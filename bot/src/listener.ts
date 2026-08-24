@@ -714,15 +714,17 @@ export async function runListener(): Promise<void> {
             cliMsgId: String(payload?.data?.cliMsgId ?? ""),
             displayName,
           }).catch((e) => console.warn(`[moderation] lỗi không bắt được: ${String(e)}`));
-
-          // Trợ lý tương tác thành viên (/rank, /top, /summary, /help, /hoi & Q&A lịch sử chat)
-          void handleMemberInteraction(api, {
-            threadId,
-            sender,
-            displayName,
-            text,
-          }).catch((e) => console.warn(`[member-assistant] lỗi: ${String(e)}`));
         }
+
+        // Trợ lý tương tác thành viên (/rank, /top, /summary, /help, /hoi & Q&A lịch sử chat)
+        // Cho phép cả chủ bot gõ lệnh /rank để tra cứu hoặc kiểm tra
+        void handleMemberInteraction(api, {
+          threadId,
+          sender,
+          displayName,
+          text,
+          isSelf: Boolean(payload?.isSelf),
+        }).catch((e) => console.warn(`[member-assistant] lỗi: ${String(e)}`));
       }
       const mediaUrl = media ? extractMediaUrl(payload) : null;
       if (media) {

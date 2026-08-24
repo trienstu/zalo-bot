@@ -7,6 +7,7 @@ interface MemberMessageEvent {
   sender: string;
   displayName: string;
   text: string;
+  isSelf?: boolean;
 }
 
 // User cooldown map to prevent spamming: userId -> lastResponseTimestamp
@@ -275,6 +276,26 @@ async function handleHistoryQA(question: string, displayName: string): Promise<s
 export async function handleMemberInteraction(api: any, event: MemberMessageEvent): Promise<void> {
   const rawText = (event.text || "").trim();
   if (!rawText) return;
+
+  // Bỏ qua tin nhắn do bot trả lời (bắt đầu bằng emoji bot) để tránh lặp vô tận
+  if (
+    rawText.startsWith("🤖") ||
+    rawText.startsWith("📊") ||
+    rawText.startsWith("🏆") ||
+    rawText.startsWith("📋")
+  ) {
+    return;
+  }
+
+  // Nếu là tin nhắn của chính tài khoản bot, chỉ xử lý nếu bắt đầu bằng / hoặc ! hoặc bot ơi
+  if (event.isSelf) {
+    const isCommand =
+      rawText.startsWith("/") ||
+      rawText.startsWith("!") ||
+      rawText.toLowerCase().startsWith("bot ơi") ||
+      rawText.toLowerCase().startsWith("bot oi");
+    if (!isCommand) return;
+  }
 
   const sender = event.sender;
   const displayName = event.displayName || "Bạn";
