@@ -391,13 +391,18 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     const isGreeting =
       !question ||
       qLower.length < 3 ||
-      ["alo", "hi", "hello", "chào", "chao", "ơi", "oi", "hey", "test", "alo bot", "bot ơi", "sen ơi", "chào bot"].includes(qLower);
+      qLower.startsWith("chào") ||
+      qLower.startsWith("chao") ||
+      qLower.startsWith("hello") ||
+      qLower.startsWith("hi ") ||
+      qLower.startsWith("alo") ||
+      ["alo", "hi", "hello", "chào", "chao", "ơi", "oi", "hey", "test", "alo bot", "bot ơi", "sen ơi", "chào bot", "chào em", "chào bạn"].includes(qLower);
 
     if (isGreeting) {
       await sendGroupText(
         api,
         threadId,
-        `🤖 Dạ Sen Chúa nghe đây! Em sẵn sàng hỗ trợ tra cứu thông tin thảo luận trong nhóm và giải đáp thắc mắc. Bạn cần hỏi gì cứ gõ theo cú pháp: /hoi [câu hỏi] hoặc tag @Sen Chúa [câu hỏi] nhé!`,
+        `🤖 Dạ Sen Chúa chào ${displayName || "bác"} ạ! Em sẵn sàng hỗ trợ tra cứu thông tin thảo luận trong nhóm, điểm tương tác và giải đáp thắc mắc. Bạn cần hỏi gì cứ gõ: /hoi [câu hỏi] hoặc tag @Sen Chúa [câu hỏi] nhé!`,
       );
       console.log(`[member-assistant] ✅ Đã gửi lời chào cho ${displayName}`);
       return;
