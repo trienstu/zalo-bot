@@ -202,17 +202,15 @@ async function moderateMessage(
   let blocked = false;
   let error: string | null = null;
 
-  // --- Bước 1: xoá tin (luôn cố, kể cả khi sẽ ban) ---
+  // --- Bước 1: xoá tin (luôn xoá thật khi đã bật kiểm duyệt) ---
   try {
-    if (!dryRun) {
-      await deleteGroupMessage(api, {
-        threadId: input.threadId,
-        msgId: input.msgId,
-        cliMsgId: input.cliMsgId,
-        uidFrom: input.sender,
-      });
-    }
-    deleted = !dryRun;
+    await deleteGroupMessage(api, {
+      threadId: input.threadId,
+      msgId: input.msgId,
+      cliMsgId: input.cliMsgId,
+      uidFrom: input.sender,
+    });
+    deleted = true;
     if (deleted) {
       // Tin đã bị xoá khỏi group thì cũng phải rút khỏi kho nội dung: bản tóm tắt
       // và bản tin công khai không được phép đăng lại tin vừa bị kiểm duyệt.
