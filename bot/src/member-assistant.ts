@@ -27,12 +27,12 @@ function fmtAgoVi(ts: number | null): string {
 }
 
 /**
- * Tra cứu thứ hạng & điểm tương tác của một thành viên.
+ * Tra cứu thứ hạng & điểm tương tác của một thành viên trong nhóm cụ thể.
  */
-function handleRankCommand(sender: string, displayName: string): string {
+function handleRankCommand(sender: string, displayName: string, threadId: string): string {
   const db = getDb();
 
-  // Lấy danh sách thành viên active và xếp hạng
+  // Lấy danh sách thành viên active và xếp hạng theo đúng thread_id nhóm
   const members = db
     .prepare(
       `SELECT m.zalo_user_id, m.display_name,
@@ -48,14 +48,14 @@ function handleRankCommand(sender: string, displayName: string): string {
               COALESCE(SUM(CASE WHEN i.type = 'vote' THEN 1 ELSE 0 END), 0) AS vote_count,
               MAX(i.ts) AS last_interaction
        FROM members m
-       LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
+       LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND (i.thread_id = @threadId OR i.thread_id = '')
        WHERE m.is_active = 1
          AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
          AND LOWER(m.display_name) NOT LIKE '%sen chua%'
        GROUP BY m.zalo_user_id
        ORDER BY total_points DESC, last_interaction DESC`,
     )
-    .all() as {
+    .all({ threadId }) as {
       zalo_user_id: string;
       display_name: string;
       total_points: number;
@@ -93,9 +93,9 @@ function handleRankCommand(sender: string, displayName: string): string {
 }
 
 /**
- * Xem Top 5 thành viên năng nổ nhất.
+ * Xem Top 5 thành viên năng nổ nhất trong nhóm cụ thể.
  */
-function handleTopCommand(): string {
+function handleTopCommand(threadId: string): string {
   const db = getDb();
   const topRows = db
     .prepare(
@@ -110,14 +110,15 @@ function handleTopCommand(): string {
               COALESCE(SUM(CASE WHEN i.type = 'message' THEN 1 ELSE 0 END), 0) AS message_count
        FROM members m
        JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
-       WHERE m.is_active = 1
+       WHERE (i.thread_id = @threadId OR i.thread_id = '')
+         AND m.is_active = 1
          AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
          AND LOWER(m.display_name) NOT LIKE '%sen chua%'
        GROUP BY m.zalo_user_id, m.display_name
        ORDER BY total_points DESC
        LIMIT 5`,
     )
-    .all() as { display_name: string; total_points: number; message_count: number }[];
+    .all({ threadId }) as { display_name: string; total_points: number; message_count: number }[];
 
   if (topRows.length === 0) {
     return "🏆 BẢNG XẾP HẠNG TOP 5\n\nChưa có dữ liệu tương tác trong nhóm.";
@@ -152,9 +153,9 @@ function handleHelpCommand(): string {
 }
 
 /**
- * RAG Hỏi - Đáp: Tra cứu lịch sử chat và trả lời bằng Gemini AI.
+ * RAG Hỏi - Đáp: Tra cứu lịch sử chat riêng của từng nhóm và trả lời bằng Gemini AI.
  */
-async function handleHistoryQA(question: string, displayName: string): Promise<string> {
+async function handleHistoryQA(question: string, displayName: string, threadId: string): Promise<string> {
   const db = getDb();
 
   // Tách từ khóa tìm kiếm (lọc bỏ các từ vô nghĩa)
@@ -164,35 +165,35 @@ async function handleHistoryQA(question: string, displayName: string): Promise<s
     .split(/\s+/)
     .filter((w) => w.length >= 2 && !["làm", "sao", "cho", "hỏi", "mình", "anh", "em", "bot", "sen", "chúa", "gì", "thế", "nào", "được", "không"].includes(w));
 
-  // Truy vấn tin nhắn lịch sử liên quan
+  // Truy vấn tin nhắn lịch sử liên quan (cô lập theo từng nhóm thread_id)
   let relevantMessages: { display_name: string; text: string; ts: number }[] = [];
 
   if (keywords.length > 0) {
     // Tìm các tin nhắn có chứa từ khóa
     const conditions = keywords.map(() => `LOWER(text) LIKE ?`).join(" OR ");
-    const params = keywords.map((k) => `%${k}%`);
+    const params = [threadId, ...keywords.map((k) => `%${k}%`)];
     relevantMessages = db
       .prepare(
         `SELECT display_name, text, ts
          FROM group_messages
-         WHERE deleted_at IS NULL AND is_self = 0 AND text != '' AND (${conditions})
+         WHERE (thread_id = ? OR thread_id = '') AND deleted_at IS NULL AND is_self = 0 AND text != '' AND (${conditions})
          ORDER BY ts DESC
          LIMIT 60`,
       )
       .all(...params) as { display_name: string; text: string; ts: number }[];
   }
 
-  // Nếu ít tin nhắn khớp từ khóa, lấy thêm các tin nhắn thảo luận gần đây nhất
+  // Nếu ít tin nhắn khớp từ khóa, lấy thêm các tin nhắn thảo luận gần đây nhất của nhóm
   if (relevantMessages.length < 20) {
     const recent = db
       .prepare(
         `SELECT display_name, text, ts
          FROM group_messages
-         WHERE deleted_at IS NULL AND is_self = 0 AND text != ''
+         WHERE (thread_id = ? OR thread_id = '') AND deleted_at IS NULL AND is_self = 0 AND text != ''
          ORDER BY ts DESC
          LIMIT 60`,
       )
-      .all() as { display_name: string; text: string; ts: number }[];
+      .all(threadId) as { display_name: string; text: string; ts: number }[];
 
     const seen = new Set(relevantMessages.map((m) => m.text));
     for (const r of recent) {
@@ -203,16 +204,16 @@ async function handleHistoryQA(question: string, displayName: string): Promise<s
     }
   }
 
-  // Lấy thêm các bản tóm tắt đã lưu trong daily_summaries
+  // Lấy thêm các bản tóm tắt đã lưu trong daily_summaries của nhóm
   const pastSummaries = db
-    .prepare(`SELECT day_label, summary_text FROM daily_summaries ORDER BY day_date DESC LIMIT 7`)
-    .all() as { day_label: string; summary_text: string }[];
+    .prepare(`SELECT day_label, summary_text FROM daily_summaries WHERE thread_id = ? OR thread_id = '' ORDER BY day_date DESC LIMIT 7`)
+    .all(threadId) as { day_label: string; summary_text: string }[];
 
   if (relevantMessages.length === 0 && pastSummaries.length === 0) {
     return `Dạ thông tin về chủ đề này chưa từng được các thành viên trong nhóm thảo luận hoặc chia sẻ trước đây ạ.`;
   }
 
-  // Lấy Top thành viên tích cực nhất từ bảng xếp hạng để AI biết ai nói nhiều nhất/nhiều điểm nhất
+  // Lấy Top thành viên tích cực nhất từ bảng xếp hạng của nhóm
   const topMembers = db
     .prepare(
       `SELECT m.display_name,
@@ -220,14 +221,15 @@ async function handleHistoryQA(question: string, displayName: string): Promise<s
               COALESCE(SUM(CASE i.type WHEN 'message' THEN 10 WHEN 'vote' THEN 3 WHEN 'reaction' THEN 1 ELSE 1 END), 0) AS points
        FROM members m
        JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
-       WHERE m.is_active = 1
+       WHERE (i.thread_id = @threadId OR i.thread_id = '')
+         AND m.is_active = 1
          AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
          AND LOWER(m.display_name) NOT LIKE '%sen chua%'
        GROUP BY m.zalo_user_id, m.display_name
        ORDER BY points DESC
        LIMIT 10`,
     )
-    .all() as { display_name: string; msg_count: number; points: number }[];
+    .all({ threadId }) as { display_name: string; msg_count: number; points: number }[];
 
   // Dựng ngữ cảnh dữ liệu lịch sử
   const contextLines: string[] = [];
@@ -333,7 +335,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   // 2. Lệnh /rank, /diem, /myrank
   if (lower === "/rank" || lower === "/diem" || lower === "/myrank" || lower === "!rank" || lower === "!diem") {
     userCooldowns.set(sender, now);
-    const reply = handleRankCommand(sender, displayName);
+    const reply = handleRankCommand(sender, displayName, threadId);
     await sendGroupText(api, threadId, reply);
     console.log(`[member-assistant] ✅ Đã phản hồi /rank cho ${displayName}`);
     return;
@@ -342,7 +344,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   // 3. Lệnh /top, /top5, /leaderboard
   if (lower === "/top" || lower === "/top5" || lower === "/bxh" || lower === "/leaderboard" || lower === "!top") {
     userCooldowns.set(sender, now);
-    const reply = handleTopCommand();
+    const reply = handleTopCommand(threadId);
     await sendGroupText(api, threadId, reply);
     console.log(`[member-assistant] ✅ Đã phản hồi /top cho ${displayName}`);
     return;
@@ -439,7 +441,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
 
     try {
       // Tra cứu RAG từ lịch sử chat
-      const answer = await handleHistoryQA(question, displayName);
+      const answer = await handleHistoryQA(question, displayName, threadId);
       const reply = `🤖 Sen Chúa trả lời @${displayName}:\n\n${answer}`;
       await sendGroupText(api, threadId, reply);
       console.log(`[member-assistant] ✅ Đã gửi câu trả lời thành công vào nhóm`);

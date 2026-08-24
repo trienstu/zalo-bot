@@ -69,6 +69,8 @@ function runColumnMigrations(database: Database.Database): void {
     ["group_media_events", "local_path", "TEXT NOT NULL DEFAULT ''"],
     ["group_media_events", "ocr_text", "TEXT NOT NULL DEFAULT ''"],
     ["group_media_events", "ocr_at", "INTEGER"],
+    // Phân loại tương tác theo từng nhóm để hỗ trợ nhiều nhóm không bị lẫn
+    ["interactions", "thread_id", "TEXT NOT NULL DEFAULT ''"],
   ];
 
   for (const [table, column, definition] of additions) {
@@ -377,17 +379,19 @@ export function logInteraction(input: {
   type: InteractionType;
   ts: number;
   source?: InteractionSource;
+  threadId?: string;
 }): void {
   getDb()
     .prepare(
-      `INSERT OR IGNORE INTO interactions (zalo_user_id, type, ts, source)
-       VALUES (@id, @type, @ts, @source)`,
+      `INSERT OR IGNORE INTO interactions (zalo_user_id, type, ts, source, thread_id)
+       VALUES (@id, @type, @ts, @source, @threadId)`,
     )
     .run({
       id: input.zaloUserId,
       type: input.type,
       ts: input.ts,
       source: input.source ?? "listener",
+      threadId: input.threadId ?? "",
     });
 }
 
@@ -399,9 +403,11 @@ export function logReactionOnce(input: {
   zaloUserId: string;
   targetMsgId: string;
   ts: number;
+  threadId?: string;
 }): boolean {
   const db = getDb();
   const source = input.targetMsgId ? `react:${input.targetMsgId}` : "listener";
+  const threadId = input.threadId ?? "";
 
   if (input.targetMsgId) {
     const existing = db
@@ -418,12 +424,13 @@ export function logReactionOnce(input: {
   }
 
   db.prepare(
-    `INSERT OR IGNORE INTO interactions (zalo_user_id, type, ts, source)
-     VALUES (@id, 'reaction', @ts, @source)`,
+    `INSERT OR IGNORE INTO interactions (zalo_user_id, type, ts, source, thread_id)
+     VALUES (@id, 'reaction', @ts, @source, @threadId)`,
   ).run({
     id: input.zaloUserId,
     ts: input.ts,
     source,
+    threadId,
   });
 
   return true;

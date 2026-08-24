@@ -799,9 +799,9 @@ export async function runListener(): Promise<void> {
         ).trim();
 
         // 🎯 1 Tin nhắn = Tối đa 1 Điểm Reaction cho mỗi thành viên (Chống bấm đổi/thả nhiều lần)
-        logReactionOnce({ zaloUserId: sender, targetMsgId, ts });
+        logReactionOnce({ zaloUserId: sender, targetMsgId, ts, threadId });
       } else {
-        logInteraction({ zaloUserId: sender, type, ts, source: "listener" });
+        logInteraction({ zaloUserId: sender, type, ts, source: "listener", threadId });
       }
     }
 

@@ -49,8 +49,26 @@ function readOptionalPositiveInt(name: string): number | null {
 const sessionDir = process.env.SESSION_DIR?.trim() || "./data";
 
 export const config = {
-  /** ID group Zalo cần quản lý. Lấy bằng lệnh `list-groups`. */
-  groupId: process.env.GROUP_ID?.trim() || "",
+  /** Danh sách các ID group Zalo cần quản lý (phân tách bởi dấu phẩy). */
+  groupIds: (process.env.GROUP_ID || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+
+  /** ID group chính (dùng tương thích ngược). */
+  groupId: (process.env.GROUP_ID || "").split(",")[0]?.trim() || "",
+
+  /** Kiểm tra xem 1 threadId có thuộc danh sách group đang quản lý không. */
+  isManagedGroup(threadId: unknown): boolean {
+    const tid = String(threadId ?? "").trim();
+    if (!tid) return false;
+    const ids = (process.env.GROUP_ID || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (ids.length === 0) return true; // Chưa cấu hình -> chấp nhận mọi group
+    return ids.includes(tid);
+  },
 
   /** Số thành viên muốn giữ lại sau mỗi kỳ (brainstorm: 965). */
   targetMemberCount: readInt("TARGET_MEMBER_COUNT", 965),
