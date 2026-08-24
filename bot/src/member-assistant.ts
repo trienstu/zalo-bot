@@ -12,7 +12,7 @@ interface MemberMessageEvent {
 
 // User cooldown map to prevent spamming: userId -> lastResponseTimestamp
 const userCooldowns = new Map<string, number>();
-const COOLDOWN_MS = 4000; // 4 seconds cooldown per user
+const COOLDOWN_MS = 2000; // 2 seconds cooldown per user
 
 function fmtAgoVi(ts: number | null): string {
   if (!ts) return "Chưa có";
@@ -326,8 +326,8 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
 
   // 4. Lệnh /hoi [câu hỏi] hoặc Tag bot / Nhắc tên Sen Chúa
   const isTagBot =
-    lower.startsWith("/hoi ") ||
-    lower.startsWith("!hoi ") ||
+    lower.startsWith("/hoi") ||
+    lower.startsWith("!hoi") ||
     lower.includes("@sen chúa") ||
     lower.includes("@sen chua") ||
     lower.includes("sen chúa") ||
@@ -337,15 +337,16 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     lower.startsWith("bot ơi") ||
     lower.startsWith("bot oi") ||
     lower.startsWith("sen ơi") ||
-    lower.startsWith("sen oi");
+    lower.startsWith("sen oi") ||
+    (event.isSelf && lower.startsWith("@"));
 
   if (isTagBot) {
     userCooldowns.set(sender, now);
 
     // Làm sạch câu hỏi
     let question = rawText
-      .replace(/^\/hoi\s+/i, "")
-      .replace(/^!hoi\s+/i, "")
+      .replace(/^\/hoi\s*/i, "")
+      .replace(/^!hoi\s*/i, "")
       .replace(/@sen chúa/gi, "")
       .replace(/@sen chua/gi, "")
       .replace(/@senchua/gi, "")
@@ -358,13 +359,20 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       .replace(/@bot/gi, "")
       .replace(/^bot ơi\s*,?/i, "")
       .replace(/^bot oi\s*,?/i, "")
+      .replace(/^@[^\s]+\s*/, "") // Loại bỏ tag mention đầu dòng nếu còn sót
       .trim();
 
-    if (!question || question.length < 3) {
+    const qLower = question.toLowerCase();
+    const isGreeting =
+      !question ||
+      qLower.length < 3 ||
+      ["alo", "hi", "hello", "chào", "chao", "ơi", "oi", "hey", "test", "alo bot", "bot ơi", "sen ơi", "chào bot"].includes(qLower);
+
+    if (isGreeting) {
       await sendGroupText(
         api,
         threadId,
-        `🤖 Dạ Sen Chúa nghe đây! Bạn cần tra cứu thông tin gì trong nhóm ạ? Hãy gõ theo cú pháp: /hoi [nội dung cần hỏi] hoặc tag @Sen Chúa [câu hỏi] nhé!`,
+        `🤖 Dạ Sen Chúa nghe đây! Em sẵn sàng hỗ trợ tra cứu thông tin thảo luận trong nhóm và giải đáp thắc mắc. Bạn cần hỏi gì cứ gõ theo cú pháp: /hoi [câu hỏi] hoặc tag @Sen Chúa [câu hỏi] nhé!`,
       );
       return;
     }
