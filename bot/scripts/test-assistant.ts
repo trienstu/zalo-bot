@@ -112,6 +112,19 @@ async function main() {
     text: "/hoi cách tăng 1 triệu view trong 1 đêm",
   });
 
+  // Test 10: Test /hoi làm thế nào để em thành stevejob Việt Nam
+  console.log("\n10. Test /hoi làm thế nào để em thành stevejob Việt Nam:");
+  await handleMemberInteraction({
+    sendMessage: async (msgPayload: any, threadId: string) => {
+      console.log("[Bot Reply to " + threadId + "]:\n", msgPayload?.msg ?? msgPayload);
+    },
+  }, {
+    threadId: "1913869945242410752",
+    sender: "member_tuan",
+    displayName: "Tuân",
+    text: "/hoi làm thế nào để em thành stevejob Việt Nam",
+  });
+
   console.log("\n=== TEST COMPLETED ===");
 }
 
