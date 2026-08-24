@@ -273,13 +273,17 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
-  // Nếu là tin nhắn của chính tài khoản bot, chỉ xử lý nếu bắt đầu bằng / hoặc ! hoặc bot/sen
+  // Nếu là tin nhắn của chính tài khoản bot (chủ bot test từ app Zalo):
   if (event.isSelf) {
+    const lowerSelf = rawText.toLowerCase();
     const isCommand =
       rawText.startsWith("/") ||
       rawText.startsWith("!") ||
-      rawText.toLowerCase().startsWith("sen") ||
-      rawText.toLowerCase().startsWith("bot");
+      rawText.startsWith("@") ||
+      lowerSelf.includes("sen chúa") ||
+      lowerSelf.includes("sen chua") ||
+      lowerSelf.startsWith("sen") ||
+      lowerSelf.startsWith("bot");
     if (!isCommand) return;
   }
 
