@@ -97,6 +97,17 @@ export const runtimeConfig = {
     return dbInt("cfg:summary_group_gap_minutes", 0, 720) ?? config.summaryGroupGapMinutes;
   },
 
+  /** Bật/tắt tự động tóm tắt hằng ngày theo lịch hẹn trong bot listener. */
+  get autoSummaryEnabled(): boolean {
+    return dbBool("cfg:auto_summary_enabled") ?? true;
+  },
+
+  /** Giờ tự động chạy tóm tắt (định dạng HH:mm, ví dụ '23:00' hoặc '07:30'). Mặc định '23:00'. */
+  get autoSummaryTime(): string {
+    const v = getBotState("cfg:auto_summary_time");
+    return v && /^\d{2}:\d{2}$/.test(v.trim()) ? v.trim() : "23:00";
+  },
+
   // ---- Kiểm duyệt real-time theo từ khoá ----
 
   /** Bật/tắt toàn bộ tính năng lọc từ khoá. Mặc định TẮT (an toàn). */

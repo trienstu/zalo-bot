@@ -125,6 +125,15 @@ export const config = {
   /** Bot token riêng cho đích tóm tắt Telegram. Rỗng = dùng chung TELEGRAM_BOT_TOKEN. */
   summaryTelegramBotToken: process.env.SUMMARY_TELEGRAM_BOT_TOKEN?.trim() || "",
 
+  /** Provider AI dùng cho tóm tắt và xử lý thông tin: 'gemini' | 'deepseek'. Mặc định 'gemini' nếu có GEMINI_API_KEY. */
+  llmProvider: (process.env.LLM_PROVIDER?.trim().toLowerCase() || (process.env.GEMINI_API_KEY ? "gemini" : "deepseek")) as "gemini" | "deepseek",
+
+  /** API key Google Gemini (https://aistudio.google.com/app/apikey). Rỗng = tắt. */
+  geminiApiKey: process.env.GEMINI_API_KEY?.trim() || "",
+
+  /** Model Gemini dùng để tóm tắt (vd: gemini-3.6-flash, gemini-3.7-flash, gemini-3.1-pro). */
+  geminiModel: process.env.GEMINI_MODEL?.trim() || "gemini-3.6-flash",
+
   /** API key DeepSeek cho tóm tắt hằng ngày (https://platform.deepseek.com). Rỗng = tắt. */
   deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() || "",
 

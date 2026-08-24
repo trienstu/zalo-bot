@@ -109,7 +109,7 @@ export interface MemberStatRow {
 }
 
 export type MemberRoleFilter = "all" | "owner" | "admin" | "member";
-export type MemberActivityFilter = "all" | "zero" | "never" | "recent" | "inactive30" | "inactive90" | "warned";
+export type MemberActivityFilter = "all" | "zero" | "never" | "recent" | "inactive7" | "inactive30" | "inactive90" | "warned";
 export type MemberSort = "risk" | "interactions" | "last" | "name" | "joined" | "warnings";
 
 export interface MemberFilters {
@@ -515,6 +515,9 @@ function memberFilterWhere(filters: MemberFilters): string {
     case "recent":
       clauses.push(`last_interaction >= @since30`);
       break;
+    case "inactive7":
+      clauses.push(`(last_interaction IS NULL OR last_interaction < @since7)`);
+      break;
     case "inactive30":
       clauses.push(`(last_interaction IS NULL OR last_interaction < @since30)`);
       break;
@@ -535,6 +538,7 @@ function memberFilterParams(filters: MemberFilters): Record<string, string | num
     q,
     like: `%${q}%`,
     role: filters.role ?? "all",
+    since7: Date.now() - 7 * 86400000,
     since30: Date.now() - 30 * 86400000,
     since90: Date.now() - 90 * 86400000,
     limit: Math.min(Math.max(filters.limit ?? 2000, 1), 5000),

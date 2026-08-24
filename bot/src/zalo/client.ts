@@ -67,6 +67,7 @@ const RELOGIN_REQUEST_FILE = "relogin-request.json";
 const MEMBER_SYNC_REQUEST_FILE = "member-sync-request.json";
 const PERMISSION_CHECK_REQUEST_FILE = "permission-check-request.json";
 const KICK_NOW_REQUEST_FILE = "kick-now-request.json";
+const SUMMARY_SEND_REQUEST_FILE = "summary-send-request.json";
 
 /** Ghi trạng thái login + đường dẫn QR ra file để web panel hiển thị. */
 function writeLoginStatus(state: LoginState, extra?: Record<string, unknown>): void {
@@ -208,6 +209,50 @@ export function consumeKickNowRequest(): KickNowRequest | null {
     zaloUserId,
     displayName: typeof obj.displayName === "string" ? obj.displayName : "",
     block: obj.block === true,
+    requestedAt: typeof obj.requestedAt === "number" ? obj.requestedAt : Date.now(),
+    requestedBy: typeof obj.requestedBy === "string" && obj.requestedBy.trim() ? obj.requestedBy.trim() : "dashboard",
+  };
+}
+
+export interface SummarySendRequest {
+  requestId: string;
+  parts: string[];
+  groupId?: string;
+  requestedAt: number;
+  requestedBy: string;
+}
+
+/**
+ * Yêu cầu gửi bản tóm tắt ngay từ dashboard vào nhóm Zalo.
+ */
+export function consumeSummarySendRequest(): SummarySendRequest | null {
+  const requestPath = path.join(config.sessionDir, SUMMARY_SEND_REQUEST_FILE);
+  if (!fs.existsSync(requestPath)) return null;
+
+  let data: unknown;
+  try {
+    data = JSON.parse(fs.readFileSync(requestPath, "utf8"));
+  } catch {
+    data = null;
+  } finally {
+    fs.rmSync(requestPath, { force: true });
+  }
+
+  const obj = (data ?? {}) as {
+    requestId?: unknown;
+    parts?: unknown;
+    groupId?: unknown;
+    requestedAt?: unknown;
+    requestedBy?: unknown;
+  };
+  const requestId = typeof obj.requestId === "string" && obj.requestId.trim() ? obj.requestId.trim() : null;
+  const parts = Array.isArray(obj.parts) ? obj.parts.map(String).filter((s) => s.trim()) : [];
+  if (!requestId || parts.length === 0) return null;
+
+  return {
+    requestId,
+    parts,
+    groupId: typeof obj.groupId === "string" && obj.groupId.trim() ? obj.groupId.trim() : undefined,
     requestedAt: typeof obj.requestedAt === "number" ? obj.requestedAt : Date.now(),
     requestedBy: typeof obj.requestedBy === "string" && obj.requestedBy.trim() ? obj.requestedBy.trim() : "dashboard",
   };

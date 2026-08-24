@@ -8,6 +8,9 @@ import {
   consumePermissionCheckRequest,
   consumeReloginRequest,
   consumeKickNowRequest,
+  consumeSummarySendRequest,
+  sendGroupText,
+  sleep,
   reloginRequestExists,
   hasSavedCredentials,
   writeLoginReadyStatus,
@@ -28,6 +31,7 @@ import {
   markGroupContentDeleted,
   recordBotError,
   recordModerationAction,
+  getBotState,
   setBotState,
   acquireLock,
   releaseLock,
@@ -35,6 +39,8 @@ import {
 import { syncGroupMembers } from "./member-sync.js";
 import { saveZaloImage } from "./zalo-media.js";
 import { KICK_LOCK_KEY, KICK_LOCK_STALE_MS } from "./commands/monthly-cleanup.js";
+import { runDailySummarySafe } from "./commands/daily-summary.js";
+import { handleMemberInteraction } from "./member-assistant.js";
 import {
   compileBlacklist,
   findBlacklistedWord,
@@ -548,6 +554,71 @@ export async function runListener(): Promise<void> {
     })();
   }, 1_000);
 
+  // Xử lý yêu cầu gửi bản tóm tắt từ dashboard vào nhóm Zalo
+  setInterval(() => {
+    const request = consumeSummarySendRequest();
+    if (!request) return;
+    void (async () => {
+      try {
+        const targetGroupId: string = request.groupId || config.groupId || "";
+        if (!targetGroupId) throw new Error("Chưa xác định được GROUP_ID nhận bản tin");
+        console.log(`[listener] Đang gửi bản tóm tắt (${request.parts.length} tin) vào group ${targetGroupId} theo yêu cầu dashboard...`);
+        for (let i = 0; i < request.parts.length; i++) {
+          const part = request.parts[i];
+          if (!part) continue;
+          await sendGroupText(api, targetGroupId, part);
+          if (i < request.parts.length - 1) await sleep(2000);
+        }
+        setBotState(
+          "summary_send_result",
+          JSON.stringify({
+            requestId: request.requestId,
+            ok: true,
+            sentAt: Date.now(),
+          }),
+          Date.now(),
+        );
+        console.log(`[listener] ✅ Đã gửi bản tóm tắt thành công vào group ${targetGroupId}.`);
+      } catch (e) {
+        recordBotError({
+          source: "listener",
+          code: "summary_send_failed",
+          message: String(e),
+          detail: e instanceof Error ? e.stack : null,
+        });
+        setBotState(
+          "summary_send_result",
+          JSON.stringify({
+            requestId: request.requestId,
+            ok: false,
+            error: String(e),
+            failedAt: Date.now(),
+          }),
+          Date.now(),
+        );
+        console.warn(`[listener] Gửi bản tóm tắt thất bại: ${String(e)}`);
+      }
+    })();
+  }, 1_000);
+
+  // Tự động chạy tóm tắt ngày theo lịch hẹn (mỗi 30s)
+  setInterval(() => {
+    if (!runtimeConfig.autoSummaryEnabled) return;
+    const targetTime = runtimeConfig.autoSummaryTime; // vd: "23:00"
+    const nowVN = new Date(Date.now() + 7 * 3600 * 1000);
+    const currentHHMM = `${String(nowVN.getUTCHours()).padStart(2, "0")}:${String(nowVN.getUTCMinutes()).padStart(2, "0")}`;
+    const todayDateVN = nowVN.toISOString().slice(0, 10); // 'YYYY-MM-DD'
+
+    if (currentHHMM === targetTime) {
+      const lastRunDate = getBotState("auto_summary_last_run_date");
+      if (lastRunDate !== todayDateVN) {
+        setBotState("auto_summary_last_run_date", todayDateVN, Date.now());
+        console.log(`[listener] ⏰ Đã đến giờ hẹn (${targetTime})! Đang tự động chạy tóm tắt ngày...`);
+        void runDailySummarySafe().catch((e) => console.warn(`[listener] Tự động tóm tắt lỗi: ${String(e)}`));
+      }
+    }
+  }, 30_000);
+
   if (!config.groupId) {
     console.warn(
       "[listener] Đã đăng nhập nhưng GROUP_ID chưa được cấu hình. Bot đang tạm ngưng; " +
@@ -643,6 +714,14 @@ export async function runListener(): Promise<void> {
             cliMsgId: String(payload?.data?.cliMsgId ?? ""),
             displayName,
           }).catch((e) => console.warn(`[moderation] lỗi không bắt được: ${String(e)}`));
+
+          // Trợ lý tương tác thành viên (/rank, /top, /summary, /help, /hoi & Q&A lịch sử chat)
+          void handleMemberInteraction(api, {
+            threadId,
+            sender,
+            displayName,
+            text,
+          }).catch((e) => console.warn(`[member-assistant] lỗi: ${String(e)}`));
         }
       }
       const mediaUrl = media ? extractMediaUrl(payload) : null;

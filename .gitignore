@@ -19,6 +19,7 @@ zalo-session*.json
 *.sqlite3
 
 # Build output
+*.tar.gz
 dist/
 build/
 .next/

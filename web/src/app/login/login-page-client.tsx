@@ -84,6 +84,7 @@ export function LoginPageClient({ initialStatus }: { initialStatus: QrStatus }) 
 
   async function requestRelogin() {
     if (
+      loggedIn &&
       !window.confirm(
         "Đăng xuất session Zalo hiện tại và tạo QR mới? Listener sẽ restart trong vài giây.",
       )

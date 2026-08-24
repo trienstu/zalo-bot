@@ -9,6 +9,7 @@ import {
   listDailySummaryDays,
   type DailySummaryDayRow,
 } from "@/lib/db";
+import { QuickSummaryCard } from "./quick-summary-card";
 
 export const dynamic = "force-dynamic";
 
@@ -57,23 +58,14 @@ export default async function SummariesPage({ searchParams }: { searchParams?: P
   const dayParam = one(params, "day");
 
   const days = listDailySummaryDays();
-  if (days.length === 0) {
-    return (
-      <div>
-        <PageHeader title="Tóm tắt ngày" />
-        <EmptyState>
-          Chưa có bản tóm tắt nào trong kho. Bản tin sẽ được lưu tự động mỗi sáng khi cron daily-summary chạy;
-          quá khứ bù bằng lệnh backfill-summaries trên server.
-        </EmptyState>
-      </div>
-    );
-  }
 
   const selectedDate =
     /^\d{4}-\d{2}-\d{2}$/.test(dayParam) && days.some((d) => d.day_date === dayParam)
       ? dayParam
-      : days[0].day_date;
-  const selected = getDailySummaryByDate(selectedDate);
+      : days.length > 0
+        ? days[0].day_date
+        : "";
+  const selected = selectedDate ? getDailySummaryByDate(selectedDate) : null;
   const selectedIdx = days.findIndex((d) => d.day_date === selectedDate);
   // days sắp mới → cũ: "hôm trước" nằm SAU trong mảng, "hôm sau" nằm TRƯỚC.
   const olderDay = selectedIdx >= 0 ? days[selectedIdx + 1] : undefined;
@@ -84,15 +76,30 @@ export default async function SummariesPage({ searchParams }: { searchParams?: P
   const totalMessages = days.reduce((sum, d) => sum + (d.total_messages ?? 0), 0);
 
   return (
-    <div>
+    <div className="flex flex-col gap-6">
       <PageHeader
         title="Tóm tắt ngày"
-        desc={`Kho lưu ${days.length} ngày (${days[days.length - 1].day_label} → ${days[0].day_label}) · ${totalMessages} tin nhắn đã tóm tắt.`}
+        desc="Tạo tóm tắt hội thoại theo yêu cầu bằng Gemini AI hoặc cấu hình lịch hẹn tự động gửi vào nhóm Zalo."
       />
 
-      {/* Thanh điều hướng ngày + tìm kiếm: dạng cột trên mobile, 1 hàng trên desktop. */}
-      <Card className="p-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+      {/* Panel Tóm tắt nhanh & Hẹn giờ */}
+      <QuickSummaryCard />
+
+      {days.length === 0 ? (
+        <Card className="p-5 text-center text-xs text-[var(--color-muted)]">
+          Chưa có bản tóm tắt nào trong lịch sử lưu trữ. Bạn có thể bấm nút "Bắt đầu tóm tắt" ở trên để tạo bản tin đầu tiên!
+        </Card>
+      ) : (
+        <>
+          <div className="flex items-center justify-between border-t border-[var(--color-border)] pt-4 mt-2">
+            <h3 className="text-sm font-semibold text-[var(--color-text)]">
+              📚 Lịch sử bản tin đã lưu ({days.length} ngày · {totalMessages} tin nhắn)
+            </h3>
+          </div>
+
+          {/* Thanh điều hướng ngày + tìm kiếm: dạng cột trên mobile, 1 hàng trên desktop. */}
+          <Card className="p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <form action="/summaries" className="flex min-w-0 flex-1 items-center gap-2">
             {q ? <input type="hidden" name="q" value={q} /> : null}
             <Link
@@ -257,6 +264,8 @@ export default async function SummariesPage({ searchParams }: { searchParams?: P
           )}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

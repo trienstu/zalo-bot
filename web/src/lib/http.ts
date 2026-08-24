@@ -30,7 +30,26 @@ export function isOriginAllowed(request: Request): boolean {
   }
 
   try {
-    return new URL(origin).host === new URL(request.url).host;
+    const originUrl = new URL(origin);
+    const reqUrl = new URL(request.url);
+    const hostHeader = request.headers.get("host")?.split(":")[0]?.toLowerCase();
+    const originHostname = originUrl.hostname.toLowerCase();
+    const reqHostname = reqUrl.hostname.toLowerCase();
+
+    // Khớp hostname (bỏ qua port mismatch do iptables/proxy) hoặc khớp Host header
+    if (originHostname === reqHostname || (hostHeader && originHostname === hostHeader)) {
+      return true;
+    }
+
+    // Chấp nhận local loopback
+    if (
+      (originHostname === "localhost" || originHostname === "127.0.0.1") &&
+      (reqHostname === "localhost" || reqHostname === "127.0.0.1")
+    ) {
+      return true;
+    }
+
+    return false;
   } catch {
     return false;
   }
