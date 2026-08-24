@@ -772,7 +772,10 @@ export async function runListener(): Promise<void> {
     if (type === "message") {
       upsertMember({ zaloUserId: sender, displayName: String(payload?.data?.dName ?? ""), now: Date.now() });
     }
-    logInteraction({ zaloUserId: sender, type, ts, source: "listener" });
+    // KHÔNG tính điểm tương tác cho chính tài khoản bot (Sen Chúa)
+    if (!payload?.isSelf) {
+      logInteraction({ zaloUserId: sender, type, ts, source: "listener" });
+    }
 
     if (type === "message") messageEvents += 1;
     if (type === "reaction") reactionEvents += 1;

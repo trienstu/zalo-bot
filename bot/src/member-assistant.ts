@@ -50,6 +50,9 @@ function handleRankCommand(sender: string, displayName: string): string {
        FROM members m
        LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
        WHERE m.is_active = 1
+         AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
+         AND LOWER(m.display_name) NOT LIKE '%sen chua%'
+         AND m.zalo_user_id NOT IN (SELECT DISTINCT zalo_user_id FROM group_messages WHERE is_self = 1)
        GROUP BY m.zalo_user_id
        ORDER BY total_points DESC, last_interaction DESC`,
     )
@@ -67,6 +70,9 @@ function handleRankCommand(sender: string, displayName: string): string {
   const index = members.findIndex((m) => m.zalo_user_id === sender);
 
   if (index === -1) {
+    if (displayName.toLowerCase().includes("sen chúa") || displayName.toLowerCase().includes("sen chua")) {
+      return `🤖 Sen Chúa là trợ lý phục vụ anh em trong nhóm, không tham gia đua top tranh cúp nhé!`;
+    }
     return `📊 THÔNG TIN TƯƠNG TÁC\n\n👤 Thành viên: ${displayName || sender}\nℹ️ Bạn chưa có dữ liệu tương tác trong hệ thống. Hãy gửi tin nhắn hoặc thả reaction để tích điểm nhé!`;
   }
 
@@ -106,6 +112,9 @@ function handleTopCommand(): string {
        FROM members m
        JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
        WHERE m.is_active = 1
+         AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
+         AND LOWER(m.display_name) NOT LIKE '%sen chua%'
+         AND m.zalo_user_id NOT IN (SELECT DISTINCT zalo_user_id FROM group_messages WHERE is_self = 1)
        GROUP BY m.zalo_user_id, m.display_name
        ORDER BY total_points DESC
        LIMIT 5`,
