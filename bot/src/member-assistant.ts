@@ -291,10 +291,10 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   const displayName = event.displayName || "Bạn";
   const threadId = event.threadId;
 
-  // Kiểm tra cooldown
+  // Kiểm tra cooldown (bỏ qua cooldown đối với chính tài khoản chủ bot để tiện test lệnh)
   const now = Date.now();
   const lastTime = userCooldowns.get(sender) || 0;
-  if (now - lastTime < COOLDOWN_MS) {
+  if (!event.isSelf && now - lastTime < COOLDOWN_MS) {
     return; // Đang trong thời gian chờ, bỏ qua để chống spam
   }
 
@@ -305,6 +305,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     userCooldowns.set(sender, now);
     const reply = handleHelpCommand();
     await sendGroupText(api, threadId, reply);
+    console.log(`[member-assistant] ✅ Đã phản hồi /help cho ${displayName}`);
     return;
   }
 
@@ -313,6 +314,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     userCooldowns.set(sender, now);
     const reply = handleRankCommand(sender, displayName);
     await sendGroupText(api, threadId, reply);
+    console.log(`[member-assistant] ✅ Đã phản hồi /rank cho ${displayName}`);
     return;
   }
 
@@ -321,6 +323,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     userCooldowns.set(sender, now);
     const reply = handleTopCommand();
     await sendGroupText(api, threadId, reply);
+    console.log(`[member-assistant] ✅ Đã phản hồi /top cho ${displayName}`);
     return;
   }
 
@@ -374,15 +377,26 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         threadId,
         `🤖 Dạ Sen Chúa nghe đây! Em sẵn sàng hỗ trợ tra cứu thông tin thảo luận trong nhóm và giải đáp thắc mắc. Bạn cần hỏi gì cứ gõ theo cú pháp: /hoi [câu hỏi] hoặc tag @Sen Chúa [câu hỏi] nhé!`,
       );
+      console.log(`[member-assistant] ✅ Đã gửi lời chào cho ${displayName}`);
       return;
     }
 
-    console.log(`[member-assistant] Thành viên ${displayName} (${sender}) hỏi Sen Chúa: "${question}"`);
+    console.log(`[member-assistant] 🔍 Đang xử lý câu hỏi từ ${displayName} (${sender}): "${question}"...`);
 
-    // Tra cứu RAG từ lịch sử chat
-    const answer = await handleHistoryQA(question, displayName);
-    const reply = `🤖 Sen Chúa trả lời @${displayName}:\n\n${answer}`;
-    await sendGroupText(api, threadId, reply);
+    try {
+      // Tra cứu RAG từ lịch sử chat
+      const answer = await handleHistoryQA(question, displayName);
+      const reply = `🤖 Sen Chúa trả lời @${displayName}:\n\n${answer}`;
+      await sendGroupText(api, threadId, reply);
+      console.log(`[member-assistant] ✅ Đã gửi câu trả lời thành công vào nhóm`);
+    } catch (err) {
+      console.error(`[member-assistant] ❌ Lỗi xử lý câu hỏi:`, err);
+      await sendGroupText(
+        api,
+        threadId,
+        `🤖 Dạ em đang gặp trục trặc khi tra cứu dữ liệu, bạn vui lòng thử lại sau giây lát nhé!`,
+      );
+    }
     return;
   }
 }
