@@ -436,7 +436,6 @@ export function listLeaderboard(period: LeaderboardPeriod, limit = 50): Leaderbo
          AND i.ts >= @since
          AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
          AND LOWER(m.display_name) NOT LIKE '%sen chua%'
-         AND m.zalo_user_id NOT IN (SELECT DISTINCT zalo_user_id FROM group_messages WHERE is_self = 1)
        GROUP BY i.zalo_user_id, m.display_name
        ORDER BY interaction_count DESC, last_interaction DESC, LOWER(m.display_name) ASC
        LIMIT @limit`,
