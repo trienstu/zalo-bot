@@ -263,18 +263,18 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   const rawText = (event.text || "").trim();
   if (!rawText) return;
 
-  // Bỏ qua tin nhắn do bot trả lời (bắt đầu bằng emoji bot) để tránh lặp vô tận
-  if (
-    rawText.startsWith("🤖") ||
-    rawText.startsWith("📊") ||
-    rawText.startsWith("🏆") ||
-    rawText.startsWith("📋")
-  ) {
-    return;
-  }
-
   // Nếu là tin nhắn của chính tài khoản bot (chủ bot test từ app Zalo):
   if (event.isSelf) {
+    // Bỏ qua tin nhắn do bot trả lời tự động để tránh lặp vô tận
+    if (
+      rawText.startsWith("🤖") ||
+      rawText.startsWith("📊") ||
+      rawText.startsWith("🏆") ||
+      rawText.startsWith("📋")
+    ) {
+      return;
+    }
+
     const lowerSelf = rawText.toLowerCase();
     const isCommand =
       rawText.startsWith("/") ||

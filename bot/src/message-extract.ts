@@ -98,25 +98,57 @@ export function extractText(payload: any): string | null {
   const content = payload?.data?.content;
   if (typeof content === "string") {
     const text = content.trim();
+    // Nếu chuỗi là JSON serialized object (ví dụ quote message):
+    if (text.startsWith("{") && text.endsWith("}")) {
+      const obj = parseObjectMaybe(text);
+      if (obj) {
+        const userMsg =
+          typeof obj.message === "string" && obj.message.trim() !== ""
+            ? obj.message.trim()
+            : typeof obj.msg === "string" && obj.msg.trim() !== ""
+              ? obj.msg.trim()
+              : typeof obj.text === "string" && obj.text.trim() !== ""
+                ? obj.text.trim()
+                : null;
+        if (userMsg) return userMsg;
+
+        const title = typeof obj.title === "string" ? obj.title.trim() : "";
+        const desc = typeof obj.description === "string" ? obj.description.trim() : "";
+        if (title || desc) return [title, desc].filter(Boolean).join(" ");
+      }
+    }
     return text ? text : null;
   }
-  // content là object TAttachmentContent { title, description, href, thumb, ... }.
-  // - Link/recommend: rút title + description + href (URL là nội dung chính).
-  // - Ảnh/video có CAPTION: caption nằm ở title/description; href là URL ảnh (KHÔNG lấy,
-  //   tránh ghi link ảnh thành text và double-count với group_media_events). Media đã được
-  //   extractMediaSummary xử lý riêng; ở đây chỉ vớt thêm caption nếu có.
+
   const obj = parseObjectMaybe(content);
   if (obj) {
+    // Nếu có trường message/msg (tin reply người dùng gõ vào khi quote)
+    const userMsg =
+      typeof obj.message === "string" && obj.message.trim() !== ""
+        ? obj.message.trim()
+        : typeof obj.msg === "string" && obj.msg.trim() !== ""
+          ? obj.msg.trim()
+          : typeof obj.text === "string" && obj.text.trim() !== ""
+            ? obj.text.trim()
+            : null;
+
+    if (userMsg) return userMsg;
+
     const isMedia = extractMediaSummary(payload) != null;
-    // Với media chỉ lấy caption (title/description); với link lấy cả href.
     const fields = isMedia ? [obj.title, obj.description] : [obj.title, obj.description, obj.href];
     const parts = fields
       .filter((v): v is string => typeof v === "string" && v.trim() !== "")
       .map((v) => v.trim());
     if (parts.length > 0) {
-      // Khử trùng lặp (title trùng description, v.v.) rồi nối cho gọn.
       return [...new Set(parts)].join(" — ");
     }
   }
+
+  // Fallback từ các trường khác của payload
+  const directMsg = payload?.data?.msg ?? payload?.data?.text ?? payload?.text;
+  if (typeof directMsg === "string" && directMsg.trim() !== "") {
+    return directMsg.trim();
+  }
+
   return null;
 }
