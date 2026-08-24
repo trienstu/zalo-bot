@@ -1,5 +1,19 @@
-import "dotenv/config";
+import dotenv from "dotenv";
 import path from "node:path";
+import fs from "node:fs";
+
+// Tự động nạp .env từ mọi vị trí (root repo, bot dir, parent dir)
+const envPaths = [
+  path.resolve(process.cwd(), ".env"),
+  path.resolve(process.cwd(), "bot/.env"),
+  path.resolve(process.cwd(), "../.env"),
+  path.resolve(process.cwd(), "../bot/.env"),
+];
+for (const p of envPaths) {
+  if (fs.existsSync(p)) {
+    dotenv.config({ path: p, override: false });
+  }
+}
 
 /**
  * Đọc + validate cấu hình từ env (.env). Mọi số liệu nghiệp vụ (965, warmup 30 ngày,
