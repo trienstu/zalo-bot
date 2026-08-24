@@ -73,6 +73,45 @@ async function main() {
     text: "/hoi chào em",
   });
 
+  // Test 7: Test @Sen Chúa ngáo
+  console.log("\n7. Test @Sen Chúa ngáo:");
+  await handleMemberInteraction({
+    sendMessage: async (msgPayload: any, threadId: string) => {
+      console.log("[Bot Reply to " + threadId + "]:\n", msgPayload?.msg ?? msgPayload);
+    },
+  }, {
+    threadId: "1913869945242410752",
+    sender: "member_trien",
+    displayName: "Trien Nguyen",
+    text: "@Sen Chúa ngáo",
+  });
+
+  // Test 8: Test /hoi mute 100 ngày
+  console.log("\n8. Test /hoi mute 100 ngày:");
+  await handleMemberInteraction({
+    sendMessage: async (msgPayload: any, threadId: string) => {
+      console.log("[Bot Reply to " + threadId + "]:\n", msgPayload?.msg ?? msgPayload);
+    },
+  }, {
+    threadId: "1913869945242410752",
+    sender: "member_tu",
+    displayName: "Tu",
+    text: "/hoi mute 100 ngày",
+  });
+
+  // Test 9: Test /hoi cách tăng 1 triệu view trong 1 đêm
+  console.log("\n9. Test /hoi cách tăng 1 triệu view trong 1 đêm:");
+  await handleMemberInteraction({
+    sendMessage: async (msgPayload: any, threadId: string) => {
+      console.log("[Bot Reply to " + threadId + "]:\n", msgPayload?.msg ?? msgPayload);
+    },
+  }, {
+    threadId: "1913869945242410752",
+    sender: "member_tu",
+    displayName: "Tu",
+    text: "/hoi cách tăng 1 triệu view trong 1 đêm",
+  });
+
   console.log("\n=== TEST COMPLETED ===");
 }
 

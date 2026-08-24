@@ -13,7 +13,8 @@ export async function callGemini(
     json?: boolean;
   },
 ): Promise<string> {
-  if (!config.geminiApiKey) {
+  const apiKey = (config.geminiApiKey || process.env.GEMINI_API_KEY || "").trim();
+  if (!apiKey) {
     throw new Error("Thiếu GEMINI_API_KEY trong .env");
   }
 
@@ -21,39 +22,35 @@ export async function callGemini(
   const temperature = options?.temperature ?? 0.3;
   const maxTokens = options?.maxTokens;
 
-  // Sử dụng endpoint chuẩn OpenAI-compatible của Google AI Studio
-  const endpoint = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
+  // Sử dụng endpoint chuẩn Native của Google AI Studio (nhanh và tương thích 100%)
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const requestBody: Record<string, unknown> = {
-    model,
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: user },
+    system_instruction: system ? { parts: [{ text: system }] } : undefined,
+    contents: [
+      {
+        role: "user",
+        parts: [{ text: user }],
+      },
     ],
-    temperature,
-    stream: false,
+    generationConfig: {
+      temperature,
+      ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
+      ...(options?.json ? { responseMimeType: "application/json" } : {}),
+    },
   };
 
-  if (maxTokens) {
-    requestBody.max_tokens = maxTokens;
-  }
-
-  if (options?.json) {
-    requestBody.response_format = { type: "json_object" };
-  }
-
   const MAX_ATTEMPTS = 3;
-  const BACKOFF_MS = [2_000, 8_000];
+  const BACKOFF_MS = [2_000, 5_000];
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
       const resp = await fetch(endpoint, {
         method: "POST",
-        signal: AbortSignal.timeout(300_000), // 5 phút timeout
+        signal: AbortSignal.timeout(30_000), // 30s timeout
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${config.geminiApiKey}`,
         },
         body: JSON.stringify(requestBody),
       });
@@ -65,7 +62,7 @@ export async function callGemini(
         if (resp.status === 429 || resp.status >= 500) {
           lastError = err;
           if (attempt < MAX_ATTEMPTS) {
-            const delay = BACKOFF_MS[attempt - 1] ?? 5_000;
+            const delay = BACKOFF_MS[attempt - 1] ?? 3_000;
             console.warn(`[gemini] Thử lại lần ${attempt + 1}/${MAX_ATTEMPTS} sau ${delay}ms... Lỗi: ${err.message}`);
             await new Promise((r) => setTimeout(r, delay));
             continue;
@@ -75,9 +72,9 @@ export async function callGemini(
       }
 
       const data = (await resp.json()) as {
-        choices?: { message?: { content?: string } }[];
+        candidates?: { content?: { parts?: { text?: string }[] } }[];
       };
-      const content = data.choices?.[0]?.message?.content?.trim();
+      const content = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
       if (!content) {
         throw new Error("Response Gemini API không có nội dung (content rỗng)");
       }
@@ -85,7 +82,7 @@ export async function callGemini(
     } catch (error) {
       lastError = error;
       if (attempt < MAX_ATTEMPTS && !(error instanceof Error && error.message.includes("HTTP 400"))) {
-        const delay = BACKOFF_MS[attempt - 1] ?? 5_000;
+        const delay = BACKOFF_MS[attempt - 1] ?? 3_000;
         await new Promise((r) => setTimeout(r, delay));
         continue;
       }
