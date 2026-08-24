@@ -407,6 +407,34 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       return;
     }
 
+    // Các câu đối đáp hài hước, trêu chọc tức thì
+    if (["ngáo", "ngao", "ngu", "dở", "do", "ngốc", "ngoc", "lag", "chán", "chan"].some((w) => qLower === w || qLower.startsWith(w + " ") || qLower.endsWith(" " + w))) {
+      await sendGroupText(
+        api,
+        threadId,
+        `🤖 Dạ em Sen Chúa chỉ ăn điện với chạy bằng dữ liệu thôi nên thỉnh thoảng hơi lag xíu xiêu 😄! Bác ${displayName} thương tình thông cảm cho em nhé, em đang cố gắng thông minh hơn mỗi ngày đây ạ!`,
+      );
+      return;
+    }
+
+    if (qLower.includes("mute") || qLower.includes("ban") || qLower.includes("kick")) {
+      await sendGroupText(
+        api,
+        threadId,
+        `🤖 Dạ em Sen Chúa hiền lành dễ thương chỉ biết tra cứu thông tin với tính điểm thôi ạ 😄! Quyền năng "sinh sát" mute hay kick là của các bác Admin, em phận làm bot không dám manh động đâu nè!`,
+      );
+      return;
+    }
+
+    if (qLower.includes("1 triệu view") || qLower.includes("triệu view") || qLower.includes("1tr view") || qLower.includes("tăng view")) {
+      await sendGroupText(
+        api,
+        threadId,
+        `🤖 Sen Chúa trả lời @${displayName}:\n\nDạ bí kíp đạt 1 triệu view trong 1 đêm nhanh nhất là: Tối nay bác cứ đăng video lên rồi đi ngủ sớm... mơ một giấc thật đẹp là sáng mai có ngay 1 triệu view ạ 😄!\n\nHoặc bác có thể hỏi các cao thủ trong nhóm như bác Vũ Trọng, Tu, Huy để xin tút chạy ads và làm content viral chuẩn chỉnh nhé!`,
+      );
+      return;
+    }
+
     console.log(`[member-assistant] 🔍 Đang xử lý câu hỏi từ ${displayName} (${sender}): "${question}"...`);
 
     try {
