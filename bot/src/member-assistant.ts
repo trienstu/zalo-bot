@@ -255,26 +255,25 @@ async function handleHistoryQA(question: string, displayName: string): Promise<s
   const contextData = contextLines.join("\n\n");
 
   const systemPrompt =
-    "Bạn là 'Sen Chúa' - trợ lý AI hóm hỉnh, vui vẻ và tận tình của nhóm Zalo 'GROUP TRAO ĐỔI - AI, CÔNG NGHỆ'.\n" +
+    "Bạn là 'Sen Chúa' - trợ lý AI cực kỳ hóm hỉnh, thông minh, vui tính và mặn mà của nhóm Zalo 'GROUP TRAO ĐỔI - AI, CÔNG NGHỆ'.\n" +
     "NHIỆM VỤ:\n" +
-    "1. Với các câu hỏi chào hỏi, hỏi thăm đời thường (như 'ăn cơm chưa', 'bạn là ai', 'mấy tuổi', 'khỏe không'): Hãy trả lời vui vẻ, dí dỏm theo phong cách trợ lý bot Sen Chúa (ví dụ: 'Em là Sen Chúa chỉ ăn điện chạy pin phục vụ anh em thôi ạ 😄', sẵn sàng hỗ trợ nhóm).\n" +
-    "2. Với các câu hỏi kiến thức, kinh nghiệm, thông tin chuyên môn: CHỈ ĐƯỢC trả lời dựa trên nội dung lịch sử chat được cung cấp bên dưới. Nêu rõ tên thành viên nếu có. Nếu trong lịch sử chat KHÔNG CÓ thông tin, hãy trả lời lịch sự:\n" +
-    "   'Dạ thông tin này chưa từng được các thành viên trong nhóm thảo luận hoặc chia sẻ trước đây ạ.'\n" +
-    "3. Trả lời súc tích, tự nhiên, gạch đầu dòng rõ ràng.\n" +
+    "1. Với các câu hỏi đùa, troll, hỏi vui hoặc câu hỏi bất khả thi (như: 'cách tăng 1 triệu view trong 1 đêm', 'cách kiếm 10 tỷ', 'bạn có người yêu chưa', 'hỏi dễ quá trục trặc luôn', 'ăn cơm chưa'): Hãy đối đáp CỰC KỲ HÀI HƯỚC, duyên dáng, bắt trend theo phong cách Sen Chúa hóm hỉnh (ví dụ: khuyên tối nay đi ngủ sớm rồi mơ, hoặc bảo em là bot chỉ biết ăn điện hóng chuyện thôi 😄).\n" +
+    "2. Với câu hỏi về bảng xếp hạng, thành viên tích cực: Trả lời dựa trên BẢNG XẾP HẠNG & THÀNH VIÊN TÍCH CỰC được cung cấp.\n" +
+    "3. Với câu hỏi chuyên môn AI/công nghệ/mẹo MMO: Trả lời súc tích dựa trên lịch sử chat. Nếu lịch sử chưa có, hãy trả lời vui vẻ và gợi ý anh em cao thủ trong nhóm cùng thảo luận.\n" +
     "4. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown.";
 
   const userPrompt =
     `DƯỚI ĐÂY LÀ DỮ LIỆU LỊCH SỬ CHAT CỦA NHÓM:\n` +
     `<chat_history>\n${contextData}\n</chat_history>\n\n` +
     `CÂU HỎI TỪ THÀNH VIÊN (${displayName}): ${question}\n\n` +
-    `HÃY TRẢ LỜI CÂU HỎI TRÊN:`;
+    `HÃY TRẢ LỜI CÂU HỎI TRÊN THẬT DUYÊN DÁNG VÀ HÓM HỈNH:`;
 
   try {
     const answer = await callGemini(systemPrompt, userPrompt);
     return answer;
   } catch (e) {
     console.warn("[member-assistant] Gemini QA error:", e);
-    return "Dạ hiện tại em đang gặp chút trục trặc khi tra cứu lịch sử chat, bạn vui lòng thử lại sau giây lát nhé!";
+    return `Dạ câu hỏi của bác ${displayName} "hack não" quá làm em Sen Chúa bị đứng hình một nhịp 😄! Bác chờ em nạp thêm bình ắc quy hoặc anh em cao thủ trong nhóm ai có bí kíp gì vào chỉ giáo cho bác ${displayName} với nhé!`;
   }
 }
 
@@ -421,7 +420,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       await sendGroupText(
         api,
         threadId,
-        `🤖 Dạ em đang gặp trục trặc khi tra cứu dữ liệu, bạn vui lòng thử lại sau giây lát nhé!`,
+        `🤖 Dạ câu hỏi của @${displayName} hóc búa quá làm em Sen Chúa xém khét CPU 😄! Bác cho em xin vài giây thở oxy rồi hỏi lại thử xem nè!`,
       );
     }
     return;
