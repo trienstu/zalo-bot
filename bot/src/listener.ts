@@ -220,6 +220,19 @@ async function moderateMessage(
         source: "moderation",
         now,
       });
+
+      // Nhắn tin cảnh báo thành viên vào nhóm Zalo
+      const targetName = input.displayName ? `@${input.displayName}` : "Bạn";
+      const warnMsg =
+        `⚠️ CẢNH BÁO NỘI QUY NHÓM\n\n` +
+        `Nhắc nhở ${targetName}: Nhóm nghiêm cấm gửi các nội dung nhạy cảm, chính trị, giới tính, quảng cáo rác hoặc vi phạm quy chuẩn cộng đồng.\n` +
+        `Tin nhắn vi phạm đã được Sen Chúa tự động thu hồi. Vui lòng giữ gìn môi trường trao đổi văn minh nhé!`;
+
+      try {
+        await sendGroupText(api, input.threadId, warnMsg);
+      } catch (warnErr) {
+        console.warn(`[moderation] Không gửi được tin nhắn cảnh báo vào nhóm: ${String(warnErr)}`);
+      }
     }
   } catch (e) {
     error = `xoá tin lỗi: ${String(e)}`;
