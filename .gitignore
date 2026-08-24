@@ -37,6 +37,7 @@ screenlog.*
 Thumbs.db
 .idea/
 .vscode/
+.github/
 *.swp
 
 # Local planning and AI-agent workspace

@@ -131,36 +131,15 @@ function handleTopCommand(): string {
 }
 
 /**
- * Xem bản tóm tắt mới nhất.
- */
-function handleSummaryCommand(): string {
-  const db = getDb();
-  const latest = db
-    .prepare(`SELECT day_label, summary_text, total_messages, unique_senders FROM daily_summaries ORDER BY day_date DESC LIMIT 1`)
-    .get() as { day_label: string; summary_text: string; total_messages: number; unique_senders: number } | undefined;
-
-  if (!latest) {
-    return "📋 TÓM TẮT THẢO LUẬN\n\nHiện chưa có bản tóm tắt nào được tạo trong kho dữ liệu.";
-  }
-
-  return (
-    `📋 TÓM TẮT THẢO LUẬN NGÀY ${latest.day_label}\n\n` +
-    `${latest.summary_text.slice(0, 1500)}${latest.summary_text.length > 1500 ? "\n..." : ""}\n\n` +
-    `📊 Thống kê: ${latest.total_messages ?? 0} tin nhắn · ${latest.unique_senders ?? 0} người tham gia`
-  );
-}
-
-/**
  * Trả lời trợ giúp / danh sách lệnh.
  */
 function handleHelpCommand(): string {
   return (
-    `🤖 TRỢ LÝ CỘNG ĐỒNG ZALO\n\n` +
+    `🤖 TRỢ LÝ CỘNG ĐỒNG — SEN CHÚA\n\n` +
     `Các lệnh bạn có thể sử dụng:\n` +
     `🔹 /rank hoặc /diem: Tra cứu thứ hạng & điểm tương tác của bạn\n` +
     `🔹 /top: Xem Top 5 thành viên tích cực nhất nhóm\n` +
-    `🔹 /summary hoặc /tomtat: Xem bản tóm tắt thảo luận mới nhất\n` +
-    `🔹 /hoi [câu hỏi] (hoặc tag @Trien Nguyen): Hỏi đáp kiến thức tra cứu từ lịch sử chat của nhóm\n` +
+    `🔹 /hoi [câu hỏi] hoặc tag @Sen Chúa: Hỏi đáp kiến thức tra cứu từ lịch sử chat của nhóm\n` +
     `🔹 /help: Hiển thị hướng dẫn này`
   );
 }
@@ -176,7 +155,7 @@ async function handleHistoryQA(question: string, displayName: string): Promise<s
     .toLowerCase()
     .replace(/[?,.!/\\:;]/g, " ")
     .split(/\s+/)
-    .filter((w) => w.length >= 2 && !["làm", "sao", "cho", "hỏi", "mình", "anh", "em", "bot", "gì", "thế", "nào", "được", "không"].includes(w));
+    .filter((w) => w.length >= 2 && !["làm", "sao", "cho", "hỏi", "mình", "anh", "em", "bot", "sen", "chúa", "gì", "thế", "nào", "được", "không"].includes(w));
 
   // Truy vấn tin nhắn lịch sử liên quan
   let relevantMessages: { display_name: string; text: string; ts: number }[] = [];
@@ -245,14 +224,14 @@ async function handleHistoryQA(question: string, displayName: string): Promise<s
   const contextData = contextLines.join("\n\n");
 
   const systemPrompt =
-    "Bạn là trợ lý AI chuyên môn của cộng đồng Zalo 'GROUP TRAO ĐỔI - AI, CÔNG NGHỆ'.\n" +
+    "Bạn là 'Sen Chúa' - trợ lý AI của cộng đồng Zalo 'GROUP TRAO ĐỔI - AI, CÔNG NGHỆ'.\n" +
     "NHIỆM VỤ: Trả lời câu hỏi của thành viên DỰA HOÀN TOÀN VÀO DỮ LIỆU LỊCH SỬ CHAT CỦA NHÓM được cung cấp dưới đây.\n\n" +
     "QUY TẮC BẮT BUỘC:\n" +
     "1. CHỈ ĐƯỢC sử dụng các kiến thức, kinh nghiệm, mẹo, cách làm, link, công cụ hoặc thông tin đã được các thành viên thảo luận hoặc chia sẻ trong lịch sử chat được cung cấp.\n" +
     "2. Nếu trong lịch sử chat KHÔNG CÓ thông tin hoặc không đủ cơ sở để trả lời câu hỏi, bạn PHẢI trả lời ngắn gọn, lịch sự:\n" +
     "   'Dạ thông tin này chưa từng được các thành viên trong nhóm thảo luận hoặc chia sẻ trước đây ạ.'\n" +
     "3. Nêu rõ tên thành viên đã chia sẻ nếu có thông tin (Ví dụ: 'Theo kinh nghiệm chia sẻ từ bạn Huy...', 'Anh Tu có hướng dẫn mẹo...').\n" +
-    "4. Trả lời súc tích, rõ ràng, gạch đầu dòng, giọng điệu thân thiện, hữu ích.\n" +
+    "4. Trả lời súc tích, rõ ràng, gạch đầu dòng, giọng điệu hóm hỉnh, thân thiện đúng phong cách Sen Chúa.\n" +
     "5. KHÔNG dùng cú pháp markdown in đậm ** vì Zalo không hiển thị định dạng này.";
 
   const userPrompt =
@@ -287,13 +266,13 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
-  // Nếu là tin nhắn của chính tài khoản bot, chỉ xử lý nếu bắt đầu bằng / hoặc ! hoặc bot ơi
+  // Nếu là tin nhắn của chính tài khoản bot, chỉ xử lý nếu bắt đầu bằng / hoặc ! hoặc bot/sen
   if (event.isSelf) {
     const isCommand =
       rawText.startsWith("/") ||
       rawText.startsWith("!") ||
-      rawText.toLowerCase().startsWith("bot ơi") ||
-      rawText.toLowerCase().startsWith("bot oi");
+      rawText.toLowerCase().startsWith("sen") ||
+      rawText.toLowerCase().startsWith("bot");
     if (!isCommand) return;
   }
 
@@ -334,23 +313,20 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
-  // 4. Lệnh /summary, /tomtat
-  if (lower === "/summary" || lower === "/tomtat" || lower === "!summary" || lower === "!tomtat") {
-    userCooldowns.set(sender, now);
-    const reply = handleSummaryCommand();
-    await sendGroupText(api, threadId, reply);
-    return;
-  }
-
-  // 5. Lệnh /hoi [câu hỏi] hoặc Tag bot / Nhắc tên bot
+  // 4. Lệnh /hoi [câu hỏi] hoặc Tag bot / Nhắc tên Sen Chúa
   const isTagBot =
     lower.startsWith("/hoi ") ||
     lower.startsWith("!hoi ") ||
-    lower.includes("@trien nguyen") ||
-    lower.includes("@trien") ||
-    lower.includes("@bot ") ||
+    lower.includes("@sen chúa") ||
+    lower.includes("@sen chua") ||
+    lower.includes("sen chúa") ||
+    lower.includes("sen chua") ||
+    lower.includes("@senchua") ||
+    lower.includes("@bot") ||
     lower.startsWith("bot ơi") ||
-    lower.startsWith("bot oi");
+    lower.startsWith("bot oi") ||
+    lower.startsWith("sen ơi") ||
+    lower.startsWith("sen oi");
 
   if (isTagBot) {
     userCooldowns.set(sender, now);
@@ -359,8 +335,15 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     let question = rawText
       .replace(/^\/hoi\s+/i, "")
       .replace(/^!hoi\s+/i, "")
-      .replace(/@trien nguyen/gi, "")
-      .replace(/@trien/gi, "")
+      .replace(/@sen chúa/gi, "")
+      .replace(/@sen chua/gi, "")
+      .replace(/@senchua/gi, "")
+      .replace(/sen chúa ơi,?\s*/gi, "")
+      .replace(/sen chua oi,?\s*/gi, "")
+      .replace(/sen chúa,?\s*/gi, "")
+      .replace(/sen chua,?\s*/gi, "")
+      .replace(/sen ơi,?\s*/gi, "")
+      .replace(/sen oi,?\s*/gi, "")
       .replace(/@bot/gi, "")
       .replace(/^bot ơi\s*,?/i, "")
       .replace(/^bot oi\s*,?/i, "")
@@ -370,16 +353,16 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       await sendGroupText(
         api,
         threadId,
-        `🤖 Dạ bạn cần tra cứu thông tin gì trong nhóm ạ? Hãy gõ theo cú pháp: /hoi [nội dung cần hỏi] nhé!`,
+        `🤖 Dạ Sen Chúa nghe đây! Bạn cần tra cứu thông tin gì trong nhóm ạ? Hãy gõ theo cú pháp: /hoi [nội dung cần hỏi] hoặc tag @Sen Chúa [câu hỏi] nhé!`,
       );
       return;
     }
 
-    console.log(`[member-assistant] Thành viên ${displayName} (${sender}) hỏi: "${question}"`);
+    console.log(`[member-assistant] Thành viên ${displayName} (${sender}) hỏi Sen Chúa: "${question}"`);
 
     // Tra cứu RAG từ lịch sử chat
     const answer = await handleHistoryQA(question, displayName);
-    const reply = `🤖 Trả lời @${displayName}:\n\n${answer}`;
+    const reply = `🤖 Sen Chúa trả lời @${displayName}:\n\n${answer}`;
     await sendGroupText(api, threadId, reply);
     return;
   }
