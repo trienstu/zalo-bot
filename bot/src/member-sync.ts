@@ -27,6 +27,7 @@ export interface GroupMemberSyncResult {
 export interface GroupMemberSyncOptions {
   requestedBy?: string;
   eventSource?: MemberEventSource;
+  groupId?: string;
 }
 
 /**
@@ -40,7 +41,8 @@ export async function syncGroupMembers(
   now = Date.now(),
   options: GroupMemberSyncOptions = {},
 ): Promise<GroupMemberSyncResult> {
-  if (!config.groupId) {
+  const targetGroupId = options.groupId || config.groupId;
+  if (!targetGroupId) {
     throw new Error("Chưa có GROUP_ID trong .env");
   }
 
@@ -49,13 +51,13 @@ export async function syncGroupMembers(
   const runId = createMemberSyncRun({ requestedBy, startedAt: now });
 
   try {
-    const snap = await getGroupSnapshot(api, config.groupId);
+    const snap = await getGroupSnapshot(api, targetGroupId);
     const reportedCount = Number.isFinite(snap.totalMember) ? snap.totalMember : 0;
     const snapshotCount = snap.members.length;
 
     if (reportedCount === 0 && snapshotCount === 0 && !snap.name.trim()) {
       throw new Error(
-        `Zalo trả snapshot group rỗng cho GROUP_ID=${config.groupId}; ` +
+        `Zalo trả snapshot group rỗng cho GROUP_ID=${targetGroupId}; ` +
           "bỏ qua sync để tránh đánh inactive nhầm toàn bộ member.",
       );
     }

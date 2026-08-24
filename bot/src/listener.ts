@@ -84,8 +84,7 @@ import {
 
 /** Chỉ ghi tương tác cho group ta quản lý (bỏ qua DM / group khác). */
 function isTargetThread(threadId: unknown): boolean {
-  if (!config.groupId) return true; // chưa cấu hình group → ghi tất cả (giai đoạn dò group id)
-  return String(threadId ?? "") === config.groupId;
+  return config.isManagedGroup(threadId);
 }
 
 function extractSender(payload: any): string | null {
@@ -354,25 +353,20 @@ async function notifyModeration(d: {
   }
 }
 
-async function syncMembersOnce(api: any, now: number, requestedBy = "listener"): Promise<void> {
-  if (!config.groupId) {
-    console.log("[listener] GROUP_ID chưa đặt — bỏ qua sync member. Chạy export-members để lấy group id.");
+async function syncMembersOnce(api: any, now: number, requestedBy = "listener", groupId?: string): Promise<void> {
+  const targetGroupId = groupId || config.groupId;
+  if (!targetGroupId) {
+    console.log("[listener] GROUP_ID chưa đặt — bỏ qua sync member.");
     return;
   }
   try {
-    const result = await syncGroupMembers(api, now, { requestedBy });
+    const result = await syncGroupMembers(api, now, { requestedBy, groupId: targetGroupId });
     console.log(
-      `[listener] Đồng bộ member: snapshot=${result.snapshotCount}/${result.memberCount}, ` +
+      `[listener] Đồng bộ member (${result.groupId}): snapshot=${result.snapshotCount}/${result.memberCount}, ` +
         `upsert=${result.upserted}, inactive=${result.markedLeft}, group="${result.groupName}".`,
     );
   } catch (e) {
-    recordBotError({
-      source: "listener",
-      code: "sync_members_once_failed",
-      message: String(e),
-      detail: e instanceof Error ? e.stack : null,
-    });
-    console.warn(`[listener] Không sync được member: ${String(e)}`);
+    console.warn(`[listener] Đồng bộ member group ${targetGroupId} lỗi: ${String(e)}`);
   }
 }
 
@@ -421,8 +415,10 @@ export async function runListener(): Promise<void> {
     }
     memberSyncInFlight = true;
     try {
-      console.log(`[listener] Bắt đầu sync member (${reason}).`);
-      await syncMembersOnce(api, Date.now(), `listener:${reason}`);
+      const gids = config.groupIds.length > 0 ? config.groupIds : [config.groupId].filter(Boolean);
+      for (const gid of gids) {
+        await syncMembersOnce(api, Date.now(), `listener:${reason}`, gid);
+      }
     } finally {
       memberSyncInFlight = false;
     }
