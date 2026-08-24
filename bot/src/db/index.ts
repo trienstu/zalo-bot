@@ -391,6 +391,44 @@ export function logInteraction(input: {
     });
 }
 
+/**
+ * Ghi tương tác reaction: CHỈ TÍNH 1 ĐIỂM DUY NHẤT cho mỗi tin nhắn đối với mỗi thành viên.
+ * Nếu thành viên đổi reaction hoặc bấm lại trên cùng 1 tin nhắn -> KHÔNG cộng thêm điểm.
+ */
+export function logReactionOnce(input: {
+  zaloUserId: string;
+  targetMsgId: string;
+  ts: number;
+}): boolean {
+  const db = getDb();
+  const source = input.targetMsgId ? `react:${input.targetMsgId}` : "listener";
+
+  if (input.targetMsgId) {
+    const existing = db
+      .prepare(
+        `SELECT 1 FROM interactions
+         WHERE zalo_user_id = @id AND type = 'reaction' AND source = @source
+         LIMIT 1`,
+      )
+      .get({ id: input.zaloUserId, source });
+
+    if (existing) {
+      return false; // Đã từng tính điểm reaction cho tin nhắn này -> bỏ qua
+    }
+  }
+
+  db.prepare(
+    `INSERT OR IGNORE INTO interactions (zalo_user_id, type, ts, source)
+     VALUES (@id, 'reaction', @ts, @source)`,
+  ).run({
+    id: input.zaloUserId,
+    ts: input.ts,
+    source,
+  });
+
+  return true;
+}
+
 // ---- Group text message archive ----
 
 /** Lưu text message để sau này export/tổng hợp blog. Dedupe theo thread_id + message_id. */

@@ -20,6 +20,7 @@ import {
 } from "./zalo/client.js";
 import {
   logInteraction,
+  logReactionOnce,
   upsertMember,
   markMemberLeft,
   getMember,
@@ -774,7 +775,23 @@ export async function runListener(): Promise<void> {
     }
     // KHÔNG tính điểm tương tác cho chính tài khoản bot (Sen Chúa)
     if (!payload?.isSelf) {
-      logInteraction({ zaloUserId: sender, type, ts, source: "listener" });
+      if (type === "reaction") {
+        const data = payload?.data;
+        const targetMsgId = String(
+          data?.msgId ??
+          data?.react?.msgId ??
+          data?.content?.msgId ??
+          data?.targetId ??
+          data?.cliMsgId ??
+          payload?.msgId ??
+          ""
+        ).trim();
+
+        // 🎯 1 Tin nhắn = Tối đa 1 Điểm Reaction cho mỗi thành viên (Chống bấm đổi/thả nhiều lần)
+        logReactionOnce({ zaloUserId: sender, targetMsgId, ts });
+      } else {
+        logInteraction({ zaloUserId: sender, type, ts, source: "listener" });
+      }
     }
 
     if (type === "message") messageEvents += 1;
