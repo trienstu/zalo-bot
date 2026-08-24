@@ -13,8 +13,10 @@ export async function callGemini(
     json?: boolean;
   },
 ): Promise<string> {
-  const apiKey = (config.geminiApiKey || process.env.GEMINI_API_KEY || "").trim();
-  if (!apiKey) {
+  const rawKey = (config.geminiApiKey || process.env.GEMINI_API_KEY || "").trim();
+  const apiKeys = rawKey.split(",").map((k) => k.trim()).filter(Boolean);
+
+  if (apiKeys.length === 0) {
     throw new Error("Thiếu GEMINI_API_KEY trong .env");
   }
 
@@ -22,29 +24,28 @@ export async function callGemini(
   const temperature = options?.temperature ?? 0.3;
   const maxTokens = options?.maxTokens;
 
-  // Sử dụng endpoint chuẩn Native của Google AI Studio (nhanh và tương thích 100%)
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-  const requestBody: Record<string, unknown> = {
-    system_instruction: system ? { parts: [{ text: system }] } : undefined,
-    contents: [
-      {
-        role: "user",
-        parts: [{ text: user }],
-      },
-    ],
-    generationConfig: {
-      temperature,
-      ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
-      ...(options?.json ? { responseMimeType: "application/json" } : {}),
-    },
-  };
-
-  const MAX_ATTEMPTS = 3;
-  const BACKOFF_MS = [2_000, 5_000];
   let lastError: unknown;
 
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+  // Thử lần lượt qua từng API Key nếu có nhiều key (Xoay vòng chống 429 Rate Limit)
+  for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx += 1) {
+    const apiKey = apiKeys[keyIdx];
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    const requestBody: Record<string, unknown> = {
+      system_instruction: system ? { parts: [{ text: system }] } : undefined,
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: user }],
+        },
+      ],
+      generationConfig: {
+        temperature,
+        ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
+        ...(options?.json ? { responseMimeType: "application/json" } : {}),
+      },
+    };
+
     try {
       const resp = await fetch(endpoint, {
         method: "POST",
@@ -58,15 +59,12 @@ export async function callGemini(
       if (!resp.ok) {
         const errText = await resp.text().catch(() => "");
         const err = new Error(`Gemini API HTTP ${resp.status}: ${errText.slice(0, 500)}`);
-        // 429: rate limit, >= 500: lỗi máy chủ -> retry
-        if (resp.status === 429 || resp.status >= 500) {
+        
+        // 429: Hết quota Free Tier -> Thử key tiếp theo ngay lập tức
+        if (resp.status === 429) {
+          console.warn(`[gemini] Key #${keyIdx + 1} hết quota (HTTP 429). Đang chuyển sang key tiếp theo...`);
           lastError = err;
-          if (attempt < MAX_ATTEMPTS) {
-            const delay = BACKOFF_MS[attempt - 1] ?? 3_000;
-            console.warn(`[gemini] Thử lại lần ${attempt + 1}/${MAX_ATTEMPTS} sau ${delay}ms... Lỗi: ${err.message}`);
-            await new Promise((r) => setTimeout(r, delay));
-            continue;
-          }
+          continue;
         }
         throw err;
       }
@@ -81,12 +79,37 @@ export async function callGemini(
       return content;
     } catch (error) {
       lastError = error;
-      if (attempt < MAX_ATTEMPTS && !(error instanceof Error && error.message.includes("HTTP 400"))) {
-        const delay = BACKOFF_MS[attempt - 1] ?? 3_000;
-        await new Promise((r) => setTimeout(r, delay));
-        continue;
+      console.warn(`[gemini] Lỗi với Key #${keyIdx + 1}: ${String(error)}`);
+    }
+  }
+
+  // Fallback sang DeepSeek nếu có cấu hình DEEPSEEK_API_KEY
+  if (config.deepseekApiKey) {
+    try {
+      console.log("[gemini] Gemini quá tải, đang chuyển hướng sang DeepSeek AI...");
+      const dsResp = await fetch("https://api.deepseek.com/chat/completions", {
+        method: "POST",
+        signal: AbortSignal.timeout(30_000),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${config.deepseekApiKey}`,
+        },
+        body: JSON.stringify({
+          model: config.deepseekModel || "deepseek-chat",
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: user },
+          ],
+          temperature,
+        }),
+      });
+      if (dsResp.ok) {
+        const dsData = (await dsResp.json()) as any;
+        const dsContent = dsData.choices?.[0]?.message?.content?.trim();
+        if (dsContent) return dsContent;
       }
-      break;
+    } catch (dsErr) {
+      console.warn("[gemini] Fallback DeepSeek thất bại:", dsErr);
     }
   }
 
