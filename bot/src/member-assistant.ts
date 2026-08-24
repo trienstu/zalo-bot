@@ -212,8 +212,32 @@ async function handleHistoryQA(question: string, displayName: string): Promise<s
     return `Dạ thông tin về chủ đề này chưa từng được các thành viên trong nhóm thảo luận hoặc chia sẻ trước đây ạ.`;
   }
 
+  // Lấy Top thành viên tích cực nhất từ bảng xếp hạng để AI biết ai nói nhiều nhất/nhiều điểm nhất
+  const topMembers = db
+    .prepare(
+      `SELECT m.display_name,
+              COUNT(CASE WHEN i.type = 'message' THEN 1 END) AS msg_count,
+              COALESCE(SUM(CASE i.type WHEN 'message' THEN 10 WHEN 'vote' THEN 3 WHEN 'reaction' THEN 1 ELSE 1 END), 0) AS points
+       FROM members m
+       JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
+       WHERE m.is_active = 1
+         AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
+         AND LOWER(m.display_name) NOT LIKE '%sen chua%'
+       GROUP BY m.zalo_user_id, m.display_name
+       ORDER BY points DESC
+       LIMIT 10`,
+    )
+    .all() as { display_name: string; msg_count: number; points: number }[];
+
   // Dựng ngữ cảnh dữ liệu lịch sử
   const contextLines: string[] = [];
+
+  if (topMembers.length > 0) {
+    contextLines.push("=== BẢNG XẾP HẠNG & THÀNH VIÊN TÍCH CỰC NHẤT NHÓM ===");
+    topMembers.forEach((m, idx) => {
+      contextLines.push(`Top ${idx + 1}: ${m.display_name} - ${m.msg_count} tin nhắn, tổng ${m.points} điểm.`);
+    });
+  }
 
   if (pastSummaries.length > 0) {
     contextLines.push("=== TÓM TẮT CÁC NGÀY TRƯỚC ===");

@@ -46,17 +46,17 @@ async function main() {
     text: "/hoi Anh em có chia sẻ mẹo gì để bật kiếm tiền GA tránh bị hold không?",
   });
 
-  // Test /hoi with an unknown topic (should politely decline based on strict rule)
-  console.log("\n4. Test /hoi với chủ đề chưa từng thảo luận:");
+  // Test 5: Hỏi ai nói nhiều nhất / Top tương tác
+  console.log("\n5. Test hỏi ai nói nhiều nhất:");
   await handleMemberInteraction({
-    sendMessage: async (dest: any, text: string) => {
-      console.log("[Bot Reply]:", text);
+    sendMessage: async (msgPayload: any, threadId: string) => {
+      console.log("[Bot Reply to " + threadId + "]:\n", msgPayload?.msg ?? msgPayload);
     },
   }, {
     threadId: "1913869945242410752",
-    sender: "test_user_4",
-    displayName: "Phạm Văn D",
-    text: "/hoi Công thức nấu phở bò gia truyền như thế nào?",
+    sender: "test_user_5",
+    displayName: "Viet Phuoc Tran",
+    text: "@Sen Chúa ông nào nói nhiều nhất cái group này 😜",
   });
 
   console.log("\n=== TEST COMPLETED ===");
