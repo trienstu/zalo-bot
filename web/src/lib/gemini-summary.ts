@@ -241,7 +241,26 @@ export async function generateChatSummary(options: {
     .slice(0, 5)
     .map(([_, s]) => `${s.name} (${s.count})`);
 
-  // Dựng transcript
+  // Trích xuất toàn bộ đường link được chia sẻ trong ngày
+  const urlRegex = /(https?:\/\/[^\s]+)/gi;
+  const extractedLinks: { sender: string; url: string; context: string }[] = [];
+  for (const m of messages) {
+    const matches = m.text.match(urlRegex);
+    if (matches) {
+      for (const u of matches) {
+        const cleanUrl = u.replace(/[.,;!?)]+$/, "");
+        if (!extractedLinks.some((l) => l.url === cleanUrl)) {
+          extractedLinks.push({
+            sender: m.display_name || m.zalo_user_id,
+            url: cleanUrl,
+            context: m.text.replace(/\s*\n\s*/g, " ").slice(0, 150),
+          });
+        }
+      }
+    }
+  }
+
+  // Dựng transcript (tăng sức chứa lên đến 3000 tin nhắn để không bỏ sót nội dung quan trọng)
   const transcriptLines = messages.map((m) => {
     const d = new Date(m.ts + VN_UTC_OFFSET_MS);
     const time = `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
@@ -250,23 +269,28 @@ export async function generateChatSummary(options: {
     return `${time} | ${name}: ${cleanText}`;
   });
 
-  const transcript = transcriptLines.slice(-300).join("\n");
+  const transcript = transcriptLines.slice(-3000).join("\n");
 
   const systemPrompt =
-    "Bạn viết bản tóm tắt hội thoại nhóm Zalo tiếng Việt cho NGƯỜI KHÔNG CÓ MẶT TRONG NHÓM. " +
-    "Người dùng cung cấp log tin nhắn một ngày đặt giữa <log> và </log>, mỗi dòng dạng 'HH:MM | Tên: nội dung'. " +
-    "NGUYÊN TẮC: tóm tắt NỘI DUNG THỰC CHẤT của từng thảo luận — luận điểm, cách làm, kinh nghiệm, kết luận, con số cụ thể. " +
+    "Bạn là trợ lý AI chuyên viết bản tóm tắt hội thoại nhóm Zalo tiếng Việt súc tích, đầy đủ và hữu ích cho người vắng mặt. " +
+    "Người dùng cung cấp log tin nhắn một ngày đặt giữa <log> và </log>, và danh sách các link được chia sẻ đặt giữa <links> và </links>. " +
+    "NGUYÊN TẮC: tóm tắt NỘI DUNG THỰC CHẤT của từng thảo luận — luận điểm, giải pháp, kinh nghiệm, kết luận, con số và công cụ cụ thể. " +
     "Bố cục: Phân nhóm nội dung thành các mục có nội dung thực tế (bỏ mục rỗng): " +
     "(1) '📢 THÔNG BÁO & QUYẾT ĐỊNH' " +
     "(2) '💼 CHỦ ĐỀ CHUYÊN MÔN & THẢO LUẬN' " +
     "(3) '🤖 AI & CÔNG NGHỆ' " +
     "(4) '🎓 HỌC HÀNH & KINH NGHIỆM' " +
-    "(5) '🔗 LINK ĐÃ CHIA SẺ' (kèm mô tả) " +
+    "(5) '🔗 LINK ĐÃ CHIA SẺ' (YÊU CẦU ĐẶC BIỆT: Phải liệt kê ĐẦY ĐỦ TẤT CẢ các link xuất hiện trong <links> hoặc <log>, kèm mô tả ngắn và ai gửi, tuyệt đối không được bỏ sót) " +
     "(6) '❓ CÂU HỎI CHƯA CÓ TRẢ LỜI' " +
     "(7) '☕ NGOÀI LỀ' (tán gẫu, chuyện vui cuối ngày). " +
     "Trình bày bằng gạch đầu dòng '- ', mỗi ý một dòng, KHÔNG dùng markdown in đậm ** vì Zalo không render.";
 
-  const userPrompt = `Tóm tắt log tin nhắn ngày ${dayRange.label} sau:\n<log>\n${transcript}\n</log>`;
+  const linksBlock =
+    extractedLinks.length > 0
+      ? `\n\n<links>\n${extractedLinks.map((l) => `- ${l.url} (Người gửi: ${l.sender} | Đoạn chat: ${l.context})`).join("\n")}\n</links>`
+      : "";
+
+  const userPrompt = `Tóm tắt log tin nhắn ngày ${dayRange.label} sau:\n<log>\n${transcript}\n</log>${linksBlock}`;
 
   const summary = await callGeminiDirect(systemPrompt, userPrompt, config.geminiApiKey, config.geminiModel);
 

@@ -622,7 +622,7 @@ export async function runListener(): Promise<void> {
       if (lastRunDate !== todayDateVN) {
         setBotState("auto_summary_last_run_date", todayDateVN, Date.now());
         console.log(`[listener] ⏰ Đã đến giờ hẹn (${targetTime})! Đang tự động chạy tóm tắt ngày...`);
-        void runDailySummarySafe().catch((e) => console.warn(`[listener] Tự động tóm tắt lỗi: ${String(e)}`));
+        void runDailySummarySafe({ forceSend: true }).catch((e) => console.warn(`[listener] Tự động tóm tắt lỗi: ${String(e)}`));
       }
     }
   }, 30_000);

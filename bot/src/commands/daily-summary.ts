@@ -19,6 +19,7 @@ import {
   buildTranscript,
   composeSummaryMessages,
   dayWindowFromLabelVN,
+  dayWindowVNAt,
   isBotSummaryMessage,
   isoDateFromDayStartVN,
   previousDayWindowVN,
@@ -40,9 +41,10 @@ type SummaryDestination =
   | { key: string; kind: "zalo"; groupId: string }
   | { key: string; kind: "telegram"; chatId: string };
 
-/** Danh sách đích theo config: các group Zalo (theo thứ tự khai báo) rồi Telegram. */
+/** Danh sách đích theo config: các group Zalo (theo thứ tự khai báo hoặc danh sách group đang quản lý) rồi Telegram. */
 function buildDestinations(): SummaryDestination[] {
-  const dests: SummaryDestination[] = config.summaryGroupIds.map((groupId) => ({
+  const groupList = config.summaryGroupIds.length > 0 ? config.summaryGroupIds : config.groupIds;
+  const dests: SummaryDestination[] = groupList.map((groupId) => ({
     key: `zalo:${groupId}`,
     kind: "zalo" as const,
     groupId,
@@ -175,19 +177,20 @@ async function sendParts(state: SummarySendState, dests: SummaryDestination[]): 
  * .env.example) — cron có cài sẵn cũng không spam lỗi. Cấu hình nửa vời
  * (có key không có đích, hoặc ngược lại) → báo lỗi rõ.
  */
-export async function runDailySummary(): Promise<void> {
+export async function runDailySummary(options?: { forceSend?: boolean }): Promise<void> {
   const hasLLM = !!(config.geminiApiKey || config.deepseekApiKey);
-  const hasDestination = config.summaryGroupIds.length > 0 || config.summaryTelegramChatId !== "";
+  const dests = buildDestinations();
+  const hasDestination = dests.length > 0;
   if (!hasDestination && !hasLLM) {
     console.log(
-      "[daily-summary] Tính năng đang TẮT (không có SUMMARY_GROUP_ID/SUMMARY_TELEGRAM_CHAT_ID lẫn GEMINI_API_KEY/DEEPSEEK_API_KEY) — bỏ qua.",
+      "[daily-summary] Tính năng đang TẮT (không có SUMMARY_GROUP_ID/GROUP_ID lẫn GEMINI_API_KEY/DEEPSEEK_API_KEY) — bỏ qua.",
     );
     return;
   }
   if (!hasDestination || !hasLLM) {
     throw new Error(
       "Cấu hình tóm tắt dở dang: cần GEMINI_API_KEY (hoặc DEEPSEEK_API_KEY) VÀ ít nhất một đích " +
-        "(SUMMARY_GROUP_ID hoặc SUMMARY_TELEGRAM_CHAT_ID) — hoặc xoá hết để tắt.",
+        "(SUMMARY_GROUP_ID hoặc GROUP_ID) — hoặc xoá hết để tắt.",
     );
   }
   if (!config.groupId) {
@@ -200,8 +203,10 @@ export async function runDailySummary(): Promise<void> {
   }
 
   const now = Date.now();
-  const window = previousDayWindowVN(now);
-  const dests = buildDestinations();
+  const vnHour = new Date(now + 7 * 3600 * 1000).getUTCHours();
+  // Nếu chạy vào buổi tối (từ 18h trở đi): tóm tắt ngày HÔM NAY.
+  // Nếu chạy vào buổi sáng/trưa (< 18h): tóm tắt ngày HÔM QUA.
+  const window = vnHour >= 18 ? dayWindowVNAt(now) : previousDayWindowVN(now);
 
   // Chống 2 process chạy chồng (cron treo + chạy tay).
   if (!acquireLock(DAILY_SUMMARY_LOCK_KEY, now, LOCK_STALE_MS)) {
@@ -215,12 +220,12 @@ export async function runDailySummary(): Promise<void> {
     // Kho daily_summaries ra đời sau tính năng tóm tắt — bản tin đang nằm trong
     // bot_state (sắp bị ghi đè khi sang ngày mới) được cứu vào kho trước.
     if (prev) backfillSummaryArchiveFromState(prev);
-    if (prev?.dayLabel === window.label && prev.parts.length > 0) {
+    if (prev && prev.dayLabel === window.label && prev.parts.length > 0) {
       if (isAllSent(prev, dests)) {
         console.log(`[daily-summary] Đã gửi đủ tóm tắt ngày ${window.label} cho mọi đích — bỏ qua.`);
         return;
       }
-      if (config.dryRun) {
+      if (config.dryRun && !options?.forceSend) {
         console.log(
           `[daily-summary] DRY-RUN: bản tin ngày ${window.label} còn đích chưa gửi đủ, không gửi.`,
         );
@@ -315,7 +320,7 @@ export async function runDailySummary(): Promise<void> {
       );
     }
 
-    if (config.dryRun) {
+    if (config.dryRun && !options?.forceSend) {
       console.log(
         `[daily-summary] DRY-RUN: sẽ gửi ${parts.length} tin đến [${dests.map((d) => d.key).join(", ")}]:\n\n${parts.join("\n\n---\n\n")}`,
       );
@@ -337,7 +342,7 @@ export async function runDailySummary(): Promise<void> {
       images: media.images,
       videos: media.videos,
       topSenders: top,
-      model: messages.length > 0 ? config.deepseekModel : "",
+      model: messages.length > 0 ? (config.geminiApiKey ? config.geminiModel : config.deepseekModel) : "",
       transcriptChars: transcriptInfo ? transcriptInfo.text.length : null,
       source: "live",
       now: Date.now(),
@@ -416,9 +421,9 @@ async function notifyTelegramBestEffort(text: string): Promise<void> {
 }
 
 /** Bọc lỗi: ghi bot_errors + báo Telegram best-effort để không lặng lẽ mất bản tin. */
-export async function runDailySummarySafe(): Promise<void> {
+export async function runDailySummarySafe(options?: { forceSend?: boolean }): Promise<void> {
   try {
-    await runDailySummary();
+    await runDailySummary(options);
   } catch (e) {
     recordBotError({
       source: "daily-summary",
@@ -427,7 +432,7 @@ export async function runDailySummarySafe(): Promise<void> {
       detail: e instanceof Error ? e.stack : null,
     });
     await notifyTelegramBestEffort(
-      `⚠️ daily-summary lỗi, chưa gửi được bản tóm tắt ngày hôm qua:\n${String(e)}`,
+      `⚠️ daily-summary lỗi, chưa gửi được bản tóm tắt:\n${String(e)}`,
     );
     throw e;
   }
