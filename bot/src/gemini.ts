@@ -4,6 +4,8 @@ import { config } from "./config.js";
  * Lớp gọi Google Gemini API dùng chung (Tóm tắt hội thoại Zalo, bóc tách dữ liệu).
  * Hỗ trợ các dòng model Gemini (Gemini 2.5 Flash, Gemini 3.7 Flash, Gemini 3.1 Pro, v.v.).
  */
+let botKeyOffset = 0;
+
 export async function callGemini(
   system: string,
   user: string,
@@ -25,9 +27,11 @@ export async function callGemini(
   const maxTokens = options?.maxTokens;
 
   let lastError: unknown;
+  const numKeys = apiKeys.length;
 
   // Thử lần lượt qua từng API Key nếu có nhiều key (Xoay vòng chống 429 Rate Limit)
-  for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx += 1) {
+  for (let attempt = 0; attempt < numKeys; attempt += 1) {
+    const keyIdx = (botKeyOffset + attempt) % numKeys;
     const apiKey = apiKeys[keyIdx];
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
@@ -49,7 +53,7 @@ export async function callGemini(
     try {
       const resp = await fetch(endpoint, {
         method: "POST",
-        signal: AbortSignal.timeout(30_000), // 30s timeout
+        signal: AbortSignal.timeout(15_000), // 15s timeout
         headers: {
           "Content-Type": "application/json",
         },
@@ -77,6 +81,7 @@ export async function callGemini(
       if (!content) {
         throw new Error("Response Gemini API không có nội dung (content rỗng)");
       }
+      botKeyOffset = (keyIdx + 1) % numKeys;
       return content;
     } catch (error) {
       lastError = error;

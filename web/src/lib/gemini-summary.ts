@@ -63,6 +63,8 @@ export function parseDayRange(targetDateStr?: string): DayRange {
   return { startTs, endTs, label, dayDate };
 }
 
+let currentKeyOffset = 0;
+
 export async function callGeminiDirect(
   systemPrompt: string,
   userPrompt: string,
@@ -79,9 +81,11 @@ export async function callGeminiDirect(
   }
 
   let lastError: unknown;
+  const numKeys = apiKeys.length;
 
-  // Thử lần lượt qua từng API Key nếu có nhiều key (Xoay vòng chống 429 Rate Limit)
-  for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx += 1) {
+  // Xoay vòng luân phiên qua các Key để chia đều tải và tránh Rate Limit/Timeout
+  for (let attempt = 0; attempt < numKeys; attempt += 1) {
+    const keyIdx = (currentKeyOffset + attempt) % numKeys;
     const apiKey = apiKeys[keyIdx];
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
@@ -102,7 +106,7 @@ export async function callGeminiDirect(
     try {
       const resp = await fetch(endpoint, {
         method: "POST",
-        signal: AbortSignal.timeout(30_000), // 30s timeout
+        signal: AbortSignal.timeout(15_000), // 15s timeout mỗi key để chuyển nhanh nếu nghẽn
         headers: {
           "Content-Type": "application/json",
         },
@@ -130,6 +134,7 @@ export async function callGeminiDirect(
       if (!content) {
         throw new Error("Response Gemini API không có nội dung (content rỗng)");
       }
+      currentKeyOffset = (keyIdx + 1) % numKeys; // Lưu lại key tiếp theo cho lượt sau
       return content;
     } catch (error) {
       lastError = error;
