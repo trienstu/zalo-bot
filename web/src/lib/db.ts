@@ -491,9 +491,15 @@ export function listLeaderboard(period: LeaderboardPeriod, limit = 50, threadId?
         : 0;
 
   const targetThreadId = (threadId || "").trim();
-  const threadClause = targetThreadId && targetThreadId !== "all"
-    ? `AND (i.thread_id = @targetThreadId OR i.thread_id = '')`
-    : "";
+  const primaryGroupId = "1913869945242410752";
+  let threadClause = "";
+  if (targetThreadId && targetThreadId !== "all") {
+    if (targetThreadId === primaryGroupId) {
+      threadClause = `AND (i.thread_id = @targetThreadId OR i.thread_id = '' OR i.thread_id IS NULL)`;
+    } else {
+      threadClause = `AND i.thread_id = @targetThreadId`;
+    }
+  }
 
   const rows = getDb()
     .prepare(
@@ -566,9 +572,15 @@ export function listMemberStats(limit = 2000): MemberStatRow[] {
 
 function memberStatsCte(threadId?: string): string {
   const targetThreadId = (threadId || "").trim();
-  const threadJoin = targetThreadId && targetThreadId !== "all"
-    ? `AND (i.thread_id = '${targetThreadId}' OR i.thread_id = '')`
-    : "";
+  const primaryGroupId = "1913869945242410752";
+  let threadJoin = "";
+  if (targetThreadId && targetThreadId !== "all") {
+    if (targetThreadId === primaryGroupId) {
+      threadJoin = `AND (i.thread_id = '${targetThreadId}' OR i.thread_id = '' OR i.thread_id IS NULL)`;
+    } else {
+      threadJoin = `AND i.thread_id = '${targetThreadId}'`;
+    }
+  }
 
   return `WITH member_stats AS (
     SELECT m.zalo_user_id, m.display_name, m.role, m.joined_at, m.first_seen_at,
