@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Download, Image as ImageIcon, MessageSquare, RotateCcw, Search, Video } from "lucide-react";
+import { Download, Image as ImageIcon, MessageSquare, RotateCcw, Search, Users, Video } from "lucide-react";
 import { PageHeader, EmptyState, Card, CardTitle, Button, Input, Stat, Badge } from "@/components/ui";
 import { fmtDateTime } from "@/lib/utils";
 import {
@@ -8,6 +8,7 @@ import {
   listGroupMediaEvents,
   listGroupMessages,
   summarizeGroupMedia,
+  listManagedGroups,
   type MessageFilters,
 } from "@/lib/db";
 
@@ -46,6 +47,7 @@ function parseFilters(params: SearchParams | undefined): MessageFilters & { from
   const self = one(params, "self");
   const fromRaw = one(params, "from");
   const toRaw = one(params, "to");
+  const threadId = one(params, "group") || undefined;
 
   return {
     q: one(params, "q"),
@@ -53,6 +55,7 @@ function parseFilters(params: SearchParams | undefined): MessageFilters & { from
     to: parseDateMs(toRaw, true),
     self: self === "self" || self === "member" ? self : "all",
     limit,
+    threadId,
     fromRaw,
     toRaw,
   };
@@ -60,7 +63,7 @@ function parseFilters(params: SearchParams | undefined): MessageFilters & { from
 
 function exportHref(params: SearchParams | undefined): string {
   const qs = new URLSearchParams();
-  for (const key of ["q", "from", "to", "self", "limit"]) {
+  for (const key of ["q", "from", "to", "self", "limit", "group"]) {
     const v = one(params, key);
     if (v) qs.set(key, v);
   }
@@ -78,6 +81,10 @@ export default async function MessagesPage({ searchParams }: { searchParams?: Pr
   }
 
   const params = await searchParams;
+  const groups = listManagedGroups();
+  const selectedGroupId = one(params, "group") || "all";
+  const activeGroup = groups.find((g) => g.id === selectedGroupId) || { id: "all", name: "Tất cả nhóm" };
+
   const filters = parseFilters(params);
   const messages = listGroupMessages(filters);
   const total = countGroupMessages(filters);
@@ -87,9 +94,49 @@ export default async function MessagesPage({ searchParams }: { searchParams?: Pr
   return (
     <div>
       <PageHeader
-        title="Tin nhắn"
-        desc="Text message và metadata ảnh/video đã ghi từ group."
+        title="Lịch sử tin nhắn"
+        desc={`Text message và media đã ghi ${activeGroup.name ? `nhóm "${activeGroup.name}"` : ""}.`}
       />
+
+      {/* Bộ chọn Nhóm (Multi-Group Selector Tab) */}
+      {groups.length > 0 && (
+        <div className="mb-6 flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)] px-2 flex items-center gap-1.5">
+            <Users className="h-3.5 w-3.5" /> Chọn nhóm:
+          </span>
+          <Link
+            href="/messages"
+            className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all border ${
+              selectedGroupId === "all"
+                ? "border-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-primary)_18%,transparent)] text-[var(--color-primary)] shadow-sm shadow-blue-500/10"
+                : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
+            }`}
+          >
+            <span>🌐 Tất cả nhóm</span>
+          </Link>
+          {groups.map((g) => {
+            const active = selectedGroupId === g.id;
+            return (
+              <Link
+                key={g.id}
+                href={`/messages?group=${g.id}`}
+                className={`flex items-center gap-2 rounded-xl px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all border ${
+                  active
+                    ? "border-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-primary)_18%,transparent)] text-[var(--color-primary)] shadow-sm shadow-blue-500/10"
+                    : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
+                }`}
+              >
+                <span className="truncate max-w-[200px]">{g.name}</span>
+                {g.memberCount ? (
+                  <span className={`text-[11px] px-1.5 py-0.2 rounded-full font-mono ${active ? "bg-[var(--color-primary)] text-white" : "bg-[var(--color-surface)] text-[var(--color-muted)]"}`}>
+                    {g.memberCount} TV
+                  </span>
+                ) : null}
+              </Link>
+            );
+          })}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Stat label="Tin nhắn khớp bộ lọc" value={total} sub={`hiển thị ${messages.length} dòng mới nhất`} />
@@ -104,6 +151,7 @@ export default async function MessagesPage({ searchParams }: { searchParams?: Pr
           action="/messages"
           className="mt-4 grid gap-3 lg:grid-cols-[minmax(220px,1.5fr)_150px_150px_150px_120px_auto_auto_auto]"
         >
+          <input type="hidden" name="group" value={selectedGroupId} />
           <label className="relative block">
             <Search
               size={16}

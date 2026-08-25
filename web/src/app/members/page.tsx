@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { RotateCcw, Search } from "lucide-react";
+import { RotateCcw, Search, Users } from "lucide-react";
 import {
   PageHeader,
   Table,
@@ -18,6 +18,7 @@ import {
   dbExists,
   listMemberStatsFiltered,
   summarizeMemberStats,
+  listManagedGroups,
   type MemberActivityFilter,
   type MemberFilters,
   type MemberRoleFilter,
@@ -75,6 +76,7 @@ function parseFilters(params: SearchParams | undefined): MemberFilters {
   const sort = one(params, "sort");
   const rawLimit = Number(one(params, "limit") || 1000);
   const limit = [100, 250, 500, 1000].includes(rawLimit) ? rawLimit : 1000;
+  const threadId = one(params, "group") || undefined;
 
   return {
     q: one(params, "q"),
@@ -82,6 +84,7 @@ function parseFilters(params: SearchParams | undefined): MemberFilters {
     activity: ACTIVITY_OPTIONS.some((o) => o.value === activity) ? (activity as MemberActivityFilter) : "all",
     sort: SORT_OPTIONS.some((o) => o.value === sort) ? (sort as MemberSort) : "risk",
     limit,
+    threadId,
   };
 }
 
@@ -96,6 +99,10 @@ export default async function MembersPage({ searchParams }: { searchParams?: Pro
   }
 
   const params = await searchParams;
+  const groups = listManagedGroups();
+  const selectedGroupId = one(params, "group") || "all";
+  const activeGroup = groups.find((g) => g.id === selectedGroupId) || { id: "all", name: "Tất cả nhóm" };
+
   const filters = parseFilters(params);
   const members = listMemberStatsFiltered(filters);
   const summary = summarizeMemberStats(filters);
@@ -107,9 +114,49 @@ export default async function MembersPage({ searchParams }: { searchParams?: Pro
   return (
     <div>
       <PageHeader
-        title="Thành viên"
-        desc={`${summary.total} thành viên khớp bộ lọc — hiển thị ${members.length} dòng đầu tiên.`}
+        title="Quản lý thành viên"
+        desc={`${summary.total} thành viên ${activeGroup.name ? `thuộc nhóm "${activeGroup.name}"` : ""} — hiển thị ${members.length} dòng.`}
       />
+
+      {/* Bộ chọn Nhóm (Multi-Group Selector Tab) */}
+      {groups.length > 0 && (
+        <div className="mb-6 flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)] px-2 flex items-center gap-1.5">
+            <Users className="h-3.5 w-3.5" /> Chọn nhóm:
+          </span>
+          <Link
+            href="/members"
+            className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all border ${
+              selectedGroupId === "all"
+                ? "border-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-primary)_18%,transparent)] text-[var(--color-primary)] shadow-sm shadow-blue-500/10"
+                : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
+            }`}
+          >
+            <span>🌐 Tất cả nhóm</span>
+          </Link>
+          {groups.map((g) => {
+            const active = selectedGroupId === g.id;
+            return (
+              <Link
+                key={g.id}
+                href={`/members?group=${g.id}`}
+                className={`flex items-center gap-2 rounded-xl px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all border ${
+                  active
+                    ? "border-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-primary)_18%,transparent)] text-[var(--color-primary)] shadow-sm shadow-blue-500/10"
+                    : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
+                }`}
+              >
+                <span className="truncate max-w-[200px]">{g.name}</span>
+                {g.memberCount ? (
+                  <span className={`text-[11px] px-1.5 py-0.2 rounded-full font-mono ${active ? "bg-[var(--color-primary)] text-white" : "bg-[var(--color-surface)] text-[var(--color-muted)]"}`}>
+                    {g.memberCount} TV
+                  </span>
+                ) : null}
+              </Link>
+            );
+          })}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <Stat
@@ -137,6 +184,7 @@ export default async function MembersPage({ searchParams }: { searchParams?: Pro
           action="/members"
           className="mt-4 grid gap-3 lg:grid-cols-[minmax(220px,1.4fr)_1fr_1fr_1fr_120px_auto_auto]"
         >
+          <input type="hidden" name="group" value={selectedGroupId} />
           <label className="relative block">
             <Search
               size={16}

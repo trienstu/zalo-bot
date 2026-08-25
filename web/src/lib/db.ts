@@ -341,6 +341,7 @@ export interface MessageFilters {
   to?: number | null;
   self?: "all" | "self" | "member";
   limit?: number;
+  threadId?: string;
 }
 
 export interface DailySummaryRow {
@@ -368,6 +369,7 @@ export interface DailySummaryFilters {
   from?: number | null;
   to?: number | null;
   limit?: number;
+  threadId?: string;
 }
 
 export type LeaderboardPeriod = "7d" | "30d" | "all";
@@ -403,8 +405,18 @@ export function countByRole(): { owner: number; admin: number; member: number } 
   return out;
 }
 
-export function countInteractions(): number {
-  const r = getDb().prepare(`SELECT COUNT(*) AS n FROM interactions`).get() as { n: number };
+export function countInteractions(threadId?: string): number {
+  const targetThreadId = (threadId || "").trim();
+  const primaryGroupId = "1913869945242410752";
+  if (!targetThreadId || targetThreadId === "all") {
+    const r = getDb().prepare(`SELECT COUNT(*) AS n FROM interactions`).get() as { n: number };
+    return r.n;
+  }
+  if (targetThreadId === primaryGroupId) {
+    const r = getDb().prepare(`SELECT COUNT(*) AS n FROM interactions WHERE thread_id = @targetThreadId OR thread_id = '' OR thread_id IS NULL`).get({ targetThreadId }) as { n: number };
+    return r.n;
+  }
+  const r = getDb().prepare(`SELECT COUNT(*) AS n FROM interactions WHERE thread_id = @targetThreadId`).get({ targetThreadId }) as { n: number };
   return r.n;
 }
 
@@ -817,6 +829,29 @@ export function getLatestMemberSyncRun(): MemberSyncRunRow | undefined {
     .get() as MemberSyncRunRow | undefined;
 }
 
+export function getLatestMemberSyncRuns(): MemberSyncRunRow[] {
+  if (!tableExists("member_sync_runs")) return [];
+  return getDb()
+    .prepare(
+      `SELECT * FROM member_sync_runs
+       WHERE group_id IS NOT NULL AND group_id != ''
+       GROUP BY group_id
+       HAVING id = MAX(id)
+       ORDER BY id DESC`,
+    )
+    .all() as MemberSyncRunRow[];
+}
+
+export function getLatestMemberSyncRunByGroup(groupId?: string): MemberSyncRunRow | undefined {
+  if (!tableExists("member_sync_runs")) return undefined;
+  if (!groupId || groupId === "all") {
+    return getLatestMemberSyncRun();
+  }
+  return getDb()
+    .prepare(`SELECT * FROM member_sync_runs WHERE group_id = @groupId ORDER BY id DESC LIMIT 1`)
+    .get({ groupId }) as MemberSyncRunRow | undefined;
+}
+
 function memberEventWhere(filters: MemberEventFilters): { sql: string; params: Record<string, string | number | null> } {
   const clauses: string[] = [];
   const params: Record<string, string | number | null> = {
@@ -1026,11 +1061,14 @@ export function getLatestCleanupDraftComparison(): CleanupDraftComparison | null
 function messageWhere(filters: MessageFilters): { sql: string; params: Record<string, string | number | null> } {
   const clauses: string[] = [];
   const q = filters.q?.trim().toLowerCase() ?? "";
+  const targetThreadId = (filters.threadId || "").trim();
+  const primaryGroupId = "1913869945242410752";
   const params: Record<string, string | number | null> = {
     q,
     like: `%${q}%`,
     from: filters.from ?? null,
     to: filters.to ?? null,
+    threadId: targetThreadId,
     limit: Math.min(Math.max(filters.limit ?? 200, 1), 5000),
   };
 
@@ -1039,6 +1077,13 @@ function messageWhere(filters: MessageFilters): { sql: string; params: Record<st
   if (filters.to) clauses.push(`ts <= @to`);
   if (filters.self === "self") clauses.push(`is_self = 1`);
   if (filters.self === "member") clauses.push(`is_self = 0`);
+  if (targetThreadId && targetThreadId !== "all") {
+    if (targetThreadId === primaryGroupId) {
+      clauses.push(`(thread_id = @threadId OR thread_id = '' OR thread_id IS NULL)`);
+    } else {
+      clauses.push(`thread_id = @threadId`);
+    }
+  }
 
   return {
     sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "",
@@ -1049,11 +1094,14 @@ function messageWhere(filters: MessageFilters): { sql: string; params: Record<st
 function mediaWhere(filters: MessageFilters): { sql: string; params: Record<string, string | number | null> } {
   const clauses: string[] = [];
   const q = filters.q?.trim().toLowerCase() ?? "";
+  const targetThreadId = (filters.threadId || "").trim();
+  const primaryGroupId = "1913869945242410752";
   const params: Record<string, string | number | null> = {
     q,
     like: `%${q}%`,
     from: filters.from ?? null,
     to: filters.to ?? null,
+    threadId: targetThreadId,
     limit: Math.min(Math.max(filters.limit ?? 200, 1), 5000),
   };
 
@@ -1062,6 +1110,13 @@ function mediaWhere(filters: MessageFilters): { sql: string; params: Record<stri
   if (filters.to) clauses.push(`ts <= @to`);
   if (filters.self === "self") clauses.push(`is_self = 1`);
   if (filters.self === "member") clauses.push(`is_self = 0`);
+  if (targetThreadId && targetThreadId !== "all") {
+    if (targetThreadId === primaryGroupId) {
+      clauses.push(`(thread_id = @threadId OR thread_id = '' OR thread_id IS NULL)`);
+    } else {
+      clauses.push(`thread_id = @threadId`);
+    }
+  }
 
   return {
     sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "",
@@ -1133,15 +1188,25 @@ function dailySummaryWhere(filters: DailySummaryFilters): {
 } {
   const clauses: string[] = [];
   const q = filters.q?.trim().toLowerCase() ?? "";
+  const targetThreadId = (filters.threadId || "").trim();
+  const primaryGroupId = "1913869945242410752";
   const params: Record<string, string | number | null> = {
     like: `%${q}%`,
     from: filters.from ?? null,
     to: filters.to ?? null,
+    threadId: targetThreadId,
     limit: Math.min(Math.max(filters.limit ?? 100, 1), 1000),
   };
   if (q) clauses.push(`(LOWER(summary_text) LIKE @like OR day_label LIKE @like OR day_date LIKE @like)`);
   if (filters.from) clauses.push(`day_start_ts >= @from`);
   if (filters.to) clauses.push(`day_start_ts <= @to`);
+  if (targetThreadId && targetThreadId !== "all") {
+    if (targetThreadId === primaryGroupId) {
+      clauses.push(`(thread_id = @threadId OR thread_id = '' OR thread_id IS NULL)`);
+    } else {
+      clauses.push(`thread_id = @threadId`);
+    }
+  }
   return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
 

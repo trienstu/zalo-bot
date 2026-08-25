@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Download, NotebookText, Search, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, NotebookText, Search, Users, X } from "lucide-react";
 import { PageHeader, EmptyState, Card, CardTitle, Button, Input, Badge } from "@/components/ui";
 import { fmtDateTime } from "@/lib/utils";
 import {
@@ -7,6 +7,7 @@ import {
   getDailySummaryByDate,
   listDailySummaries,
   listDailySummaryDays,
+  listManagedGroups,
   type DailySummaryDayRow,
 } from "@/lib/db";
 import { QuickSummaryCard } from "./quick-summary-card";
@@ -30,9 +31,10 @@ function snippetAround(text: string, q: string, radius = 90): string {
   return (start > 0 ? "…" : "") + flat.slice(start, end) + (end < flat.length ? "…" : "");
 }
 
-function dayHref(dayDate: string, q?: string): string {
+function dayHref(dayDate: string, q?: string, group?: string): string {
   const qs = new URLSearchParams({ day: dayDate });
   if (q) qs.set("q", q);
+  if (group && group !== "all") qs.set("group", group);
   return `/summaries?${qs.toString()}`;
 }
 
@@ -54,6 +56,10 @@ export default async function SummariesPage({ searchParams }: { searchParams?: P
   }
 
   const params = await searchParams;
+  const groups = listManagedGroups();
+  const selectedGroupId = one(params, "group") || "all";
+  const activeGroup = groups.find((g) => g.id === selectedGroupId) || { id: "all", name: "Tất cả nhóm" };
+
   const q = one(params, "q").trim();
   const dayParam = one(params, "day");
 
@@ -79,8 +85,48 @@ export default async function SummariesPage({ searchParams }: { searchParams?: P
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Tóm tắt ngày"
-        desc="Tạo tóm tắt hội thoại theo yêu cầu bằng Gemini AI hoặc cấu hình lịch hẹn tự động gửi vào nhóm Zalo."
+        desc={`Tạo tóm tắt hội thoại theo yêu cầu bằng Gemini AI cho ${activeGroup.name ? `nhóm "${activeGroup.name}"` : "các nhóm"}.`}
       />
+
+      {/* Bộ chọn Nhóm (Multi-Group Selector Tab) */}
+      {groups.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)] px-2 flex items-center gap-1.5">
+            <Users className="h-3.5 w-3.5" /> Chọn nhóm:
+          </span>
+          <Link
+            href="/summaries"
+            className={`flex items-center gap-1.5 rounded-xl px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all border ${
+              selectedGroupId === "all"
+                ? "border-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-primary)_18%,transparent)] text-[var(--color-primary)] shadow-sm shadow-blue-500/10"
+                : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
+            }`}
+          >
+            <span>🌐 Tất cả nhóm</span>
+          </Link>
+          {groups.map((g) => {
+            const active = selectedGroupId === g.id;
+            return (
+              <Link
+                key={g.id}
+                href={`/summaries?group=${g.id}`}
+                className={`flex items-center gap-2 rounded-xl px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all border ${
+                  active
+                    ? "border-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-primary)_18%,transparent)] text-[var(--color-primary)] shadow-sm shadow-blue-500/10"
+                    : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
+                }`}
+              >
+                <span className="truncate max-w-[200px]">{g.name}</span>
+                {g.memberCount ? (
+                  <span className={`text-[11px] px-1.5 py-0.2 rounded-full font-mono ${active ? "bg-[var(--color-primary)] text-white" : "bg-[var(--color-surface)] text-[var(--color-muted)]"}`}>
+                    {g.memberCount} TV
+                  </span>
+                ) : null}
+              </Link>
+            );
+          })}
+        </div>
+      )}
 
       {/* Panel Tóm tắt nhanh & Hẹn giờ */}
       <QuickSummaryCard />
