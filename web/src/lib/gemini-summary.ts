@@ -95,7 +95,7 @@ export async function callGeminiDirect(
       ],
       generationConfig: {
         temperature: 0.3,
-        maxOutputTokens: 4096,
+        maxOutputTokens: 8192,
       },
     };
 
@@ -125,7 +125,8 @@ export async function callGeminiDirect(
       const data = (await resp.json()) as {
         candidates?: { content?: { parts?: { text?: string }[] } }[];
       };
-      const content = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      const candidate = data.candidates?.[0];
+      const content = candidate?.content?.parts?.map((p: { text?: string }) => p.text || "").join("").trim();
       if (!content) {
         throw new Error("Response Gemini API không có nội dung (content rỗng)");
       }
