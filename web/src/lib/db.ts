@@ -387,17 +387,35 @@ export interface LeaderboardRow {
 
 // ---- Reads ----
 
-export function countActiveMembers(): number {
-  const r = getDb().prepare(`SELECT COUNT(*) AS n FROM members WHERE is_active = 1`).get() as {
-    n: number;
-  };
+export function countActiveMembers(groupId?: string): number {
+  const targetGroupId = (groupId || "").trim();
+  const primaryGroupId = "1913869945242410752";
+  if (!targetGroupId || targetGroupId === "all") {
+    const r = getDb().prepare(`SELECT COUNT(*) AS n FROM members WHERE is_active = 1`).get() as { n: number };
+    return r.n;
+  }
+  if (targetGroupId === primaryGroupId) {
+    const r = getDb().prepare(`SELECT COUNT(*) AS n FROM members WHERE is_active = 1 AND (group_id = @targetGroupId OR group_id = '' OR group_id IS NULL)`).get({ targetGroupId }) as { n: number };
+    return r.n;
+  }
+  const r = getDb().prepare(`SELECT COUNT(*) AS n FROM members WHERE is_active = 1 AND group_id = @targetGroupId`).get({ targetGroupId }) as { n: number };
   return r.n;
 }
 
-export function countByRole(): { owner: number; admin: number; member: number } {
+export function countByRole(groupId?: string): { owner: number; admin: number; member: number } {
+  const targetGroupId = (groupId || "").trim();
+  const primaryGroupId = "1913869945242410752";
+  let whereClause = "WHERE is_active = 1";
+  if (targetGroupId && targetGroupId !== "all") {
+    if (targetGroupId === primaryGroupId) {
+      whereClause = "WHERE is_active = 1 AND (group_id = @targetGroupId OR group_id = '' OR group_id IS NULL)";
+    } else {
+      whereClause = "WHERE is_active = 1 AND group_id = @targetGroupId";
+    }
+  }
   const rows = getDb()
-    .prepare(`SELECT role, COUNT(*) AS n FROM members WHERE is_active = 1 GROUP BY role`)
-    .all() as { role: string; n: number }[];
+    .prepare(`SELECT role, COUNT(*) AS n FROM members ${whereClause} GROUP BY role`)
+    .all({ targetGroupId }) as { role: string; n: number }[];
   const out = { owner: 0, admin: 0, member: 0 };
   for (const r of rows) {
     if (r.role === "owner" || r.role === "admin" || r.role === "member") out[r.role] = r.n;

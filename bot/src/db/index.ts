@@ -71,6 +71,8 @@ function runColumnMigrations(database: Database.Database): void {
     ["group_media_events", "ocr_at", "INTEGER"],
     // Phân loại tương tác theo từng nhóm để hỗ trợ nhiều nhóm không bị lẫn
     ["interactions", "thread_id", "TEXT NOT NULL DEFAULT ''"],
+    // Phân loại thành viên theo nhóm quản lý
+    ["members", "group_id", "TEXT NOT NULL DEFAULT ''"],
   ];
 
   for (const [table, column, definition] of additions) {
@@ -221,15 +223,17 @@ export function upsertMember(input: {
   displayName?: string;
   role?: MemberRole;
   joinedAt?: number | null;
+  groupId?: string;
   now: number;
 }): void {
   getDb()
     .prepare(
-      `INSERT INTO members (zalo_user_id, display_name, role, joined_at, first_seen_at, is_active, left_at)
-       VALUES (@id, @name, @roleInsert, @joinedAt, @now, 1, NULL)
+      `INSERT INTO members (zalo_user_id, display_name, role, joined_at, first_seen_at, is_active, left_at, group_id)
+       VALUES (@id, @name, @roleInsert, @joinedAt, @now, 1, NULL, @groupId)
        ON CONFLICT(zalo_user_id) DO UPDATE SET
          display_name = CASE WHEN @name != '' THEN @name ELSE display_name END,
          role         = CASE WHEN @role != '' THEN @role ELSE role END,
+         group_id     = CASE WHEN @groupId != '' THEN @groupId ELSE group_id END,
          joined_at    = COALESCE(members.joined_at, @joinedAt),
          is_active    = 1,
          left_at      = NULL`,
@@ -240,6 +244,7 @@ export function upsertMember(input: {
       role: input.role ?? "",
       roleInsert: input.role ?? "member",
       joinedAt: input.joinedAt ?? null,
+      groupId: input.groupId ?? "",
       now: input.now,
     });
 }
@@ -1362,7 +1367,18 @@ export const INTERACTION_WEIGHT_SQL = `CASE i.type
  * Dùng cho export-members (M1) và ranking (M2 — sắp theo count ASC, last_interaction ASC).
  * Trọng số: message/image/video = 10, vote = 3, reaction/manual = 1.
  */
-export function getMemberStats(): MemberStats[] {
+export function getMemberStats(groupId?: string): MemberStats[] {
+  const targetGroupId = (groupId || "").trim();
+  const primaryGroupId = "1913869945242410752";
+  let groupClause = "WHERE m.is_active = 1";
+  if (targetGroupId && targetGroupId !== "all") {
+    if (targetGroupId === primaryGroupId) {
+      groupClause = "WHERE m.is_active = 1 AND (m.group_id = @targetGroupId OR m.group_id = '' OR m.group_id IS NULL)";
+    } else {
+      groupClause = "WHERE m.is_active = 1 AND m.group_id = @targetGroupId";
+    }
+  }
+
   return getDb()
     .prepare(
       `SELECT m.zalo_user_id, m.display_name, m.role, m.joined_at, m.first_seen_at,
@@ -1370,11 +1386,11 @@ export function getMemberStats(): MemberStats[] {
               MAX(i.ts)         AS last_interaction
        FROM members m
        LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
-       WHERE m.is_active = 1
+       ${groupClause}
        GROUP BY m.zalo_user_id
        ORDER BY interaction_count ASC, last_interaction ASC`,
     )
-    .all() as MemberStats[];
+    .all({ targetGroupId }) as MemberStats[];
 }
 
 export type LeaderboardPeriod = "7d" | "30d" | "all";

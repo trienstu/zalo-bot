@@ -77,7 +77,7 @@ export async function syncGroupMembers(
       if (!m.id) continue;
       activeIds.add(m.id);
       const before = getMember(m.id);
-      upsertMember({ zaloUserId: m.id, displayName: m.displayName, role: m.role, now });
+      upsertMember({ zaloUserId: m.id, displayName: m.displayName, role: m.role, groupId: targetGroupId, now });
       if (!before) {
         recordMemberEvent({
           zaloUserId: m.id,
@@ -104,7 +104,7 @@ export async function syncGroupMembers(
     }
 
     let markedLeft = 0;
-    for (const s of getMemberStats()) {
+    for (const s of getMemberStats(targetGroupId)) {
       if (activeIds.has(s.zalo_user_id)) continue;
       markMemberLeft(s.zalo_user_id, now);
       recordMemberEvent({
@@ -115,7 +115,7 @@ export async function syncGroupMembers(
         source: eventSource,
         syncRunId: runId,
         ts: now,
-        note: "Không còn trong snapshot Zalo.",
+        note: `Không còn trong snapshot Zalo của nhóm ${targetGroupId}.`,
       });
       markedLeft += 1;
     }
