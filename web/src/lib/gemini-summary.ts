@@ -66,44 +66,115 @@ export function parseDayRange(targetDateStr?: string): DayRange {
 export async function callGeminiDirect(
   systemPrompt: string,
   userPrompt: string,
-  apiKey: string,
+  rawApiKey: string,
   model = "gemini-3.6-flash",
 ): Promise<string> {
-  if (!apiKey) throw new Error("Chưa cấu hình GEMINI_API_KEY trong .env");
+  const apiKeys = (rawApiKey || process.env.GEMINI_API_KEY || "")
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
 
-  const endpoint = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-  const resp = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      temperature: 0.3,
-      max_tokens: 4096,
-      stream: false,
-    }),
-  });
-
-  if (!resp.ok) {
-    const body = await resp.text().catch(() => "");
-    throw new Error(`Gemini API HTTP ${resp.status}: ${body.slice(0, 500)}`);
+  if (apiKeys.length === 0) {
+    throw new Error("Chưa cấu hình GEMINI_API_KEY trong .env");
   }
 
-  const data = (await resp.json()) as { choices?: { message?: { content?: string } }[] };
-  const content = data.choices?.[0]?.message?.content?.trim();
-  if (!content) throw new Error("Gemini API không trả về nội dung");
-  return content;
+  let lastError: unknown;
+
+  // Thử lần lượt qua từng API Key nếu có nhiều key (Xoay vòng chống 429 Rate Limit)
+  for (let keyIdx = 0; keyIdx < apiKeys.length; keyIdx += 1) {
+    const apiKey = apiKeys[keyIdx];
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    const requestBody: Record<string, unknown> = {
+      system_instruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: userPrompt }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.3,
+        maxOutputTokens: 4096,
+      },
+    };
+
+    try {
+      const resp = await fetch(endpoint, {
+        method: "POST",
+        signal: AbortSignal.timeout(30_000), // 30s timeout
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => "");
+        const err = new Error(`Gemini API HTTP ${resp.status}: ${errText.slice(0, 500)}`);
+        
+        // 429: Hết quota Free Tier -> Thử key tiếp theo ngay lập tức
+        if (resp.status === 429) {
+          console.warn(`[web-gemini] Key #${keyIdx + 1} hết quota (HTTP 429). Đang chuyển sang key tiếp theo...`);
+          lastError = err;
+          continue;
+        }
+        throw err;
+      }
+
+      const data = (await resp.json()) as {
+        candidates?: { content?: { parts?: { text?: string }[] } }[];
+      };
+      const content = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (!content) {
+        throw new Error("Response Gemini API không có nội dung (content rỗng)");
+      }
+      return content;
+    } catch (error) {
+      lastError = error;
+      console.warn(`[web-gemini] Lỗi với Key #${keyIdx + 1}: ${String(error)}`);
+    }
+  }
+
+  // Fallback sang DeepSeek nếu có cấu hình DEEPSEEK_API_KEY
+  const deepseekApiKey = process.env.DEEPSEEK_API_KEY || "";
+  if (deepseekApiKey) {
+    try {
+      console.log("[web-gemini] Gemini quá tải, đang chuyển hướng sang DeepSeek AI...");
+      const dsResp = await fetch("https://api.deepseek.com/chat/completions", {
+        method: "POST",
+        signal: AbortSignal.timeout(30_000),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${deepseekApiKey}`,
+        },
+        body: JSON.stringify({
+          model: process.env.DEEPSEEK_MODEL || "deepseek-chat",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          temperature: 0.3,
+          max_tokens: 4096,
+        }),
+      });
+      if (dsResp.ok) {
+        const dsData = (await dsResp.json()) as { choices?: { message?: { content?: string } }[] };
+        const dsContent = dsData.choices?.[0]?.message?.content?.trim();
+        if (dsContent) return dsContent;
+      }
+    } catch (dsErr) {
+      console.warn("[web-gemini] DeepSeek fallback cũng lỗi:", dsErr);
+    }
+  }
+
+  throw lastError || new Error("Không thể gọi Gemini API qua tất cả các key");
 }
 
 export async function generateChatSummary(options: {
   targetDate?: string;
   sendToGroup?: boolean;
+  groupId?: string;
 }) {
   const config = getEnvConfig();
   if (!fs.existsSync(DB_PATH)) {
@@ -112,16 +183,31 @@ export async function generateChatSummary(options: {
 
   const db = new Database(DB_PATH);
   const dayRange = parseDayRange(options.targetDate);
+  const targetGroupId = (options.groupId || config.groupId || "").trim();
+  const primaryGroupId = "1913869945242410752";
 
-  // Lấy tin nhắn trong ngày
+  let groupClause = "";
+  let queryParams: (string | number)[] = [dayRange.startTs, dayRange.endTs];
+
+  if (targetGroupId && targetGroupId !== "all") {
+    if (targetGroupId === primaryGroupId) {
+      groupClause = "AND (thread_id = ? OR thread_id = '' OR thread_id IS NULL)";
+      queryParams.push(targetGroupId);
+    } else {
+      groupClause = "AND thread_id = ?";
+      queryParams.push(targetGroupId);
+    }
+  }
+
+  // Lấy tin nhắn trong ngày theo nhóm đã chọn
   const messages = db
     .prepare(
       `SELECT message_id, thread_id, zalo_user_id, display_name, text, ts
        FROM group_messages
-       WHERE ts >= ? AND ts < ? AND deleted_at IS NULL
+       WHERE ts >= ? AND ts < ? AND deleted_at IS NULL ${groupClause}
        ORDER BY ts ASC`,
     )
-    .all(dayRange.startTs, dayRange.endTs) as {
+    .all(...queryParams) as {
       message_id: string;
       thread_id: string;
       zalo_user_id: string;
@@ -134,7 +220,7 @@ export async function generateChatSummary(options: {
     db.close();
     return {
       ok: false,
-      message: `Ngày ${dayRange.label} chưa có tin nhắn nào được lưu trong database. Hãy chat thêm trong nhóm để bot thu thập dữ liệu nhé!`,
+      message: `Ngày ${dayRange.label} chưa có tin nhắn nào được lưu trong database cho nhóm này. Hãy chat thêm trong nhóm để bot thu thập dữ liệu nhé!`,
       dayLabel: dayRange.label,
       dayDate: dayRange.dayDate,
       totalMessages: 0,
@@ -202,7 +288,7 @@ export async function generateChatSummary(options: {
       dayRange.dayDate,
       dayRange.label,
       dayRange.startTs,
-      config.groupId,
+      targetGroupId || config.groupId,
       summary,
       JSON.stringify([fullMessage]),
       messages.length,
@@ -230,7 +316,7 @@ export async function generateChatSummary(options: {
       JSON.stringify({
         requestId,
         parts: [fullMessage],
-        groupId: config.summaryGroupId || config.groupId,
+        groupId: targetGroupId || config.summaryGroupId || config.groupId,
         requestedAt: Date.now(),
         requestedBy: "web_admin",
       }),

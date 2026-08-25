@@ -1,12 +1,21 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Sparkles, Send, Clock, Check, Copy, RefreshCw, AlertCircle, Cpu, Database, CheckCircle2 } from "lucide-react";
 import { Card, CardTitle, Button, Input, Badge } from "@/components/ui";
 
 export function QuickSummaryCard() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const currentGroupId = searchParams.get("group") || "1913869945242410752";
+  const groupLabel =
+    currentGroupId === "1913869945242410752"
+      ? 'nhóm "GROUP TRAO ĐỔI - AI, CÔNG NGHỆ"'
+      : currentGroupId === "6918708484908920459"
+        ? 'nhóm "HỘI ĂN NHẬU 🍻"'
+        : "nhóm đang chọn";
+
   const todayStr = new Date().toISOString().slice(0, 10);
   const yesterdayStr = new Date(Date.now() - 24 * 3600 * 1000).toISOString().slice(0, 10);
 
@@ -82,6 +91,7 @@ export function QuickSummaryCard() {
         body: JSON.stringify({
           targetDate: selectedDate,
           sendToGroup: sendDirectly,
+          groupId: currentGroupId,
         }),
       });
 
@@ -112,7 +122,10 @@ export function QuickSummaryCard() {
       const res = await fetch("/api/summaries/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: result.fullMessage }),
+        body: JSON.stringify({
+          message: result.fullMessage,
+          groupId: currentGroupId,
+        }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) {

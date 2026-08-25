@@ -176,16 +176,17 @@ async function sendParts(state: SummarySendState, dests: SummaryDestination[]): 
  * (có key không có đích, hoặc ngược lại) → báo lỗi rõ.
  */
 export async function runDailySummary(): Promise<void> {
+  const hasLLM = !!(config.geminiApiKey || config.deepseekApiKey);
   const hasDestination = config.summaryGroupIds.length > 0 || config.summaryTelegramChatId !== "";
-  if (!hasDestination && !config.deepseekApiKey) {
+  if (!hasDestination && !hasLLM) {
     console.log(
-      "[daily-summary] Tính năng đang TẮT (không có SUMMARY_GROUP_ID/SUMMARY_TELEGRAM_CHAT_ID lẫn DEEPSEEK_API_KEY) — bỏ qua.",
+      "[daily-summary] Tính năng đang TẮT (không có SUMMARY_GROUP_ID/SUMMARY_TELEGRAM_CHAT_ID lẫn GEMINI_API_KEY/DEEPSEEK_API_KEY) — bỏ qua.",
     );
     return;
   }
-  if (!hasDestination || !config.deepseekApiKey) {
+  if (!hasDestination || !hasLLM) {
     throw new Error(
-      "Cấu hình tóm tắt dở dang: cần DEEPSEEK_API_KEY VÀ ít nhất một đích " +
+      "Cấu hình tóm tắt dở dang: cần GEMINI_API_KEY (hoặc DEEPSEEK_API_KEY) VÀ ít nhất một đích " +
         "(SUMMARY_GROUP_ID hoặc SUMMARY_TELEGRAM_CHAT_ID) — hoặc xoá hết để tắt.",
     );
   }

@@ -13,11 +13,13 @@ export async function POST(request: Request) {
     const body = (await request.json().catch(() => ({}))) as {
       targetDate?: string;
       sendToGroup?: boolean;
+      groupId?: string;
     };
 
     const result = await generateChatSummary({
       targetDate: body.targetDate,
       sendToGroup: body.sendToGroup === true,
+      groupId: body.groupId,
     });
 
     return NextResponse.json(result);
