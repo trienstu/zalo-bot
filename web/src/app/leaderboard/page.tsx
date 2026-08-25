@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BarChart3, Clock3, MessageCircle, Trophy, UserX, Star, Search, Shield, User, Sparkles } from "lucide-react";
-import { dbExists, listLeaderboard, listMemberStatsFiltered, type LeaderboardPeriod } from "@/lib/db";
+import { BarChart3, Clock3, MessageCircle, Trophy, UserX, Star, Search, Shield, User, Sparkles, Users } from "lucide-react";
+import { dbExists, listLeaderboard, listMemberStatsFiltered, listManagedGroups, type LeaderboardPeriod } from "@/lib/db";
 import { readVip } from "@/lib/vip";
 import { fmtAgo, fmtDateTime } from "@/lib/utils";
 import { VipToggleButton } from "../members/vip-toggle-button";
@@ -85,14 +85,19 @@ export default async function LeaderboardPage({
   const activePeriod = PERIODS.find((item) => item.value === period) ?? PERIODS[0];
   const q = one(params, "q").trim();
 
+  const groups = dbExists() ? listManagedGroups() : [];
+  const defaultGroupId = groups[0]?.id || "1913869945242410752";
+  const selectedGroupId = one(params, "group") || defaultGroupId;
+  const activeGroup = groups.find((g) => g.id === selectedGroupId) || (selectedGroupId === "all" ? { id: "all", name: "Tất cả nhóm" } : groups[0]);
+
   const inactiveFilter = (one(params, "filter") || "inactive7") as "inactive7" | "inactive30" | "zero";
 
-  const rows = dbExists() ? listLeaderboard(period, 50) : [];
+  const rows = dbExists() ? listLeaderboard(period, 50, selectedGroupId) : [];
   const vipMap = new Set(readVip().map((v) => v.id));
 
-  // Lấy danh sách thành viên không tương tác theo bộ lọc đã chọn
+  // Lấy danh sách thành viên không tương tác theo bộ lọc đã chọn và nhóm đã chọn
   const inactiveMembers = dbExists()
-    ? listMemberStatsFiltered({ activity: inactiveFilter, q, limit: 1000 })
+    ? listMemberStatsFiltered({ activity: inactiveFilter, q, limit: 1000, threadId: selectedGroupId })
     : [];
 
   const totalInactive = inactiveMembers.length;
@@ -112,15 +117,55 @@ export default async function LeaderboardPage({
           </h1>
           <p className="mx-auto mt-2 max-w-xl text-sm text-[var(--color-muted)] sm:text-base">
             {currentTab === "active"
-              ? "Vinh danh những thành viên hoạt động sôi nổi và đóng góp nhiều nhất cho cộng đồng."
-              : "Danh sách các thành viên chưa có tin nhắn hoặc tương tác để quản lý, nhắc nhở hoặc gắn VIP."}
+              ? `Vinh danh những thành viên hoạt động sôi nổi nhất nhóm ${activeGroup?.name ? `"${activeGroup.name}"` : ""}.`
+              : `Danh sách các thành viên chưa tương tác trong nhóm ${activeGroup?.name ? `"${activeGroup.name}"` : ""}.`}
           </p>
         </header>
 
+        {/* Bộ chọn Nhóm (Multi-Group Selector) */}
+        {groups.length > 1 && (
+          <div className="mx-auto mt-6 flex max-w-2xl flex-wrap items-center justify-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)] mr-1 flex items-center gap-1">
+              <Users className="h-3.5 w-3.5" /> Chọn nhóm:
+            </span>
+            {groups.map((g) => {
+              const active = selectedGroupId === g.id;
+              return (
+                <Link
+                  key={g.id}
+                  href={`/leaderboard?tab=${currentTab}&period=${period}&group=${g.id}${q ? `&q=${encodeURIComponent(q)}` : ""}${inactiveFilter ? `&filter=${inactiveFilter}` : ""}`}
+                  className={`flex items-center gap-2 rounded-xl px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all border ${
+                    active
+                      ? "border-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-primary)_18%,transparent)] text-[var(--color-primary)] shadow-sm shadow-blue-500/10"
+                      : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
+                  }`}
+                >
+                  <span className="truncate max-w-[200px] sm:max-w-[260px]">{g.name}</span>
+                  {g.memberCount ? (
+                    <span className={`text-[11px] px-1.5 py-0.2 rounded-full font-mono ${active ? "bg-[var(--color-primary)] text-white" : "bg-[var(--color-surface-2)] text-[var(--color-muted)]"}`}>
+                      {g.memberCount} TV
+                    </span>
+                  ) : null}
+                </Link>
+              );
+            })}
+            <Link
+              href={`/leaderboard?tab=${currentTab}&period=${period}&group=all${q ? `&q=${encodeURIComponent(q)}` : ""}${inactiveFilter ? `&filter=${inactiveFilter}` : ""}`}
+              className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs sm:text-sm font-semibold transition-all border ${
+                selectedGroupId === "all"
+                  ? "border-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-primary)_18%,transparent)] text-[var(--color-primary)] shadow-sm shadow-blue-500/10"
+                  : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
+              }`}
+            >
+              <span>🌐 Tất cả nhóm</span>
+            </Link>
+          </div>
+        )}
+
         {/* Tab chuyển đổi lớn: Top tương tác vs Không tương tác */}
-        <div className="mx-auto mt-7 flex max-w-md items-center justify-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5">
+        <div className="mx-auto mt-6 flex max-w-md items-center justify-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5">
           <Link
-            href={`/leaderboard?tab=active&period=${period}`}
+            href={`/leaderboard?tab=active&period=${period}&group=${selectedGroupId}`}
             className={`flex-1 flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-center text-sm font-semibold transition-all ${
               currentTab === "active"
                 ? "bg-[var(--color-primary)] text-white shadow-md shadow-blue-500/20"
@@ -131,7 +176,7 @@ export default async function LeaderboardPage({
             <span>Top tương tác</span>
           </Link>
           <Link
-            href="/leaderboard?tab=inactive"
+            href={`/leaderboard?tab=inactive&group=${selectedGroupId}`}
             className={`flex-1 flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-center text-sm font-semibold transition-all ${
               currentTab === "inactive"
                 ? "bg-rose-600 text-white shadow-md shadow-rose-500/20"
@@ -152,7 +197,7 @@ export default async function LeaderboardPage({
                 return (
                   <Link
                     key={item.value}
-                    href={`/leaderboard?tab=active&period=${item.value}`}
+                    href={`/leaderboard?tab=active&period=${item.value}&group=${selectedGroupId}`}
                     className={`rounded-lg px-3 py-2 text-center text-sm font-medium transition-colors ${
                       active
                         ? "bg-[var(--color-surface-2)] text-[var(--color-text)] font-semibold border border-[var(--color-border)]"
@@ -173,7 +218,7 @@ export default async function LeaderboardPage({
                     <Sparkles className="h-4 w-4 text-amber-400" />
                   </h2>
                   <p className="mt-0.5 text-xs text-[var(--color-muted)]">
-                    {activePeriod.description}
+                    {activePeriod.description} {activeGroup?.name ? `· ${activeGroup.name}` : ""}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-[var(--color-muted)]">
@@ -290,7 +335,7 @@ export default async function LeaderboardPage({
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs text-[var(--color-muted)] font-medium">Lọc theo:</span>
               <Link
-                href={`/leaderboard?tab=inactive&filter=inactive7${q ? `&q=${q}` : ""}`}
+                href={`/leaderboard?tab=inactive&filter=inactive7&group=${selectedGroupId}${q ? `&q=${q}` : ""}`}
                 className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                   inactiveFilter === "inactive7"
                     ? "bg-rose-500/20 text-rose-300 border border-rose-500/40 font-semibold"
@@ -300,7 +345,7 @@ export default async function LeaderboardPage({
                 💤 Im lặng 7 ngày qua
               </Link>
               <Link
-                href={`/leaderboard?tab=inactive&filter=inactive30${q ? `&q=${q}` : ""}`}
+                href={`/leaderboard?tab=inactive&filter=inactive30&group=${selectedGroupId}${q ? `&q=${q}` : ""}`}
                 className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                   inactiveFilter === "inactive30"
                     ? "bg-rose-500/20 text-rose-300 border border-rose-500/40 font-semibold"
@@ -310,7 +355,7 @@ export default async function LeaderboardPage({
                 😴 Im lặng 30 ngày qua
               </Link>
               <Link
-                href={`/leaderboard?tab=inactive&filter=zero${q ? `&q=${q}` : ""}`}
+                href={`/leaderboard?tab=inactive&filter=zero&group=${selectedGroupId}${q ? `&q=${q}` : ""}`}
                 className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                   inactiveFilter === "zero"
                     ? "bg-rose-500/20 text-rose-300 border border-rose-500/40 font-semibold"
@@ -325,6 +370,7 @@ export default async function LeaderboardPage({
             <form action="/leaderboard" method="GET" className="flex items-center gap-2">
               <input type="hidden" name="tab" value="inactive" />
               <input type="hidden" name="filter" value={inactiveFilter} />
+              <input type="hidden" name="group" value={selectedGroupId} />
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--color-muted)]" />
                 <Input

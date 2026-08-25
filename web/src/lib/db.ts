@@ -118,6 +118,7 @@ export interface MemberFilters {
   activity?: MemberActivityFilter;
   sort?: MemberSort;
   limit?: number;
+  threadId?: string;
 }
 
 export interface MemberSummary {
@@ -407,11 +408,80 @@ export function countInteractions(): number {
   return r.n;
 }
 
+export interface ManagedGroup {
+  id: string;
+  name: string;
+  memberCount?: number;
+}
+
+/**
+ * Lấy danh sách các nhóm được quản lý từ .env và dữ liệu sync trong DB.
+ */
+export function listManagedGroups(): ManagedGroup[] {
+  const envGroupIds = (process.env.GROUP_ID || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const groupMap = new Map<string, ManagedGroup>();
+
+  // Khởi tạo tên mặc định từ các nhóm đã biết hoặc .env
+  for (const gid of envGroupIds) {
+    const defaultName =
+      gid === "1913869945242410752"
+        ? "GROUP TRAO ĐỔI - AI, CÔNG NGHỆ"
+        : gid === "6918708484908920459"
+          ? "HỘI ĂN NHẬU 🍻"
+          : `Nhóm ${gid}`;
+    groupMap.set(gid, { id: gid, name: defaultName });
+  }
+
+  try {
+    if (dbExists() && tableExists("member_sync_runs")) {
+      const runs = getDb()
+        .prepare(
+          `SELECT group_id, group_name, member_count
+           FROM member_sync_runs
+           WHERE group_id IS NOT NULL AND group_id != ''
+           ORDER BY id DESC`,
+        )
+        .all() as { group_id: string; group_name: string; member_count: number }[];
+
+      for (const r of runs) {
+        if (!r.group_id) continue;
+        const existing = groupMap.get(r.group_id);
+        if (existing) {
+          if (r.group_name && r.group_name.trim()) existing.name = r.group_name;
+          if (r.member_count) existing.memberCount = r.member_count;
+        } else {
+          groupMap.set(r.group_id, {
+            id: r.group_id,
+            name: r.group_name || `Nhóm ${r.group_id}`,
+            memberCount: r.member_count,
+          });
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("Lỗi khi đọc member_sync_runs:", e);
+  }
+
+  const list = Array.from(groupMap.values());
+  if (list.length === 0) {
+    return [
+      { id: "1913869945242410752", name: "GROUP TRAO ĐỔI - AI, CÔNG NGHỆ" },
+      { id: "6918708484908920459", name: "HỘI ĂN NHẬU 🍻" },
+    ];
+  }
+  return list;
+}
+
 /**
  * Bảng xếp hạng public: chỉ trả tên + số liệu tổng hợp, tuyệt đối không trả Zalo ID.
  * Mỗi row interactions được tính là 1 lượt. Chỉ xếp hạng member còn active.
+ * Hỗ trợ lọc theo từng nhóm cụ thể threadId.
  */
-export function listLeaderboard(period: LeaderboardPeriod, limit = 50): LeaderboardRow[] {
+export function listLeaderboard(period: LeaderboardPeriod, limit = 50, threadId?: string): LeaderboardRow[] {
   const now = Date.now();
   const since =
     period === "7d"
@@ -419,6 +489,11 @@ export function listLeaderboard(period: LeaderboardPeriod, limit = 50): Leaderbo
       : period === "30d"
         ? now - 30 * 86400000
         : 0;
+
+  const targetThreadId = (threadId || "").trim();
+  const threadClause = targetThreadId && targetThreadId !== "all"
+    ? `AND (i.thread_id = @targetThreadId OR i.thread_id = '')`
+    : "";
 
   const rows = getDb()
     .prepare(
@@ -434,6 +509,7 @@ export function listLeaderboard(period: LeaderboardPeriod, limit = 50): Leaderbo
        JOIN members m ON m.zalo_user_id = i.zalo_user_id
        WHERE m.is_active = 1
          AND i.ts >= @since
+         ${threadClause}
          AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
          AND LOWER(m.display_name) NOT LIKE '%sen chua%'
        GROUP BY i.zalo_user_id, m.display_name
@@ -442,6 +518,7 @@ export function listLeaderboard(period: LeaderboardPeriod, limit = 50): Leaderbo
     )
     .all({
       since,
+      targetThreadId,
       limit: Math.min(Math.max(limit, 1), 100),
     }) as Omit<LeaderboardRow, "rank">[];
 
@@ -487,7 +564,12 @@ export function listMemberStats(limit = 2000): MemberStatRow[] {
     .all({ limit }) as MemberStatRow[];
 }
 
-function memberStatsCte(): string {
+function memberStatsCte(threadId?: string): string {
+  const targetThreadId = (threadId || "").trim();
+  const threadJoin = targetThreadId && targetThreadId !== "all"
+    ? `AND (i.thread_id = '${targetThreadId}' OR i.thread_id = '')`
+    : "";
+
   return `WITH member_stats AS (
     SELECT m.zalo_user_id, m.display_name, m.role, m.joined_at, m.first_seen_at,
            COALESCE(SUM(${INTERACTION_WEIGHT_SQL}), 0) AS interaction_count,
@@ -495,7 +577,7 @@ function memberStatsCte(): string {
            COALESCE(cw.warning_count, 0) AS warning_count,
            cw.last_warned_at AS last_warned_at
     FROM members m
-    LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
+    LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id ${threadJoin}
     LEFT JOIN cleanup_warnings cw ON cw.zalo_user_id = m.zalo_user_id
     WHERE m.is_active = 1
       AND (@q = '' OR LOWER(m.display_name) LIKE @like OR LOWER(m.zalo_user_id) LIKE @like)
@@ -568,7 +650,7 @@ function memberSortSql(sort: MemberSort | undefined): string {
 export function listMemberStatsFiltered(filters: MemberFilters = {}): MemberStatRow[] {
   return getDb()
     .prepare(
-      `${memberStatsCte()}
+      `${memberStatsCte(filters.threadId)}
        SELECT *
        FROM member_stats
        ${memberFilterWhere(filters)}
@@ -581,7 +663,7 @@ export function listMemberStatsFiltered(filters: MemberFilters = {}): MemberStat
 export function summarizeMemberStats(filters: MemberFilters = {}): MemberSummary {
   const row = getDb()
     .prepare(
-      `${memberStatsCte()}
+      `${memberStatsCte(filters.threadId)}
        SELECT
          COUNT(*) AS total,
          COALESCE(SUM(CASE WHEN role = 'owner' THEN 1 ELSE 0 END), 0) AS owner,
