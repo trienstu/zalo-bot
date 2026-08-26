@@ -35,7 +35,7 @@ export interface KnowledgeItem {
   groupId?: string;
 }
 
-// Danh sách domain tin tức rác / báo chí không phục vụ kiến thức chuyên môn
+// Domain báo chí / tin tức cần loại bỏ hoàn toàn
 const NEWS_DOMAINS = [
   "vnexpress.net",
   "dantri.com.vn",
@@ -59,7 +59,7 @@ const NEWS_DOMAINS = [
   "baomoi.com",
 ];
 
-// Danh sách domain tài liệu / file / drive
+// Domain File / Drive / Kho lưu trữ
 const FILE_DOMAINS = [
   "drive.google.com",
   "docs.google.com",
@@ -101,6 +101,30 @@ function isFileOrDriveUrl(url: string): boolean {
   );
 }
 
+// Bỏ qua tất cả các đoạn chat rác, bot joke, lệnh rank
+function isSpamOrBotMessage(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    lower.startsWith("/rank") ||
+    lower.startsWith("/top") ||
+    lower.startsWith("/diem") ||
+    lower.startsWith("/help") ||
+    lower.startsWith("/hoi") ||
+    lower.startsWith("/taungam") ||
+    lower.includes("thông tin tương tác") ||
+    lower.includes("thứ hạng:") ||
+    lower.includes("tổng điểm:") ||
+    lower.includes("lượt thả reaction") ||
+    lower.includes("lượt bình chọn") ||
+    lower.includes("lần tương tác cuối") ||
+    lower.includes("sen chúa trả lời") ||
+    lower.includes("e guộc") ||
+    lower.includes("cà khịa") ||
+    lower.includes("ngoan như cún") ||
+    lower.includes("bị thu hồi")
+  );
+}
+
 function extractTitleFromUrl(url: string): string | null {
   try {
     const u = new URL(url);
@@ -108,15 +132,14 @@ function extractTitleFromUrl(url: string): string | null {
     const segments = pathname.split("/").filter(Boolean);
     const lastSeg = segments[segments.length - 1] || "";
 
-    if (lastSeg.length >= 6) {
-      // Chuyển slug 'Quy-tr-nh-edit-t-ng-b-ng-Chat-GPT-Codex' thành chữ đẹp
+    if (lastSeg.length >= 4) {
       const cleanSlug = lastSeg
-        .replace(/-[a-f0-9]{20,}/i, "") // Bỏ UUID Notion
+        .replace(/-[a-f0-9]{20,}/i, "")
         .replace(/^(p|d|file|document)\//i, "")
         .replace(/[_-]+/g, " ")
         .trim();
 
-      if (cleanSlug.length >= 8 && !/^[0-9a-f]+$/i.test(cleanSlug)) {
+      if (cleanSlug.length >= 5 && !/^[0-9a-f]+$/i.test(cleanSlug)) {
         return cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1);
       }
     }
@@ -127,7 +150,7 @@ function extractTitleFromUrl(url: string): string | null {
 function cleanTitle(raw: string, fallback: string, url?: string): string {
   if (url) {
     const fromUrl = extractTitleFromUrl(url);
-    if (fromUrl) return fromUrl;
+    if (fromUrl && fromUrl.length >= 6) return fromUrl;
   }
 
   let t = raw
@@ -137,8 +160,8 @@ function cleanTitle(raw: string, fallback: string, url?: string): string {
     .replace(/^(hướng dẫn|chia sẻ|kinh nghiệm|tút|tut|bí quyết|tool|cách)\s*:\s*/i, "")
     .trim();
 
-  if (t.length > 85) {
-    t = t.slice(0, 82) + "...";
+  if (t.length > 70) {
+    t = t.slice(0, 68) + "...";
   }
   return t || fallback;
 }
@@ -161,8 +184,8 @@ export async function GET(request: Request) {
     const uniqueFiles = new Set<string>();
     const contributors = new Set<string>();
 
-    // 1. Trích xuất từ bảng daily_summaries (TOÀN BỘ LỊCH SỬ TỪ NGÀY ĐẦU TIÊN)
-    let summaryQuery = "SELECT * FROM daily_summaries ORDER BY day_date DESC";
+    // 1. Trích xuất từ bảng daily_summaries
+    const summaryQuery = "SELECT * FROM daily_summaries ORDER BY day_date DESC";
     const summaries = db.prepare(summaryQuery).all() as any[];
 
     for (const s of summaries) {
@@ -170,7 +193,6 @@ export async function GET(request: Request) {
       const dayLabel = s.day_label || s.day_date || "";
       const ts = s.day_start_ts || s.created_at || Date.now();
 
-      // Lấy tác giả từ top senders nếu có
       let author = "Cộng đồng AI & MMO";
       try {
         const topSenders = JSON.parse(s.top_senders_json || "[]");
@@ -180,7 +202,6 @@ export async function GET(request: Request) {
         }
       } catch {}
 
-      // Phân tách các mục theo định dạng tóm tắt
       const sections = summaryText.split(/(?=\([1-7]\)|\b(?:📢|💼|🤖|🎓|🔗|❓|☕)\b)/);
 
       for (let secIdx = 0; secIdx < sections.length; secIdx++) {
@@ -208,10 +229,9 @@ export async function GET(request: Request) {
           catLabel = "Tài nguyên & File";
           defaultTitle = "Tổng hợp Tài nguyên & Link";
         } else {
-          continue; // Bỏ qua mục chuyện ngoài lề / thông báo không chuyên môn
+          continue;
         }
 
-        // Tách các dòng gạch đầu dòng
         const lines = rawSec
           .split("\n")
           .map((l: string) => l.trim())
@@ -223,9 +243,8 @@ export async function GET(request: Request) {
 
         for (const line of lines) {
           const cleanLine = line.replace(/^[-•*]\s*/, "");
-          if (!cleanLine) continue;
+          if (!cleanLine || isSpamOrBotMessage(cleanLine)) continue;
 
-          // Kiểm tra xem dòng có link không
           const matches = cleanLine.match(urlRegex);
           let hasIgnoredNews = false;
 
@@ -234,7 +253,7 @@ export async function GET(request: Request) {
               const cleanUrl = u.replace(/[.,;!?)]+$/, "");
               if (isNewsUrl(cleanUrl)) {
                 hasIgnoredNews = true;
-                continue; // Lọc bỏ link báo chí
+                continue;
               }
               const isFile = isFileOrDriveUrl(cleanUrl);
               if (isFile) uniqueFiles.add(cleanUrl);
@@ -243,7 +262,6 @@ export async function GET(request: Request) {
             }
           }
 
-          // Nếu dòng này thuần là share link báo chí thì bỏ qua
           if (hasIgnoredNews && !cleanLine.replace(urlRegex, "").trim()) {
             continue;
           }
@@ -253,9 +271,8 @@ export async function GET(request: Request) {
 
         if (keyPoints.length === 0) continue;
 
-        // Đặt tiêu đề tối ưu, ngắn gọn từ ý đầu tiên
         const firstPoint = keyPoints[0];
-        const displayTitle = cleanTitle(firstPoint.split(":")[0] || firstPoint, defaultTitle);
+        const displayTitle = cleanTitle(firstPoint.split(":")[0] || firstPoint, defaultTitle, secLinks[0]?.url);
 
         items.push({
           id: `sum_${s.id || s.day_date}_${secIdx}`,
@@ -274,27 +291,31 @@ export async function GET(request: Request) {
       }
     }
 
-    // 2. Trích xuất toàn bộ các tin nhắn chứa file / link hữu ích từ group_messages từ ngày đầu tiên
+    // 2. Trích xuất các tin nhắn chứa file / link từ group_messages
     const linkMessages = db
       .prepare(
         `SELECT message_id, display_name, text, ts, thread_id
          FROM group_messages
          WHERE (text LIKE '%http://%' OR text LIKE '%https://%' OR text LIKE '%.pdf%' OR text LIKE '%.zip%' OR text LIKE '%.rar%' OR text LIKE '%.docx%' OR text LIKE '%.apk%')
            AND deleted_at IS NULL
+           AND is_self = 0
+           AND LOWER(display_name) NOT LIKE '%sen chúa%'
          ORDER BY ts DESC
-         LIMIT 2000`,
+         LIMIT 500`,
       )
       .all() as any[];
 
     const urlRegex = /(https?:\/\/[^\s]+)/gi;
     for (const msg of linkMessages) {
+      if (isSpamOrBotMessage(msg.text)) continue;
+
       const matches = msg.text.match(urlRegex);
       if (!matches) continue;
 
       const cleanLinks: { url: string; isFile?: boolean }[] = [];
       for (const u of matches) {
         const clean = u.replace(/[.,;!?)]+$/, "");
-        if (isNewsUrl(clean)) continue; // Bỏ qua báo chí
+        if (isNewsUrl(clean)) continue;
         const isFile = isFileOrDriveUrl(clean);
         if (isFile) uniqueFiles.add(clean);
         uniqueLinks.add(clean);
@@ -303,64 +324,45 @@ export async function GET(request: Request) {
 
       if (cleanLinks.length === 0) continue;
 
+      const firstLink = cleanLinks[0]?.url;
+      if (firstLink && items.some((it) => it.links.some((l) => l.url === firstLink))) {
+        continue;
+      }
+
       const authorName = msg.display_name || "Thành viên";
       contributors.add(authorName);
 
       const d = new Date(msg.ts + 7 * 3600 * 1000);
       const dateStr = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
 
-      // 🔍 PHÂN TÍCH NGỮ CẢNH HỘI THOẠI (Trước và sau khi gửi link 10 phút)
-      const timeWindow = 600_000; // 10 phút
-      const surroundingMessages = db
-        .prepare(
-          `SELECT display_name, text, ts, zalo_user_id
-           FROM group_messages
-           WHERE (thread_id = ? OR thread_id = '')
-             AND deleted_at IS NULL
-             AND text != ''
-             AND ts BETWEEN ? AND ?
-           ORDER BY ts ASC`,
-        )
-        .all(msg.thread_id || "", msg.ts - timeWindow, msg.ts + timeWindow) as {
-        display_name: string;
-        text: string;
-        ts: number;
-        zalo_user_id: string;
-      }[];
-
-      // Tìm và tách tất cả các bước hướng dẫn / mô tả từ các tin nhắn trước và sau
-      const contextTexts: string[] = [];
-      for (const sm of surroundingMessages) {
-        // Tách các dòng có trong tin nhắn để không bị gộp cụt các bước Bước 1, Bước 2, Bước 3...
-        const lines = sm.text
-          .split("\n")
-          .map((l) => l.replace(urlRegex, "").trim())
-          .filter(Boolean);
-
-        for (const l of lines) {
-          if (
-            l.length >= 4 &&
-            !["ok", "tks", "thanks", "cảm ơn", "cam on", "hay quá", "+1", "dạ", "chấm", "."].includes(l.toLowerCase())
-          ) {
-            if (!contextTexts.includes(l)) {
-              contextTexts.push(l);
-            }
-          }
-        }
-      }
-
-      // Tách các dòng trong chính tin nhắn chứa link
-      const currentMsgLines = msg.text
+      // Tách các dòng CHÍNH XÁC trong tin nhắn của người gửi
+      const rawLines = msg.text
         .split("\n")
         .map((l: string) => l.replace(urlRegex, "").trim())
-        .filter(Boolean);
+        .filter((l: string) => l.length >= 3 && !isSpamOrBotMessage(l));
 
+      const hasFile = cleanLinks.some((l) => l.isFile);
+      const titlePrefix = hasFile ? "📂 " : "";
+
+      // Xác định tiêu đề súc tích
+      let titleCandidate = "";
+      if (firstLink) {
+        titleCandidate = extractTitleFromUrl(firstLink) || "";
+      }
+      if (!titleCandidate && rawLines.length > 0) {
+        titleCandidate = rawLines[0];
+      }
+
+      const displayTitle = cleanTitle(
+        titleCandidate,
+        hasFile ? `Tài liệu chia sẻ từ ${authorName}` : `Tài nguyên & Tool từ ${authorName}`,
+        firstLink,
+      );
+
+      // Phân loại danh mục
+      const lowerContext = (displayTitle + " " + rawLines.join(" ")).toLowerCase();
       let msgCat: KnowledgeItem["category"] = "links";
       let msgCatLabel = "Tài nguyên";
-
-      // Phân tích từ khóa từ TOÀN BỘ NGỮ CẢNH trước/sau
-      const combinedContext = [...currentMsgLines, ...contextTexts].join(" ");
-      const lowerContext = combinedContext.toLowerCase();
 
       if (
         lowerContext.includes("ai") ||
@@ -372,7 +374,8 @@ export async function GET(request: Request) {
         lowerContext.includes("midjourney") ||
         lowerContext.includes("comfyui") ||
         lowerContext.includes("colab") ||
-        lowerContext.includes("codex")
+        lowerContext.includes("codex") ||
+        lowerContext.includes("vox")
       ) {
         msgCat = "ai";
         msgCatLabel = "AI & Video";
@@ -390,43 +393,14 @@ export async function GET(request: Request) {
         msgCatLabel = "MMO & Tut";
       }
 
-      // Tránh trùng lặp nếu link đã có trong item gần nhất
-      const firstLink = cleanLinks[0]?.url;
-      if (firstLink && items.some((it) => it.links.some((l) => l.url === firstLink))) {
-        continue;
-      }
-
-      const hasFile = cleanLinks.some((l) => l.isFile);
-      const titlePrefix = hasFile ? "📂 File & Tài liệu: " : "";
-
-      // Chọn câu mô tả hay nhất từ ngữ cảnh để làm Tiêu đề
-      let bestTitleCandidate = currentMsgLines[0] || "";
-      if (!bestTitleCandidate || bestTitleCandidate.length < 8 || /^(bước|buoc)\s*\d+/i.test(bestTitleCandidate)) {
-        // Tìm câu chủ đề chung không phải là câu bước 1
-        const nonStepTitle = contextTexts.find((t) => t.length >= 8 && !/^(bước|buoc|—|-)\s*\d+/i.test(t));
-        if (nonStepTitle) {
-          bestTitleCandidate = nonStepTitle;
-        } else if (firstLink) {
-          const fromSlug = extractTitleFromUrl(firstLink);
-          if (fromSlug) bestTitleCandidate = fromSlug;
-        }
-      }
-
-      const displayTitle = cleanTitle(
-        bestTitleCandidate,
-        hasFile ? `Tài liệu Google Drive / File từ ${authorName}` : `Tài nguyên & Hướng dẫn từ ${authorName}`,
-        firstLink,
-      );
-
-      // Xây dựng ĐẦY ĐỦ TOÀN BỘ các bước thực hành & mô tả (không cắt cụt)
-      const allPoints = Array.from(new Set([...currentMsgLines, ...contextTexts]));
+      // Xây dựng Key Points súc tích
       const keyPoints: string[] = [];
-      for (const p of allPoints) {
-        if (p.trim()) keyPoints.push(p.trim());
-      }
-
-      if (keyPoints.length === 0) {
-        keyPoints.push(hasFile ? "Tệp đính kèm / Kho lưu trữ Google Drive" : "Đường link công cụ & tài nguyên chia sẻ");
+      if (rawLines.length > 0) {
+        for (const line of rawLines) {
+          keyPoints.push(line);
+        }
+      } else {
+        keyPoints.push(displayTitle);
       }
       keyPoints.push(`Đóng góp & chia sẻ bởi ${authorName}`);
 
@@ -435,7 +409,7 @@ export async function GET(request: Request) {
         title: titlePrefix + displayTitle,
         category: msgCat,
         categoryLabel: hasFile ? "📂 File & Tài liệu" : msgCatLabel,
-        summary: keyPoints.slice(0, 3).join(". ") || "Tài nguyên & hướng dẫn chi tiết từ cộng đồng.",
+        summary: keyPoints.slice(0, 2).join(". ") || "Tài nguyên & liên kết chia sẻ từ cộng đồng.",
         keyPoints,
         links: cleanLinks,
         author: authorName,
@@ -448,10 +422,8 @@ export async function GET(request: Request) {
 
     db.close();
 
-    // Sắp xếp bài mới nhất lên đầu
     items.sort((a, b) => b.timestamp - a.timestamp);
 
-    // Lọc theo query tìm kiếm và category
     let filtered = items;
     if (category !== "all") {
       if (category === "files") {
