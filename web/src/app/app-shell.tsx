@@ -19,12 +19,8 @@ import {
   Users,
   Layers,
   Sparkles,
-  Lock,
-  Eye,
-  EyeOff,
-  ShieldCheck,
-  ArrowLeft,
-  KeyRound,
+  ShieldAlert,
+  ArrowRight,
 } from "lucide-react";
 
 const GROUPS = [
@@ -48,106 +44,29 @@ const NAV = [
   { href: "/login", label: "Đăng nhập Zalo", shortLabel: "Zalo QR", icon: LogIn },
 ];
 
-// Khối Cổng Bảo Mật Admin
-function AdminAuthGate({ onSuccess }: { onSuccess: () => void }) {
-  const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  async function handleLogin(e: React.FormEvent) {
-    e.preventDefault();
-    if (!password.trim()) {
-      setError("Vui lòng nhập mật khẩu quản trị");
-      return;
-    }
-
-    setLoading(true);
-    setError("");
-
-    try {
-      const res = await fetch("/api/auth", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: password.trim() }),
-      });
-
-      const data = await res.json();
-      if (data.ok) {
-        localStorage.setItem("admin_auth", "true");
-        onSuccess();
-      } else {
-        setError(data.error || "Mật khẩu Admin không chính xác");
-      }
-    } catch {
-      setError("Lỗi kết nối máy chủ");
-    } finally {
-      setLoading(false);
-    }
-  }
-
+// Khối 403 Forbidden dành cho người không có quyền truy cập
+function ForbiddenAccessScreen() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-12">
-      <div className="w-full max-w-md space-y-6 rounded-2xl border border-cyan-500/20 bg-slate-900/90 p-8 shadow-2xl backdrop-blur-xl">
-        <div className="text-center space-y-2">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400">
-            <Lock className="h-7 w-7" />
-          </div>
-          <h2 className="text-2xl font-bold text-white tracking-tight">Khu Vực Quản Trị Admin</h2>
-          <p className="text-xs text-slate-400">
-            Bảng điều khiển này chỉ dành riêng cho Admin. Vui lòng nhập mật khẩu quản trị để tiếp tục.
+      <div className="w-full max-w-md space-y-6 rounded-2xl border border-rose-500/20 bg-slate-900/90 p-8 shadow-2xl backdrop-blur-xl text-center">
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400">
+          <ShieldAlert className="h-8 w-8" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-2xl font-bold text-white tracking-tight">403 — Không Có Quyền Truy Cập</h2>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            Trang này chỉ dành riêng cho Quản trị viên hệ thống. Vui lòng quay lại Kho Kiến Thức để xem các tài liệu và chia sẻ từ cộng đồng.
           </p>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold text-slate-300">Mật khẩu Admin</label>
-            <div className="relative flex items-center">
-              <KeyRound className="absolute left-3.5 h-4 w-4 text-slate-500" />
-              <input
-                type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Nhập mật khẩu..."
-                autoFocus
-                className="w-full rounded-xl border border-slate-700 bg-slate-950 py-3 pl-10 pr-10 text-sm text-white placeholder-slate-500 outline-none transition-all focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 text-slate-400 hover:text-white"
-              >
-                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </button>
-            </div>
-          </div>
-
-          {error && (
-            <div className="rounded-lg bg-rose-500/10 border border-rose-500/20 p-2.5 text-xs text-rose-400 text-center font-medium">
-              {error}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-xl bg-cyan-500 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition-all hover:bg-cyan-400 disabled:opacity-50"
+        <div className="pt-2">
+          <Link
+            href="/hub"
+            className="flex items-center justify-center gap-2 w-full rounded-xl bg-cyan-500 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition-all hover:bg-cyan-400"
           >
-            {loading ? "Đang xác thực..." : "Đăng Nhập Quản Trị"}
-          </button>
-        </form>
-
-        <div className="border-t border-slate-800 pt-4 flex flex-col gap-2 text-center text-xs text-slate-400">
-          <span>Hoặc truy cập các trang công khai:</span>
-          <div className="flex items-center justify-center gap-3 font-medium">
-            <Link href="/hub" className="text-cyan-400 hover:underline flex items-center gap-1">
-              <Sparkles className="h-3.5 w-3.5" /> Kho Kiến Thức (/hub)
-            </Link>
-            <span>•</span>
-            <Link href="/leaderboard" className="text-amber-400 hover:underline flex items-center gap-1">
-              <Trophy className="h-3.5 w-3.5" /> Bảng Xếp Hạng (/leaderboard)
-            </Link>
-          </div>
+            <span>Vào Kho Kiến Thức Cộng Đồng</span>
+            <ArrowRight className="h-4 w-4" />
+          </Link>
         </div>
       </div>
     </div>
@@ -192,18 +111,11 @@ function AppShellInner({
     setIsAdminAuthenticated(false);
   }
 
-  // CÁC TRANG CÔNG KHAI: Kho Kiến Thức (/hub) và Bảng Xếp Hạng (/leaderboard)
-  const isPublicPage =
-    publicMode ||
-    pathname === "/hub" ||
-    pathname.startsWith("/hub/") ||
-    pathname === "/leaderboard" ||
-    pathname.startsWith("/leaderboard/");
-
-  if (isPublicPage) {
+  // 1. TRANG CÔNG KHAI THUẦN TÚY: Kho Kiến Thức (/hub)
+  const isHubPublicPage = pathname === "/hub" || pathname.startsWith("/hub/");
+  if (isHubPublicPage) {
     return (
       <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
-        {/* Top Header Public Navigation */}
         <header className="sticky top-0 z-40 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md px-4 py-3">
           <div className="container mx-auto flex items-center justify-between max-w-7xl">
             <Link href="/hub" className="flex items-center gap-2.5 font-bold text-white text-base">
@@ -213,46 +125,11 @@ function AppShellInner({
               <span>Zalo Community Hub</span>
             </Link>
 
-            <div className="flex items-center gap-2 md:gap-4">
-              <Link
-                href="/hub"
-                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  pathname.startsWith("/hub") ? "bg-cyan-500/10 text-cyan-300 border border-cyan-500/30" : "text-slate-300 hover:text-white"
-                }`}
-              >
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20 px-3 py-1 text-xs font-semibold text-cyan-300">
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>Kho Kiến Thức</span>
-              </Link>
-              <Link
-                href="/leaderboard"
-                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
-                  pathname.startsWith("/leaderboard") ? "bg-amber-500/10 text-amber-300 border border-amber-500/30" : "text-slate-300 hover:text-white"
-                }`}
-              >
-                <Trophy className="h-3.5 w-3.5" />
-                <span>Bảng Xếp Hạng</span>
-              </Link>
-
-              <div className="h-4 w-px bg-slate-800 mx-1 hidden sm:block" />
-
-              {isAdminAuthenticated ? (
-                <Link
-                  href="/"
-                  className="flex items-center gap-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 px-3 py-1.5 text-xs font-semibold text-cyan-300 border border-slate-700 transition-colors"
-                >
-                  <ShieldCheck className="h-3.5 w-3.5 text-cyan-400" />
-                  <span>Vào Admin Panel</span>
-                </Link>
-              ) : (
-                <Link
-                  href="/"
-                  className="flex items-center gap-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-400 hover:text-white border border-slate-800 transition-colors"
-                  title="Dành cho Quản trị viên"
-                >
-                  <Lock className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Admin Login</span>
-                </Link>
-              )}
+                <span>Kho Kiến Thức & Tài Nguyên</span>
+              </span>
             </div>
           </div>
         </header>
@@ -262,12 +139,13 @@ function AppShellInner({
     );
   }
 
-  // NẾU LÀ TRANG QUẢN TRỊ ADMIN VÀ CHƯA ĐĂNG NHẬP -> HIỂN THỊ CỔNG MẬT KHẨU
-  if (isAdminAuthenticated === false) {
-    return <AdminAuthGate onSuccess={() => setIsAdminAuthenticated(true)} />;
+  // 2. TRANG ĐĂNG NHẬP ADMIN CHUYÊN DỤNG (/admin)
+  const isAdminLoginRoute = pathname === "/admin" || pathname.startsWith("/admin/");
+  if (isAdminLoginRoute) {
+    return <main className="min-h-screen bg-slate-950">{children}</main>;
   }
 
-  // TRONG LÚC ĐANG KIỂM TRA PHIÊN
+  // 3. ĐANG TẢI KIỂM TRA PHIÊN
   if (isAdminAuthenticated === null) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-950">
@@ -276,6 +154,12 @@ function AppShellInner({
     );
   }
 
+  // 4. NẾU CHƯA ĐĂNG NHẬP ADMIN MÀ VÀO TRỰC TIẾP TRANG CHỦ / HOẶC BẤT KỲ TRANG ADMIN NÀO -> BÁO 403 FORBIDDEN
+  if (isAdminAuthenticated === false) {
+    return <ForbiddenAccessScreen />;
+  }
+
+  // 5. NẾU ĐÃ ĐĂNG NHẬP ADMIN -> HIỂN THỊ TOÀN BỘ BẢNG ĐIỀU KHIỂN QUẢN TRỊ
   const buildNavHref = (baseHref: string) => {
     if (!activeGroupId || activeGroupId === "1913869945242410752") {
       return `${baseHref}${baseHref.includes("?") ? "&" : "?"}group=1913869945242410752`;
