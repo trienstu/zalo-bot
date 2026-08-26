@@ -27,6 +27,7 @@ const GROUPS = [
 
 const NAV = [
   { href: "/", label: "Tổng quan", shortLabel: "Tổng quan", icon: LayoutDashboard },
+  { href: "/hub", label: "Kho Kiến Thức", shortLabel: "Kiến thức", icon: Sparkles },
   { href: "/members", label: "Thành viên", shortLabel: "Thành viên", icon: Users },
   { href: "/leaderboard", label: "Xếp hạng", shortLabel: "Top", icon: Trophy },
   { href: "/candidates", label: "Ứng viên", shortLabel: "Ứng viên", icon: UserMinus },
