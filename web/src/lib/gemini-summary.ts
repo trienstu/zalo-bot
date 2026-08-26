@@ -130,7 +130,7 @@ export async function callGeminiDirect(
     try {
       const resp = await fetch(endpoint, {
         method: "POST",
-        signal: AbortSignal.timeout(15_000), // 15s timeout mỗi key để chuyển nhanh nếu nghẽn
+        signal: AbortSignal.timeout(60_000), // 60s timeout để AI có đủ thời gian sinh bản tóm tắt dài chi tiết
         headers: {
           "Content-Type": "application/json",
         },

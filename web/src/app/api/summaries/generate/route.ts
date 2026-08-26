@@ -3,6 +3,7 @@ import { generateChatSummary } from "@/lib/gemini-summary";
 import { isOriginAllowed } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 120;
 
 export async function POST(request: Request) {
   if (!isOriginAllowed(request)) {

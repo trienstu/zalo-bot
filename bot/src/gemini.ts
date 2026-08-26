@@ -53,7 +53,7 @@ export async function callGemini(
     try {
       const resp = await fetch(endpoint, {
         method: "POST",
-        signal: AbortSignal.timeout(15_000), // 15s timeout
+        signal: AbortSignal.timeout(60_000), // 60s timeout
         headers: {
           "Content-Type": "application/json",
         },
