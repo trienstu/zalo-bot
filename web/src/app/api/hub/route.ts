@@ -132,8 +132,8 @@ export async function GET(request: Request) {
     const uniqueFiles = new Set<string>();
     const contributors = new Set<string>();
 
-    // 1. Trích xuất từ bảng daily_summaries
-    let summaryQuery = "SELECT * FROM daily_summaries ORDER BY day_date DESC LIMIT 30";
+    // 1. Trích xuất từ bảng daily_summaries (TOÀN BỘ LỊCH SỬ TỪ NGÀY ĐẦU TIÊN)
+    let summaryQuery = "SELECT * FROM daily_summaries ORDER BY day_date DESC";
     const summaries = db.prepare(summaryQuery).all() as any[];
 
     for (const s of summaries) {
@@ -245,15 +245,15 @@ export async function GET(request: Request) {
       }
     }
 
-    // 2. Trích xuất các tin nhắn chứa file / link hữu ích từ group_messages
+    // 2. Trích xuất toàn bộ các tin nhắn chứa file / link hữu ích từ group_messages từ ngày đầu tiên
     const linkMessages = db
       .prepare(
         `SELECT message_id, display_name, text, ts, thread_id
          FROM group_messages
-         WHERE (text LIKE '%http://%' OR text LIKE '%https://%' OR text LIKE '%.pdf%' OR text LIKE '%.zip%')
+         WHERE (text LIKE '%http://%' OR text LIKE '%https://%' OR text LIKE '%.pdf%' OR text LIKE '%.zip%' OR text LIKE '%.rar%' OR text LIKE '%.docx%' OR text LIKE '%.apk%')
            AND deleted_at IS NULL
          ORDER BY ts DESC
-         LIMIT 50`,
+         LIMIT 2000`,
       )
       .all() as any[];
 
