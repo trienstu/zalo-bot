@@ -264,8 +264,12 @@ export function HubClient() {
                     </div>
                   </div>
 
-                  {/* Title */}
-                  <h3 className="mt-3 text-base font-semibold text-white leading-snug group-hover:text-cyan-300 transition-colors">
+                  {/* Title - Click to open modal */}
+                  <h3
+                    onClick={() => setSelectedItem(item)}
+                    className="mt-3 text-base font-semibold text-white leading-snug group-hover:text-cyan-300 transition-colors cursor-pointer hover:underline"
+                    title="Bấm để xem chi tiết nội dung"
+                  >
                     {item.title}
                   </h3>
 
