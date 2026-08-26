@@ -101,15 +101,44 @@ function isFileOrDriveUrl(url: string): boolean {
   );
 }
 
-function cleanTitle(raw: string, fallback: string): string {
+function extractTitleFromUrl(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const pathname = decodeURIComponent(u.pathname);
+    const segments = pathname.split("/").filter(Boolean);
+    const lastSeg = segments[segments.length - 1] || "";
+
+    if (lastSeg.length >= 6) {
+      // Chuyển slug 'Quy-tr-nh-edit-t-ng-b-ng-Chat-GPT-Codex' thành chữ đẹp
+      const cleanSlug = lastSeg
+        .replace(/-[a-f0-9]{20,}/i, "") // Bỏ UUID Notion
+        .replace(/^(p|d|file|document)\//i, "")
+        .replace(/[_-]+/g, " ")
+        .trim();
+
+      if (cleanSlug.length >= 8 && !/^[0-9a-f]+$/i.test(cleanSlug)) {
+        return cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1);
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function cleanTitle(raw: string, fallback: string, url?: string): string {
+  if (url) {
+    const fromUrl = extractTitleFromUrl(url);
+    if (fromUrl) return fromUrl;
+  }
+
   let t = raw
-    .replace(/^[-•*0-9.)\s]+/, "")
+    .replace(/^[-—•*0-9.)\s]+/, "")
+    .replace(/^(bước|buoc)\s*\d+[\s.:-]*\s*/i, "")
     .replace(/\s*\([^)]*\)$/, "")
     .replace(/^(hướng dẫn|chia sẻ|kinh nghiệm|tút|tut|bí quyết|tool|cách)\s*:\s*/i, "")
     .trim();
 
-  if (t.length > 55) {
-    t = t.slice(0, 52) + "...";
+  if (t.length > 85) {
+    t = t.slice(0, 82) + "...";
   }
   return t || fallback;
 }
@@ -280,8 +309,8 @@ export async function GET(request: Request) {
       const d = new Date(msg.ts + 7 * 3600 * 1000);
       const dateStr = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
 
-      // 🔍 PHÂN TÍCH NGỮ CẢNH HỘI THOẠI (Trước và sau khi gửi link 5 phút)
-      const timeWindow = 300_000; // 5 phút
+      // 🔍 PHÂN TÍCH NGỮ CẢNH HỘI THOẠI (Trước và sau khi gửi link 10 phút)
+      const timeWindow = 600_000; // 10 phút
       const surroundingMessages = db
         .prepare(
           `SELECT display_name, text, ts, zalo_user_id
@@ -299,27 +328,38 @@ export async function GET(request: Request) {
         zalo_user_id: string;
       }[];
 
-      // Tìm các tin nhắn giải thích tính năng / mô tả của người gửi hoặc người thảo luận
+      // Tìm và tách tất cả các bước hướng dẫn / mô tả từ các tin nhắn trước và sau
       const contextTexts: string[] = [];
       for (const sm of surroundingMessages) {
-        const smClean = sm.text.replace(urlRegex, "").replace(/\s+/g, " ").trim();
-        // Bỏ qua các tin cảm ơn ngắn hoặc spam
-        if (
-          smClean.length >= 5 &&
-          !["ok", "tks", "thanks", "cảm ơn", "cam on", "hay quá", "+1", "dạ", "chấm", "."].includes(smClean.toLowerCase())
-        ) {
-          if (!contextTexts.includes(smClean)) {
-            contextTexts.push(smClean);
+        // Tách các dòng có trong tin nhắn để không bị gộp cụt các bước Bước 1, Bước 2, Bước 3...
+        const lines = sm.text
+          .split("\n")
+          .map((l) => l.replace(urlRegex, "").trim())
+          .filter(Boolean);
+
+        for (const l of lines) {
+          if (
+            l.length >= 4 &&
+            !["ok", "tks", "thanks", "cảm ơn", "cam on", "hay quá", "+1", "dạ", "chấm", "."].includes(l.toLowerCase())
+          ) {
+            if (!contextTexts.includes(l)) {
+              contextTexts.push(l);
+            }
           }
         }
       }
 
-      const cleanText = msg.text.replace(urlRegex, "").replace(/\s+/g, " ").trim();
+      // Tách các dòng trong chính tin nhắn chứa link
+      const currentMsgLines = msg.text
+        .split("\n")
+        .map((l: string) => l.replace(urlRegex, "").trim())
+        .filter(Boolean);
+
       let msgCat: KnowledgeItem["category"] = "links";
       let msgCatLabel = "Tài nguyên";
 
       // Phân tích từ khóa từ TOÀN BỘ NGỮ CẢNH trước/sau
-      const combinedContext = [cleanText, ...contextTexts].join(" ");
+      const combinedContext = [...currentMsgLines, ...contextTexts].join(" ");
       const lowerContext = combinedContext.toLowerCase();
 
       if (
@@ -331,7 +371,8 @@ export async function GET(request: Request) {
         lowerContext.includes("flux") ||
         lowerContext.includes("midjourney") ||
         lowerContext.includes("comfyui") ||
-        lowerContext.includes("colab")
+        lowerContext.includes("colab") ||
+        lowerContext.includes("codex")
       ) {
         msgCat = "ai";
         msgCatLabel = "AI & Video";
@@ -359,28 +400,33 @@ export async function GET(request: Request) {
       const titlePrefix = hasFile ? "📂 File & Tài liệu: " : "";
 
       // Chọn câu mô tả hay nhất từ ngữ cảnh để làm Tiêu đề
-      let bestTitleCandidate = cleanText;
-      if (!bestTitleCandidate || bestTitleCandidate.length < 8) {
-        // Lấy câu mô tả trước hoặc sau gần nhất của tác giả
-        const authorDesc = contextTexts.find((t) => t.length >= 10);
-        if (authorDesc) {
-          bestTitleCandidate = authorDesc;
+      let bestTitleCandidate = currentMsgLines[0] || "";
+      if (!bestTitleCandidate || bestTitleCandidate.length < 8 || /^(bước|buoc)\s*\d+/i.test(bestTitleCandidate)) {
+        // Tìm câu chủ đề chung không phải là câu bước 1
+        const nonStepTitle = contextTexts.find((t) => t.length >= 8 && !/^(bước|buoc|—|-)\s*\d+/i.test(t));
+        if (nonStepTitle) {
+          bestTitleCandidate = nonStepTitle;
+        } else if (firstLink) {
+          const fromSlug = extractTitleFromUrl(firstLink);
+          if (fromSlug) bestTitleCandidate = fromSlug;
         }
       }
 
       const displayTitle = cleanTitle(
         bestTitleCandidate,
-        hasFile ? `Tài liệu Google Drive / File từ ${authorName}` : `Tài nguyên & Tool từ ${authorName}`,
+        hasFile ? `Tài liệu Google Drive / File từ ${authorName}` : `Tài nguyên & Hướng dẫn từ ${authorName}`,
+        firstLink,
       );
 
-      // Xây dựng các ý mô tả & tính năng chi tiết từ ngữ cảnh hội thoại
+      // Xây dựng ĐẦY ĐỦ TOÀN BỘ các bước thực hành & mô tả (không cắt cụt)
+      const allPoints = Array.from(new Set([...currentMsgLines, ...contextTexts]));
       const keyPoints: string[] = [];
-      if (contextTexts.length > 0) {
-        for (const ct of contextTexts.slice(0, 4)) {
-          keyPoints.push(ct);
-        }
-      } else {
-        keyPoints.push(cleanText || (hasFile ? "Tệp đính kèm / Kho lưu trữ Google Drive" : "Đường link công cụ & tài nguyên"));
+      for (const p of allPoints) {
+        if (p.trim()) keyPoints.push(p.trim());
+      }
+
+      if (keyPoints.length === 0) {
+        keyPoints.push(hasFile ? "Tệp đính kèm / Kho lưu trữ Google Drive" : "Đường link công cụ & tài nguyên chia sẻ");
       }
       keyPoints.push(`Đóng góp & chia sẻ bởi ${authorName}`);
 
@@ -389,7 +435,7 @@ export async function GET(request: Request) {
         title: titlePrefix + displayTitle,
         category: msgCat,
         categoryLabel: hasFile ? "📂 File & Tài liệu" : msgCatLabel,
-        summary: contextTexts.slice(0, 2).join(". ") || cleanText || "Tài nguyên & liên kết chia sẻ từ cộng đồng.",
+        summary: keyPoints.slice(0, 3).join(". ") || "Tài nguyên & hướng dẫn chi tiết từ cộng đồng.",
         keyPoints,
         links: cleanLinks,
         author: authorName,

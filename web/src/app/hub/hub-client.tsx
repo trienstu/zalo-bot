@@ -403,15 +403,25 @@ export function HubClient() {
             {/* Chi tiết nội dung */}
             <div className="space-y-3 text-sm text-slate-200 leading-relaxed">
               <h4 className="font-semibold text-cyan-300 text-xs uppercase tracking-wider">
-                Chi tiết & Các bước thực hành:
+                Nội Dung Chi Tiết & Hướng Dẫn Thực Hành:
               </h4>
-              <div className="space-y-2 rounded-xl bg-slate-950/70 p-4 border border-slate-800">
-                {selectedItem.keyPoints.map((kp, idx) => (
-                  <div key={idx} className="flex items-start gap-2">
-                    <span className="text-cyan-400 font-bold mt-0.5">•</span>
-                    <p className="text-slate-300">{kp}</p>
-                  </div>
-                ))}
+              <div className="space-y-3 rounded-xl bg-slate-950/70 p-4 md:p-5 border border-slate-800">
+                {selectedItem.keyPoints.map((kp, idx) => {
+                  const isStep = /^(—\s*bước|bước|buoc|step|\d+\.)/i.test(kp);
+                  return (
+                    <div
+                      key={idx}
+                      className={`flex items-start gap-3 ${
+                        isStep ? "p-2.5 rounded-lg bg-slate-900/90 border border-slate-800" : ""
+                      }`}
+                    >
+                      <span className="text-cyan-400 font-bold mt-0.5 text-sm shrink-0">
+                        {isStep ? "📍" : "•"}
+                      </span>
+                      <p className="text-slate-200 leading-relaxed break-words whitespace-pre-wrap">{kp}</p>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
