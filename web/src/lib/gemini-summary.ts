@@ -2,10 +2,33 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 
-const BOT_DIR = path.resolve(process.cwd(), "..", "bot");
-const BOT_ENV_PATH = path.join(BOT_DIR, ".env");
-const DATA_DIR = path.join(BOT_DIR, "data");
-const DB_PATH = path.join(DATA_DIR, "bot.db");
+function getBotDbPath(): string {
+  const possiblePaths = [
+    process.env.SQLITE_DB_PATH,
+    path.resolve(process.cwd(), "data", "bot.db"),
+    path.resolve(process.cwd(), "..", "bot", "data", "bot.db"),
+    path.resolve(process.cwd(), "bot", "data", "bot.db"),
+    path.resolve(process.cwd(), "..", "data", "bot.db"),
+  ].filter(Boolean) as string[];
+
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return path.resolve(process.cwd(), "..", "bot", "data", "bot.db");
+}
+
+function getBotEnvPath(): string {
+  const possiblePaths = [
+    path.resolve(process.cwd(), "..", "bot", ".env"),
+    path.resolve(process.cwd(), "bot", ".env"),
+    path.resolve(process.cwd(), ".env"),
+    path.resolve(process.cwd(), "..", ".env"),
+  ];
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return path.resolve(process.cwd(), "..", "bot", ".env");
+}
 
 function parseEnvFile(content: string): Record<string, string> {
   const result: Record<string, string> = {};
@@ -25,8 +48,9 @@ function parseEnvFile(content: string): Record<string, string> {
 // Đọc env từ bot/.env
 function getEnvConfig() {
   let env: Record<string, string> = {};
-  if (fs.existsSync(BOT_ENV_PATH)) {
-    env = parseEnvFile(fs.readFileSync(BOT_ENV_PATH, "utf8"));
+  const envPath = getBotEnvPath();
+  if (fs.existsSync(envPath)) {
+    env = parseEnvFile(fs.readFileSync(envPath, "utf8"));
   }
   return {
     geminiApiKey: process.env.GEMINI_API_KEY || env.GEMINI_API_KEY || "",
@@ -183,11 +207,12 @@ export async function generateChatSummary(options: {
   groupId?: string;
 }) {
   const config = getEnvConfig();
-  if (!fs.existsSync(DB_PATH)) {
+  const dbPath = getBotDbPath();
+  if (!fs.existsSync(dbPath)) {
     throw new Error("Cơ sở dữ liệu bot.db chưa tồn tại. Hãy để bot chạy một lát trước.");
   }
 
-  const db = new Database(DB_PATH);
+  const db = new Database(dbPath);
   const dayRange = parseDayRange(options.targetDate);
   const targetGroupId = (options.groupId || config.groupId || "").trim();
   const primaryGroupId = "1913869945242410752";
@@ -223,10 +248,25 @@ export async function generateChatSummary(options: {
     }[];
 
   if (messages.length === 0) {
+    const latestMsg = db
+      .prepare(
+        `SELECT ts FROM group_messages WHERE deleted_at IS NULL ${targetGroupId && targetGroupId !== "all" ? (targetGroupId === primaryGroupId ? "AND (thread_id = ? OR thread_id = '' OR thread_id IS NULL)" : "AND thread_id = ?") : ""} ORDER BY ts DESC LIMIT 1`,
+      )
+      .get(...(targetGroupId && targetGroupId !== "all" ? [targetGroupId] : [])) as
+      | { ts: number }
+      | undefined;
     db.close();
+
+    let suggestion = "";
+    if (latestMsg?.ts) {
+      const d = new Date(latestMsg.ts + VN_UTC_OFFSET_MS);
+      const latestDateStr = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
+      suggestion = ` (Ngày gần nhất có dữ liệu thảo luận là ${latestDateStr})`;
+    }
+
     return {
       ok: false,
-      message: `Ngày ${dayRange.label} chưa có tin nhắn nào được lưu trong database cho nhóm này. Hãy chat thêm trong nhóm để bot thu thập dữ liệu nhé!`,
+      message: `Ngày ${dayRange.label} chưa có tin nhắn nào trong nhóm.${suggestion} Hãy chọn ngày có thảo luận để tóm tắt nhé!`,
       dayLabel: dayRange.label,
       dayDate: dayRange.dayDate,
       totalMessages: 0,
@@ -338,9 +378,10 @@ export async function generateChatSummary(options: {
 
   let sent = false;
   if (options.sendToGroup) {
+    const dataDir = path.dirname(dbPath);
     const requestId = `web_req_${Date.now()}`;
-    const sendReqPath = path.join(DATA_DIR, "summary-send-request.json");
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const sendReqPath = path.join(dataDir, "summary-send-request.json");
+    fs.mkdirSync(dataDir, { recursive: true });
     fs.writeFileSync(
       sendReqPath,
       JSON.stringify({

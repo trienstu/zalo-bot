@@ -139,6 +139,75 @@ function handleTopCommand(threadId: string): string {
 }
 
 /**
+ * Tổng hợp toàn bộ link & tài liệu được chia sẻ trong nhóm.
+ */
+function handleLinksCommand(threadId: string, keywordFilter?: string): string {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT display_name, text, ts
+       FROM group_messages
+       WHERE (thread_id = ? OR thread_id = '')
+         AND deleted_at IS NULL
+         AND (text LIKE '%http://%' OR text LIKE '%https://%')
+       ORDER BY ts DESC
+       LIMIT 60`,
+    )
+    .all(threadId) as { display_name: string; text: string; ts: number }[];
+
+  const urlRegex = /(https?:\/\/[^\s]+)/gi;
+  const links: { url: string; sender: string; context: string; ts: number }[] = [];
+
+  for (const r of rows) {
+    const matches = r.text.match(urlRegex);
+    if (matches) {
+      for (const u of matches) {
+        const cleanUrl = u.replace(/[.,;!?)]+$/, "");
+        if (!links.some((l) => l.url === cleanUrl)) {
+          const cleanContext = r.text.replace(urlRegex, "").replace(/\s+/g, " ").trim();
+          links.push({
+            url: cleanUrl,
+            sender: r.display_name || "Thành viên",
+            context: cleanContext.slice(0, 120) || "Chia sẻ đường link",
+            ts: r.ts,
+          });
+        }
+      }
+    }
+  }
+
+  let filtered = links;
+  if (keywordFilter) {
+    const k = keywordFilter.toLowerCase();
+    filtered = links.filter(
+      (l) =>
+        l.url.toLowerCase().includes(k) ||
+        l.context.toLowerCase().includes(k) ||
+        l.sender.toLowerCase().includes(k),
+    );
+  }
+
+  if (filtered.length === 0) {
+    if (keywordFilter) {
+      return `🔗 TỔNG HỢP LINK CHIA SẺ\n\nKhông tìm thấy link nào khớp với từ khóa "${keywordFilter}" trong lịch sử chat gần đây của nhóm.`;
+    }
+    return `🔗 TỔNG HỢP LINK CHIA SẺ\n\nChưa có link hoặc tài liệu nào được chia sẻ trong lịch sử chat gần đây của nhóm.`;
+  }
+
+  const items = filtered.slice(0, 15).map((l, idx) => {
+    const d = new Date(l.ts + 7 * 3600 * 1000);
+    const timeStr = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")} ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+    return `${idx + 1}. ${l.url}\n   👤 ${l.sender} (${timeStr})\n   📝 ${l.context}`;
+  });
+
+  return (
+    `🔗 TỔNG HỢP LINK & TÀI LIỆU TRONG NHÓM (${filtered.length} link gần nhất)\n\n` +
+    items.join("\n\n") +
+    `\n\n💡 Mẹo: Gõ /link [từ khóa] để lọc link theo chủ đề!`
+  );
+}
+
+/**
  * Trả lời trợ giúp / danh sách lệnh.
  */
 function handleHelpCommand(): string {
@@ -147,6 +216,7 @@ function handleHelpCommand(): string {
     `Các lệnh bạn có thể sử dụng:\n` +
     `🔹 /rank hoặc /diem: Tra cứu thứ hạng & điểm tương tác của bạn\n` +
     `🔹 /top: Xem Top 5 thành viên tích cực nhất nhóm\n` +
+    `🔹 /link [từ khóa]: Tổng hợp tất cả link/tài liệu/video đã chia sẻ trong nhóm\n` +
     `🔹 /hoi [câu hỏi] hoặc tag @Sen Chúa: Hỏi đáp kiến thức tra cứu từ lịch sử chat của nhóm\n` +
     `🔹 /help: Hiển thị hướng dẫn này`
   );
@@ -350,6 +420,28 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
+  // 4. Lệnh /link, /links, /tonghoplink, /tailieu
+  if (
+    lower === "/link" ||
+    lower === "/links" ||
+    lower.startsWith("/link ") ||
+    lower.startsWith("/links ") ||
+    lower === "/tonghoplink" ||
+    lower === "/tailieu" ||
+    lower.startsWith("/tonghoplink ") ||
+    lower.startsWith("/tailieu ")
+  ) {
+    userCooldowns.set(sender, now);
+    const filter = rawText
+      .replace(/^\/links?\s*/i, "")
+      .replace(/^\/(tonghoplink|tailieu)\s*/i, "")
+      .trim();
+    const reply = handleLinksCommand(threadId, filter || undefined);
+    await sendGroupText(api, threadId, reply);
+    console.log(`[member-assistant] ✅ Đã phản hồi /link cho ${displayName}`);
+    return;
+  }
+
   // 4. Lệnh /hoi [câu hỏi] hoặc Tag bot / Nhắc tên Sen Chúa
   const isTagBot =
     lower.startsWith("/hoi") ||
@@ -434,6 +526,39 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         threadId,
         `🤖 Sen Chúa trả lời @${displayName}:\n\nDạ bí kíp đạt 1 triệu view trong 1 đêm nhanh nhất là: Tối nay bác cứ đăng video lên rồi đi ngủ sớm... mơ một giấc thật đẹp là sáng mai có ngay 1 triệu view ạ 😄!\n\nHoặc bác có thể hỏi các cao thủ trong nhóm như bác Vũ Trọng, Tu, Huy để xin tút chạy ads và làm content viral chuẩn chỉnh nhé!`,
       );
+      return;
+    }
+
+    // Tự động nhận diện câu hỏi xin link, tổng hợp link, tài liệu
+    if (
+      qLower.includes("tổng hợp link") ||
+      qLower.includes("tong hop link") ||
+      qLower.includes("danh sách link") ||
+      qLower.includes("danh sach link") ||
+      qLower.includes("các link") ||
+      qLower.includes("cac link") ||
+      qLower.includes("tìm link") ||
+      qLower.includes("tim link") ||
+      qLower.includes("link chia sẻ") ||
+      qLower.includes("link chia se") ||
+      qLower.includes("link bài viết") ||
+      qLower.includes("link tài liệu") ||
+      qLower.includes("link fb") ||
+      qLower.includes("link tiktok") ||
+      qLower.includes("link youtube")
+    ) {
+      let filterWord = "";
+      if (qLower.includes("ai")) filterWord = "ai";
+      else if (qLower.includes("tiktok") || qLower.includes("tik tok")) filterWord = "tiktok";
+      else if (qLower.includes("facebook") || qLower.includes("fb")) filterWord = "facebook";
+      else if (qLower.includes("canva")) filterWord = "canva";
+      else if (qLower.includes("drive")) filterWord = "drive";
+
+      const reply =
+        `🤖 Sen Chúa tổng hợp link cho @${displayName}:\n\n` +
+        handleLinksCommand(threadId, filterWord || undefined);
+      await sendGroupText(api, threadId, reply);
+      console.log(`[member-assistant] ✅ Đã gửi tổng hợp link tự động cho ${displayName}`);
       return;
     }
 
