@@ -17,6 +17,9 @@ import {
   ArrowUpRight,
   Bookmark,
   Calendar,
+  FolderDown,
+  Download,
+  FileText,
 } from "lucide-react";
 import { Badge } from "@/components/ui";
 
@@ -27,7 +30,7 @@ interface KnowledgeItem {
   categoryLabel: string;
   summary: string;
   keyPoints: string[];
-  links: { url: string; label?: string }[];
+  links: { url: string; label?: string; isFile?: boolean }[];
   author: string;
   date: string;
   timestamp: number;
@@ -36,10 +39,10 @@ interface KnowledgeItem {
 
 const CATEGORIES = [
   { id: "all", label: "Tất cả", icon: Layers },
-  { id: "ai", label: "🤖 AI & Công nghệ", icon: Sparkles },
+  { id: "ai", label: "🤖 AI & Video", icon: Sparkles },
   { id: "mmo", label: "💼 MMO & Tut Mẹo", icon: Flame },
-  { id: "learning", label: "🎓 Học tập & Chia sẻ", icon: BookOpen },
-  { id: "links", label: "🔗 Kho Link & Tài liệu", icon: LinkIcon },
+  { id: "files", label: "📂 File & Tài liệu Drive", icon: FolderDown },
+  { id: "links", label: "🔗 Link & Công cụ", icon: LinkIcon },
 ];
 
 export function HubClient() {
@@ -48,7 +51,7 @@ export function HubClient() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [stats, setStats] = useState({ totalItems: 0, totalLinks: 0, totalContributors: 0 });
+  const [stats, setStats] = useState({ totalItems: 0, totalLinks: 0, totalFiles: 0, totalContributors: 0 });
   const [savedItemIds, setSavedItemIds] = useState<string[]>([]);
   const [selectedItem, setSelectedItem] = useState<KnowledgeItem | null>(null);
 
@@ -133,7 +136,7 @@ export function HubClient() {
           </p>
 
           {/* Stat Badges */}
-          <div className="flex flex-wrap items-center gap-4 pt-2">
+          <div className="flex flex-wrap items-center gap-3 pt-2">
             <div className="flex items-center gap-2 rounded-lg bg-slate-800/80 px-3.5 py-1.5 border border-slate-700/60 text-xs font-medium text-slate-200">
               <BookOpen className="h-4 w-4 text-cyan-400" />
               <span>
@@ -141,15 +144,21 @@ export function HubClient() {
               </span>
             </div>
             <div className="flex items-center gap-2 rounded-lg bg-slate-800/80 px-3.5 py-1.5 border border-slate-700/60 text-xs font-medium text-slate-200">
-              <LinkIcon className="h-4 w-4 text-emerald-400" />
+              <FolderDown className="h-4 w-4 text-amber-400" />
               <span>
-                <strong className="text-emerald-300">{stats.totalLinks}</strong> link & tài liệu
+                <strong className="text-amber-300">{stats.totalFiles}</strong> file & Drive
               </span>
             </div>
             <div className="flex items-center gap-2 rounded-lg bg-slate-800/80 px-3.5 py-1.5 border border-slate-700/60 text-xs font-medium text-slate-200">
-              <Users className="h-4 w-4 text-amber-400" />
+              <LinkIcon className="h-4 w-4 text-emerald-400" />
               <span>
-                <strong className="text-amber-300">{stats.totalContributors}</strong> thành viên chia sẻ
+                <strong className="text-emerald-300">{stats.totalLinks}</strong> link công cụ
+              </span>
+            </div>
+            <div className="flex items-center gap-2 rounded-lg bg-slate-800/80 px-3.5 py-1.5 border border-slate-700/60 text-xs font-medium text-slate-200">
+              <Users className="h-4 w-4 text-purple-400" />
+              <span>
+                <strong className="text-purple-300">{stats.totalContributors}</strong> thành viên chia sẻ
               </span>
             </div>
           </div>
@@ -278,11 +287,21 @@ export function HubClient() {
                     )}
                   </div>
 
-                  {/* Links attached */}
+                  {/* Links & Files attached */}
                   {item.links.length > 0 && (
-                    <div className="mt-4 space-y-1.5 rounded-lg bg-slate-950/60 p-2.5 border border-slate-800">
-                      <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1">
-                        <LinkIcon className="h-3 w-3" /> Tài liệu đính kèm:
+                    <div className="mt-4 space-y-2 rounded-lg bg-slate-950/60 p-3 border border-slate-800">
+                      <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1.5">
+                        {item.links.some((l) => l.isFile) ? (
+                          <>
+                            <FolderDown className="h-3.5 w-3.5 text-amber-400" />
+                            <span className="text-amber-300">File & Tài liệu đính kèm:</span>
+                          </>
+                        ) : (
+                          <>
+                            <LinkIcon className="h-3.5 w-3.5 text-emerald-400" />
+                            <span>Tài nguyên & Link:</span>
+                          </>
+                        )}
                       </span>
                       {item.links.slice(0, 2).map((l, idx) => (
                         <a
@@ -290,10 +309,19 @@ export function HubClient() {
                           href={l.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center justify-between gap-1 text-[11px] text-slate-300 hover:text-cyan-300 hover:underline truncate"
+                          className={`flex items-center justify-between gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors truncate ${
+                            l.isFile
+                              ? "bg-amber-500/10 text-amber-300 border border-amber-500/20 hover:bg-amber-500/20"
+                              : "bg-slate-900/80 text-cyan-300 border border-slate-700/60 hover:bg-slate-800 hover:text-cyan-200"
+                          }`}
                         >
-                          <span className="truncate">{l.url}</span>
-                          <ExternalLink className="h-3 w-3 shrink-0 text-slate-400" />
+                          <div className="flex items-center gap-1.5 truncate">
+                            {l.isFile ? <Download className="h-3.5 w-3.5 shrink-0 text-amber-400" /> : <ExternalLink className="h-3 w-3 shrink-0 text-cyan-400" />}
+                            <span className="truncate">{l.url}</span>
+                          </div>
+                          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider opacity-80">
+                            {l.isFile ? "Tải File" : "Mở"}
+                          </span>
                         </a>
                       ))}
                     </div>
@@ -383,11 +411,21 @@ export function HubClient() {
               </div>
             </div>
 
-            {/* Link đính kèm */}
+            {/* Link & File đính kèm */}
             {selectedItem.links.length > 0 && (
               <div className="space-y-2 pt-2">
-                <h4 className="font-semibold text-emerald-400 text-xs uppercase tracking-wider flex items-center gap-1">
-                  <LinkIcon className="h-3.5 w-3.5" /> Đường link & Tài nguyên:
+                <h4 className="font-semibold text-emerald-400 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                  {selectedItem.links.some((l) => l.isFile) ? (
+                    <>
+                      <FolderDown className="h-4 w-4 text-amber-400" />
+                      <span className="text-amber-300">File & Tài liệu đính kèm:</span>
+                    </>
+                  ) : (
+                    <>
+                      <LinkIcon className="h-4 w-4 text-emerald-400" />
+                      <span>Đường link & Tài nguyên:</span>
+                    </>
+                  )}
                 </h4>
                 <div className="space-y-2">
                   {selectedItem.links.map((l, idx) => (
@@ -396,10 +434,19 @@ export function HubClient() {
                       href={l.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center justify-between rounded-lg border border-emerald-500/20 bg-emerald-950/20 p-3 text-xs text-emerald-300 hover:bg-emerald-950/40 hover:underline transition-colors"
+                      className={`flex items-center justify-between rounded-lg p-3 text-xs transition-colors ${
+                        l.isFile
+                          ? "border border-amber-500/30 bg-amber-950/20 text-amber-300 hover:bg-amber-950/40"
+                          : "border border-emerald-500/20 bg-emerald-950/20 text-emerald-300 hover:bg-emerald-950/40"
+                      }`}
                     >
-                      <span className="truncate max-w-[450px]">{l.url}</span>
-                      <ExternalLink className="h-4 w-4 shrink-0" />
+                      <div className="flex items-center gap-2 truncate max-w-[450px]">
+                        {l.isFile ? <Download className="h-4 w-4 text-amber-400 shrink-0" /> : <ExternalLink className="h-4 w-4 shrink-0" />}
+                        <span className="truncate">{l.url}</span>
+                      </div>
+                      <span className="text-[11px] font-bold uppercase shrink-0 px-2 py-0.5 rounded bg-slate-900 border border-slate-700">
+                        {l.isFile ? "Tải File / Mở Drive" : "Mở Link"}
+                      </span>
                     </a>
                   ))}
                 </div>
