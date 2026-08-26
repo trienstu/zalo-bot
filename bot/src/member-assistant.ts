@@ -208,6 +208,53 @@ function handleLinksCommand(threadId: string, keywordFilter?: string): string {
 }
 
 /**
+ * Thống kê thành viên nằm vùng / chưa từng gửi tin nhắn trong nhóm.
+ */
+function handleInactiveCommand(threadId: string): string {
+  const db = getDb();
+  const inactiveMembers = db
+    .prepare(
+      `SELECT m.display_name,
+              COUNT(CASE WHEN i.type = 'message' THEN 1 END) AS msg_count
+       FROM members m
+       LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND (i.thread_id = @threadId OR i.thread_id = '')
+       WHERE (m.group_id = @threadId OR m.group_id = '' OR m.group_id IS NULL)
+         AND m.is_active = 1
+         AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
+         AND LOWER(m.display_name) NOT LIKE '%sen chua%'
+       GROUP BY m.zalo_user_id, m.display_name
+       HAVING msg_count = 0
+       ORDER BY m.display_name ASC`,
+    )
+    .all({ threadId }) as { display_name: string; msg_count: number }[];
+
+  const totalMembersInGroup = db
+    .prepare(
+      `SELECT COUNT(*) AS total FROM members WHERE (group_id = ? OR group_id = '' OR group_id IS NULL) AND is_active = 1 AND LOWER(display_name) NOT LIKE '%sen chúa%'`,
+    )
+    .get(threadId) as { total: number } | undefined;
+
+  const total = totalMembersInGroup?.total ?? 0;
+  const count = inactiveMembers.length;
+
+  if (count === 0) {
+    return `🚢 THỐNG KÊ THÀNH VIÊN TÀU NGẦM\n\nTuyệt vời! Toàn bộ ${total} thành viên trong nhóm đều đã từng gửi tin nhắn tương tác!`;
+  }
+
+  const sampleNames = inactiveMembers.slice(0, 15).map((m, idx) => `${idx + 1}. ${m.display_name}`);
+  const more = count > 15 ? `\n... và ${count - 15} thành viên khác.` : "";
+
+  return (
+    `🚢 THỐNG KÊ THÀNH VIÊN TÀU NGẦM (CHƯA TỪNG CHAT)\n\n` +
+    `📊 Hiện có ${count}/${total} thành viên chưa từng gửi tin nhắn nào trong nhóm.\n\n` +
+    `📋 Danh sách một số thành viên nằm vùng tiêu biểu:\n` +
+    sampleNames.join("\n") +
+    more +
+    `\n\n💡 Mẹo: Nhắc nhẹ anh em nổi lên giao lưu kẻo bị lọc nhé 😄!`
+  );
+}
+
+/**
  * Trả lời trợ giúp / danh sách lệnh.
  */
 function handleHelpCommand(): string {
@@ -216,6 +263,7 @@ function handleHelpCommand(): string {
     `Các lệnh bạn có thể sử dụng:\n` +
     `🔹 /rank hoặc /diem: Tra cứu thứ hạng & điểm tương tác của bạn\n` +
     `🔹 /top: Xem Top 5 thành viên tích cực nhất nhóm\n` +
+    `🔹 /taungam: Xem thống kê các thành viên nằm vùng / chưa từng gửi tin nhắn\n` +
     `🔹 /link [từ khóa]: Tổng hợp tất cả link/tài liệu/video đã chia sẻ trong nhóm\n` +
     `🔹 /hoi [câu hỏi] hoặc tag @Sen Chúa: Hỏi đáp kiến thức tra cứu từ lịch sử chat của nhóm\n` +
     `🔹 /help: Hiển thị hướng dẫn này`
@@ -279,10 +327,6 @@ async function handleHistoryQA(question: string, displayName: string, threadId: 
     .prepare(`SELECT day_label, summary_text FROM daily_summaries WHERE thread_id = ? OR thread_id = '' ORDER BY day_date DESC LIMIT 7`)
     .all(threadId) as { day_label: string; summary_text: string }[];
 
-  if (relevantMessages.length === 0 && pastSummaries.length === 0) {
-    return `Dạ thông tin về chủ đề này chưa từng được các thành viên trong nhóm thảo luận hoặc chia sẻ trước đây ạ.`;
-  }
-
   // Lấy Top thành viên tích cực nhất từ bảng xếp hạng của nhóm
   const topMembers = db
     .prepare(
@@ -301,6 +345,28 @@ async function handleHistoryQA(question: string, displayName: string, threadId: 
     )
     .all({ threadId }) as { display_name: string; msg_count: number; points: number }[];
 
+  // Lấy thống kê thành viên tàu ngầm / chưa từng chat trong nhóm
+  const inactiveMembers = db
+    .prepare(
+      `SELECT m.display_name,
+              COUNT(CASE WHEN i.type = 'message' THEN 1 END) AS msg_count
+       FROM members m
+       LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND (i.thread_id = @threadId OR i.thread_id = '')
+       WHERE (m.group_id = @threadId OR m.group_id = '' OR m.group_id IS NULL)
+         AND m.is_active = 1
+         AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
+         AND LOWER(m.display_name) NOT LIKE '%sen chua%'
+       GROUP BY m.zalo_user_id, m.display_name
+       HAVING msg_count = 0`,
+    )
+    .all({ threadId }) as { display_name: string; msg_count: number }[];
+
+  const totalMembersInGroup = db
+    .prepare(
+      `SELECT COUNT(*) AS total FROM members WHERE (group_id = ? OR group_id = '' OR group_id IS NULL) AND is_active = 1 AND LOWER(display_name) NOT LIKE '%sen chúa%'`,
+    )
+    .get(threadId) as { total: number } | undefined;
+
   // Dựng ngữ cảnh dữ liệu lịch sử
   const contextLines: string[] = [];
 
@@ -309,6 +375,16 @@ async function handleHistoryQA(question: string, displayName: string, threadId: 
     topMembers.forEach((m, idx) => {
       contextLines.push(`Top ${idx + 1}: ${m.display_name} - ${m.msg_count} tin nhắn, tổng ${m.points} điểm.`);
     });
+  }
+
+  if (inactiveMembers.length > 0) {
+    const totalCount = totalMembersInGroup?.total ?? 0;
+    contextLines.push("=== THỐNG KÊ THÀNH VIÊN CHƯA TỪNG NHẮN TIN / NẰM VÙNG / TÀU NGẦM ===");
+    contextLines.push(
+      `Tổng số thành viên trong nhóm: ${totalCount} người.\n` +
+      `Số thành viên chưa từng gửi bất kỳ tin nhắn nào trong nhóm: ${inactiveMembers.length}/${totalCount} người.\n` +
+      `Danh sách một số thành viên nằm vùng chưa từng chat: ${inactiveMembers.slice(0, 15).map((m) => m.display_name).join(", ")}...`
+    );
   }
 
   if (pastSummaries.length > 0) {
@@ -442,6 +518,22 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
+  // 5. Lệnh /taungam, /namvung, /inactive, /chuachat
+  if (
+    lower === "/taungam" ||
+    lower === "/namvung" ||
+    lower === "/inactive" ||
+    lower === "/chuachat" ||
+    lower === "/chuatungchat" ||
+    lower === "!taungam"
+  ) {
+    userCooldowns.set(sender, now);
+    const reply = handleInactiveCommand(threadId);
+    await sendGroupText(api, threadId, reply);
+    console.log(`[member-assistant] ✅ Đã phản hồi /taungam cho ${displayName}`);
+    return;
+  }
+
   // 4. Lệnh /hoi [câu hỏi] hoặc Tag bot / Nhắc tên Sen Chúa
   const isTagBot =
     lower.startsWith("/hoi") ||
@@ -559,6 +651,33 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         handleLinksCommand(threadId, filterWord || undefined);
       await sendGroupText(api, threadId, reply);
       console.log(`[member-assistant] ✅ Đã gửi tổng hợp link tự động cho ${displayName}`);
+      return;
+    }
+
+    // Tự động nhận diện câu hỏi về thành viên chưa từng chat, nằm vùng, tàu ngầm
+    if (
+      qLower.includes("chưa từng chat") ||
+      qLower.includes("chua tung chat") ||
+      qLower.includes("chưa chat") ||
+      qLower.includes("chua chat") ||
+      qLower.includes("chưa từng nhắn") ||
+      qLower.includes("chua tung nhan") ||
+      qLower.includes("chưa nhắn tin") ||
+      qLower.includes("chua nhan tin") ||
+      qLower.includes("nằm vùng") ||
+      qLower.includes("nam vung") ||
+      qLower.includes("tàu ngầm") ||
+      qLower.includes("tau ngam") ||
+      qLower.includes("ai chưa tương tác") ||
+      qLower.includes("ai chua tuong tac") ||
+      qLower.includes("ít tương tác nhất") ||
+      qLower.includes("lười chat")
+    ) {
+      const reply =
+        `🤖 Sen Chúa trả lời @${displayName}:\n\n` +
+        handleInactiveCommand(threadId);
+      await sendGroupText(api, threadId, reply);
+      console.log(`[member-assistant] ✅ Đã gửi thống kê tàu ngầm tự động cho ${displayName}`);
       return;
     }
 
