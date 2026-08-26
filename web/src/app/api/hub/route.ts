@@ -280,15 +280,71 @@ export async function GET(request: Request) {
       const d = new Date(msg.ts + 7 * 3600 * 1000);
       const dateStr = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
 
+      // 🔍 PHÂN TÍCH NGỮ CẢNH HỘI THOẠI (Trước và sau khi gửi link 5 phút)
+      const timeWindow = 300_000; // 5 phút
+      const surroundingMessages = db
+        .prepare(
+          `SELECT display_name, text, ts, zalo_user_id
+           FROM group_messages
+           WHERE (thread_id = ? OR thread_id = '')
+             AND deleted_at IS NULL
+             AND text != ''
+             AND ts BETWEEN ? AND ?
+           ORDER BY ts ASC`,
+        )
+        .all(msg.thread_id || "", msg.ts - timeWindow, msg.ts + timeWindow) as {
+        display_name: string;
+        text: string;
+        ts: number;
+        zalo_user_id: string;
+      }[];
+
+      // Tìm các tin nhắn giải thích tính năng / mô tả của người gửi hoặc người thảo luận
+      const contextTexts: string[] = [];
+      for (const sm of surroundingMessages) {
+        const smClean = sm.text.replace(urlRegex, "").replace(/\s+/g, " ").trim();
+        // Bỏ qua các tin cảm ơn ngắn hoặc spam
+        if (
+          smClean.length >= 5 &&
+          !["ok", "tks", "thanks", "cảm ơn", "cam on", "hay quá", "+1", "dạ", "chấm", "."].includes(smClean.toLowerCase())
+        ) {
+          if (!contextTexts.includes(smClean)) {
+            contextTexts.push(smClean);
+          }
+        }
+      }
+
       const cleanText = msg.text.replace(urlRegex, "").replace(/\s+/g, " ").trim();
       let msgCat: KnowledgeItem["category"] = "links";
       let msgCatLabel = "Tài nguyên";
 
-      const lowerText = msg.text.toLowerCase();
-      if (lowerText.includes("ai") || lowerText.includes("gpt") || lowerText.includes("prompt") || lowerText.includes("video") || lowerText.includes("voice")) {
+      // Phân tích từ khóa từ TOÀN BỘ NGỮ CẢNH trước/sau
+      const combinedContext = [cleanText, ...contextTexts].join(" ");
+      const lowerContext = combinedContext.toLowerCase();
+
+      if (
+        lowerContext.includes("ai") ||
+        lowerContext.includes("gpt") ||
+        lowerContext.includes("prompt") ||
+        lowerContext.includes("video") ||
+        lowerContext.includes("voice") ||
+        lowerContext.includes("flux") ||
+        lowerContext.includes("midjourney") ||
+        lowerContext.includes("comfyui") ||
+        lowerContext.includes("colab")
+      ) {
         msgCat = "ai";
         msgCatLabel = "AI & Video";
-      } else if (lowerText.includes("mmo") || lowerText.includes("ga") || lowerText.includes("adsense") || lowerText.includes("tiktok") || lowerText.includes("kênh") || lowerText.includes("view")) {
+      } else if (
+        lowerContext.includes("mmo") ||
+        lowerContext.includes("ga") ||
+        lowerContext.includes("adsense") ||
+        lowerContext.includes("tiktok") ||
+        lowerContext.includes("kênh") ||
+        lowerContext.includes("view") ||
+        lowerContext.includes("traffic") ||
+        lowerContext.includes("bkt")
+      ) {
         msgCat = "mmo";
         msgCatLabel = "MMO & Tut";
       }
@@ -301,15 +357,40 @@ export async function GET(request: Request) {
 
       const hasFile = cleanLinks.some((l) => l.isFile);
       const titlePrefix = hasFile ? "📂 File & Tài liệu: " : "";
-      const displayTitle = cleanTitle(cleanText, hasFile ? `Tài liệu Google Drive / File từ ${authorName}` : `Tài nguyên chia sẻ từ ${authorName}`);
+
+      // Chọn câu mô tả hay nhất từ ngữ cảnh để làm Tiêu đề
+      let bestTitleCandidate = cleanText;
+      if (!bestTitleCandidate || bestTitleCandidate.length < 8) {
+        // Lấy câu mô tả trước hoặc sau gần nhất của tác giả
+        const authorDesc = contextTexts.find((t) => t.length >= 10);
+        if (authorDesc) {
+          bestTitleCandidate = authorDesc;
+        }
+      }
+
+      const displayTitle = cleanTitle(
+        bestTitleCandidate,
+        hasFile ? `Tài liệu Google Drive / File từ ${authorName}` : `Tài nguyên & Tool từ ${authorName}`,
+      );
+
+      // Xây dựng các ý mô tả & tính năng chi tiết từ ngữ cảnh hội thoại
+      const keyPoints: string[] = [];
+      if (contextTexts.length > 0) {
+        for (const ct of contextTexts.slice(0, 4)) {
+          keyPoints.push(ct);
+        }
+      } else {
+        keyPoints.push(cleanText || (hasFile ? "Tệp đính kèm / Kho lưu trữ Google Drive" : "Đường link công cụ & tài nguyên"));
+      }
+      keyPoints.push(`Đóng góp & chia sẻ bởi ${authorName}`);
 
       items.push({
         id: `msg_${msg.message_id || msg.ts}`,
         title: titlePrefix + displayTitle,
         category: msgCat,
         categoryLabel: hasFile ? "📂 File & Tài liệu" : msgCatLabel,
-        summary: cleanText || "Tài nguyên & liên kết chia sẻ từ cộng đồng.",
-        keyPoints: [cleanText || (hasFile ? "Tệp đính kèm / Kho lưu trữ Google Drive" : "Đường link công cụ & tài nguyên"), `Đóng góp bởi ${authorName}`],
+        summary: contextTexts.slice(0, 2).join(". ") || cleanText || "Tài nguyên & liên kết chia sẻ từ cộng đồng.",
+        keyPoints,
         links: cleanLinks,
         author: authorName,
         date: dateStr,

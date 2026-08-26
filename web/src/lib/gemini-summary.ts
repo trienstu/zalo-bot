@@ -287,19 +287,32 @@ export async function generateChatSummary(options: {
     .slice(0, 5)
     .map(([_, s]) => `${s.name} (${s.count})`);
 
-  // Trích xuất toàn bộ đường link được chia sẻ trong ngày
+  // Trích xuất toàn bộ đường link được chia sẻ trong ngày kèm ngữ cảnh đa tin nhắn trước & sau
   const urlRegex = /(https?:\/\/[^\s]+)/gi;
   const extractedLinks: { sender: string; url: string; context: string }[] = [];
-  for (const m of messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
     const matches = m.text.match(urlRegex);
     if (matches) {
+      // Thu thập 2 tin nhắn trước và 2 tin nhắn sau (trong vòng 3 phút) để hiểu người gửi đang chia sẻ tài liệu/tool gì
+      const prevTexts = messages
+        .slice(Math.max(0, i - 2), i)
+        .filter((pm) => pm.zalo_user_id === m.zalo_user_id || Math.abs(pm.ts - m.ts) < 180_000)
+        .map((pm) => `${pm.display_name}: ${pm.text}`);
+      const nextTexts = messages
+        .slice(i + 1, Math.min(messages.length, i + 3))
+        .filter((nm) => nm.zalo_user_id === m.zalo_user_id || Math.abs(nm.ts - m.ts) < 180_000)
+        .map((nm) => `${nm.display_name}: ${nm.text}`);
+
+      const fullContext = [...prevTexts, `${m.display_name}: ${m.text}`, ...nextTexts].join(" -> ");
+
       for (const u of matches) {
         const cleanUrl = u.replace(/[.,;!?)]+$/, "");
         if (!extractedLinks.some((l) => l.url === cleanUrl)) {
           extractedLinks.push({
             sender: m.display_name || m.zalo_user_id,
             url: cleanUrl,
-            context: m.text.replace(/\s*\n\s*/g, " ").slice(0, 150),
+            context: fullContext.slice(0, 300),
           });
         }
       }
@@ -320,20 +333,20 @@ export async function generateChatSummary(options: {
   const systemPrompt =
     "Bạn là trợ lý AI chuyên viết bản tóm tắt hội thoại nhóm Zalo tiếng Việt súc tích, đầy đủ và hữu ích cho người vắng mặt. " +
     "Người dùng cung cấp log tin nhắn một ngày đặt giữa <log> và </log>, và danh sách các link được chia sẻ đặt giữa <links> và </links>. " +
-    "NGUYÊN TẮC: tóm tắt NỘI DUNG THỰC CHẤT của từng thảo luận — luận điểm, giải pháp, kinh nghiệm, kết luận, con số và công cụ cụ thể. " +
+    "NGUYÊN TẮC QUAN TRỌNG: Hãy phân tích kỹ NGỮ CẢNH CỦA NGƯỜI GỬI (các tin nhắn họ nhắn trước hoặc sau khi gửi link) để nắm rõ TÊN TOOL / CÔNG NGHỆ, TÍNH NĂNG VÀ HƯỚNG DẪN CỤ THỂ của tài liệu đó. " +
     "Bố cục: Phân nhóm nội dung thành các mục có nội dung thực tế (bỏ mục rỗng): " +
     "(1) '📢 THÔNG BÁO & QUYẾT ĐỊNH' " +
     "(2) '💼 CHỦ ĐỀ CHUYÊN MÔN & THẢO LUẬN' " +
     "(3) '🤖 AI & CÔNG NGHỆ' " +
     "(4) '🎓 HỌC HÀNH & KINH NGHIỆM' " +
-    "(5) '🔗 LINK ĐÃ CHIA SẺ' (YÊU CẦU ĐẶC BIỆT: Phải liệt kê ĐẦY ĐỦ TẤT CẢ các link xuất hiện trong <links> hoặc <log>, kèm mô tả ngắn và ai gửi, tuyệt đối không được bỏ sót) " +
+    "(5) '🔗 LINK ĐÃ CHIA SẺ' (YÊU CẦU ĐẶC BIỆT: Liệt kê ĐẦY ĐỦ TẤT CẢ các link kèm Tên tool, Công dụng chi tiết đúc kết từ tin nhắn trước/sau và ai gửi) " +
     "(6) '❓ CÂU HỎI CHƯA CÓ TRẢ LỜI' " +
     "(7) '☕ NGOÀI LỀ' (tán gẫu, chuyện vui cuối ngày). " +
     "Trình bày bằng gạch đầu dòng '- ', mỗi ý một dòng, KHÔNG dùng markdown in đậm ** vì Zalo không render.";
 
   const linksBlock =
     extractedLinks.length > 0
-      ? `\n\n<links>\n${extractedLinks.map((l) => `- ${l.url} (Người gửi: ${l.sender} | Đoạn chat: ${l.context})`).join("\n")}\n</links>`
+      ? `\n\n<links>\n${extractedLinks.map((l) => `- ${l.url} (Người gửi: ${l.sender} | Ngữ cảnh hội thoại trước/sau: ${l.context})`).join("\n")}\n</links>`
       : "";
 
   const userPrompt = `Tóm tắt log tin nhắn ngày ${dayRange.label} sau:\n<log>\n${transcript}\n</log>${linksBlock}`;
