@@ -30,20 +30,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Origin không hợp lệ" }, { status: 403 });
   }
 
+  const body = (await request.json().catch(() => ({}))) as { groupId?: string };
   const requestPath = memberSyncRequestPath();
   const dir = path.dirname(requestPath);
   const tempPath = `${requestPath}.${process.pid}.tmp`;
   const requestedAt = Date.now();
 
   try {
-    if (!isBotHealthFresh(getBotHealth())) {
-      return NextResponse.json({ error: "Bot heartbeat stale hoặc bot chưa chạy; không gửi yêu cầu sync." }, { status: 503 });
-    }
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(tempPath, JSON.stringify({ requestedAt, requestedBy: "dashboard" }, null, 2), {
-      encoding: "utf8",
-      mode: 0o600,
-    });
+    fs.writeFileSync(
+      tempPath,
+      JSON.stringify({ requestedAt, requestedBy: "dashboard", groupId: body.groupId || undefined }, null, 2),
+      {
+        encoding: "utf8",
+        mode: 0o600,
+      },
+    );
     fs.renameSync(tempPath, requestPath);
     return NextResponse.json({
       ok: true,

@@ -2,7 +2,7 @@
 
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useMemo, Suspense } from "react";
 import {
   AlertTriangle,
   History,
@@ -22,7 +22,9 @@ import {
   ShieldAlert,
   ArrowRight,
   RefreshCw,
-  Plus,
+  Search,
+  CheckCircle2,
+  SlidersHorizontal,
 } from "lucide-react";
 
 interface GroupItem {
@@ -51,7 +53,6 @@ const NAV = [
   { href: "/login", label: "Đăng nhập Zalo", shortLabel: "Zalo QR", icon: LogIn },
 ];
 
-// Khối 403 Forbidden dành cho người không có quyền truy cập
 function ForbiddenAccessScreen() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-12">
@@ -95,6 +96,8 @@ function AppShellInner({
   const [groups, setGroups] = useState<GroupItem[]>([]);
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [syncingGroups, setSyncingGroups] = useState(false);
+  const [syncingMembers, setSyncingMembers] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Lấy danh sách nhóm động từ API
   async function loadGroups() {
@@ -131,9 +134,24 @@ function AppShellInner({
     setSyncingGroups(false);
   }
 
+  // Đồng bộ danh sách chi tiết thành viên của nhóm đang chọn
+  async function handleSyncMembers(targetGroupId?: string) {
+    setSyncingMembers(true);
+    try {
+      await fetch("/api/member-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groupId: targetGroupId || activeGroupId }),
+      });
+    } catch {}
+    setTimeout(() => {
+      setSyncingMembers(false);
+      router.refresh();
+    }, 2500);
+  }
+
   // Đổi chế độ hoạt động cho nhóm: 'interactive' | 'silent' | 'disabled'
   async function handleSetGroupMode(groupId: string, mode: "interactive" | "silent" | "disabled") {
-    // Cập nhật UI ngay lập tức
     setGroups((prev) =>
       prev.map((g) => (g.id === groupId ? { ...g, mode, icon: mode === "silent" ? "🟡" : mode === "disabled" ? "🔴" : "🟢" } : g)),
     );
@@ -216,143 +234,198 @@ function AppShellInner({
     );
   }
 
-  // 4. NẾU CHƯA ĐĂNG NHẬP ADMIN MÀ VÀO TRỰC TIẾP TRANG CHỦ / HOẶC BẤT KỲ TRANG ADMIN NÀO -> BÁO 403 FORBIDDEN
+  // 4. NẾU CHƯA ĐĂNG NHẬP ADMIN -> BÁO 403 FORBIDDEN
   if (isAdminAuthenticated === false) {
     return <ForbiddenAccessScreen />;
   }
 
   const activeGroupId = searchParams.get("group") || (groups.length > 0 ? groups[0].id : "");
+  const activeGroup = groups.find((g) => g.id === activeGroupId);
 
-  // 5. NẾU ĐÃ ĐĂNG NHẬP ADMIN -> HIỂN THỊ TOÀN BỘ BẢNG ĐIỀU KHIỂN QUẢN TRỊ
+  const filteredGroups = groups.filter(
+    (g) =>
+      !searchQuery ||
+      g.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      g.id.includes(searchQuery),
+  );
+
   const buildNavHref = (baseHref: string) => {
     if (!activeGroupId) return baseHref;
     return `${baseHref}${baseHref.includes("?") ? "&" : "?"}group=${activeGroupId}`;
   };
 
   return (
-    <>
-      <div className="flex min-h-screen">
-        <aside className="hidden md:flex md:w-64 md:shrink-0 flex-col justify-between border-r border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-          <div>
-            <div className="mb-4 px-2">
-              <div className="flex items-center justify-between text-base font-bold text-[var(--color-text)]">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--color-primary)] text-white text-xs">
-                    🤖
-                  </span>
-                  <span>Bot Member Zalo</span>
-                </div>
-                <span className="text-[10px] bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 px-2 py-0.5 rounded font-mono font-bold">
-                  ADMIN
-                </span>
+    <div className="flex h-screen overflow-hidden bg-slate-950 text-slate-100">
+      {/* 👈 CỘT TRÁI: 100% DÀNH CHO QUẢN LÝ TẤT CẢ NHÓM HOẠT ĐỘNG */}
+      <aside className="w-80 shrink-0 flex flex-col border-r border-slate-800 bg-slate-900/90 backdrop-blur-md">
+        {/* Header Cột Trái */}
+        <div className="p-3.5 border-b border-slate-800">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-500 text-slate-950 font-bold text-xs">
+                🤖
+              </span>
+              <div>
+                <h1 className="text-sm font-bold text-white leading-none">Bot Member Zalo</h1>
+                <span className="text-[10px] text-cyan-400 font-mono">Multi-Group Manager</span>
               </div>
-              <div className="mt-0.5 text-xs text-[var(--color-muted)]">Quản trị & Phân vùng nhóm</div>
             </div>
+            <button
+              onClick={handleSyncGroups}
+              disabled={syncingGroups}
+              title="Quét lại tất cả các nhóm trên Zalo"
+              className="flex items-center gap-1 rounded-lg bg-cyan-500/10 border border-cyan-500/30 px-2 py-1 text-[11px] font-bold text-cyan-300 hover:bg-cyan-500/20 transition-all"
+            >
+              <RefreshCw className={`h-3 w-3 ${syncingGroups ? "animate-spin text-cyan-300" : ""}`} />
+              <span>Quét nhóm</span>
+            </button>
+          </div>
 
-            {/* BỘ CHUYỂN PHÂN VÙNG NHÓM ĐỘNG */}
-            <div className="mb-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2">
-              <div className="px-1.5 py-1 text-[11px] font-bold uppercase tracking-wider text-[var(--color-muted)] flex items-center justify-between">
-                <span className="flex items-center gap-1">
-                  <Layers className="h-3 w-3" /> Nhóm hoạt động:
-                </span>
-                <button
-                  onClick={handleSyncGroups}
-                  disabled={syncingGroups}
-                  title="Quét & Làm mới danh sách nhóm Zalo"
-                  className="text-[10px] text-cyan-400 hover:text-cyan-300 transition-colors p-1"
+          {/* Ô Tìm Kiếm Nhóm */}
+          <div className="relative mt-3">
+            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Tìm nhanh nhóm Zalo..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full rounded-lg bg-slate-950/80 border border-slate-800 py-1.5 pl-8 pr-3 text-xs text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
+            />
+          </div>
+        </div>
+
+        {/* Danh Sách Tất Cả Nhóm Hoạt Động (Scrollable Full Height) */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-1.5 custom-scrollbar">
+          <div className="px-2 py-1 text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+            <span>Danh sách nhóm ({filteredGroups.length})</span>
+            <span className="text-[10px] font-mono text-cyan-400">Click để chọn</span>
+          </div>
+
+          {filteredGroups.length > 0 ? (
+            filteredGroups.map((g) => {
+              const isActive = activeGroupId === g.id;
+              const mode = g.mode || "interactive";
+
+              return (
+                <div
+                  key={g.id}
+                  className={`group relative rounded-xl p-2.5 transition-all border ${
+                    isActive
+                      ? "border-cyan-500/60 bg-gradient-to-r from-cyan-950/40 to-slate-900 shadow-md shadow-cyan-500/10 ring-1 ring-cyan-500/30"
+                      : "border-slate-800/80 bg-slate-950/40 hover:bg-slate-800/50 hover:border-slate-700"
+                  }`}
                 >
-                  <RefreshCw className={`h-3 w-3 ${syncingGroups ? "animate-spin text-cyan-300" : ""}`} />
-                </button>
-              </div>
+                  <div className="flex items-start justify-between gap-2">
+                    <Link
+                      href={`${pathname}?group=${g.id}`}
+                      className="flex-1 min-w-0"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm">{g.icon || "👥"}</span>
+                        <h4 className={`text-xs font-bold truncate ${isActive ? "text-cyan-300" : "text-slate-200 group-hover:text-white"}`}>
+                          {g.name}
+                        </h4>
+                      </div>
+                      <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-400 font-mono">
+                        <span className="bg-slate-800/80 px-1.5 py-0.2 rounded text-slate-300 font-bold">{g.count}</span>
+                        <span className="truncate max-w-[120px]">ID: {g.id}</span>
+                      </div>
+                    </Link>
 
-              <div className="mt-1 flex flex-col gap-1.5 max-h-56 overflow-y-auto">
-                {groups.length > 0 ? (
-                  groups.map((g) => {
-                    const isActive = activeGroupId === g.id;
-                    const mode = g.mode || "interactive";
+                    {isActive && (
+                      <span className="flex h-2 w-2 rounded-full bg-cyan-400 animate-pulse mt-1 shrink-0" />
+                    )}
+                  </div>
 
-                    return (
-                      <div
-                        key={g.id}
-                        className={`group relative flex flex-col rounded-lg p-2 text-xs transition-all border ${
-                          isActive
-                            ? "border-cyan-500/40 bg-cyan-950/20 shadow-md shadow-cyan-500/10"
-                            : "border-slate-800/80 bg-slate-900/40 hover:bg-slate-800/40"
+                  {/* 3 Nút Chọn Chế Độ Hoạt Động (Xanh - Vàng - Đỏ) */}
+                  <div className="mt-2.5 flex items-center justify-between border-t border-slate-800/60 pt-2 text-[10px]">
+                    <span className="text-slate-400 font-medium">Chế độ:</span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSetGroupMode(g.id, "interactive");
+                        }}
+                        title="🟢 Toàn quyền tương tác: Bot trả lời lệnh, tương tác với mọi người"
+                        className={`rounded px-1.5 py-0.5 font-bold transition-all ${
+                          mode === "interactive"
+                            ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/50 ring-1 ring-emerald-500/30"
+                            : "text-slate-400 hover:text-white hover:bg-slate-800"
                         }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <Link
-                            href={`${pathname}?group=${g.id}`}
-                            className="flex items-center gap-2 truncate font-semibold text-slate-200 hover:text-white"
-                          >
-                            <span>{g.icon || "👥"}</span>
-                            <span className="truncate max-w-[110px]">{g.name}</span>
-                          </Link>
-                          <span className="text-[10px] text-slate-400 font-mono">{g.count}</span>
-                        </div>
-
-                        {/* Thanh chọn 3 Chế Độ Hoạt Động */}
-                        <div className="mt-2 flex items-center justify-between border-t border-slate-800/60 pt-1.5 text-[10px]">
-                          <span className="text-slate-400">Chế độ:</span>
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => handleSetGroupMode(g.id, "interactive")}
-                              title="🟢 Toàn quyền tương tác: Bot trả lời lệnh, tương tác với mọi người"
-                              className={`rounded px-1.5 py-0.5 font-bold transition-all ${
-                                mode === "interactive"
-                                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
-                                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-                              }`}
-                            >
-                              🟢 Tương tác
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleSetGroupMode(g.id, "silent")}
-                              title="🟡 Tàu ngầm ẩn: Bot im lặng 100%, chỉ thu thập kiến thức/file lên /hub"
-                              className={`rounded px-1.5 py-0.5 font-bold transition-all ${
-                                mode === "silent"
-                                  ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-                              }`}
-                            >
-                              🟡 Ẩn
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleSetGroupMode(g.id, "disabled")}
-                              title="🔴 Tắt: Bot bỏ qua hoàn toàn nhóm này"
-                              className={`rounded px-1.5 py-0.5 font-bold transition-all ${
-                                mode === "disabled"
-                                  ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
-                                  : "text-slate-400 hover:text-white hover:bg-slate-800"
-                              }`}
-                            >
-                              🔴 Tắt
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="p-2 text-center text-xs text-slate-400">
-                    <p className="text-[11px]">Chưa có nhóm nào</p>
-                    <button
-                      onClick={handleSyncGroups}
-                      disabled={syncingGroups}
-                      className="mt-1.5 inline-flex items-center gap-1 rounded bg-cyan-500/10 border border-cyan-500/30 px-2 py-1 text-[11px] font-semibold text-cyan-300 hover:bg-cyan-500/20"
-                    >
-                      <RefreshCw className={`h-3 w-3 ${syncingGroups ? "animate-spin" : ""}`} />
-                      <span>Quét nhóm Zalo</span>
-                    </button>
+                        🟢 Tương tác
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSetGroupMode(g.id, "silent");
+                        }}
+                        title="🟡 Tàu ngầm ẩn: Bot im lặng 100%, chỉ cào kiến thức/file lên /hub"
+                        className={`rounded px-1.5 py-0.5 font-bold transition-all ${
+                          mode === "silent"
+                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/50 ring-1 ring-amber-500/30"
+                            : "text-slate-400 hover:text-white hover:bg-slate-800"
+                        }`}
+                      >
+                        🟡 Ẩn
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSetGroupMode(g.id, "disabled");
+                        }}
+                        title="🔴 Tắt: Bot bỏ qua hoàn toàn nhóm này"
+                        className={`rounded px-1.5 py-0.5 font-bold transition-all ${
+                          mode === "disabled"
+                            ? "bg-rose-500/20 text-rose-300 border border-rose-500/50 ring-1 ring-rose-500/30"
+                            : "text-slate-400 hover:text-white hover:bg-slate-800"
+                        }`}
+                      >
+                        🔴 Tắt
+                      </button>
+                    </div>
                   </div>
-                )}
-              </div>
+                </div>
+              );
+            })
+          ) : (
+            <div className="p-4 text-center text-xs text-slate-400">
+              <p>Chưa tìm thấy nhóm nào</p>
+              <button
+                onClick={handleSyncGroups}
+                disabled={syncingGroups}
+                className="mt-2 inline-flex items-center gap-1 rounded bg-cyan-500/10 border border-cyan-500/30 px-3 py-1.5 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/20"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${syncingGroups ? "animate-spin" : ""}`} />
+                <span>Quét nhóm Zalo</span>
+              </button>
             </div>
+          )}
+        </div>
 
-            <nav className="flex flex-col gap-1 overflow-y-auto max-h-[50vh]">
+        {/* Footer Cột Trái */}
+        <div className="p-3 border-t border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
+          <span>Tổng: <strong className="text-white">{groups.length}</strong> nhóm</span>
+          <button
+            onClick={handleLogout}
+            className="flex items-center gap-1 text-rose-400 hover:text-rose-300 font-semibold"
+          >
+            <LogOut size={13} />
+            <span>Đăng xuất</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* 👉 KHU VỰC CHÍNH: THANH MENU TRÊN ĐẦU NẰM NGANG & NỘI DUNG */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* 🌟 THANH NAVIGATION NẰM NGANG TRÊN ĐẦU */}
+        <header className="shrink-0 border-b border-slate-800 bg-slate-900/95 backdrop-blur-md px-4 py-2 flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-4">
+            {/* Thanh menu nằm ngang cuộn mượt */}
+            <nav className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar py-1">
               {NAV.map((item) => {
                 const Icon = item.icon;
                 const isCurrent = pathname === item.href;
@@ -360,53 +433,45 @@ function AppShellInner({
                   <Link
                     key={item.href}
                     href={buildNavHref(item.href)}
-                    className={`flex items-center gap-3 rounded-[var(--radius)] px-3 py-2 text-sm transition-colors ${
+                    className={`flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs sm:text-sm font-semibold whitespace-nowrap transition-all ${
                       isCurrent
-                        ? "bg-[var(--color-primary)]/10 font-semibold text-[var(--color-primary)] border border-[var(--color-primary)]/30"
-                        : "text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
+                        ? "bg-cyan-500 text-slate-950 font-bold shadow-md shadow-cyan-500/20"
+                        : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
                     }`}
                   >
-                    <Icon size={16} />
-                    {item.label}
+                    <Icon size={15} />
+                    <span>{item.label}</span>
                   </Link>
                 );
               })}
             </nav>
-          </div>
 
-          {/* Bottom Sidebar: Logout Admin */}
-          <div className="border-t border-[var(--color-border)] pt-3 mt-4">
-            <button
-              onClick={handleLogout}
-              className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-800/80 px-3 py-2 text-xs font-semibold text-rose-300 hover:bg-rose-950/40 hover:text-rose-200 border border-rose-500/20 transition-colors"
-            >
-              <LogOut size={14} />
-              <span>Đăng xuất Admin</span>
-            </button>
+            {/* Nút tác vụ nhanh bên phải */}
+            <div className="hidden lg:flex items-center gap-2 shrink-0">
+              {activeGroup && (
+                <div className="flex items-center gap-1.5 rounded-xl bg-slate-950 border border-slate-800 px-3 py-1 text-xs">
+                  <span className="text-slate-400">Đang chọn:</span>
+                  <span className="font-bold text-cyan-300 truncate max-w-[140px]">{activeGroup.name}</span>
+                </div>
+              )}
+              <button
+                onClick={() => handleSyncMembers(activeGroupId)}
+                disabled={syncingMembers}
+                className="flex items-center gap-1.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 px-3 py-1.5 text-xs font-bold text-cyan-300 hover:bg-cyan-500/20 transition-all"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${syncingMembers ? "animate-spin text-cyan-300" : ""}`} />
+                <span>{syncingMembers ? "Đang đồng bộ..." : "Đồng bộ thành viên"}</span>
+              </button>
+            </div>
           </div>
-        </aside>
+        </header>
 
-        {/* Main content */}
-        <main className="min-w-0 flex-1 overflow-auto p-4 pb-20 md:p-8 md:pb-8">{children}</main>
+        {/* Nội dung chi tiết của trang theo Nhóm đang chọn */}
+        <main className="flex-1 overflow-y-auto p-4 md:p-6 bg-slate-950">
+          {children}
+        </main>
       </div>
-
-      {/* Mobile Nav */}
-      <nav className="fixed bottom-0 inset-x-0 z-50 flex overflow-x-auto md:hidden border-t border-[var(--color-border)] bg-[var(--color-surface)]">
-        {NAV.map((item) => {
-          const Icon = item.icon;
-          return (
-            <Link
-              key={item.href}
-              href={buildNavHref(item.href)}
-              className="flex min-w-16 flex-1 flex-col items-center gap-1 py-2.5 text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors"
-            >
-              <Icon size={20} />
-              <span className="text-[10px] leading-none">{item.shortLabel}</span>
-            </Link>
-          );
-        })}
-      </nav>
-    </>
+    </div>
   );
 }
 
@@ -418,7 +483,7 @@ export function AppShell({
   publicMode?: boolean;
 }) {
   return (
-    <Suspense fallback={<main className="min-h-screen">{children}</main>}>
+    <Suspense fallback={<main className="min-h-screen bg-slate-950 text-white flex items-center justify-center">Đang tải...</main>}>
       <AppShellInner publicMode={publicMode}>{children}</AppShellInner>
     </Suspense>
   );

@@ -133,6 +133,7 @@ export function consumeGroupScanRequest(): boolean {
 export interface MemberSyncRequest {
   requestedAt: number;
   requestedBy: string;
+  groupId?: string;
 }
 
 export function consumeMemberSyncRequest(): MemberSyncRequest | null {
@@ -148,10 +149,11 @@ export function consumeMemberSyncRequest(): MemberSyncRequest | null {
     fs.rmSync(requestPath, { force: true });
   }
 
-  const obj = (data ?? {}) as { requestedAt?: unknown; requestedBy?: unknown };
+  const obj = (data ?? {}) as { requestedAt?: unknown; requestedBy?: unknown; groupId?: unknown };
   const requestedAt = typeof obj.requestedAt === "number" ? obj.requestedAt : Date.now();
   const requestedBy = typeof obj.requestedBy === "string" && obj.requestedBy.trim() ? obj.requestedBy.trim() : "dashboard";
-  return { requestedAt, requestedBy };
+  const groupId = typeof obj.groupId === "string" && obj.groupId.trim() ? obj.groupId.trim() : undefined;
+  return { requestedAt, requestedBy, groupId };
 }
 
 export interface PermissionCheckRequest {

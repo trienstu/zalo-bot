@@ -416,15 +416,31 @@ export async function runListener(): Promise<void> {
 
   let memberSyncInFlight = false;
   let memberSyncTimer: NodeJS.Timeout | null = null;
-  async function runMemberSync(reason: string): Promise<void> {
+  async function runMemberSync(reason = "listener", specificGroupId?: string): Promise<void> {
     if (memberSyncInFlight) {
       console.log(`[listener] Bỏ qua sync member (${reason}) vì lần trước còn đang chạy.`);
       return;
     }
     memberSyncInFlight = true;
     try {
-      const gids = config.groupIds.length > 0 ? config.groupIds : [config.groupId].filter(Boolean);
+      let gids: string[] = [];
+      if (specificGroupId) {
+        gids = [specificGroupId];
+      } else {
+        try {
+          const rows = getDb()
+            .prepare(`SELECT group_id FROM bot_groups WHERE mode != 'disabled'`)
+            .all() as { group_id: string }[];
+          gids = rows.map((r) => r.group_id);
+        } catch {}
+        if (gids.length === 0) {
+          gids = config.groupIds.length > 0 ? config.groupIds : [config.groupId].filter(Boolean);
+        }
+      }
+
       for (const gid of gids) {
+        if (!gid) continue;
+        console.log(`[listener] Đang đồng bộ danh sách thành viên cho nhóm ${gid}...`);
         await syncMembersOnce(api, Date.now(), `listener:${reason}`, gid);
       }
     } finally {
@@ -484,7 +500,7 @@ export async function runListener(): Promise<void> {
   setInterval(() => {
     const request = consumeMemberSyncRequest();
     if (!request) return;
-    void runMemberSync(request.requestedBy).catch((e) => console.warn(`[listener] sync member theo yêu cầu lỗi: ${String(e)}`));
+    void runMemberSync(request.requestedBy, request.groupId).catch((e) => console.warn(`[listener] sync member theo yêu cầu lỗi: ${String(e)}`));
   }, 1_000);
 
   setInterval(() => {
