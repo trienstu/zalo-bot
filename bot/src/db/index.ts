@@ -73,6 +73,8 @@ function runColumnMigrations(database: Database.Database): void {
     ["interactions", "thread_id", "TEXT NOT NULL DEFAULT ''"],
     // Phân loại thành viên theo nhóm quản lý
     ["members", "group_id", "TEXT NOT NULL DEFAULT ''"],
+    // Chế độ hoạt động cho từng nhóm: 'interactive' | 'silent' | 'disabled'
+    ["bot_groups", "mode", "TEXT NOT NULL DEFAULT 'interactive'"],
   ];
 
   for (const [table, column, definition] of additions) {
@@ -1743,3 +1745,28 @@ export function acquireLock(key: string, now: number, staleMs: number): boolean 
 export function releaseLock(key: string): void {
   deleteBotState(key);
 }
+
+/** Lấy chế độ hoạt động của nhóm: 'interactive' | 'silent' | 'disabled' */
+export function getGroupMode(groupId: string): "interactive" | "silent" | "disabled" {
+  try {
+    const row = getDb()
+      .prepare(`SELECT mode FROM bot_groups WHERE group_id = ?`)
+      .get(groupId) as { mode?: string } | undefined;
+    if (row?.mode === "silent" || row?.mode === "disabled" || row?.mode === "interactive") {
+      return row.mode;
+    }
+  } catch {}
+  return "interactive";
+}
+
+/** Cập nhật chế độ hoạt động của nhóm */
+export function setGroupMode(groupId: string, mode: "interactive" | "silent" | "disabled"): void {
+  getDb()
+    .prepare(
+      `INSERT INTO bot_groups (group_id, name, total_members, mode, is_active, updated_at)
+       VALUES (@groupId, @groupId, 0, @mode, 0, @now)
+       ON CONFLICT(group_id) DO UPDATE SET mode = @mode, updated_at = @now`,
+    )
+    .run({ groupId, mode, now: Date.now() });
+}
+

@@ -36,6 +36,7 @@ import {
   setBotState,
   acquireLock,
   releaseLock,
+  getGroupMode,
 } from "./db/index.js";
 import { syncGroupMembers } from "./member-sync.js";
 import { saveZaloImage } from "./zalo-media.js";
@@ -84,7 +85,11 @@ import {
 
 /** Chỉ ghi tương tác cho group ta quản lý (bỏ qua DM / group khác). */
 function isTargetThread(threadId: unknown): boolean {
-  return config.isManagedGroup(threadId);
+  const tid = String(threadId ?? "").trim();
+  if (!tid) return false;
+  const mode = getGroupMode(tid);
+  if (mode === "disabled") return false;
+  return config.isManagedGroup(tid);
 }
 
 function extractSender(payload: any): string | null {
@@ -725,14 +730,18 @@ export async function runListener(): Promise<void> {
         }
 
         // Trợ lý tương tác thành viên (/rank, /top, /summary, /help, /hoi & Q&A lịch sử chat)
-        // Cho phép cả chủ bot gõ lệnh /rank để tra cứu hoặc kiểm tra
-        void handleMemberInteraction(api, {
-          threadId,
-          sender,
-          displayName,
-          text,
-          isSelf: Boolean(payload?.isSelf),
-        }).catch((e) => console.warn(`[member-assistant] lỗi: ${String(e)}`));
+        // CHỈ PHẢN HỒI KHI NHÓM Ở CHẾ ĐỘ 🟢 'interactive' (Toàn quyền tương tác)
+        // Khi ở chế độ 🟡 'silent' (Tàu ngầm ẩn), bot tuyệt đối im lặng không trả lời lệnh
+        const currentGroupMode = getGroupMode(threadId);
+        if (currentGroupMode === "interactive") {
+          void handleMemberInteraction(api, {
+            threadId,
+            sender,
+            displayName,
+            text,
+            isSelf: Boolean(payload?.isSelf),
+          }).catch((e) => console.warn(`[member-assistant] lỗi: ${String(e)}`));
+        }
       }
       const mediaUrl = media ? extractMediaUrl(payload) : null;
       if (media) {

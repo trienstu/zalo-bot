@@ -31,6 +31,7 @@ interface GroupItem {
   fullName: string;
   icon: string;
   count: string;
+  mode?: "interactive" | "silent" | "disabled";
   isActive?: boolean;
 }
 
@@ -121,6 +122,22 @@ function AppShellInner({
       setSyncingGroups(false);
       loadGroups();
     }, 2000);
+  }
+
+  // Đổi chế độ hoạt động cho nhóm: 'interactive' | 'silent' | 'disabled'
+  async function handleSetGroupMode(groupId: string, mode: "interactive" | "silent" | "disabled") {
+    // Cập nhật UI ngay lập tức
+    setGroups((prev) =>
+      prev.map((g) => (g.id === groupId ? { ...g, mode, icon: mode === "silent" ? "🟡" : mode === "disabled" ? "🔴" : "🟢" } : g)),
+    );
+
+    try {
+      await fetch("/api/groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_mode", groupId, mode }),
+      });
+    } catch {}
   }
 
   useEffect(() => {
@@ -241,28 +258,75 @@ function AppShellInner({
                 </button>
               </div>
 
-              <div className="mt-1 flex flex-col gap-1 max-h-40 overflow-y-auto">
+              <div className="mt-1 flex flex-col gap-1.5 max-h-56 overflow-y-auto">
                 {groups.length > 0 ? (
                   groups.map((g) => {
                     const isActive = activeGroupId === g.id;
+                    const mode = g.mode || "interactive";
+
                     return (
-                      <Link
+                      <div
                         key={g.id}
-                        href={`${pathname}?group=${g.id}`}
-                        className={`flex items-center justify-between rounded-lg px-2.5 py-2 text-xs font-semibold transition-all ${
+                        className={`group relative flex flex-col rounded-lg p-2 text-xs transition-all border ${
                           isActive
-                            ? "bg-[var(--color-primary)] text-white shadow-md shadow-blue-500/20"
-                            : "text-[var(--color-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+                            ? "border-cyan-500/40 bg-cyan-950/20 shadow-md shadow-cyan-500/10"
+                            : "border-slate-800/80 bg-slate-900/40 hover:bg-slate-800/40"
                         }`}
                       >
-                        <div className="flex items-center gap-2 truncate">
-                          <span>{g.icon || "👥"}</span>
-                          <span className="truncate">{g.name}</span>
+                        <div className="flex items-center justify-between">
+                          <Link
+                            href={`${pathname}?group=${g.id}`}
+                            className="flex items-center gap-2 truncate font-semibold text-slate-200 hover:text-white"
+                          >
+                            <span>{g.icon || "👥"}</span>
+                            <span className="truncate max-w-[110px]">{g.name}</span>
+                          </Link>
+                          <span className="text-[10px] text-slate-400 font-mono">{g.count}</span>
                         </div>
-                        <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${isActive ? "bg-white/20 text-white" : "bg-[var(--color-surface)] text-[var(--color-muted)]"}`}>
-                          {g.count}
-                        </span>
-                      </Link>
+
+                        {/* Thanh chọn 3 Chế Độ Hoạt Động */}
+                        <div className="mt-2 flex items-center justify-between border-t border-slate-800/60 pt-1.5 text-[10px]">
+                          <span className="text-slate-400">Chế độ:</span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleSetGroupMode(g.id, "interactive")}
+                              title="🟢 Toàn quyền tương tác: Bot trả lời lệnh, tương tác với mọi người"
+                              className={`rounded px-1.5 py-0.5 font-bold transition-all ${
+                                mode === "interactive"
+                                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                                  : "text-slate-400 hover:text-white hover:bg-slate-800"
+                              }`}
+                            >
+                              🟢 Tương tác
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSetGroupMode(g.id, "silent")}
+                              title="🟡 Tàu ngầm ẩn: Bot im lặng 100%, chỉ thu thập kiến thức/file lên /hub"
+                              className={`rounded px-1.5 py-0.5 font-bold transition-all ${
+                                mode === "silent"
+                                  ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
+                                  : "text-slate-400 hover:text-white hover:bg-slate-800"
+                              }`}
+                            >
+                              🟡 Ẩn
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSetGroupMode(g.id, "disabled")}
+                              title="🔴 Tắt: Bot bỏ qua hoàn toàn nhóm này"
+                              className={`rounded px-1.5 py-0.5 font-bold transition-all ${
+                                mode === "disabled"
+                                  ? "bg-rose-500/20 text-rose-300 border border-rose-500/40"
+                                  : "text-slate-400 hover:text-white hover:bg-slate-800"
+                              }`}
+                            >
+                              🔴 Tắt
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                     );
                   })
                 ) : (

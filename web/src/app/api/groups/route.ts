@@ -35,17 +35,27 @@ export async function GET() {
         group_id       TEXT PRIMARY KEY,
         name           TEXT NOT NULL,
         total_members  INTEGER NOT NULL DEFAULT 0,
+        mode           TEXT NOT NULL DEFAULT 'interactive',
         is_active      INTEGER NOT NULL DEFAULT 0,
         creator_id     TEXT,
         updated_at     INTEGER NOT NULL
       );
     `);
 
+    // Migration thêm cột mode nếu bảng đã có từ trước
+    try {
+      const cols = db.prepare(`PRAGMA table_info(bot_groups)`).all() as { name: string }[];
+      if (!cols.some((c) => c.name === "mode")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN mode TEXT NOT NULL DEFAULT 'interactive'`);
+      }
+    } catch {}
+
     // 1. Đọc danh sách group đã lưu trong bot_groups
     let savedGroups = db.prepare("SELECT * FROM bot_groups ORDER BY total_members DESC").all() as {
       group_id: string;
       name: string;
       total_members: number;
+      mode: string;
       is_active: number;
     }[];
 
@@ -64,8 +74,8 @@ export async function GET() {
       if (syncRuns.length > 0) {
         for (const sr of syncRuns) {
           db.prepare(
-            `INSERT OR REPLACE INTO bot_groups (group_id, name, total_members, is_active, updated_at)
-             VALUES (?, ?, ?, 0, ?)`,
+            `INSERT OR REPLACE INTO bot_groups (group_id, name, total_members, mode, is_active, updated_at)
+             VALUES (?, ?, ?, 'interactive', 0, ?)`,
           ).run(sr.group_id, sr.name || `Nhóm ${sr.group_id.slice(-4)}`, sr.total_members || 0, Date.now());
         }
         savedGroups = db.prepare("SELECT * FROM bot_groups ORDER BY total_members DESC").all() as any[];
@@ -84,8 +94,8 @@ export async function GET() {
 
       for (const mt of msgThreads) {
         db.prepare(
-          `INSERT OR IGNORE INTO bot_groups (group_id, name, total_members, is_active, updated_at)
-           VALUES (?, ?, 0, 0, ?)`,
+          `INSERT OR IGNORE INTO bot_groups (group_id, name, total_members, mode, is_active, updated_at)
+           VALUES (?, ?, 0, 'interactive', 0, ?)`,
         ).run(mt.group_id, `Nhóm Zalo ${mt.group_id.slice(-6)}`, Date.now());
       }
       savedGroups = db.prepare("SELECT * FROM bot_groups ORDER BY total_members DESC").all() as any[];
@@ -97,8 +107,9 @@ export async function GET() {
       id: g.group_id,
       name: g.name,
       fullName: g.name,
-      icon: "👥",
+      icon: g.mode === "silent" ? "🟡" : g.mode === "disabled" ? "🔴" : "🟢",
       count: `${g.total_members || 0} TV`,
+      mode: (g.mode as "interactive" | "silent" | "disabled") || "interactive",
       isActive: g.is_active === 1,
     }));
 
@@ -112,9 +123,10 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as {
-      action?: "scan" | "select";
+      action?: "scan" | "select" | "set_mode";
       groupId?: string;
       groupName?: string;
+      mode?: "interactive" | "silent" | "disabled";
     };
 
     const dbPath = getBotDbPath();
@@ -129,11 +141,22 @@ export async function POST(request: Request) {
         group_id       TEXT PRIMARY KEY,
         name           TEXT NOT NULL,
         total_members  INTEGER NOT NULL DEFAULT 0,
+        mode           TEXT NOT NULL DEFAULT 'interactive',
         is_active      INTEGER NOT NULL DEFAULT 0,
         creator_id     TEXT,
         updated_at     INTEGER NOT NULL
       );
     `);
+
+    if (body.action === "set_mode" && body.groupId && body.mode) {
+      db.prepare("UPDATE bot_groups SET mode = ?, updated_at = ? WHERE group_id = ?").run(
+        body.mode,
+        Date.now(),
+        body.groupId,
+      );
+      db.close();
+      return NextResponse.json({ ok: true, message: `Đã cập nhật chế độ cho nhóm: ${body.mode}` });
+    }
 
     if (body.action === "select" && body.groupId) {
       db.prepare("UPDATE bot_groups SET is_active = 0").run();
@@ -144,8 +167,8 @@ export async function POST(request: Request) {
 
     if (body.groupId && body.groupName) {
       db.prepare(
-        `INSERT OR REPLACE INTO bot_groups (group_id, name, total_members, is_active, updated_at)
-         VALUES (?, ?, ?, 1, ?)`,
+        `INSERT OR REPLACE INTO bot_groups (group_id, name, total_members, mode, is_active, updated_at)
+         VALUES (?, ?, ?, 'interactive', 1, ?)`,
       ).run(body.groupId, body.groupName, 0, Date.now());
     }
 

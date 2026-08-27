@@ -439,3 +439,15 @@ CREATE TABLE IF NOT EXISTS telegram_forwards (
 CREATE INDEX IF NOT EXISTS idx_telegram_forwards_zalo
   ON telegram_forwards(thread_id, zalo_message_id);
 CREATE INDEX IF NOT EXISTS idx_telegram_forwards_ts ON telegram_forwards(ts);
+
+-- Quản lý danh sách nhóm và chế độ hoạt động: 'interactive' | 'silent' | 'disabled'
+CREATE TABLE IF NOT EXISTS bot_groups (
+  group_id       TEXT PRIMARY KEY,
+  name           TEXT NOT NULL,
+  total_members  INTEGER NOT NULL DEFAULT 0,
+  mode           TEXT NOT NULL DEFAULT 'interactive',
+  is_active      INTEGER NOT NULL DEFAULT 0,
+  creator_id     TEXT,
+  updated_at     INTEGER NOT NULL
+);
+
