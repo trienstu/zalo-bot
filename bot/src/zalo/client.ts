@@ -606,12 +606,35 @@ export async function sendGroupText(api: ZaloApi, groupId: string, text: string)
     throw new Error("zca-js runtime không có api.sendMessage");
   }
 
+  const threadIdStr = String(groupId).trim();
+
+  // Thử lần lượt các cú pháp sendMessage của zca-js
   try {
-    await api.sendMessage({ msg: text }, groupId, 1);
+    await api.sendMessage({ msg: text }, threadIdStr, ThreadType.Group);
     return;
-  } catch {
-    await api.sendMessage(text, groupId, 1);
-  }
+  } catch {}
+
+  try {
+    await api.sendMessage(text, threadIdStr, ThreadType.Group);
+    return;
+  } catch {}
+
+  try {
+    await api.sendMessage({ msg: text }, threadIdStr, 1);
+    return;
+  } catch {}
+
+  try {
+    await api.sendMessage(text, threadIdStr, 1);
+    return;
+  } catch {}
+
+  try {
+    await api.sendMessage({ msg: text }, threadIdStr);
+    return;
+  } catch {}
+
+  await api.sendMessage(text, threadIdStr);
 }
 
 /**

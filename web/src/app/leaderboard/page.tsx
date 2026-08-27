@@ -122,46 +122,6 @@ export default async function LeaderboardPage({
           </p>
         </header>
 
-        {/* Bộ chọn Nhóm (Multi-Group Selector) */}
-        {groups.length > 1 && (
-          <div className="mx-auto mt-6 flex max-w-2xl flex-wrap items-center justify-center gap-2">
-            <span className="text-xs font-semibold uppercase tracking-wider text-[var(--color-muted)] mr-1 flex items-center gap-1">
-              <Users className="h-3.5 w-3.5" /> Chọn nhóm:
-            </span>
-            {groups.map((g) => {
-              const active = selectedGroupId === g.id;
-              return (
-                <Link
-                  key={g.id}
-                  href={`/leaderboard?tab=${currentTab}&period=${period}&group=${g.id}${q ? `&q=${encodeURIComponent(q)}` : ""}${inactiveFilter ? `&filter=${inactiveFilter}` : ""}`}
-                  className={`flex items-center gap-2 rounded-xl px-3.5 py-1.5 text-xs sm:text-sm font-semibold transition-all border ${
-                    active
-                      ? "border-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-primary)_18%,transparent)] text-[var(--color-primary)] shadow-sm shadow-blue-500/10"
-                      : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
-                  }`}
-                >
-                  <span className="truncate max-w-[200px] sm:max-w-[260px]">{g.name}</span>
-                  {g.memberCount ? (
-                    <span className={`text-[11px] px-1.5 py-0.2 rounded-full font-mono ${active ? "bg-[var(--color-primary)] text-white" : "bg-[var(--color-surface-2)] text-[var(--color-muted)]"}`}>
-                      {g.memberCount} TV
-                    </span>
-                  ) : null}
-                </Link>
-              );
-            })}
-            <Link
-              href={`/leaderboard?tab=${currentTab}&period=${period}&group=all${q ? `&q=${encodeURIComponent(q)}` : ""}${inactiveFilter ? `&filter=${inactiveFilter}` : ""}`}
-              className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs sm:text-sm font-semibold transition-all border ${
-                selectedGroupId === "all"
-                  ? "border-[var(--color-primary)] bg-[color-mix(in_srgb,var(--color-primary)_18%,transparent)] text-[var(--color-primary)] shadow-sm shadow-blue-500/10"
-                  : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
-              }`}
-            >
-              <span>🌐 Tất cả nhóm</span>
-            </Link>
-          </div>
-        )}
-
         {/* Tab chuyển đổi lớn: Top tương tác vs Không tương tác */}
         <div className="mx-auto mt-6 flex max-w-md items-center justify-center gap-2 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-1.5">
           <Link

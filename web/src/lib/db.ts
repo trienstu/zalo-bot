@@ -605,14 +605,12 @@ export function listMemberStats(limit = 2000): MemberStatRow[] {
 
 function memberStatsCte(threadId?: string): string {
   const targetThreadId = (threadId || "").trim();
-  const primaryGroupId = "1913869945242410752";
+  let groupWhere = "";
   let threadJoin = "";
+
   if (targetThreadId && targetThreadId !== "all") {
-    if (targetThreadId === primaryGroupId) {
-      threadJoin = `AND (i.thread_id = '${targetThreadId}' OR i.thread_id = '' OR i.thread_id IS NULL)`;
-    } else {
-      threadJoin = `AND i.thread_id = '${targetThreadId}'`;
-    }
+    threadJoin = `AND (i.thread_id = '${targetThreadId}')`;
+    groupWhere = `AND (m.group_id = '${targetThreadId}')`;
   }
 
   return `WITH member_stats AS (
@@ -625,6 +623,7 @@ function memberStatsCte(threadId?: string): string {
     LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id ${threadJoin}
     LEFT JOIN cleanup_warnings cw ON cw.zalo_user_id = m.zalo_user_id
     WHERE m.is_active = 1
+      ${groupWhere}
       AND (@q = '' OR LOWER(m.display_name) LIKE @like OR LOWER(m.zalo_user_id) LIKE @like)
     GROUP BY m.zalo_user_id
   )`;
