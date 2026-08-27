@@ -753,7 +753,13 @@ export async function runListener(): Promise<void> {
 
   /** Ghi 1 tương tác (message/reaction) real-time vào DB. */
   function record(payload: any, type: "message" | "reaction"): void {
-    const threadId = String(payload?.threadId ?? payload?.data?.idTo ?? "");
+    const threadId = String(
+      payload?.threadId ??
+      payload?.data?.groupId ??
+      payload?.groupId ??
+      payload?.data?.idTo ??
+      ""
+    ).trim();
     if (!threadId) return;
 
     // Tự động ghi nhận nhóm mới vào database nếu chưa có
@@ -777,7 +783,8 @@ export async function runListener(): Promise<void> {
       const media = extractMediaSummary(payload);
       const displayName = String(payload?.data?.dName ?? "");
       if (text) {
-        upsertMember({ zaloUserId: sender, displayName, now: Date.now() });
+        console.log(`[listener] 📩 Tin nhắn từ [${displayName || sender}] trong nhóm [${threadId}]: "${text}"`);
+        upsertMember({ zaloUserId: sender, displayName, groupId: threadId, now: Date.now() });
         saveGroupMessage({
           threadId,
           messageId: extractMessageId(payload, sender, ts, text),

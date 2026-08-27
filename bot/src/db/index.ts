@@ -228,7 +228,9 @@ export function upsertMember(input: {
   groupId?: string;
   now: number;
 }): void {
-  getDb()
+  const database = getDb();
+  // 1. Lưu bảng members chung
+  database
     .prepare(
       `INSERT INTO members (zalo_user_id, display_name, role, joined_at, first_seen_at, is_active, left_at, group_id)
        VALUES (@id, @name, @roleInsert, @joinedAt, @now, 1, NULL, @groupId)
@@ -249,17 +251,61 @@ export function upsertMember(input: {
       groupId: input.groupId ?? "",
       now: input.now,
     });
+
+  // 2. Lưu bảng group_members riêng theo từng nhóm
+  if (input.groupId) {
+    try {
+      database
+        .prepare(
+          `INSERT INTO group_members (zalo_user_id, group_id, display_name, role, joined_at, first_seen_at, is_active, left_at)
+           VALUES (@id, @groupId, @name, @roleInsert, @joinedAt, @now, 1, NULL)
+           ON CONFLICT(zalo_user_id, group_id) DO UPDATE SET
+             display_name = CASE WHEN @name != '' THEN @name ELSE display_name END,
+             role         = CASE WHEN @role != '' THEN @role ELSE role END,
+             joined_at    = COALESCE(group_members.joined_at, @joinedAt),
+             is_active    = 1,
+             left_at      = NULL`,
+        )
+        .run({
+          id: input.zaloUserId,
+          groupId: input.groupId,
+          name: input.displayName ?? "",
+          role: input.role ?? "",
+          roleInsert: input.role ?? "member",
+          joinedAt: input.joinedAt ?? null,
+          now: input.now,
+        });
+    } catch {}
+  }
 }
 
-/** Đánh dấu member đã rời/bị kick (không xoá row — giữ lịch sử). */
-export function markMemberLeft(zaloUserId: string, now: number): void {
-  getDb()
-    .prepare(`UPDATE members SET is_active = 0, left_at = @now WHERE zalo_user_id = @id`)
-    .run({ id: zaloUserId, now });
+/** Đánh dấu member đã rời/bị kick khỏi một nhóm cụ thể (hoặc toàn bộ nếu không truyền groupId). */
+export function markMemberLeft(zaloUserId: string, now: number, groupId?: string): void {
+  const database = getDb();
+  if (groupId) {
+    try {
+      database
+        .prepare(`UPDATE group_members SET is_active = 0, left_at = @now WHERE zalo_user_id = @id AND group_id = @groupId`)
+        .run({ id: zaloUserId, groupId, now });
+    } catch {}
+  } else {
+    database
+      .prepare(`UPDATE members SET is_active = 0, left_at = @now WHERE zalo_user_id = @id`)
+      .run({ id: zaloUserId, now });
+  }
 }
 
-export function getMember(zaloUserId: string): MemberRow | undefined {
-  return getDb()
+export function getMember(zaloUserId: string, groupId?: string): MemberRow | undefined {
+  const database = getDb();
+  if (groupId) {
+    try {
+      const row = database
+        .prepare(`SELECT * FROM group_members WHERE zalo_user_id = @id AND group_id = @groupId`)
+        .get({ id: zaloUserId, groupId }) as MemberRow | undefined;
+      if (row) return row;
+    } catch {}
+  }
+  return database
     .prepare(`SELECT * FROM members WHERE zalo_user_id = @id`)
     .get({ id: zaloUserId }) as MemberRow | undefined;
 }

@@ -63,20 +63,18 @@ export async function syncGroupMembers(
     }
     if (reportedCount > 0 && snapshotCount === 0) {
       throw new Error(
-        `Zalo trả snapshot member rỗng trong khi totalMember=${reportedCount}; bỏ qua sync để tránh lệch DB.`,
+        `Zalo trả snapshot member rỗng cho nhóm ${targetGroupId}; bỏ qua sync để tránh lệch DB.`,
       );
     }
     if (reportedCount > 0 && snapshotCount < reportedCount) {
-      throw new Error(
-        `Zalo trả snapshot member chưa đủ (${snapshotCount}/${reportedCount}); bỏ qua đánh dấu rời nhóm.`,
-      );
+      console.warn(`[zalo] Snapshot lấy được ${snapshotCount}/${reportedCount} thành viên cho nhóm ${targetGroupId}. Đang lưu...`);
     }
 
     const activeIds = new Set<string>();
     for (const m of snap.members) {
       if (!m.id) continue;
       activeIds.add(m.id);
-      const before = getMember(m.id);
+      const before = getMember(m.id, targetGroupId);
       upsertMember({ zaloUserId: m.id, displayName: m.displayName, role: m.role, groupId: targetGroupId, now });
       if (!before) {
         recordMemberEvent({
@@ -104,20 +102,23 @@ export async function syncGroupMembers(
     }
 
     let markedLeft = 0;
-    for (const s of getMemberStats(targetGroupId)) {
-      if (activeIds.has(s.zalo_user_id)) continue;
-      markMemberLeft(s.zalo_user_id, now);
-      recordMemberEvent({
-        zaloUserId: s.zalo_user_id,
-        displayName: s.display_name,
-        role: s.role,
-        eventType: "left",
-        source: eventSource,
-        syncRunId: runId,
-        ts: now,
-        note: `Không còn trong snapshot Zalo của nhóm ${targetGroupId}.`,
-      });
-      markedLeft += 1;
+    // Chỉ đánh dấu rời nhóm nếu snapshot lấy được gần như đầy đủ
+    if (snapshotCount >= reportedCount && reportedCount > 0) {
+      for (const s of getMemberStats(targetGroupId)) {
+        if (activeIds.has(s.zalo_user_id)) continue;
+        markMemberLeft(s.zalo_user_id, now, targetGroupId);
+        recordMemberEvent({
+          zaloUserId: s.zalo_user_id,
+          displayName: s.display_name,
+          role: s.role,
+          eventType: "left",
+          source: eventSource,
+          syncRunId: runId,
+          ts: now,
+          note: `Không còn trong snapshot Zalo của nhóm ${targetGroupId}.`,
+        });
+        markedLeft += 1;
+      }
     }
 
     const result = {

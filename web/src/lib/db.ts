@@ -607,10 +607,19 @@ function memberStatsCte(threadId?: string): string {
   const targetThreadId = (threadId || "").trim();
   let groupWhere = "";
   let threadJoin = "";
+  let fromTable = "members";
 
   if (targetThreadId && targetThreadId !== "all") {
     threadJoin = `AND (i.thread_id = '${targetThreadId}')`;
     groupWhere = `AND (m.group_id = '${targetThreadId}')`;
+    try {
+      const hasGroupMembers = getDb()
+        .prepare(`SELECT 1 FROM group_members WHERE group_id = ? LIMIT 1`)
+        .get(targetThreadId);
+      if (hasGroupMembers) {
+        fromTable = "group_members";
+      }
+    } catch {}
   }
 
   return `WITH member_stats AS (
@@ -619,7 +628,7 @@ function memberStatsCte(threadId?: string): string {
            MAX(i.ts) AS last_interaction,
            COALESCE(cw.warning_count, 0) AS warning_count,
            cw.last_warned_at AS last_warned_at
-    FROM members m
+    FROM ${fromTable} m
     LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id ${threadJoin}
     LEFT JOIN cleanup_warnings cw ON cw.zalo_user_id = m.zalo_user_id
     WHERE m.is_active = 1

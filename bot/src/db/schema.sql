@@ -38,6 +38,23 @@ CREATE TABLE IF NOT EXISTS members (
 
 CREATE INDEX IF NOT EXISTS idx_members_active ON members(is_active);
 
+-- Thành viên theo từng Group Zalo riêng biệt (Hỗ trợ đa nhóm hoàn hảo)
+CREATE TABLE IF NOT EXISTS group_members (
+  zalo_user_id   TEXT NOT NULL,
+  group_id       TEXT NOT NULL,
+  display_name   TEXT NOT NULL DEFAULT '',
+  role           TEXT NOT NULL DEFAULT 'member',
+  joined_at      INTEGER,
+  first_seen_at  INTEGER NOT NULL,
+  is_active      INTEGER NOT NULL DEFAULT 1,
+  left_at        INTEGER,
+  PRIMARY KEY (zalo_user_id, group_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_members_group_active ON group_members(group_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(zalo_user_id);
+
+
 -- Lịch sử đồng bộ member từ Zalo về DB.
 CREATE TABLE IF NOT EXISTS member_sync_runs (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
