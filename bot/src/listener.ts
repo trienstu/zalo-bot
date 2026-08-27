@@ -691,16 +691,6 @@ export async function runListener(): Promise<void> {
     }
   }, 30_000);
 
-  if (!config.groupId) {
-    console.warn(
-      "[listener] Đã đăng nhập nhưng GROUP_ID chưa được cấu hình. Bot đang tạm ngưng; " +
-        "điền GROUP_ID rồi restart zalo-bot.",
-    );
-    await new Promise<never>(() => {
-      // Giữ process ổn định để PM2 không restart liên tục trong lúc chờ cấu hình.
-    });
-  }
-
   let messageEvents = 0;
   let reactionEvents = 0;
   let undoEvents = 0;
