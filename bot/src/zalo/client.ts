@@ -603,38 +603,56 @@ export async function fetchGroupPollVotes(
  */
 export async function sendGroupText(api: ZaloApi, groupId: string, text: string): Promise<void> {
   if (typeof api.sendMessage !== "function") {
+    console.error("[sendGroupText] api.sendMessage không tồn tại trong runtime zca-js.");
     throw new Error("zca-js runtime không có api.sendMessage");
   }
 
   const threadIdStr = String(groupId).trim();
+  console.log(`[sendGroupText] 📤 Đang gửi tin vào nhóm [${threadIdStr}]: "${text.slice(0, 60)}..."`);
 
   // Thử lần lượt các cú pháp sendMessage của zca-js
   try {
     await api.sendMessage({ msg: text }, threadIdStr, ThreadType.Group);
+    console.log(`[sendGroupText] ✅ Đã gửi thành công vào nhóm [${threadIdStr}] (Method 1: {msg}, Group)`);
     return;
-  } catch {}
+  } catch (e1) {
+    console.warn(`[sendGroupText] Method 1 thất bại: ${String(e1)}, đang thử Method 2...`);
+  }
 
   try {
     await api.sendMessage(text, threadIdStr, ThreadType.Group);
+    console.log(`[sendGroupText] ✅ Đã gửi thành công vào nhóm [${threadIdStr}] (Method 2: string, Group)`);
     return;
-  } catch {}
+  } catch (e2) {
+    console.warn(`[sendGroupText] Method 2 thất bại: ${String(e2)}, đang thử Method 3...`);
+  }
 
   try {
     await api.sendMessage({ msg: text }, threadIdStr, 1);
+    console.log(`[sendGroupText] ✅ Đã gửi thành công vào nhóm [${threadIdStr}] (Method 3: {msg}, 1)`);
     return;
-  } catch {}
+  } catch (e3) {
+    console.warn(`[sendGroupText] Method 3 thất bại: ${String(e3)}, đang thử Method 4...`);
+  }
 
   try {
     await api.sendMessage(text, threadIdStr, 1);
+    console.log(`[sendGroupText] ✅ Đã gửi thành công vào nhóm [${threadIdStr}] (Method 4: string, 1)`);
     return;
-  } catch {}
+  } catch (e4) {
+    console.warn(`[sendGroupText] Method 4 thất bại: ${String(e4)}, đang thử Method 5...`);
+  }
 
   try {
     await api.sendMessage({ msg: text }, threadIdStr);
+    console.log(`[sendGroupText] ✅ Đã gửi thành công vào nhóm [${threadIdStr}] (Method 5: {msg})`);
     return;
-  } catch {}
+  } catch (e5) {
+    console.warn(`[sendGroupText] Method 5 thất bại: ${String(e5)}, đang thử Method 6...`);
+  }
 
   await api.sendMessage(text, threadIdStr);
+  console.log(`[sendGroupText] ✅ Đã gửi thành công vào nhóm [${threadIdStr}] (Method 6: raw string)`);
 }
 
 /**

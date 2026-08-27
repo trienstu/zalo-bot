@@ -31,6 +31,11 @@ function fmtAgoVi(ts: number | null): string {
  */
 function handleRankCommand(sender: string, displayName: string, threadId: string): string {
   const db = getDb();
+  let fromTable = "members";
+  try {
+    const hasGroupMembers = db.prepare(`SELECT 1 FROM group_members WHERE group_id = ? LIMIT 1`).get(threadId);
+    if (hasGroupMembers) fromTable = "group_members";
+  } catch {}
 
   // Lấy danh sách thành viên active và xếp hạng theo đúng thread_id nhóm
   const members = db
@@ -47,7 +52,7 @@ function handleRankCommand(sender: string, displayName: string, threadId: string
               COALESCE(SUM(CASE WHEN i.type = 'reaction' THEN 1 ELSE 0 END), 0) AS reaction_count,
               COALESCE(SUM(CASE WHEN i.type = 'vote' THEN 1 ELSE 0 END), 0) AS vote_count,
               MAX(i.ts) AS last_interaction
-       FROM members m
+       FROM ${fromTable} m
        LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND (i.thread_id = @threadId OR i.thread_id = '')
        WHERE m.is_active = 1
          AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
@@ -97,6 +102,12 @@ function handleRankCommand(sender: string, displayName: string, threadId: string
  */
 function handleTopCommand(threadId: string): string {
   const db = getDb();
+  let fromTable = "members";
+  try {
+    const hasGroupMembers = db.prepare(`SELECT 1 FROM group_members WHERE group_id = ? LIMIT 1`).get(threadId);
+    if (hasGroupMembers) fromTable = "group_members";
+  } catch {}
+
   const topRows = db
     .prepare(
       `SELECT m.display_name,
@@ -108,7 +119,7 @@ function handleTopCommand(threadId: string): string {
                 WHEN 'reaction' THEN 1
                 ELSE 1 END), 0) AS total_points,
               COALESCE(SUM(CASE WHEN i.type = 'message' THEN 1 ELSE 0 END), 0) AS message_count
-       FROM members m
+       FROM ${fromTable} m
        JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
        WHERE (i.thread_id = @threadId OR i.thread_id = '')
          AND m.is_active = 1
@@ -121,7 +132,7 @@ function handleTopCommand(threadId: string): string {
     .all({ threadId }) as { display_name: string; total_points: number; message_count: number }[];
 
   if (topRows.length === 0) {
-    return "🏆 BẢNG XẾP HẠNG TOP 5\n\nChưa có dữ liệu tương tác trong nhóm.";
+    return "🏆 BẢNG XẾP HẠNG TOP 5\n\nChưa có dữ liệu tương tác trong nhóm này. Hãy nhắn tin để lên bảng xếp hạng nhé!";
   }
 
   const medals = ["🥇", "🥈", "🥉", "⭐", "⭐"];
@@ -470,7 +481,18 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   const lower = rawText.toLowerCase();
 
   // 1. Lệnh /help, /menu, /trogiup
-  if (lower === "/help" || lower === "/menu" || lower === "/trogiup" || lower === "/lenh" || lower === "!help") {
+  if (
+    lower === "/help" ||
+    lower === "help" ||
+    lower === "!help" ||
+    lower === "/menu" ||
+    lower === "menu" ||
+    lower === "!menu" ||
+    lower === "/trogiup" ||
+    lower === "/lenh" ||
+    lower === "lenh" ||
+    lower === "!lenh"
+  ) {
     userCooldowns.set(sender, now);
     const reply = handleHelpCommand();
     await sendGroupText(api, threadId, reply);
@@ -479,7 +501,16 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   }
 
   // 2. Lệnh /rank, /diem, /myrank
-  if (lower === "/rank" || lower === "/diem" || lower === "/myrank" || lower === "!rank" || lower === "!diem") {
+  if (
+    lower === "/rank" ||
+    lower === "rank" ||
+    lower === "!rank" ||
+    lower === "/diem" ||
+    lower === "diem" ||
+    lower === "!diem" ||
+    lower === "/myrank" ||
+    lower === "myrank"
+  ) {
     userCooldowns.set(sender, now);
     const reply = handleRankCommand(sender, displayName, threadId);
     await sendGroupText(api, threadId, reply);
@@ -487,8 +518,19 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
-  // 3. Lệnh /top, /top5, /leaderboard
-  if (lower === "/top" || lower === "/top5" || lower === "/bxh" || lower === "/leaderboard" || lower === "!top") {
+  // 3. Lệnh /top, /top5, /leaderboard, /bxh
+  if (
+    lower === "/top" ||
+    lower === "top" ||
+    lower === "!top" ||
+    lower === "/top5" ||
+    lower === "top5" ||
+    lower === "/bxh" ||
+    lower === "bxh" ||
+    lower === "!bxh" ||
+    lower === "/leaderboard" ||
+    lower === "leaderboard"
+  ) {
     userCooldowns.set(sender, now);
     const reply = handleTopCommand(threadId);
     await sendGroupText(api, threadId, reply);
@@ -499,8 +541,10 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   // 4. Lệnh /link, /links, /tonghoplink, /tailieu
   if (
     lower === "/link" ||
+    lower === "!link" ||
     lower === "/links" ||
     lower.startsWith("/link ") ||
+    lower.startsWith("!link ") ||
     lower.startsWith("/links ") ||
     lower === "/tonghoplink" ||
     lower === "/tailieu" ||
@@ -510,6 +554,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     userCooldowns.set(sender, now);
     const filter = rawText
       .replace(/^\/links?\s*/i, "")
+      .replace(/^!links?\s*/i, "")
       .replace(/^\/(tonghoplink|tailieu)\s*/i, "")
       .trim();
     const reply = handleLinksCommand(threadId, filter || undefined);
@@ -521,11 +566,13 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   // 5. Lệnh /taungam, /namvung, /inactive, /chuachat
   if (
     lower === "/taungam" ||
+    lower === "taungam" ||
+    lower === "!taungam" ||
     lower === "/namvung" ||
     lower === "/inactive" ||
+    lower === "inactive" ||
     lower === "/chuachat" ||
-    lower === "/chuatungchat" ||
-    lower === "!taungam"
+    lower === "/chuatungchat"
   ) {
     userCooldowns.set(sender, now);
     const reply = handleInactiveCommand(threadId);
@@ -534,7 +581,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
-  // 4. Lệnh /hoi [câu hỏi] hoặc Tag bot / Nhắc tên Sen Chúa
+  // 6. Lệnh /hoi [câu hỏi] hoặc Tag bot / Nhắc tên Sen Chúa / Chào hỏi
   const isTagBot =
     lower.startsWith("/hoi") ||
     lower.startsWith("!hoi") ||
@@ -546,8 +593,15 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     lower.includes("@bot") ||
     lower.startsWith("bot ơi") ||
     lower.startsWith("bot oi") ||
+    lower.startsWith("chào bot") ||
+    lower.startsWith("chao bot") ||
+    lower.startsWith("alo bot") ||
+    lower.startsWith("hi bot") ||
+    lower.startsWith("hello bot") ||
     lower.startsWith("sen ơi") ||
     lower.startsWith("sen oi") ||
+    lower.includes("bot ơi") ||
+    lower.includes("bot oi") ||
     (event.isSelf && lower.startsWith("@"));
 
   if (isTagBot) {
@@ -569,7 +623,12 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       .replace(/@bot/gi, "")
       .replace(/^bot ơi\s*,?/i, "")
       .replace(/^bot oi\s*,?/i, "")
-      .replace(/^@[^\s]+\s*/, "") // Loại bỏ tag mention đầu dòng nếu còn sót
+      .replace(/^chào bot\s*,?/i, "")
+      .replace(/^chao bot\s*,?/i, "")
+      .replace(/^alo bot\s*,?/i, "")
+      .replace(/^hi bot\s*,?/i, "")
+      .replace(/^hello bot\s*,?/i, "")
+      .replace(/^@[^\s]+\s*/, "")
       .trim();
 
     const qLower = question.toLowerCase();
