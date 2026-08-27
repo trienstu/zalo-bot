@@ -448,6 +448,23 @@ export interface ManagedGroup {
  * Lấy danh sách các nhóm được quản lý từ .env và dữ liệu sync trong DB.
  */
 export function listManagedGroups(): ManagedGroup[] {
+  try {
+    if (dbExists() && tableExists("bot_groups")) {
+      const rows = getDb()
+        .prepare(`SELECT group_id, name, total_members FROM bot_groups ORDER BY total_members DESC`)
+        .all() as { group_id: string; name: string; total_members: number }[];
+      if (rows.length > 0) {
+        return rows.map((r) => ({
+          id: r.group_id,
+          name: r.name,
+          memberCount: r.total_members,
+        }));
+      }
+    }
+  } catch (e) {
+    console.warn("Lỗi khi đọc bot_groups:", e);
+  }
+
   const envGroupIds = (process.env.GROUP_ID || "")
     .split(",")
     .map((s) => s.trim())
@@ -455,15 +472,8 @@ export function listManagedGroups(): ManagedGroup[] {
 
   const groupMap = new Map<string, ManagedGroup>();
 
-  // Khởi tạo tên mặc định từ các nhóm đã biết hoặc .env
   for (const gid of envGroupIds) {
-    const defaultName =
-      gid === "1913869945242410752"
-        ? "GROUP TRAO ĐỔI - AI, CÔNG NGHỆ"
-        : gid === "6918708484908920459"
-          ? "HỘI ĂN NHẬU 🍻"
-          : `Nhóm ${gid}`;
-    groupMap.set(gid, { id: gid, name: defaultName });
+    groupMap.set(gid, { id: gid, name: `Nhóm ${gid}` });
   }
 
   try {
@@ -496,14 +506,7 @@ export function listManagedGroups(): ManagedGroup[] {
     console.warn("Lỗi khi đọc member_sync_runs:", e);
   }
 
-  const list = Array.from(groupMap.values());
-  if (list.length === 0) {
-    return [
-      { id: "1913869945242410752", name: "GROUP TRAO ĐỔI - AI, CÔNG NGHỆ" },
-      { id: "6918708484908920459", name: "HỘI ĂN NHẬU 🍻" },
-    ];
-  }
-  return list;
+  return Array.from(groupMap.values());
 }
 
 /**

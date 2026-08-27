@@ -737,6 +737,20 @@ export async function runListener(): Promise<void> {
   /** Ghi 1 tương tác (message/reaction) real-time vào DB. */
   function record(payload: any, type: "message" | "reaction"): void {
     const threadId = String(payload?.threadId ?? payload?.data?.idTo ?? "");
+    if (!threadId) return;
+
+    // Tự động ghi nhận nhóm mới vào database nếu chưa có
+    if (!threadId.startsWith("u")) {
+      try {
+        getDb()
+          .prepare(
+            `INSERT OR IGNORE INTO bot_groups (group_id, name, total_members, mode, is_active, updated_at)
+             VALUES (?, ?, 0, 'interactive', 0, ?)`,
+          )
+          .run(threadId, `Nhóm Zalo ${threadId.slice(-6)}`, Date.now());
+      } catch {}
+    }
+
     if (!isTargetThread(threadId)) return;
     const sender = extractSender(payload);
     if (!sender) return;
