@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useState, useEffect, Suspense } from "react";
 import {
@@ -21,12 +21,18 @@ import {
   Sparkles,
   ShieldAlert,
   ArrowRight,
+  RefreshCw,
+  Plus,
 } from "lucide-react";
 
-const GROUPS = [
-  { id: "1913869945242410752", name: "AI, CÔNG NGHỆ", fullName: "GROUP TRAO ĐỔI - AI, CÔNG NGHỆ", icon: "🚀", count: "144 TV" },
-  { id: "6918708484908920459", name: "HỘI ĂN NHẬU 🍻", fullName: "HỘI ĂN NHẬU 🍻", icon: "🍻", count: "12 TV" },
-];
+interface GroupItem {
+  id: string;
+  name: string;
+  fullName: string;
+  icon: string;
+  count: string;
+  isActive?: boolean;
+}
 
 const NAV = [
   { href: "/", label: "Tổng quan", shortLabel: "Tổng quan", icon: LayoutDashboard },
@@ -82,9 +88,40 @@ function AppShellInner({
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const activeGroupId = searchParams.get("group") || "1913869945242410752";
+  const router = useRouter();
 
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean | null>(null);
+  const [groups, setGroups] = useState<GroupItem[]>([]);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [syncingGroups, setSyncingGroups] = useState(false);
+
+  // Lấy danh sách nhóm động từ API
+  async function loadGroups() {
+    setLoadingGroups(true);
+    try {
+      const res = await fetch("/api/groups");
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.groups)) {
+          setGroups(data.groups);
+        }
+      }
+    } catch {}
+    setLoadingGroups(false);
+  }
+
+  // Quét và đồng bộ nhóm từ Bot Zalo
+  async function handleSyncGroups() {
+    setSyncingGroups(true);
+    try {
+      await fetch("/api/member-sync", { method: "POST" });
+      await loadGroups();
+    } catch {}
+    setTimeout(() => {
+      setSyncingGroups(false);
+      loadGroups();
+    }, 2000);
+  }
 
   useEffect(() => {
     async function checkAuth() {
@@ -101,6 +138,7 @@ function AppShellInner({
       }
     }
     checkAuth();
+    loadGroups();
   }, [pathname]);
 
   async function handleLogout() {
@@ -159,11 +197,11 @@ function AppShellInner({
     return <ForbiddenAccessScreen />;
   }
 
+  const activeGroupId = searchParams.get("group") || (groups.length > 0 ? groups[0].id : "");
+
   // 5. NẾU ĐÃ ĐĂNG NHẬP ADMIN -> HIỂN THỊ TOÀN BỘ BẢNG ĐIỀU KHIỂN QUẢN TRỊ
   const buildNavHref = (baseHref: string) => {
-    if (!activeGroupId || activeGroupId === "1913869945242410752") {
-      return `${baseHref}${baseHref.includes("?") ? "&" : "?"}group=1913869945242410752`;
-    }
+    if (!activeGroupId) return baseHref;
     return `${baseHref}${baseHref.includes("?") ? "&" : "?"}group=${activeGroupId}`;
   };
 
@@ -184,44 +222,66 @@ function AppShellInner({
                   ADMIN
                 </span>
               </div>
-              <div className="mt-0.5 text-xs text-[var(--color-muted)]">Hệ thống quản lý đa nhóm</div>
+              <div className="mt-0.5 text-xs text-[var(--color-muted)]">Quản trị & Phân vùng nhóm</div>
             </div>
 
-            {/* BỘ CHUYỂN PHÂN VÙNG NHÓM */}
+            {/* BỘ CHUYỂN PHÂN VÙNG NHÓM ĐỘNG */}
             <div className="mb-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2">
               <div className="px-1.5 py-1 text-[11px] font-bold uppercase tracking-wider text-[var(--color-muted)] flex items-center justify-between">
                 <span className="flex items-center gap-1">
-                  <Layers className="h-3 w-3" /> Phân vùng nhóm:
+                  <Layers className="h-3 w-3" /> Nhóm hoạt động:
                 </span>
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                <button
+                  onClick={handleSyncGroups}
+                  disabled={syncingGroups}
+                  title="Quét & Làm mới danh sách nhóm Zalo"
+                  className="text-[10px] text-cyan-400 hover:text-cyan-300 transition-colors p-1"
+                >
+                  <RefreshCw className={`h-3 w-3 ${syncingGroups ? "animate-spin text-cyan-300" : ""}`} />
+                </button>
               </div>
-              <div className="mt-1 flex flex-col gap-1">
-                {GROUPS.map((g) => {
-                  const isActive = activeGroupId === g.id;
-                  return (
-                    <Link
-                      key={g.id}
-                      href={`${pathname}?group=${g.id}`}
-                      className={`flex items-center justify-between rounded-lg px-2.5 py-2 text-xs font-semibold transition-all ${
-                        isActive
-                          ? "bg-[var(--color-primary)] text-white shadow-md shadow-blue-500/20"
-                          : "text-[var(--color-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-                      }`}
+
+              <div className="mt-1 flex flex-col gap-1 max-h-40 overflow-y-auto">
+                {groups.length > 0 ? (
+                  groups.map((g) => {
+                    const isActive = activeGroupId === g.id;
+                    return (
+                      <Link
+                        key={g.id}
+                        href={`${pathname}?group=${g.id}`}
+                        className={`flex items-center justify-between rounded-lg px-2.5 py-2 text-xs font-semibold transition-all ${
+                          isActive
+                            ? "bg-[var(--color-primary)] text-white shadow-md shadow-blue-500/20"
+                            : "text-[var(--color-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 truncate">
+                          <span>{g.icon || "👥"}</span>
+                          <span className="truncate">{g.name}</span>
+                        </div>
+                        <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${isActive ? "bg-white/20 text-white" : "bg-[var(--color-surface)] text-[var(--color-muted)]"}`}>
+                          {g.count}
+                        </span>
+                      </Link>
+                    );
+                  })
+                ) : (
+                  <div className="p-2 text-center text-xs text-slate-400">
+                    <p className="text-[11px]">Chưa có nhóm nào</p>
+                    <button
+                      onClick={handleSyncGroups}
+                      disabled={syncingGroups}
+                      className="mt-1.5 inline-flex items-center gap-1 rounded bg-cyan-500/10 border border-cyan-500/30 px-2 py-1 text-[11px] font-semibold text-cyan-300 hover:bg-cyan-500/20"
                     >
-                      <div className="flex items-center gap-2 truncate">
-                        <span>{g.icon}</span>
-                        <span className="truncate">{g.name}</span>
-                      </div>
-                      <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${isActive ? "bg-white/20 text-white" : "bg-[var(--color-surface)] text-[var(--color-muted)]"}`}>
-                        {g.count}
-                      </span>
-                    </Link>
-                  );
-                })}
+                      <RefreshCw className={`h-3 w-3 ${syncingGroups ? "animate-spin" : ""}`} />
+                      <span>Quét nhóm Zalo</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
-            <nav className="flex flex-col gap-1 overflow-y-auto max-h-[55vh]">
+            <nav className="flex flex-col gap-1 overflow-y-auto max-h-[50vh]">
               {NAV.map((item) => {
                 const Icon = item.icon;
                 const isCurrent = pathname === item.href;
