@@ -110,3 +110,9 @@ export function permissionCheckRequestPath(): string {
 export function kickNowRequestPath(): string {
   return KICK_NOW_REQUEST_PATH;
 }
+
+/** Đường dẫn marker để dashboard yêu cầu bot quét danh sách tất cả nhóm Zalo. */
+export function groupScanRequestPath(): string {
+  return path.join(QR_DIR, "group-scan-request.json");
+}
+

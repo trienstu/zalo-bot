@@ -117,6 +117,19 @@ export function reloginRequestExists(): boolean {
   return fs.existsSync(path.join(config.sessionDir, RELOGIN_REQUEST_FILE));
 }
 
+const GROUP_SCAN_REQUEST_FILE = "group-scan-request.json";
+
+export function consumeGroupScanRequest(): boolean {
+  const requestPath = path.join(config.sessionDir, GROUP_SCAN_REQUEST_FILE);
+  if (!fs.existsSync(requestPath)) return false;
+  try {
+    fs.rmSync(requestPath, { force: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface MemberSyncRequest {
   requestedAt: number;
   requestedBy: string;

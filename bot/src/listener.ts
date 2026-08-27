@@ -5,10 +5,12 @@ import {
   normalizeTs,
   fetchGroupPollVotes,
   consumeMemberSyncRequest,
+  consumeGroupScanRequest,
   consumePermissionCheckRequest,
   consumeReloginRequest,
   consumeKickNowRequest,
   consumeSummarySendRequest,
+  listGroups,
   sendGroupText,
   sleep,
   reloginRequestExists,
@@ -19,6 +21,7 @@ import {
   blockGroupMember,
 } from "./zalo/client.js";
 import {
+  getDb,
   logInteraction,
   logReactionOnce,
   upsertMember,
@@ -437,7 +440,46 @@ export async function runListener(): Promise<void> {
     }, delayMs);
   }
 
+  async function runGroupScan(reason = "startup"): Promise<void> {
+    try {
+      console.log(`[listener] Đang quét danh sách group Zalo (${reason})...`);
+      const groups = await listGroups(api, config.zaloThrottleMs);
+      if (!groups || groups.length === 0) {
+        console.log("[listener] Không tìm thấy group nào hoặc API trả rỗng.");
+        return;
+      }
+      console.log(`[listener] Tìm thấy ${groups.length} group. Đang lưu vào DB...`);
+      for (const g of groups) {
+        getDb()
+          .prepare(
+            `INSERT INTO bot_groups (group_id, name, total_members, mode, is_active, updated_at)
+             VALUES (@groupId, @name, @totalMembers, 'interactive', 0, @now)
+             ON CONFLICT(group_id) DO UPDATE SET
+               name = @name,
+               total_members = @totalMembers,
+               updated_at = @now`,
+          )
+          .run({
+            groupId: g.groupId,
+            name: g.name || `Nhóm ${g.groupId}`,
+            totalMembers: g.totalMember || 0,
+            now: Date.now(),
+          });
+      }
+      console.log(`[listener] Đã đồng bộ ${groups.length} group vào bảng bot_groups thành công!`);
+    } catch (e) {
+      console.warn(`[listener] Quét group lỗi: ${String(e)}`);
+    }
+  }
+
+  await runGroupScan("startup");
   await runMemberSync("startup");
+
+  setInterval(() => {
+    if (consumeGroupScanRequest()) {
+      void runGroupScan("dashboard").catch((e) => console.warn(`[listener] Quét group theo yêu cầu lỗi: ${String(e)}`));
+    }
+  }, 1_000);
 
   setInterval(() => {
     const request = consumeMemberSyncRequest();

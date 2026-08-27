@@ -148,6 +148,31 @@ export async function POST(request: Request) {
       );
     `);
 
+    if (body.action === "scan") {
+      try {
+        const reqPath = path.resolve(path.dirname(dbPath), "group-scan-request.json");
+        fs.mkdirSync(path.dirname(reqPath), { recursive: true });
+        fs.writeFileSync(reqPath, JSON.stringify({ requestedAt: Date.now(), requestedBy: "dashboard" }), "utf8");
+      } catch (e) {
+        console.warn("[api/groups] Không ghi được file group-scan-request:", e);
+      }
+      // Đợi bot quét xong trong 1.5s
+      await new Promise((r) => setTimeout(r, 1500));
+
+      const updated = db.prepare("SELECT * FROM bot_groups ORDER BY total_members DESC").all() as any[];
+      db.close();
+      const formatted = updated.map((g) => ({
+        id: g.group_id,
+        name: g.name,
+        fullName: g.name,
+        icon: g.mode === "silent" ? "🟡" : g.mode === "disabled" ? "🔴" : "🟢",
+        count: `${g.total_members || 0} TV`,
+        mode: g.mode || "interactive",
+        isActive: g.is_active === 1,
+      }));
+      return NextResponse.json({ ok: true, groups: formatted });
+    }
+
     if (body.action === "set_mode" && body.groupId && body.mode) {
       db.prepare("UPDATE bot_groups SET mode = ?, updated_at = ? WHERE group_id = ?").run(
         body.mode,

@@ -115,13 +115,20 @@ function AppShellInner({
   async function handleSyncGroups() {
     setSyncingGroups(true);
     try {
-      await fetch("/api/member-sync", { method: "POST" });
-      await loadGroups();
+      const res = await fetch("/api/groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "scan" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.groups) && data.groups.length > 0) {
+          setGroups(data.groups);
+        }
+      }
     } catch {}
-    setTimeout(() => {
-      setSyncingGroups(false);
-      loadGroups();
-    }, 2000);
+    await loadGroups();
+    setSyncingGroups(false);
   }
 
   // Đổi chế độ hoạt động cho nhóm: 'interactive' | 'silent' | 'disabled'
