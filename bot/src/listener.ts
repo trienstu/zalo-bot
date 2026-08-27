@@ -86,12 +86,13 @@ import {
  * Dùng tài khoản co-admin. KHÔNG kick/gửi gì ở listener.
  */
 
-/** Chỉ ghi tương tác cho group ta quản lý (bỏ qua DM / group khác). */
+/** Chỉ ghi tương tác cho group ta quản lý (bỏ qua DM / group bị Tắt). */
 function isTargetThread(threadId: unknown): boolean {
   const tid = String(threadId ?? "").trim();
   if (!tid) return false;
   const mode = getGroupMode(tid);
   if (mode === "disabled") return false;
+  if (mode === "interactive" || mode === "silent") return true;
   return config.isManagedGroup(tid);
 }
 
