@@ -22,7 +22,7 @@ export async function callGemini(
     throw new Error("Thiếu GEMINI_API_KEY trong .env");
   }
 
-  const model = process.env.GEMINI_MODEL?.trim() || config.geminiModel || "gemini-2.0-flash";
+  const model = process.env.GEMINI_MODEL?.trim() || config.geminiModel || "gemini-3.6-flash";
   const temperature = options?.temperature ?? 0.3;
   const maxTokens = options?.maxTokens;
 

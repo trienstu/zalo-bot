@@ -163,8 +163,8 @@ export const config = {
   /** API key Google Gemini (https://aistudio.google.com/app/apikey). Rỗng = tắt. */
   geminiApiKey: process.env.GEMINI_API_KEY?.trim() || "",
 
-  /** Model Gemini dùng để tóm tắt (vd: gemini-2.0-flash, gemini-1.5-flash). */
-  geminiModel: process.env.GEMINI_MODEL?.trim() || "gemini-2.0-flash",
+  /** Model Gemini dùng để tóm tắt (vd: gemini-3.6-flash, gemini-3.7-flash, gemini-3.1-pro). */
+  geminiModel: process.env.GEMINI_MODEL?.trim() || "gemini-3.6-flash",
 
   /** API key DeepSeek cho tóm tắt hằng ngày (https://platform.deepseek.com). Rỗng = tắt. */
   deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() || "",
