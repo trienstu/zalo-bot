@@ -182,53 +182,55 @@ export function QuickSummaryCard() {
               </p>
             </div>
           </div>
-          <Badge tone="ok" className="text-xs">Gemini 3.6 Flash</Badge>
+          <Badge tone="ok" className="text-xs">Gemini 3.5 Flash</Badge>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setSelectedDate(todayStr)}
-              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                selectedDate === todayStr
-                  ? "bg-cyan-500 text-black font-semibold"
-                  : "bg-[var(--color-card-subtle)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
-              }`}
-            >
-              Hôm nay
-            </button>
-            <button
-              type="button"
-              onClick={() => setSelectedDate(yesterdayStr)}
-              className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                selectedDate === yesterdayStr
-                  ? "bg-cyan-500 text-black font-semibold"
-                  : "bg-[var(--color-card-subtle)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
-              }`}
-            >
-              Hôm qua
-            </button>
+        <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setSelectedDate(todayStr)}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                  selectedDate === todayStr
+                    ? "bg-cyan-500 text-black font-semibold"
+                    : "bg-[var(--color-card-subtle)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
+                }`}
+              >
+                Hôm nay
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedDate(yesterdayStr)}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                  selectedDate === yesterdayStr
+                    ? "bg-cyan-500 text-black font-semibold"
+                    : "bg-[var(--color-card-subtle)] text-[var(--color-muted)] hover:text-[var(--color-text)]"
+                }`}
+              >
+                Hôm qua
+              </button>
+            </div>
+
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="text-[var(--color-muted)]">Ngày:</span>
+              <Input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="h-8 w-auto min-w-[130px] text-xs"
+              />
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-[var(--color-muted)]">Hoặc chọn ngày:</span>
-            <Input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="h-8 max-w-[150px] text-xs"
-            />
-          </div>
-
-          <label className="flex items-center gap-2 text-xs text-[var(--color-muted)] cursor-pointer select-none ml-auto">
+          <label className="flex items-center gap-2 text-xs text-[var(--color-muted)] cursor-pointer select-none">
             <input
               type="checkbox"
               checked={sendDirectly}
               onChange={(e) => setSendDirectly(e.target.checked)}
               className="rounded border-[var(--color-border)] text-cyan-500 focus:ring-cyan-500"
             />
-            <span>Tự động gửi vào Zalo sau khi tóm tắt</span>
+            <span>Tự động gửi vào Zalo</span>
           </label>
         </div>
 
