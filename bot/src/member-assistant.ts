@@ -751,19 +751,18 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       .replace(/^@[^\s]+\s*/, "")
       .trim();
 
-    const qLower = question.toLowerCase();
+    const qLower = question.toLowerCase().trim();
+    const greetingWords = new Set([
+      "alo", "hi", "hello", "chào", "chao", "ơi", "oi", "hey", "test",
+      "alo bot", "bot ơi", "sen ơi", "chào bot", "chào em", "chào bạn",
+      "sen chúa ơi", "sen chua oi", "chào sen", "chao sen", "hi bot", "hello bot"
+    ]);
+
     const isGreeting =
       !hasImage &&
       !hasFile &&
       !hasQuote &&
-      (!question ||
-        qLower.length < 3 ||
-        qLower.startsWith("chào") ||
-        qLower.startsWith("chao") ||
-        qLower.startsWith("hello") ||
-        qLower.startsWith("hi ") ||
-        qLower.startsWith("alo") ||
-        ["alo", "hi", "hello", "chào", "chao", "ơi", "oi", "hey", "test", "alo bot", "bot ơi", "sen ơi", "chào bot", "chào em", "chào bạn"].includes(qLower));
+      (!question || greetingWords.has(qLower));
 
     if (isGreeting) {
       await sendGroupText(
