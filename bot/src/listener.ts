@@ -754,29 +754,18 @@ export async function runListener(): Promise<void> {
       payload?.data?.idTo ??
       ""
     ).trim();
-    if (!threadId) return;
-
-    // Tự động ghi nhận nhóm mới vào database nếu chưa có
-    if (!threadId.startsWith("u")) {
-      try {
-        getDb()
-          .prepare(
-            `INSERT OR IGNORE INTO bot_groups (group_id, name, total_members, mode, is_active, updated_at)
-             VALUES (?, ?, 0, 'interactive', 0, ?)`,
-          )
-          .run(threadId, `Nhóm Zalo ${threadId.slice(-6)}`, Date.now());
-      } catch {}
-    }
-
     // =========================================================================
     // XỬ LÝ TIN NHẮN TRỰC TIẾP 1:1 VỚI ADMIN (DIRECT MESSAGE)
     // =========================================================================
+    const isGroup =
+      payload?.type === ThreadType.Group ||
+      payload?.type === 1 ||
+      Boolean(payload?.data?.groupId || payload?.groupId);
+
     const isDirectUserMessage =
-      payload?.type === "UserMessage" ||
-      payload?.threadType === ThreadType.User ||
-      payload?.threadType === 0 ||
-      (threadId.startsWith("u") && !payload?.data?.groupId && !payload?.groupId) ||
-      (!payload?.data?.groupId && !payload?.groupId && (!threadId || threadId.startsWith("u") || !isTargetThread(threadId)));
+      payload?.type === ThreadType.User ||
+      payload?.type === 0 ||
+      !isGroup;
 
     if (type === "message" && isDirectUserMessage) {
       const sender = extractSender(payload) || String(payload?.data?.uidFrom ?? payload?.uidFrom ?? "");
@@ -786,6 +775,8 @@ export async function runListener(): Promise<void> {
       const mediaUrl = media ? extractMediaUrl(payload) : null;
       const quote = extractQuote(payload);
       const fileAttachment = extractFileAttachment(payload);
+
+      console.log(`[listener] 💬 Nhận tin nhắn 1:1 từ ${displayName} (${sender}): "${text}"`);
 
       if (sender) {
         void handleAdminDirectInteraction(api, {
@@ -801,6 +792,18 @@ export async function runListener(): Promise<void> {
         }).catch((e) => console.warn(`[admin-assistant] lỗi: ${String(e)}`));
       }
       return;
+    }
+
+    // Tự động ghi nhận nhóm mới vào database nếu là Group
+    if (isGroup && threadId && !threadId.startsWith("u")) {
+      try {
+        getDb()
+          .prepare(
+            `INSERT OR IGNORE INTO bot_groups (group_id, name, total_members, mode, is_active, updated_at)
+             VALUES (?, ?, 0, 'interactive', 0, ?)`,
+          )
+          .run(threadId, `Nhóm Zalo ${threadId.slice(-6)}`, Date.now());
+      } catch {}
     }
 
     if (!isTargetThread(threadId)) return;
