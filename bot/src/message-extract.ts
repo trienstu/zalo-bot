@@ -152,3 +152,65 @@ export function extractText(payload: any): string | null {
 
   return null;
 }
+
+export interface QuotedMessage {
+  text: string;
+  senderName?: string;
+  senderId?: string;
+  mediaUrl?: string;
+  mediaType?: "image" | "video";
+}
+
+/**
+ * Trích xuất nội dung tin nhắn được trích dẫn (Quote / Reply) trong Zalo.
+ */
+export function extractQuote(payload: any): QuotedMessage | null {
+  const data = payload?.data;
+  let quoteObj = data?.quote || payload?.quote;
+
+  if (!quoteObj && typeof data?.content === "string" && data.content.startsWith("{")) {
+    const parsed = parseObjectMaybe(data.content);
+    if (parsed?.quote) quoteObj = parsed.quote;
+  } else if (!quoteObj && data?.content && typeof data.content === "object") {
+    if (data.content.quote) quoteObj = data.content.quote;
+  }
+
+  if (!quoteObj) return null;
+
+  const quote = (parseObjectMaybe(quoteObj) || (typeof quoteObj === "object" ? quoteObj : null)) as Record<string, any> | null;
+  if (!quote) return null;
+
+  const text =
+    typeof quote.msg === "string" && quote.msg.trim() !== ""
+      ? quote.msg.trim()
+      : typeof quote.text === "string" && quote.text.trim() !== ""
+        ? quote.text.trim()
+        : typeof quote.content === "string" && quote.content.trim() !== ""
+          ? quote.content.trim()
+          : typeof quote.title === "string" && quote.title.trim() !== ""
+            ? quote.title.trim()
+            : "";
+
+  const senderName = typeof quote.dName === "string" ? quote.dName : typeof quote.displayName === "string" ? quote.displayName : "";
+  const senderId = typeof quote.ownerId === "string" ? String(quote.ownerId) : typeof quote.from === "string" ? String(quote.from) : "";
+
+  let mediaUrl: string | undefined;
+  let mediaType: "image" | "video" | undefined;
+
+  const candidateUrl = quote.href || quote.hdUrl || quote.url || quote.thumb || quote.attach?.href || quote.attach?.url;
+  if (typeof candidateUrl === "string" && /^https?:\/\//i.test(candidateUrl)) {
+    mediaUrl = candidateUrl;
+    const msgType = String(quote.msgType || quote.type || "").toLowerCase();
+    mediaType = msgType.includes("video") ? "video" : "image";
+  }
+
+  if (!text && !mediaUrl) return null;
+
+  return {
+    text,
+    senderName: senderName || undefined,
+    senderId: senderId || undefined,
+    mediaUrl,
+    mediaType,
+  };
+}

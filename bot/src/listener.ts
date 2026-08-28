@@ -60,6 +60,7 @@ import {
   extractMediaSummary,
   extractMediaUrl,
   extractUndoTargetIds,
+  extractQuote,
 } from "./message-extract.js";
 import {
   forwardZaloMessageToTelegram,
@@ -799,7 +800,10 @@ export async function runListener(): Promise<void> {
           }).catch((e) => console.warn(`[moderation] lỗi không bắt được: ${String(e)}`));
         }
 
-        // Trợ lý tương tác thành viên (/rank, /top, /summary, /help, /hoi & Q&A lịch sử chat)
+        const mediaUrl = media ? extractMediaUrl(payload) : null;
+        const quote = extractQuote(payload);
+
+        // Trợ lý tương tác thành viên (/rank, /top, /summary, /help, /hoi & Q&A lịch sử chat, đọc ảnh/quote)
         // CHỈ PHẢN HỒI KHI NHÓM Ở CHẾ ĐỘ 🟢 'interactive' (Toàn quyền tương tác)
         // Khi ở chế độ 🟡 'silent' (Tàu ngầm ẩn), bot tuyệt đối im lặng không trả lời lệnh
         const currentGroupMode = getGroupMode(threadId);
@@ -810,6 +814,9 @@ export async function runListener(): Promise<void> {
             displayName,
             text,
             isSelf: Boolean(payload?.isSelf),
+            mediaUrl,
+            mediaType: media?.type,
+            quote,
           }).catch((e) => console.warn(`[member-assistant] lỗi: ${String(e)}`));
         }
       }

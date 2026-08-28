@@ -6,6 +6,34 @@ import { config } from "./config.js";
  */
 let botKeyOffset = 0;
 
+export interface GeminiImagePart {
+  data: string; // Base64 string
+  mimeType: string; // e.g. 'image/jpeg', 'image/png'
+}
+
+export async function downloadImageBase64(url: string): Promise<GeminiImagePart | null> {
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(20_000),
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+      },
+    });
+    if (!res.ok) return null;
+    const arrayBuffer = await res.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const contentType = res.headers.get("content-type") || "image/jpeg";
+    const mimeType = (contentType.split(";")[0] || "image/jpeg").trim();
+    return {
+      data: buffer.toString("base64"),
+      mimeType,
+    };
+  } catch (e) {
+    console.warn(`[gemini] Không tải được ảnh ${url.slice(0, 80)}: ${String(e)}`);
+    return null;
+  }
+}
+
 export async function callGemini(
   system: string,
   user: string,
@@ -13,6 +41,7 @@ export async function callGemini(
     maxTokens?: number;
     temperature?: number;
     json?: boolean;
+    images?: GeminiImagePart[];
   },
 ): Promise<string> {
   const rawKey = (process.env.GEMINI_API_KEY || config.geminiApiKey || "").trim();
@@ -29,6 +58,19 @@ export async function callGemini(
   let lastError: unknown;
   const numKeys = apiKeys.length;
 
+  const userParts: Record<string, unknown>[] = [];
+  if (options?.images && options.images.length > 0) {
+    for (const img of options.images) {
+      userParts.push({
+        inline_data: {
+          mime_type: img.mimeType || "image/jpeg",
+          data: img.data,
+        },
+      });
+    }
+  }
+  userParts.push({ text: user });
+
   // Thử lần lượt qua từng API Key nếu có nhiều key (Xoay vòng chống 429 Rate Limit)
   for (let attempt = 0; attempt < numKeys; attempt += 1) {
     const keyIdx = (botKeyOffset + attempt) % numKeys;
@@ -40,7 +82,7 @@ export async function callGemini(
       contents: [
         {
           role: "user",
-          parts: [{ text: user }],
+          parts: userParts,
         },
       ],
       generationConfig: {

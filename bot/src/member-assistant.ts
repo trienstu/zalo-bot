@@ -1,13 +1,22 @@
 import { getDb } from "./db/index.js";
 import { sendGroupText } from "./zalo/client.js";
-import { callGemini } from "./gemini.js";
+import { callGemini, downloadImageBase64, type GeminiImagePart } from "./gemini.js";
 
-interface MemberMessageEvent {
+export interface MemberMessageEvent {
   threadId: string;
   sender: string;
   displayName: string;
   text: string;
   isSelf?: boolean;
+  mediaUrl?: string | null;
+  mediaType?: string | null;
+  quote?: {
+    text?: string;
+    senderName?: string;
+    senderId?: string;
+    mediaUrl?: string;
+    mediaType?: "image" | "video";
+  } | null;
 }
 
 // User cooldown map to prevent spamming: userId -> lastResponseTimestamp
@@ -281,69 +290,64 @@ function handleHelpCommand(): string {
   );
 }
 
-/**
- * RAG Hỏi - Đáp: Tra cứu lịch sử chat riêng của từng nhóm và trả lời bằng Gemini AI.
- */
-async function handleHistoryQA(question: string, displayName: string, threadId: string): Promise<string> {
+async function handleHistoryQA(
+  question: string,
+  displayName: string,
+  threadId: string,
+  options?: {
+    imageUrl?: string;
+    quote?: MemberMessageEvent["quote"];
+  },
+): Promise<string> {
   const db = getDb();
 
-  // Tách từ khóa tìm kiếm (lọc bỏ các từ vô nghĩa)
-  const keywords = question
-    .toLowerCase()
-    .replace(/[?,.!/\\:;]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length >= 2 && !["làm", "sao", "cho", "hỏi", "mình", "anh", "em", "bot", "sen", "chúa", "gì", "thế", "nào", "được", "không"].includes(w));
-
-  // Truy vấn tin nhắn lịch sử liên quan (cô lập theo từng nhóm thread_id)
-  let relevantMessages: { display_name: string; text: string; ts: number }[] = [];
-
-  if (keywords.length > 0) {
-    // Tìm các tin nhắn có chứa từ khóa
-    const conditions = keywords.map(() => `LOWER(text) LIKE ?`).join(" OR ");
-    const params = [threadId, ...keywords.map((k) => `%${k}%`)];
-    relevantMessages = db
-      .prepare(
-        `SELECT display_name, text, ts
-         FROM group_messages
-         WHERE (thread_id = ? OR thread_id = '') AND deleted_at IS NULL AND is_self = 0 AND text != '' AND (${conditions})
-         ORDER BY ts DESC
-         LIMIT 60`,
-      )
-      .all(...params) as { display_name: string; text: string; ts: number }[];
-  }
-
-  // Nếu ít tin nhắn khớp từ khóa, lấy thêm các tin nhắn thảo luận gần đây nhất của nhóm
-  if (relevantMessages.length < 20) {
-    const recent = db
-      .prepare(
-        `SELECT display_name, text, ts
-         FROM group_messages
-         WHERE (thread_id = ? OR thread_id = '') AND deleted_at IS NULL AND is_self = 0 AND text != ''
-         ORDER BY ts DESC
-         LIMIT 60`,
-      )
-      .all(threadId) as { display_name: string; text: string; ts: number }[];
-
-    const seen = new Set(relevantMessages.map((m) => m.text));
-    for (const r of recent) {
-      if (!seen.has(r.text)) {
-        relevantMessages.push(r);
-        seen.add(r.text);
-      }
+  // 1. Tải ảnh nếu có đính kèm trực tiếp hoặc qua trích dẫn (Quote)
+  let imagePart: GeminiImagePart | null = null;
+  if (options?.imageUrl) {
+    console.log(`[member-assistant] 🖼️ Đang tải ảnh phân tích từ URL: ${options.imageUrl.slice(0, 80)}...`);
+    imagePart = await downloadImageBase64(options.imageUrl);
+    if (imagePart) {
+      console.log(`[member-assistant] ✅ Đã nạp ảnh thành công (${imagePart.mimeType}, size: ${Math.round(imagePart.data.length / 1024)} KB)`);
     }
   }
 
-  // Lấy thêm các bản tóm tắt đã lưu trong daily_summaries của nhóm
+  // 2. Lấy danh sách tin nhắn gần nhất trong nhóm để tạo ngữ cảnh
+  const relevantMessages = db
+    .prepare(
+      `SELECT display_name, text, ts, is_self
+       FROM messages
+       WHERE thread_id = ?
+         AND text IS NOT NULL
+         AND text != ''
+         AND is_deleted = 0
+         AND LOWER(text) NOT LIKE '%sen chúa%'
+         AND LOWER(text) NOT LIKE '%sen chua%'
+         AND text NOT LIKE '/%'
+         AND text NOT LIKE '!%'
+       ORDER BY ts DESC
+       LIMIT 80`,
+    )
+    .all(threadId) as { display_name: string; text: string; ts: number; is_self: number }[];
+
+  relevantMessages.reverse();
+
+  // 3. Lấy tóm tắt 3 ngày gần nhất (nếu có)
   const pastSummaries = db
-    .prepare(`SELECT day_label, summary_text FROM daily_summaries WHERE thread_id = ? OR thread_id = '' ORDER BY day_date DESC LIMIT 7`)
+    .prepare(
+      `SELECT day_label, summary_text
+       FROM summaries
+       WHERE thread_id = ?
+       ORDER BY day_label DESC
+       LIMIT 3`,
+    )
     .all(threadId) as { day_label: string; summary_text: string }[];
 
-  // Lấy Top thành viên tích cực nhất từ bảng xếp hạng của nhóm
+  // 4. Lấy top 5 thành viên năng nổ nhất
   const topMembers = db
     .prepare(
       `SELECT m.display_name,
-              COUNT(CASE WHEN i.type = 'message' THEN 1 END) AS msg_count,
-              COALESCE(SUM(CASE i.type WHEN 'message' THEN 10 WHEN 'vote' THEN 3 WHEN 'reaction' THEN 1 ELSE 1 END), 0) AS points
+              COUNT(i.id) AS msg_count,
+              COALESCE(SUM(CASE i.type WHEN 'message' THEN 10 WHEN 'image' THEN 10 WHEN 'video' THEN 10 WHEN 'vote' THEN 3 WHEN 'reaction' THEN 1 ELSE 1 END), 0) AS points
        FROM members m
        JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
        WHERE (i.thread_id = @threadId OR i.thread_id = '')
@@ -352,17 +356,17 @@ async function handleHistoryQA(question: string, displayName: string, threadId: 
          AND LOWER(m.display_name) NOT LIKE '%sen chua%'
        GROUP BY m.zalo_user_id, m.display_name
        ORDER BY points DESC
-       LIMIT 10`,
+       LIMIT 5`,
     )
     .all({ threadId }) as { display_name: string; msg_count: number; points: number }[];
 
-  // Lấy thống kê thành viên tàu ngầm / chưa từng chat trong nhóm
+  // 5. Thống kê thành viên chưa từng nhắn tin
   const inactiveMembers = db
     .prepare(
       `SELECT m.display_name,
-              COUNT(CASE WHEN i.type = 'message' THEN 1 END) AS msg_count
+              COUNT(i.id) AS msg_count
        FROM members m
-       LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND (i.thread_id = @threadId OR i.thread_id = '')
+       LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND (i.thread_id = @threadId OR i.thread_id = '') AND i.type = 'message'
        WHERE (m.group_id = @threadId OR m.group_id = '' OR m.group_id IS NULL)
          AND m.is_active = 1
          AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
@@ -413,22 +417,32 @@ async function handleHistoryQA(question: string, displayName: string, threadId: 
 
   const contextData = contextLines.join("\n\n");
 
+  let quotePromptSection = "";
+  if (options?.quote?.text) {
+    quotePromptSection = `\n=== NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE TỪ ${options.quote.senderName || "THÀNH VIÊN"}): ===\n"${options.quote.text}"\n`;
+  }
+
   const systemPrompt =
-    "Bạn là 'Sen Chúa' - trợ lý AI cực kỳ hóm hỉnh, thông minh, vui tính và mặn mà của nhóm Zalo 'GROUP TRAO ĐỔI - AI, CÔNG NGHỆ'.\n" +
+    "Bạn là 'Sen Chúa' - trợ lý AI cực kỳ hóm hỉnh, thông minh, vui tính và mặn mà của cộng đồng Zalo.\n" +
     "NHIỆM VỤ:\n" +
-    "1. Với các câu hỏi đùa, troll, hỏi vui hoặc câu hỏi bất khả thi (như: 'cách tăng 1 triệu view trong 1 đêm', 'cách kiếm 10 tỷ', 'bạn có người yêu chưa', 'hỏi dễ quá trục trặc luôn', 'ăn cơm chưa'): Hãy đối đáp CỰC KỲ HÀI HƯỚC, duyên dáng, bắt trend theo phong cách Sen Chúa hóm hỉnh (ví dụ: khuyên tối nay đi ngủ sớm rồi mơ, hoặc bảo em là bot chỉ biết ăn điện hóng chuyện thôi 😄).\n" +
-    "2. Với câu hỏi về bảng xếp hạng, thành viên tích cực: Trả lời dựa trên BẢNG XẾP HẠNG & THÀNH VIÊN TÍCH CỰC được cung cấp.\n" +
-    "3. Với câu hỏi chuyên môn AI/công nghệ/mẹo MMO: Trả lời súc tích dựa trên lịch sử chat. Nếu lịch sử chưa có, hãy trả lời vui vẻ và gợi ý anh em cao thủ trong nhóm cùng thảo luận.\n" +
-    "4. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown.";
+    "1. Nếu có HÌNH ẢNH đính kèm: Hãy ĐỌC KỸ TOÀN BỘ CHỮ/NỘI DUNG trong ảnh, dịch thuật (nếu được yêu cầu dịch sang tiếng Việt hoặc ngôn ngữ khác), phân tích biểu đồ/hóa đơn, giải bài tập, bắt lỗi code hoặc mô tả chi tiết theo đúng yêu cầu của người dùng.\n" +
+    "2. Nếu có NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): Hãy hiểu rằng người dùng đang hỏi, nhờ giải thích, dịch hoặc bình luận về chính nội dung được trích dẫn đó.\n" +
+    "3. Với các câu hỏi đùa, troll, hỏi vui hoặc câu hỏi bất khả thi: Hãy đối đáp CỰC KỲ HÀI HƯỚC, duyên dáng, bắt trend theo phong cách Sen Chúa hóm hỉnh.\n" +
+    "4. Với câu hỏi về bảng xếp hạng, thành viên tích cực: Trả lời dựa trên BẢNG XẾP HẠNG & THÀNH VIÊN TÍCH CỰC được cung cấp.\n" +
+    "5. Với câu hỏi chuyên môn AI/công nghệ/mẹo MMO: Trả lời súc tích, logic, chuẩn xác.\n" +
+    "6. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (hãy dùng dấu gạch đầu dòng, viết hoa hoặc icon để làm nổi bật).";
 
   const userPrompt =
-    `DƯỚI ĐÂY LÀ DỮ LIỆU LỊCH SỬ CHAT CỦA NHÓM:\n` +
+    `${quotePromptSection}\n` +
+    `DƯỚI ĐÂY LÀ DỮ LIỆU LỊCH SỬ CHAT CỦA NHÓM ĐỂ THAM KHẢO:\n` +
     `<chat_history>\n${contextData}\n</chat_history>\n\n` +
-    `CÂU HỎI TỪ THÀNH VIÊN (${displayName}): ${question}\n\n` +
-    `HÃY TRẢ LỜI CÂU HỎI TRÊN THẬT DUYÊN DÁNG VÀ HÓM HỈNH:`;
+    `YÊU CẦU / CÂU HỎI TỪ THÀNH VIÊN (${displayName}): ${question || "Hãy phân tích hình ảnh/nội dung trích dẫn trên giúp tôi."}\n\n` +
+    `HÃY TRẢ LỜI THẬT DUYÊN DÁNG, CHUẨN XÁC VÀ HÓM HỈNH:`;
 
   try {
-    const answer = await callGemini(systemPrompt, userPrompt);
+    const answer = await callGemini(systemPrompt, userPrompt, {
+      images: imagePart ? [imagePart] : undefined,
+    });
     return answer;
   } catch (e) {
     console.warn("[member-assistant] Gemini QA error:", e);
@@ -441,7 +455,10 @@ async function handleHistoryQA(question: string, displayName: string, threadId: 
  */
 export async function handleMemberInteraction(api: any, event: MemberMessageEvent): Promise<void> {
   const rawText = (event.text || "").trim();
-  if (!rawText) return;
+  const hasImage = Boolean(event.mediaUrl || event.quote?.mediaUrl);
+  const hasQuote = Boolean(event.quote?.text || event.quote?.mediaUrl);
+
+  if (!rawText && !hasImage) return;
 
   // Nếu là tin nhắn của chính tài khoản bot (chủ bot test từ app Zalo):
   if (event.isSelf) {
@@ -460,6 +477,8 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       rawText.startsWith("/") ||
       rawText.startsWith("!") ||
       rawText.startsWith("@") ||
+      hasImage ||
+      hasQuote ||
       lowerSelf.includes("sen chúa") ||
       lowerSelf.includes("sen chua") ||
       lowerSelf.startsWith("sen") ||
@@ -581,10 +600,15 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
-  // 6. Lệnh /hoi [câu hỏi] hoặc Tag bot / Nhắc tên Sen Chúa / Chào hỏi
+  // 6. Lệnh /hoi [câu hỏi], Tag bot, Nhắc tên Sen Chúa, Chào hỏi, Lệnh dịch/đọc ảnh, hoặc Quote hỏi bot
   const isTagBot =
     lower.startsWith("/hoi") ||
     lower.startsWith("!hoi") ||
+    lower.startsWith("/dich") ||
+    lower.startsWith("!dich") ||
+    lower.startsWith("/docanh") ||
+    lower.startsWith("!docanh") ||
+    lower.startsWith("/anh") ||
     lower.includes("@sen chúa") ||
     lower.includes("@sen chua") ||
     lower.includes("sen chúa") ||
@@ -602,6 +626,8 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     lower.startsWith("sen oi") ||
     lower.includes("bot ơi") ||
     lower.includes("bot oi") ||
+    (hasImage && (lower.includes("dịch") || lower.includes("dich") || lower.includes("đọc") || lower.includes("doc") || lower.includes("phân tích") || lower.includes("phan tich") || lower.includes("này") || lower.includes("gì") || lower.includes("bot") || lower.includes("sen"))) ||
+    (hasQuote && (lower.includes("bot") || lower.includes("sen") || lower.includes("dịch") || lower.includes("giải thích") || lower.includes("nghĩa là gì") || lower.startsWith("?") || lower.endsWith("?"))) ||
     (event.isSelf && lower.startsWith("@"));
 
   if (isTagBot) {
@@ -611,6 +637,11 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     let question = rawText
       .replace(/^\/hoi\s*/i, "")
       .replace(/^!hoi\s*/i, "")
+      .replace(/^\/dich\s*/i, "")
+      .replace(/^!dich\s*/i, "")
+      .replace(/^\/docanh\s*/i, "")
+      .replace(/^!docanh\s*/i, "")
+      .replace(/^\/anh\s*/i, "")
       .replace(/@sen chúa/gi, "")
       .replace(/@sen chua/gi, "")
       .replace(/@senchua/gi, "")
@@ -633,27 +664,29 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
 
     const qLower = question.toLowerCase();
     const isGreeting =
-      !question ||
-      qLower.length < 3 ||
-      qLower.startsWith("chào") ||
-      qLower.startsWith("chao") ||
-      qLower.startsWith("hello") ||
-      qLower.startsWith("hi ") ||
-      qLower.startsWith("alo") ||
-      ["alo", "hi", "hello", "chào", "chao", "ơi", "oi", "hey", "test", "alo bot", "bot ơi", "sen ơi", "chào bot", "chào em", "chào bạn"].includes(qLower);
+      !hasImage &&
+      !hasQuote &&
+      (!question ||
+        qLower.length < 3 ||
+        qLower.startsWith("chào") ||
+        qLower.startsWith("chao") ||
+        qLower.startsWith("hello") ||
+        qLower.startsWith("hi ") ||
+        qLower.startsWith("alo") ||
+        ["alo", "hi", "hello", "chào", "chao", "ơi", "oi", "hey", "test", "alo bot", "bot ơi", "sen ơi", "chào bot", "chào em", "chào bạn"].includes(qLower));
 
     if (isGreeting) {
       await sendGroupText(
         api,
         threadId,
-        `🤖 Dạ Sen Chúa chào ${displayName || "bác"} ạ! Em sẵn sàng hỗ trợ tra cứu thông tin thảo luận trong nhóm, điểm tương tác và giải đáp thắc mắc. Bạn cần hỏi gì cứ gõ: /hoi [câu hỏi] hoặc tag @Sen Chúa [câu hỏi] nhé!`,
+        `🤖 Dạ Sen Chúa chào ${displayName || "bác"} ạ! Em sẵn sàng hỗ trợ tra cứu thông tin thảo luận trong nhóm, điểm tương tác, đọc hình ảnh, dịch thuật và giải đáp thắc mắc. Bạn cần hỏi gì cứ gõ: /hoi [câu hỏi], gửi ảnh kèm câu lệnh hoặc tag @Sen Chúa nhé!`,
       );
       console.log(`[member-assistant] ✅ Đã gửi lời chào cho ${displayName}`);
       return;
     }
 
     // Các câu đối đáp hài hước, trêu chọc tức thì
-    if (["ngáo", "ngao", "ngu", "dở", "do", "ngốc", "ngoc", "lag", "chán", "chan"].some((w) => qLower === w || qLower.startsWith(w + " ") || qLower.endsWith(" " + w))) {
+    if (!hasImage && !hasQuote && ["ngáo", "ngao", "ngu", "dở", "do", "ngốc", "ngoc", "lag", "chán", "chan"].some((w) => qLower === w || qLower.startsWith(w + " ") || qLower.endsWith(" " + w))) {
       await sendGroupText(
         api,
         threadId,
@@ -662,7 +695,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       return;
     }
 
-    if (qLower.includes("mute") || qLower.includes("ban") || qLower.includes("kick")) {
+    if (!hasImage && !hasQuote && (qLower.includes("mute") || qLower.includes("ban") || qLower.includes("kick"))) {
       await sendGroupText(
         api,
         threadId,
@@ -671,7 +704,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       return;
     }
 
-    if (qLower.includes("1 triệu view") || qLower.includes("triệu view") || qLower.includes("1tr view") || qLower.includes("tăng view")) {
+    if (!hasImage && !hasQuote && (qLower.includes("1 triệu view") || qLower.includes("triệu view") || qLower.includes("1tr view") || qLower.includes("tăng view"))) {
       await sendGroupText(
         api,
         threadId,
@@ -682,21 +715,23 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
 
     // Tự động nhận diện câu hỏi xin link, tổng hợp link, tài liệu
     if (
-      qLower.includes("tổng hợp link") ||
-      qLower.includes("tong hop link") ||
-      qLower.includes("danh sách link") ||
-      qLower.includes("danh sach link") ||
-      qLower.includes("các link") ||
-      qLower.includes("cac link") ||
-      qLower.includes("tìm link") ||
-      qLower.includes("tim link") ||
-      qLower.includes("link chia sẻ") ||
-      qLower.includes("link chia se") ||
-      qLower.includes("link bài viết") ||
-      qLower.includes("link tài liệu") ||
-      qLower.includes("link fb") ||
-      qLower.includes("link tiktok") ||
-      qLower.includes("link youtube")
+      !hasImage &&
+      !hasQuote &&
+      (qLower.includes("tổng hợp link") ||
+        qLower.includes("tong hop link") ||
+        qLower.includes("danh sách link") ||
+        qLower.includes("danh sach link") ||
+        qLower.includes("các link") ||
+        qLower.includes("cac link") ||
+        qLower.includes("tìm link") ||
+        qLower.includes("tim link") ||
+        qLower.includes("link chia sẻ") ||
+        qLower.includes("link chia se") ||
+        qLower.includes("link bài viết") ||
+        qLower.includes("link tài liệu") ||
+        qLower.includes("link fb") ||
+        qLower.includes("link tiktok") ||
+        qLower.includes("link youtube"))
     ) {
       let filterWord = "";
       if (qLower.includes("ai")) filterWord = "ai";
@@ -715,22 +750,24 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
 
     // Tự động nhận diện câu hỏi về thành viên chưa từng chat, nằm vùng, tàu ngầm
     if (
-      qLower.includes("chưa từng chat") ||
-      qLower.includes("chua tung chat") ||
-      qLower.includes("chưa chat") ||
-      qLower.includes("chua chat") ||
-      qLower.includes("chưa từng nhắn") ||
-      qLower.includes("chua tung nhan") ||
-      qLower.includes("chưa nhắn tin") ||
-      qLower.includes("chua nhan tin") ||
-      qLower.includes("nằm vùng") ||
-      qLower.includes("nam vung") ||
-      qLower.includes("tàu ngầm") ||
-      qLower.includes("tau ngam") ||
-      qLower.includes("ai chưa tương tác") ||
-      qLower.includes("ai chua tuong tac") ||
-      qLower.includes("ít tương tác nhất") ||
-      qLower.includes("lười chat")
+      !hasImage &&
+      !hasQuote &&
+      (qLower.includes("chưa từng chat") ||
+        qLower.includes("chua tung chat") ||
+        qLower.includes("chưa chat") ||
+        qLower.includes("chua chat") ||
+        qLower.includes("chưa từng nhắn") ||
+        qLower.includes("chua tung nhan") ||
+        qLower.includes("chưa nhắn tin") ||
+        qLower.includes("chua nhan tin") ||
+        qLower.includes("nằm vùng") ||
+        qLower.includes("nam vung") ||
+        qLower.includes("tàu ngầm") ||
+        qLower.includes("tau ngam") ||
+        qLower.includes("ai chưa tương tác") ||
+        qLower.includes("ai chua tuong tac") ||
+        qLower.includes("ít tương tác nhất") ||
+        qLower.includes("lười chat"))
     ) {
       const reply =
         `🤖 Sen Chúa trả lời @${displayName}:\n\n` +
@@ -740,11 +777,14 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       return;
     }
 
-    console.log(`[member-assistant] 🔍 Đang xử lý câu hỏi từ ${displayName} (${sender}): "${question}"...`);
+    console.log(`[member-assistant] 🔍 Đang xử lý câu hỏi từ ${displayName} (${sender}): "${question}" (HasImage=${hasImage}, HasQuote=${hasQuote})...`);
 
     try {
-      // Tra cứu RAG từ lịch sử chat
-      const answer = await handleHistoryQA(question, displayName, threadId);
+      const targetImageUrl = event.mediaUrl || event.quote?.mediaUrl || undefined;
+      const answer = await handleHistoryQA(question, displayName, threadId, {
+        imageUrl: targetImageUrl,
+        quote: event.quote,
+      });
       const reply = `🤖 Sen Chúa trả lời @${displayName}:\n\n${answer}`;
       await sendGroupText(api, threadId, reply);
       console.log(`[member-assistant] ✅ Đã gửi câu trả lời thành công vào nhóm`);
