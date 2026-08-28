@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Card, CardTitle, Button } from "@/components/ui";
 
@@ -65,7 +65,7 @@ const PERSONA_PRESETS = [
   },
 ];
 
-export function GroupPersonaForm() {
+function GroupPersonaFormInner() {
   const searchParams = useSearchParams();
   const urlGroupId = searchParams.get("group");
 
@@ -352,7 +352,7 @@ export function GroupPersonaForm() {
             </div>
           </div>
 
-          {/* 4. Khung xem trước phản hồi mẫu (Live Preview) */}
+          {/* 3. Khung xem trước phản hồi mẫu (Live Preview) */}
           <div className="mt-2 p-4 rounded-xl border border-white/10 bg-slate-950/60 backdrop-blur-md">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2 text-xs font-semibold text-slate-300 uppercase tracking-wider">
@@ -369,5 +369,20 @@ export function GroupPersonaForm() {
         </div>
       )}
     </Card>
+  );
+}
+
+export function GroupPersonaForm() {
+  return (
+    <Suspense
+      fallback={
+        <Card className="p-6 text-center text-xs text-slate-400">
+          <div className="inline-block w-5 h-5 border-2 border-amber-500/30 border-t-amber-500 rounded-full animate-spin mr-2" />
+          Đang tải cấu hình AI nhóm...
+        </Card>
+      }
+    >
+      <GroupPersonaFormInner />
+    </Suspense>
   );
 }

@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Sparkles, Send, Clock, Check, Copy, RefreshCw, AlertCircle, Cpu, Database, CheckCircle2 } from "lucide-react";
 import { Card, CardTitle, Button, Input, Badge } from "@/components/ui";
 
-export function QuickSummaryCard() {
+function QuickSummaryCardInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const currentGroupId = searchParams.get("group") || "1913869945242410752";
@@ -400,5 +400,20 @@ export function QuickSummaryCard() {
         </div>
       </Card>
     </div>
+  );
+}
+
+export function QuickSummaryCard() {
+  return (
+    <Suspense
+      fallback={
+        <Card className="p-6 text-center text-xs text-slate-400">
+          <div className="inline-block w-5 h-5 border-2 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin mr-2" />
+          Đang tải khung tóm tắt...
+        </Card>
+      }
+    >
+      <QuickSummaryCardInner />
+    </Suspense>
   );
 }
