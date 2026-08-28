@@ -768,22 +768,29 @@ export async function runListener(): Promise<void> {
       !isGroup;
 
     if (type === "message" && isDirectUserMessage) {
-      const sender = extractSender(payload) || String(payload?.data?.uidFrom ?? payload?.uidFrom ?? "");
+      const targetUserId = String(
+        (payload?.isSelf ? payload?.data?.idTo : payload?.data?.uidFrom) ??
+        payload?.threadId ??
+        payload?.data?.uidFrom ??
+        payload?.uidFrom ??
+        payload?.data?.idTo ??
+        ""
+      ).trim();
       const displayName = String(payload?.data?.dName ?? "Admin");
-      const text = extractText(payload);
+      const text = extractText(payload) || "";
       const media = extractMediaSummary(payload);
       const mediaUrl = media ? extractMediaUrl(payload) : null;
       const quote = extractQuote(payload);
       const fileAttachment = extractFileAttachment(payload);
 
-      console.log(`[listener] 💬 Nhận tin nhắn 1:1 từ ${displayName} (${sender}): "${text}"`);
+      console.log(`[listener] 💬 Nhận tin nhắn 1:1 từ [${displayName}] (${targetUserId}): "${text}" (isSelf=${Boolean(payload?.isSelf)})`);
 
-      if (sender) {
+      if (targetUserId) {
         void handleAdminDirectInteraction(api, {
-          threadId: sender,
-          sender,
+          threadId: targetUserId,
+          sender: targetUserId,
           displayName,
-          text: text || "",
+          text,
           isSelf: Boolean(payload?.isSelf),
           mediaUrl,
           mediaType: media?.type,

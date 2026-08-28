@@ -60,8 +60,22 @@ function findGroup(query: string): { groupId: string; name: string; totalMembers
 function getAllGroupsList(): { groupId: string; name: string; totalMembers: number; mode: string }[] {
   try {
     const db = getDb();
-    return db.prepare("SELECT group_id as groupId, name, total_members as totalMembers, mode FROM bot_groups ORDER BY updated_at DESC").all() as any[];
-  } catch {
+    const rows = db.prepare("SELECT group_id as groupId, name, total_members as totalMembers, mode FROM bot_groups ORDER BY updated_at DESC").all() as any[];
+    if (rows && rows.length > 0) return rows;
+
+    // Fallback nếu bảng bot_groups chưa có dữ liệu
+    const distinctGroups = db.prepare("SELECT DISTINCT thread_id FROM group_messages WHERE thread_id != '' AND thread_id NOT LIKE 'u%' LIMIT 10").all() as { thread_id: string }[];
+    if (distinctGroups && distinctGroups.length > 0) {
+      return distinctGroups.map((g) => ({
+        groupId: g.thread_id,
+        name: `Nhóm Zalo ${g.thread_id.slice(-6)}`,
+        totalMembers: 0,
+        mode: "interactive",
+      }));
+    }
+    return [];
+  } catch (e) {
+    console.warn(`[admin-assistant] getAllGroupsList error: ${String(e)}`);
     return [];
   }
 }
