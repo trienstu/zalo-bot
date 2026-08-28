@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { Card, CardTitle, Button } from "@/components/ui";
 
 export interface GroupItem {
@@ -65,6 +66,9 @@ const PERSONA_PRESETS = [
 ];
 
 export function GroupPersonaForm() {
+  const searchParams = useSearchParams();
+  const urlGroupId = searchParams.get("group");
+
   const [groups, setGroups] = useState<GroupItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -82,6 +86,18 @@ export function GroupPersonaForm() {
     fetchGroups();
   }, []);
 
+  // Tự động nhận diện và cập nhật cấu hình nhóm khi click nhóm ở cột trái
+  useEffect(() => {
+    if (groups.length > 0) {
+      const target = groups.find((g) => g.id === urlGroupId) || groups[0];
+      if (target && target.id !== selectedId) {
+        setSelectedId(target.id);
+        applyGroupState(target);
+        setMsg(null);
+      }
+    }
+  }, [urlGroupId, groups]);
+
   async function fetchGroups() {
     try {
       setLoading(true);
@@ -89,11 +105,9 @@ export function GroupPersonaForm() {
       const data = (await res.json()) as { groups?: GroupItem[] };
       if (data?.groups && data.groups.length > 0) {
         setGroups(data.groups);
-        const first = data.groups[0];
-        if (!selectedId || !data.groups.some((g) => g.id === selectedId)) {
-          setSelectedId(first.id);
-          applyGroupState(first);
-        }
+        const target = (urlGroupId && data.groups.find((g) => g.id === urlGroupId)) || data.groups[0];
+        setSelectedId(target.id);
+        applyGroupState(target);
       }
     } catch (e) {
       console.error(e);
@@ -108,15 +122,6 @@ export function GroupPersonaForm() {
     setBotName(g.botName || "Sen Chúa");
     setWelcomeMsg(g.welcomeMsg || "");
     setMode(g.mode || "interactive");
-  }
-
-  function handleSelectGroup(id: string) {
-    setSelectedId(id);
-    const target = groups.find((g) => g.id === id);
-    if (target) {
-      applyGroupState(target);
-      setMsg(null);
-    }
   }
 
   async function handleSave() {
@@ -139,7 +144,7 @@ export function GroupPersonaForm() {
       });
       const data = (await res.json()) as { ok: boolean; message?: string; error?: string };
       if (data.ok) {
-        setMsg({ text: data.message || "Đã lưu cài đặt cá tính thành công!", ok: true });
+        setMsg({ text: data.message || `Đã lưu cài đặt cho nhóm ${selectedGroup?.name || ""} thành công!`, ok: true });
         // Cập nhật lại state local
         setGroups((prev) =>
           prev.map((g) =>
@@ -167,12 +172,25 @@ export function GroupPersonaForm() {
         <div>
           <div className="flex items-center gap-2.5">
             <span className="text-2xl">🤖</span>
-            <CardTitle className="text-xl font-bold bg-gradient-to-r from-amber-400 via-orange-300 to-rose-400 bg-clip-text text-transparent">
-              Cá Tính AI & Prompt Riêng Từng Nhóm
-            </CardTitle>
+            <div>
+              <CardTitle className="text-xl font-bold bg-gradient-to-r from-amber-400 via-orange-300 to-rose-400 bg-clip-text text-transparent">
+                Cá Tính AI & Prompt Riêng Từng Nhóm
+              </CardTitle>
+              {selectedGroup && (
+                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                  <span className="text-xs text-slate-400">Đang cấu hình:</span>
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs font-bold shadow-sm">
+                    <span>{selectedGroup.icon || "👥"}</span>
+                    <span>{selectedGroup.name}</span>
+                    <span className="text-[10px] font-mono text-slate-400 font-normal">({selectedGroup.count})</span>
+                  </span>
+                  <span className="text-[11px] text-slate-500 font-mono">ID: {selectedGroup.id}</span>
+                </div>
+              )}
+            </div>
           </div>
-          <p className="text-xs md:text-sm text-slate-400 mt-1">
-            Thiết lập phong cách trả lời, xưng hô và kịch bản chỉ thị System Prompt độc quyền cho từng nhóm Zalo.
+          <p className="text-xs md:text-sm text-slate-400 mt-2">
+            Thiết lập phong cách trả lời, xưng hô và kịch bản chỉ thị System Prompt độc quyền cho nhóm đang chọn ở cột trái.
           </p>
         </div>
 
@@ -181,7 +199,7 @@ export function GroupPersonaForm() {
             <Button
               onClick={handleSave}
               disabled={saving}
-              className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-medium px-5 py-2 rounded-xl shadow-lg shadow-orange-500/20 transition-all flex items-center gap-2 text-sm"
+              className="bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-medium px-5 py-2.5 rounded-xl shadow-lg shadow-orange-500/20 transition-all flex items-center gap-2 text-sm cursor-pointer"
             >
               {saving ? (
                 <>
@@ -214,7 +232,7 @@ export function GroupPersonaForm() {
       {loading ? (
         <div className="py-12 text-center text-slate-400 text-sm flex items-center justify-center gap-3">
           <span className="inline-block w-5 h-5 border-2 border-amber-500/30 border-t-amber-500 rounded-full animate-spin" />
-          Đang tải danh sách nhóm Zalo...
+          Đang tải cấu hình nhóm Zalo...
         </div>
       ) : groups.length === 0 ? (
         <div className="py-12 text-center text-slate-400 text-sm">
@@ -222,40 +240,10 @@ export function GroupPersonaForm() {
         </div>
       ) : (
         <div className="mt-6 flex flex-col gap-6">
-          {/* 1. Thanh chọn nhóm (Tabs) */}
+          {/* 1. Chọn Preset Cá tính AI */}
           <div>
             <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider block mb-2.5">
-              1. Chọn nhóm Zalo cần cấu hình:
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {groups.map((g) => {
-                const isSelected = g.id === selectedId;
-                return (
-                  <button
-                    key={g.id}
-                    type="button"
-                    onClick={() => handleSelectGroup(g.id)}
-                    className={`px-3.5 py-2 rounded-xl text-xs md:text-sm font-medium transition-all flex items-center gap-2 border ${
-                      isSelected
-                        ? "bg-amber-500/20 border-amber-500/60 text-amber-300 shadow-md shadow-amber-500/10 scale-[1.02]"
-                        : "bg-slate-800/60 border-slate-700/60 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                    }`}
-                  >
-                    <span>{g.icon || "👥"}</span>
-                    <span className="truncate max-w-[180px] font-semibold">{g.name}</span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-900/80 text-slate-400">
-                      {g.count}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* 2. Chọn Preset Cá tính AI */}
-          <div>
-            <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider block mb-2.5">
-              2. Chọn phong cách & cá tính AI cho [{selectedGroup?.name}]:
+              1. Chọn phong cách & cá tính AI cho [{selectedGroup?.name}]:
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {PERSONA_PRESETS.map((p) => {
@@ -294,7 +282,7 @@ export function GroupPersonaForm() {
             </div>
           </div>
 
-          {/* 3. Tùy chỉnh chi tiết (Tên bot, Chế độ, Custom Prompt, Welcome Msg) */}
+          {/* 2. Tùy chỉnh chi tiết (Tên bot, Chế độ, Custom Prompt, Welcome Msg) */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 pt-2">
             {/* Cột trái: Tên Bot, Chế độ & Welcome Msg */}
             <div className="flex flex-col gap-4">
