@@ -65,6 +65,21 @@ function ensureWebSchema(database: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_cleanup_draft_items_plan
       ON cleanup_draft_plan_items(draft_plan_id, rank);
+
+    CREATE TABLE IF NOT EXISTS group_members (
+      zalo_user_id   TEXT NOT NULL,
+      group_id       TEXT NOT NULL,
+      display_name   TEXT NOT NULL DEFAULT '',
+      role           TEXT NOT NULL DEFAULT 'member',
+      joined_at      INTEGER,
+      first_seen_at  INTEGER NOT NULL,
+      is_active      INTEGER NOT NULL DEFAULT 1,
+      left_at        INTEGER,
+      PRIMARY KEY (zalo_user_id, group_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_group_members_group_active ON group_members(group_id, is_active);
+    CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(zalo_user_id);
   `);
 }
 
