@@ -68,6 +68,8 @@ import {
   isTelegramForwardConfigured,
   removeForwardedTelegramMessages,
 } from "./telegram-forward.js";
+import { handleAdminDirectInteraction } from "./admin-assistant.js";
+import { ThreadType } from "zca-js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -764,6 +766,41 @@ export async function runListener(): Promise<void> {
           )
           .run(threadId, `Nhóm Zalo ${threadId.slice(-6)}`, Date.now());
       } catch {}
+    }
+
+    // =========================================================================
+    // XỬ LÝ TIN NHẮN TRỰC TIẾP 1:1 VỚI ADMIN (DIRECT MESSAGE)
+    // =========================================================================
+    const isDirectUserMessage =
+      payload?.type === "UserMessage" ||
+      payload?.threadType === ThreadType.User ||
+      payload?.threadType === 0 ||
+      (threadId.startsWith("u") && !payload?.data?.groupId && !payload?.groupId) ||
+      (!payload?.data?.groupId && !payload?.groupId && (!threadId || threadId.startsWith("u") || !isTargetThread(threadId)));
+
+    if (type === "message" && isDirectUserMessage) {
+      const sender = extractSender(payload) || String(payload?.data?.uidFrom ?? payload?.uidFrom ?? "");
+      const displayName = String(payload?.data?.dName ?? "Admin");
+      const text = extractText(payload);
+      const media = extractMediaSummary(payload);
+      const mediaUrl = media ? extractMediaUrl(payload) : null;
+      const quote = extractQuote(payload);
+      const fileAttachment = extractFileAttachment(payload);
+
+      if (sender) {
+        void handleAdminDirectInteraction(api, {
+          threadId: sender,
+          sender,
+          displayName,
+          text: text || "",
+          isSelf: Boolean(payload?.isSelf),
+          mediaUrl,
+          mediaType: media?.type,
+          fileAttachment,
+          quote,
+        }).catch((e) => console.warn(`[admin-assistant] lỗi: ${String(e)}`));
+      }
+      return;
     }
 
     if (!isTargetThread(threadId)) return;

@@ -1908,4 +1908,45 @@ export function searchGroupKnowledge(threadId: string, query?: string, limit = 1
   }
 }
 
+export interface AdminUserInfo {
+  zaloUserId: string;
+  displayName: string;
+  addedAt: number;
+}
+
+export function isUserAdmin(zaloUserId: string): boolean {
+  try {
+    const rawState = getBotState("admin_user_ids");
+    if (!rawState) return false;
+    const list = JSON.parse(rawState) as AdminUserInfo[];
+    return list.some((u) => u.zaloUserId === zaloUserId);
+  } catch {
+    return false;
+  }
+}
+
+export function addAdminUser(zaloUserId: string, displayName: string): void {
+  try {
+    const rawState = getBotState("admin_user_ids");
+    const list: AdminUserInfo[] = rawState ? (JSON.parse(rawState) as AdminUserInfo[]) : [];
+    if (!list.some((u) => u.zaloUserId === zaloUserId)) {
+      list.push({ zaloUserId, displayName, addedAt: Date.now() });
+      setBotState("admin_user_ids", JSON.stringify(list), Date.now());
+      console.log(`[db] 👑 Đã cấp quyền Super Admin cho ${displayName} (${zaloUserId})`);
+    }
+  } catch (e) {
+    console.warn(`[db] addAdminUser error: ${String(e)}`);
+  }
+}
+
+export function getAdminUsers(): AdminUserInfo[] {
+  try {
+    const rawState = getBotState("admin_user_ids");
+    return rawState ? (JSON.parse(rawState) as AdminUserInfo[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+
 

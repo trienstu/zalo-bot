@@ -656,6 +656,58 @@ export async function sendGroupText(api: ZaloApi, groupId: string, text: string)
 }
 
 /**
+ * Gửi tin nhắn trực tiếp 1:1 đến người dùng / Admin qua Direct Message.
+ */
+export async function sendDirectText(api: ZaloApi, userId: string, text: string): Promise<void> {
+  if (typeof api.sendMessage !== "function") {
+    throw new Error("zca-js runtime không có api.sendMessage");
+  }
+
+  const targetId = String(userId).trim();
+  console.log(`[sendDirectText] 📤 Đang gửi tin nhắn 1:1 đến [${targetId}]: "${text.slice(0, 60)}..."`);
+
+  // Method 1: { msg }, ThreadType.User
+  try {
+    await api.sendMessage({ msg: text }, targetId, ThreadType.User);
+    console.log(`[sendDirectText] ✅ Đã gửi 1:1 thành công đến [${targetId}] (Method 1: {msg}, User)`);
+    return;
+  } catch (e1) {
+    console.warn(`[sendDirectText] Method 1 thất bại: ${String(e1)}, đang thử Method 2...`);
+  }
+
+  // Method 2: raw string, ThreadType.User
+  try {
+    await api.sendMessage(text, targetId, ThreadType.User);
+    console.log(`[sendDirectText] ✅ Đã gửi 1:1 thành công đến [${targetId}] (Method 2: string, User)`);
+    return;
+  } catch (e2) {
+    console.warn(`[sendDirectText] Method 2 thất bại: ${String(e2)}, đang thử Method 3...`);
+  }
+
+  // Method 3: { msg }, 0 (User type = 0)
+  try {
+    await api.sendMessage({ msg: text }, targetId, 0);
+    console.log(`[sendDirectText] ✅ Đã gửi 1:1 thành công đến [${targetId}] (Method 3: {msg}, 0)`);
+    return;
+  } catch (e3) {
+    console.warn(`[sendDirectText] Method 3 thất bại: ${String(e3)}, đang thử Method 4...`);
+  }
+
+  // Method 4: raw string, 0
+  try {
+    await api.sendMessage(text, targetId, 0);
+    console.log(`[sendDirectText] ✅ Đã gửi 1:1 thành công đến [${targetId}] (Method 4: string, 0)`);
+    return;
+  } catch (e4) {
+    console.warn(`[sendDirectText] Method 4 thất bại: ${String(e4)}, đang thử Method 5...`);
+  }
+
+  // Method 5: fallback
+  await api.sendMessage(text, targetId);
+  console.log(`[sendDirectText] ✅ Đã gửi 1:1 thành công đến [${targetId}] (Method 5: direct target)`);
+}
+
+/**
  * Xoá 1 member khỏi group. zca-js bản đang cài không expose type definition cho method
  * này, nhưng các runtime/fork thường có một trong các tên dưới. Nếu không có, dừng rõ
  * để user không tưởng bot đã xoá thành công.
