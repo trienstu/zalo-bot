@@ -654,17 +654,10 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
-  // 6. Lệnh /hoi [câu hỏi], Tag bot, Nhắc tên Sen Chúa, Chào hỏi, Lệnh đọc file/ảnh, hoặc Quote hỏi bot
-  const isTagBot =
-    lower.startsWith("/hoi") ||
-    lower.startsWith("!hoi") ||
-    lower.startsWith("/dich") ||
-    lower.startsWith("!dich") ||
-    lower.startsWith("/docanh") ||
-    lower.startsWith("!docanh") ||
-    lower.startsWith("/docfile") ||
-    lower.startsWith("/file") ||
-    lower.startsWith("/anh") ||
+  // 6. Lệnh /hoi [câu hỏi], Tag bot, Nhắc tên Sen Chúa, Chào hỏi, Lệnh đọc file/ảnh
+  // QUY TẮC: BOT CHỈ TRẢ LỜI KHI THÀNH VIÊN THỰC SỰ GỌI TÊN HOẶC DÙNG LỆNH CỦA BOT.
+  // Tránh việc thành viên chat bình thường/quote với nhau mà bot tự ý xen vào.
+  const mentionsBot =
     lower.includes("@sen chúa") ||
     lower.includes("@sen chua") ||
     lower.includes("sen chúa") ||
@@ -682,10 +675,30 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     lower.startsWith("sen oi") ||
     lower.includes("bot ơi") ||
     lower.includes("bot oi") ||
-    (hasFile && (lower.includes("đọc") || lower.includes("tóm tắt") || lower.includes("dịch") || lower.includes("phân tích") || lower.includes("bot") || lower.includes("sen") || lower.length === 0)) ||
-    (hasImage && (lower.includes("dịch") || lower.includes("dich") || lower.includes("đọc") || lower.includes("doc") || lower.includes("phân tích") || lower.includes("phan tich") || lower.includes("này") || lower.includes("gì") || lower.includes("bot") || lower.includes("sen"))) ||
-    (hasQuote && (lower.includes("bot") || lower.includes("sen") || lower.includes("dịch") || lower.includes("giải thích") || lower.includes("nghĩa là gì") || lower.startsWith("?") || lower.endsWith("?"))) ||
+    lower.includes("sen ơi") ||
+    lower.includes("sen oi") ||
+    lower.includes("nhờ bot") ||
+    lower.includes("nhờ sen") ||
+    lower.includes("hỏi bot") ||
+    lower.includes("hỏi sen") ||
+    lower.includes("cho bot") ||
+    lower.includes("cho sen") ||
+    lower.startsWith("bot ") ||
+    lower.startsWith("sen ");
+
+  const isCommand =
+    lower.startsWith("/hoi") ||
+    lower.startsWith("!hoi") ||
+    lower.startsWith("/dich") ||
+    lower.startsWith("!dich") ||
+    lower.startsWith("/docanh") ||
+    lower.startsWith("!docanh") ||
+    lower.startsWith("/docfile") ||
+    lower.startsWith("/file") ||
+    lower.startsWith("/anh") ||
     (event.isSelf && lower.startsWith("@"));
+
+  const isTagBot = isCommand || mentionsBot;
 
   if (isTagBot) {
     userCooldowns.set(sender, now);
