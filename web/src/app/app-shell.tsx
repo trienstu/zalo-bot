@@ -103,6 +103,8 @@ function AppShellInner({
   const [syncingGroups, setSyncingGroups] = useState(false);
   const [syncingMembers, setSyncingMembers] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
 
   // Lấy danh sách nhóm động từ API
   async function loadGroups() {
@@ -196,6 +198,21 @@ function AppShellInner({
     setIsAdminAuthenticated(false);
   }
 
+  const activeGroupId = searchParams.get("group") || (groups.length > 0 ? groups[0].id : "");
+  const activeGroup = groups.find((g) => g.id === activeGroupId);
+
+  const filteredGroups = groups.filter(
+    (g) =>
+      !searchQuery ||
+      g.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      g.id.includes(searchQuery),
+  );
+
+  const buildNavHref = (baseHref: string) => {
+    if (!activeGroupId) return baseHref;
+    return `${baseHref}${baseHref.includes("?") ? "&" : "?"}group=${activeGroupId}`;
+  };
+
   // 1. TRANG CÔNG KHAI THUẦN TÚY: Kho Kiến Thức (/hub)
   const isHubPublicPage = pathname === "/hub" || pathname.startsWith("/hub/");
   if (isHubPublicPage) {
@@ -243,24 +260,6 @@ function AppShellInner({
   if (isAdminAuthenticated === false) {
     return <ForbiddenAccessScreen />;
   }
-
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
-
-  const activeGroupId = searchParams.get("group") || (groups.length > 0 ? groups[0].id : "");
-  const activeGroup = groups.find((g) => g.id === activeGroupId);
-
-  const filteredGroups = groups.filter(
-    (g) =>
-      !searchQuery ||
-      g.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      g.id.includes(searchQuery),
-  );
-
-  const buildNavHref = (baseHref: string) => {
-    if (!activeGroupId) return baseHref;
-    return `${baseHref}${baseHref.includes("?") ? "&" : "?"}group=${activeGroupId}`;
-  };
 
   // Hàm render nội dung cột nhóm (tái sử dụng cho cả desktop sidebar và mobile drawer)
   const renderSidebarContent = (isMobile = false) => (
