@@ -1,4 +1,4 @@
-import { getDb, saveGroupKnowledge, searchGroupKnowledge } from "./db/index.js";
+import { getDb, saveGroupKnowledge, searchGroupKnowledge, getGroupSettings } from "./db/index.js";
 import { sendGroupText } from "./zalo/client.js";
 import {
   callGemini,
@@ -491,16 +491,51 @@ async function handleHistoryQA(
     fileContentSection = `\n=== NỘI DUNG TÀI LIỆU ĐÍNH KÈM (${fileName || "File"}): ===\n${fileTextContent.slice(0, 40000)}\n`;
   }
 
+  const groupSettings = getGroupSettings(threadId);
+  const botName = groupSettings.botName || "Sen Chúa";
+
+  let personaIntro = "";
+  switch (groupSettings.persona) {
+    case "professional":
+      personaIntro =
+        `Bạn là '${botName}' - chuyên gia cố vấn AI cấp cao, súc tích, logic, chuẩn xác và chuyên nghiệp của cộng đồng Zalo.\n` +
+        `Phong cách trả lời: Đi thẳng vào trọng tâm, phân tích chuyên môn sâu sắc (công nghệ, AI, code, marketing, tài chính, kinh doanh), logic mạch lạc, súc tích, ngôn từ lịch thiệp và chuẩn mực.`;
+      break;
+    case "friendly":
+      personaIntro =
+        `Bạn là '${botName}' - trợ lý AI tận tâm, ân cần, lễ phép, chu đáo và lịch sự của cộng đồng Zalo.\n` +
+        `Phong cách trả lời: Nhẹ nhàng, nhiệt tình hỗ trợ, giải thích cặn kẽ và chu đáo cho mọi thành viên, xưng hô tôn trọng, tạo cảm giác gắn kết ấm áp.`;
+      break;
+    case "strict":
+      personaIntro =
+        `Bạn là '${botName}' - người điều hành & giám sát AI chuẩn mực, nghiêm túc của cộng đồng Zalo.\n` +
+        `Phong cách trả lời: Nghiêm túc, chuẩn mực, đề cao kỷ luật và nội quy nhóm, cảnh báo thẳng thắn các hành vi sai phạm hoặc thông tin sai lệch, ngôn từ chính xác và dứt khoát.`;
+      break;
+    case "custom":
+      personaIntro =
+        `Bạn là '${botName}' - trợ lý AI của cộng đồng Zalo được tùy biến riêng theo chỉ đạo của Quản trị viên.`;
+      break;
+    case "humorous":
+    default:
+      personaIntro =
+        `Bạn là '${botName}' - trợ lý AI cực kỳ hóm hỉnh, thông minh, vui tính, mặn mà và bắt trend của cộng đồng Zalo.\n` +
+        `Phong cách trả lời: Hài hước, duyên dáng, dí dỏm, thả miếng bắt trend, tạo không khí sôi nổi và gắn kết anh em trong nhóm.`;
+      break;
+  }
+
+  let customPromptSection = "";
+  if (groupSettings.customPrompt?.trim()) {
+    customPromptSection = `\n=== CHỈ THỊ & NỘI QUY RIÊNG CỦA ADMIN CHO NHÓM NÀY (BẮT BUỘC TUÂN THỦ 100%): ===\n${groupSettings.customPrompt.trim()}\n`;
+  }
+
   const systemPrompt =
-    "Bạn là 'Sen Chúa' - trợ lý AI cực kỳ hóm hỉnh, thông minh, vui tính và mặn mà của cộng đồng Zalo.\n" +
-    "NHIỆM VỤ:\n" +
-    "1. Nếu có FILE TÀI LIỆU (PDF, Word, Excel, Code, TXT, Âm thanh, Hình ảnh) đính kèm: Hãy ĐỌC KỸ TOÀN BỘ NỘI DUNG, trích xuất dữ liệu, dịch thuật (nếu được yêu cầu), giải thích, tìm lỗi code hoặc tóm tắt đầy đủ theo yêu cầu của người dùng.\n" +
-    "2. Nếu người dùng hỏi về kiến thức/tài liệu cũ đã từng gửi trong nhóm: Hãy tra cứu từ 'KHO TRI THỨC & BỘ NHỚ TÀI LIỆU ĐÃ LƯU' để trả lời chính xác.\n" +
-    "3. Nếu có NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): Hãy hiểu rằng người dùng đang hỏi, nhờ giải thích, dịch hoặc bình luận về chính nội dung được trích dẫn đó.\n" +
-    "4. Với các câu hỏi đùa, troll, hỏi vui hoặc câu hỏi bất khả thi: Hãy đối đáp CỰC KỲ HÀI HƯỚC, duyên dáng, bắt trend theo phong cách Sen Chúa hóm hỉnh.\n" +
-    "5. Với câu hỏi về bảng xếp hạng, thành viên tích cực: Trả lời dựa trên BẢNG XẾP HẠNG & THÀNH VIÊN TÍCH CỰC được cung cấp.\n" +
-    "6. Với câu hỏi chuyên môn AI/công nghệ/mẹo MMO: Trả lời súc tích, logic, chuẩn xác.\n" +
-    "7. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (hãy dùng dấu gạch đầu dòng, viết hoa hoặc icon để làm nổi bật).";
+    `${personaIntro}\n${customPromptSection}\n` +
+    `NHIỆM VỤ CHUNG:\n` +
+    `1. Nếu có FILE TÀI LIỆU (PDF, Word, Excel, Code, TXT, Âm thanh, Hình ảnh) đính kèm: ĐỌC KỸ TOÀN BỘ NỘI DUNG, trích xuất dữ liệu, dịch thuật, phân tích chuyên sâu hoặc tóm tắt đầy đủ.\n` +
+    `2. Nếu người dùng hỏi về kiến thức/tài liệu cũ đã từng gửi trong nhóm: Tra cứu từ 'KHO TRI THỨC & BỘ NHỚ TÀI LIỆU ĐÃ LƯU' để trả lời chính xác.\n` +
+    `3. Nếu có NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): Hiểu rằng người dùng đang hỏi hoặc bình luận về chính nội dung được trích dẫn đó.\n` +
+    `4. Luôn trả lời chuẩn theo phong cách cá tính được quy định ở trên.\n` +
+    `5. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (hãy dùng dấu gạch đầu dòng, viết hoa hoặc icon để làm nổi bật).`;
 
   const userPrompt =
     `${quotePromptSection}\n${fileContentSection}\n` +

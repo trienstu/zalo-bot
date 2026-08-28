@@ -75,6 +75,11 @@ function runColumnMigrations(database: Database.Database): void {
     ["members", "group_id", "TEXT NOT NULL DEFAULT ''"],
     // Chế độ hoạt động cho từng nhóm: 'interactive' | 'silent' | 'disabled'
     ["bot_groups", "mode", "TEXT NOT NULL DEFAULT 'interactive'"],
+    // Cá tính AI, prompt tùy chỉnh, biệt danh xưng hô và thông điệp chào mừng
+    ["bot_groups", "persona", "TEXT NOT NULL DEFAULT 'humorous'"],
+    ["bot_groups", "custom_prompt", "TEXT NOT NULL DEFAULT ''"],
+    ["bot_groups", "bot_name", "TEXT NOT NULL DEFAULT 'Sen Chúa'"],
+    ["bot_groups", "welcome_msg", "TEXT NOT NULL DEFAULT ''"],
   ];
 
   for (const [table, column, definition] of additions) {
@@ -1792,6 +1797,103 @@ export function releaseLock(key: string): void {
   deleteBotState(key);
 }
 
+export interface GroupSettings {
+  groupId: string;
+  name: string;
+  totalMembers: number;
+  mode: "interactive" | "silent" | "disabled";
+  persona: "humorous" | "professional" | "friendly" | "strict" | "custom";
+  customPrompt: string;
+  botName: string;
+  welcomeMsg: string;
+  isActive: boolean;
+  updatedAt: number;
+}
+
+/** Lấy đầy đủ cấu hình cá tính và cài đặt của nhóm */
+export function getGroupSettings(groupId: string): GroupSettings {
+  try {
+    const row = getDb()
+      .prepare(
+        `SELECT group_id as groupId, name, total_members as totalMembers, mode,
+                COALESCE(persona, 'humorous') as persona,
+                COALESCE(custom_prompt, '') as customPrompt,
+                COALESCE(bot_name, 'Sen Chúa') as botName,
+                COALESCE(welcome_msg, '') as welcomeMsg,
+                is_active as isActive, updated_at as updatedAt
+         FROM bot_groups WHERE group_id = ?`,
+      )
+      .get(groupId) as any;
+    if (row) {
+      return {
+        groupId: row.groupId,
+        name: row.name || `Nhóm ${groupId.slice(-4)}`,
+        totalMembers: row.totalMembers || 0,
+        mode: row.mode || "interactive",
+        persona: row.persona || "humorous",
+        customPrompt: row.customPrompt || "",
+        botName: row.botName || "Sen Chúa",
+        welcomeMsg: row.welcomeMsg || "",
+        isActive: Boolean(row.isActive),
+        updatedAt: row.updatedAt || Date.now(),
+      };
+    }
+  } catch {}
+
+  return {
+    groupId,
+    name: `Nhóm ${groupId.slice(-4)}`,
+    totalMembers: 0,
+    mode: "interactive",
+    persona: "humorous",
+    customPrompt: "",
+    botName: "Sen Chúa",
+    welcomeMsg: "",
+    isActive: true,
+    updatedAt: Date.now(),
+  };
+}
+
+/** Cập nhật toàn diện cài đặt cá tính cho nhóm */
+export function updateGroupSettings(
+  groupId: string,
+  settings: Partial<{
+    name: string;
+    mode: "interactive" | "silent" | "disabled";
+    persona: "humorous" | "professional" | "friendly" | "strict" | "custom";
+    customPrompt: string;
+    botName: string;
+    welcomeMsg: string;
+  }>,
+): void {
+  const current = getGroupSettings(groupId);
+  getDb()
+    .prepare(
+      `INSERT INTO bot_groups (group_id, name, total_members, mode, persona, custom_prompt, bot_name, welcome_msg, is_active, updated_at)
+       VALUES (@groupId, @name, @totalMembers, @mode, @persona, @customPrompt, @botName, @welcomeMsg, @isActive, @now)
+       ON CONFLICT(group_id) DO UPDATE SET
+         name = COALESCE(@name, name),
+         mode = COALESCE(@mode, mode),
+         persona = COALESCE(@persona, persona),
+         custom_prompt = COALESCE(@customPrompt, custom_prompt),
+         bot_name = COALESCE(@botName, bot_name),
+         welcome_msg = COALESCE(@welcomeMsg, welcome_msg),
+         updated_at = @now`,
+    )
+    .run({
+      groupId,
+      name: settings.name ?? current.name,
+      totalMembers: current.totalMembers,
+      mode: settings.mode ?? current.mode,
+      persona: settings.persona ?? current.persona,
+      customPrompt: settings.customPrompt ?? current.customPrompt,
+      botName: settings.botName ?? current.botName,
+      welcomeMsg: settings.welcomeMsg ?? current.welcomeMsg,
+      isActive: current.isActive ? 1 : 0,
+      now: Date.now(),
+    });
+}
+
 /** Lấy chế độ hoạt động của nhóm: 'interactive' | 'silent' | 'disabled' */
 export function getGroupMode(groupId: string): "interactive" | "silent" | "disabled" {
   try {
@@ -1807,13 +1909,7 @@ export function getGroupMode(groupId: string): "interactive" | "silent" | "disab
 
 /** Cập nhật chế độ hoạt động của nhóm */
 export function setGroupMode(groupId: string, mode: "interactive" | "silent" | "disabled"): void {
-  getDb()
-    .prepare(
-      `INSERT INTO bot_groups (group_id, name, total_members, mode, is_active, updated_at)
-       VALUES (@groupId, @groupId, 0, @mode, 0, @now)
-       ON CONFLICT(group_id) DO UPDATE SET mode = @mode, updated_at = @now`,
-    )
-    .run({ groupId, mode, now: Date.now() });
+  updateGroupSettings(groupId, { mode });
 }
 
 export interface GroupKnowledgeItem {

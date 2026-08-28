@@ -42,11 +42,23 @@ export async function GET() {
       );
     `);
 
-    // Migration thêm cột mode nếu bảng đã có từ trước
+    // Migration thêm các cột mới nếu bảng đã có từ trước
     try {
       const cols = db.prepare(`PRAGMA table_info(bot_groups)`).all() as { name: string }[];
       if (!cols.some((c) => c.name === "mode")) {
         db.exec(`ALTER TABLE bot_groups ADD COLUMN mode TEXT NOT NULL DEFAULT 'interactive'`);
+      }
+      if (!cols.some((c) => c.name === "persona")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN persona TEXT NOT NULL DEFAULT 'humorous'`);
+      }
+      if (!cols.some((c) => c.name === "custom_prompt")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN custom_prompt TEXT NOT NULL DEFAULT ''`);
+      }
+      if (!cols.some((c) => c.name === "bot_name")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN bot_name TEXT NOT NULL DEFAULT 'Sen Chúa'`);
+      }
+      if (!cols.some((c) => c.name === "welcome_msg")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN welcome_msg TEXT NOT NULL DEFAULT ''`);
       }
     } catch {}
 
@@ -56,6 +68,10 @@ export async function GET() {
       name: string;
       total_members: number;
       mode: string;
+      persona?: string;
+      custom_prompt?: string;
+      bot_name?: string;
+      welcome_msg?: string;
       is_active: number;
     }[];
 
@@ -74,8 +90,8 @@ export async function GET() {
       if (syncRuns.length > 0) {
         for (const sr of syncRuns) {
           db.prepare(
-            `INSERT OR REPLACE INTO bot_groups (group_id, name, total_members, mode, is_active, updated_at)
-             VALUES (?, ?, ?, 'interactive', 0, ?)`,
+            `INSERT OR REPLACE INTO bot_groups (group_id, name, total_members, mode, persona, custom_prompt, bot_name, welcome_msg, is_active, updated_at)
+             VALUES (?, ?, ?, 'interactive', 'humorous', '', 'Sen Chúa', '', 0, ?)`,
           ).run(sr.group_id, sr.name || `Nhóm ${sr.group_id.slice(-4)}`, sr.total_members || 0, Date.now());
         }
         savedGroups = db.prepare("SELECT * FROM bot_groups ORDER BY total_members DESC").all() as any[];
@@ -94,8 +110,8 @@ export async function GET() {
 
       for (const mt of msgThreads) {
         db.prepare(
-          `INSERT OR IGNORE INTO bot_groups (group_id, name, total_members, mode, is_active, updated_at)
-           VALUES (?, ?, 0, 'interactive', 0, ?)`,
+          `INSERT OR IGNORE INTO bot_groups (group_id, name, total_members, mode, persona, custom_prompt, bot_name, welcome_msg, is_active, updated_at)
+           VALUES (?, ?, 0, 'interactive', 'humorous', '', 'Sen Chúa', '', 0, ?)`,
         ).run(mt.group_id, `Nhóm Zalo ${mt.group_id.slice(-6)}`, Date.now());
       }
       savedGroups = db.prepare("SELECT * FROM bot_groups ORDER BY total_members DESC").all() as any[];
@@ -110,6 +126,10 @@ export async function GET() {
       icon: g.mode === "silent" ? "🟡" : g.mode === "disabled" ? "🔴" : "🟢",
       count: `${g.total_members || 0} TV`,
       mode: (g.mode as "interactive" | "silent" | "disabled") || "interactive",
+      persona: (g.persona as "humorous" | "professional" | "friendly" | "strict" | "custom") || "humorous",
+      customPrompt: g.custom_prompt || "",
+      botName: g.bot_name || "Sen Chúa",
+      welcomeMsg: g.welcome_msg || "",
       isActive: g.is_active === 1,
     }));
 
@@ -123,10 +143,14 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as {
-      action?: "scan" | "select" | "set_mode";
+      action?: "scan" | "select" | "set_mode" | "update_persona";
       groupId?: string;
       groupName?: string;
       mode?: "interactive" | "silent" | "disabled";
+      persona?: "humorous" | "professional" | "friendly" | "strict" | "custom";
+      customPrompt?: string;
+      botName?: string;
+      welcomeMsg?: string;
     };
 
     const dbPath = getBotDbPath();
@@ -142,11 +166,58 @@ export async function POST(request: Request) {
         name           TEXT NOT NULL,
         total_members  INTEGER NOT NULL DEFAULT 0,
         mode           TEXT NOT NULL DEFAULT 'interactive',
+        persona        TEXT NOT NULL DEFAULT 'humorous',
+        custom_prompt  TEXT NOT NULL DEFAULT '',
+        bot_name       TEXT NOT NULL DEFAULT 'Sen Chúa',
+        welcome_msg    TEXT NOT NULL DEFAULT '',
         is_active      INTEGER NOT NULL DEFAULT 0,
         creator_id     TEXT,
         updated_at     INTEGER NOT NULL
       );
     `);
+
+    // Migration thêm cột
+    try {
+      const cols = db.prepare(`PRAGMA table_info(bot_groups)`).all() as { name: string }[];
+      if (!cols.some((c) => c.name === "persona")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN persona TEXT NOT NULL DEFAULT 'humorous'`);
+      }
+      if (!cols.some((c) => c.name === "custom_prompt")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN custom_prompt TEXT NOT NULL DEFAULT ''`);
+      }
+      if (!cols.some((c) => c.name === "bot_name")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN bot_name TEXT NOT NULL DEFAULT 'Sen Chúa'`);
+      }
+      if (!cols.some((c) => c.name === "welcome_msg")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN welcome_msg TEXT NOT NULL DEFAULT ''`);
+      }
+    } catch {}
+
+    if (body.action === "update_persona" && body.groupId) {
+      db.prepare(
+        `UPDATE bot_groups
+         SET persona = COALESCE(?, persona),
+             custom_prompt = COALESCE(?, custom_prompt),
+             bot_name = COALESCE(?, bot_name),
+             welcome_msg = COALESCE(?, welcome_msg),
+             mode = COALESCE(?, mode),
+             updated_at = ?
+         WHERE group_id = ?`,
+      ).run(
+        body.persona ?? null,
+        body.customPrompt ?? null,
+        body.botName ?? null,
+        body.welcomeMsg ?? null,
+        body.mode ?? null,
+        Date.now(),
+        body.groupId,
+      );
+      db.close();
+      return NextResponse.json({
+        ok: true,
+        message: `Đã lưu cá tính & chỉ thị Prompt cho nhóm thành công!`,
+      });
+    }
 
     if (body.action === "scan") {
       try {
@@ -168,6 +239,10 @@ export async function POST(request: Request) {
         icon: g.mode === "silent" ? "🟡" : g.mode === "disabled" ? "🔴" : "🟢",
         count: `${g.total_members || 0} TV`,
         mode: g.mode || "interactive",
+        persona: g.persona || "humorous",
+        customPrompt: g.custom_prompt || "",
+        botName: g.bot_name || "Sen Chúa",
+        welcomeMsg: g.welcome_msg || "",
         isActive: g.is_active === 1,
       }));
       return NextResponse.json({ ok: true, groups: formatted });
@@ -192,8 +267,8 @@ export async function POST(request: Request) {
 
     if (body.groupId && body.groupName) {
       db.prepare(
-        `INSERT OR REPLACE INTO bot_groups (group_id, name, total_members, mode, is_active, updated_at)
-         VALUES (?, ?, ?, 'interactive', 1, ?)`,
+        `INSERT OR REPLACE INTO bot_groups (group_id, name, total_members, mode, persona, custom_prompt, bot_name, welcome_msg, is_active, updated_at)
+         VALUES (?, ?, ?, 'interactive', 'humorous', '', 'Sen Chúa', '', 1, ?)`,
       ).run(body.groupId, body.groupName, 0, Date.now());
     }
 

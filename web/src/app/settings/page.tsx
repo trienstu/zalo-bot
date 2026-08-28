@@ -6,6 +6,7 @@ import { readModerationConfig } from "@/lib/blacklist";
 import { ConfigForm } from "./config-form";
 import { VipForm } from "./vip-form";
 import { BlacklistForm } from "./blacklist-form";
+import { GroupPersonaForm } from "./group-persona-form";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,8 @@ export default function SettingsPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <PageHeader title="Cấu hình" desc="Chỉnh tham số dọn dẹp và danh sách VIP. Bot đọc lại ở kỳ kế tiếp." />
+      <PageHeader title="Cấu hình Hệ Thống & Cá Tính AI" desc="Tùy chỉnh cá tính & Prompt riêng cho từng nhóm Zalo, chỉnh tham số dọn dẹp và danh sách VIP." />
+      <GroupPersonaForm />
       <ConfigForm initial={config} />
       <BlacklistForm initial={moderation} />
       <VipForm initial={vip} members={members} />
