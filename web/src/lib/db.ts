@@ -81,6 +81,13 @@ function ensureWebSchema(database: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_group_members_group_active ON group_members(group_id, is_active);
     CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(zalo_user_id);
   `);
+
+  try {
+    const cols = database.prepare("PRAGMA table_info(member_events)").all() as { name: string }[];
+    if (cols.length > 0 && !cols.some((c) => c.name === "group_id")) {
+      database.exec("ALTER TABLE member_events ADD COLUMN group_id TEXT");
+    }
+  } catch {}
 }
 
 export function getDb(): Database.Database {

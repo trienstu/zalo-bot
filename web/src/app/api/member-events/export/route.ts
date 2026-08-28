@@ -24,6 +24,7 @@ export async function GET(request: Request) {
     from: parseDateMs(url.searchParams.get("from")),
     to: parseDateMs(url.searchParams.get("to"), true),
     limit: 5000,
+    threadId: url.searchParams.get("group") ?? undefined,
   };
   const rows = listMemberEvents(filters).slice().reverse();
   const lines = [["ts", "event_type", "source", "display_name", "zalo_user_id", "role", "note"].join(",")];
