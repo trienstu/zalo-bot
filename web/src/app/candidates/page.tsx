@@ -8,7 +8,14 @@ import { SaveDraftButton } from "./save-draft-button";
 
 export const dynamic = "force-dynamic";
 
-export default function CandidatesPage() {
+type SearchParams = Record<string, string | string[] | undefined>;
+
+function one(params: SearchParams | undefined, key: string): string {
+  const value = params?.[key];
+  return Array.isArray(value) ? (value[0] ?? "") : (value ?? "");
+}
+
+export default async function CandidatesPage({ searchParams }: { searchParams?: Promise<SearchParams> }) {
   if (!dbExists()) {
     return (
       <div>
@@ -18,18 +25,21 @@ export default function CandidatesPage() {
     );
   }
 
+  const params = await searchParams;
+  const selectedGroupId = one(params, "group") || "all";
+
   const cfg = readConfig();
   const target = cfg.targetMemberCount ?? CONFIG_DEFAULTS.targetMemberCount;
   const maxKicks = cfg.maxKicksPerRun ?? CONFIG_DEFAULTS.maxKicksPerRun;
   const vipIds = readVip().map((entry) => entry.id);
-  const plan = buildOverTargetCandidatePlan({ target, maxKicks, vipIds });
+  const plan = buildOverTargetCandidatePlan({ target, maxKicks, vipIds, threadId: selectedGroupId });
   const latestDraft = getLatestCleanupDraftComparison();
 
   return (
     <div>
       <PageHeader
         title="Ứng viên"
-        desc={`Xếp hạng thành viên thường, không VIP, không phải người mới trong tháng hiện tại.`}
+        desc={`Xếp hạng thành viên thường, không VIP, không phải người mới trong tháng hiện tại${selectedGroupId !== "all" ? " cho nhóm đang chọn." : "."}`}
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">

@@ -58,6 +58,7 @@ function parseFilters(params: SearchParams | undefined): MemberEventFilters & { 
   const source = one(params, "source") || "all";
   const fromRaw = one(params, "from");
   const toRaw = one(params, "to");
+  const threadId = one(params, "group") || undefined;
   return {
     eventType: EVENT_OPTIONS.some((o) => o.value === eventType) ? eventType : "all",
     source: SOURCE_OPTIONS.some((o) => o.value === source) ? source : "all",
@@ -66,12 +67,13 @@ function parseFilters(params: SearchParams | undefined): MemberEventFilters & { 
     limit: 300,
     fromRaw,
     toRaw,
+    threadId,
   };
 }
 
 function exportHref(params: SearchParams | undefined): string {
   const qs = new URLSearchParams();
-  for (const key of ["eventType", "source", "from", "to"]) {
+  for (const key of ["eventType", "source", "from", "to", "group"]) {
     const v = one(params, key);
     if (v) qs.set(key, v);
   }
@@ -89,17 +91,22 @@ export default async function MemberEventsPage({ searchParams }: { searchParams?
   }
 
   const params = await searchParams;
+  const selectedGroupId = one(params, "group") || "all";
   const filters = parseFilters(params);
   const events = listMemberEvents(filters);
   const total = countMemberEvents(filters);
 
   return (
     <div>
-      <PageHeader title="Sự kiện TV" desc={`Có ${total} sự kiện khớp bộ lọc, hiển thị ${events.length} dòng mới nhất.`} />
+      <PageHeader
+        title="Sự kiện TV"
+        desc={`Có ${total} sự kiện khớp bộ lọc, hiển thị ${events.length} dòng mới nhất${selectedGroupId !== "all" ? " cho nhóm đang chọn." : "."}`}
+      />
 
       <Card className="mb-6">
         <CardTitle>Bộ lọc</CardTitle>
         <form action="/events" className="mt-4 grid gap-3 lg:grid-cols-[1fr_1fr_150px_150px_auto_auto_auto]">
+          <input type="hidden" name="group" value={selectedGroupId} />
           <Select name="eventType" defaultValue={filters.eventType ?? "all"} ariaLabel="Loại sự kiện" options={EVENT_OPTIONS} />
           <Select name="source" defaultValue={filters.source ?? "all"} ariaLabel="Nguồn" options={SOURCE_OPTIONS} />
           <Input name="from" type="date" defaultValue={filters.fromRaw} aria-label="Từ ngày" />
@@ -109,7 +116,7 @@ export default async function MemberEventsPage({ searchParams }: { searchParams?
             Lọc
           </Button>
           <Link
-            href="/events"
+            href={selectedGroupId !== "all" ? `/events?group=${selectedGroupId}` : "/events"}
             className="inline-flex h-9 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--color-border)] px-4 text-sm font-medium text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
           >
             <RotateCcw size={16} />

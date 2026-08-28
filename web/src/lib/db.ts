@@ -229,6 +229,7 @@ export interface MemberEventFilters {
   from?: number | null;
   to?: number | null;
   limit?: number;
+  threadId?: string;
 }
 
 export interface BotHealth {
@@ -404,32 +405,36 @@ export interface LeaderboardRow {
 
 export function countActiveMembers(groupId?: string): number {
   const targetGroupId = (groupId || "").trim();
-  const primaryGroupId = "1913869945242410752";
   if (!targetGroupId || targetGroupId === "all") {
     const r = getDb().prepare(`SELECT COUNT(*) AS n FROM members WHERE is_active = 1`).get() as { n: number };
     return r.n;
   }
-  if (targetGroupId === primaryGroupId) {
-    const r = getDb().prepare(`SELECT COUNT(*) AS n FROM members WHERE is_active = 1 AND (group_id = @targetGroupId OR group_id = '' OR group_id IS NULL)`).get({ targetGroupId }) as { n: number };
-    return r.n;
-  }
-  const r = getDb().prepare(`SELECT COUNT(*) AS n FROM members WHERE is_active = 1 AND group_id = @targetGroupId`).get({ targetGroupId }) as { n: number };
+  try {
+    const hasGroupMembers = getDb().prepare(`SELECT 1 FROM group_members WHERE group_id = ? LIMIT 1`).get(targetGroupId);
+    if (hasGroupMembers) {
+      const r = getDb().prepare(`SELECT COUNT(*) AS n FROM group_members WHERE is_active = 1 AND group_id = @targetGroupId`).get({ targetGroupId }) as { n: number };
+      return r.n;
+    }
+  } catch {}
+  const r = getDb().prepare(`SELECT COUNT(*) AS n FROM members WHERE is_active = 1 AND (group_id = @targetGroupId OR group_id = '' OR group_id IS NULL)`).get({ targetGroupId }) as { n: number };
   return r.n;
 }
 
 export function countByRole(groupId?: string): { owner: number; admin: number; member: number } {
   const targetGroupId = (groupId || "").trim();
-  const primaryGroupId = "1913869945242410752";
+  let fromTable = "members";
   let whereClause = "WHERE is_active = 1";
   if (targetGroupId && targetGroupId !== "all") {
-    if (targetGroupId === primaryGroupId) {
-      whereClause = "WHERE is_active = 1 AND (group_id = @targetGroupId OR group_id = '' OR group_id IS NULL)";
-    } else {
-      whereClause = "WHERE is_active = 1 AND group_id = @targetGroupId";
-    }
+    try {
+      const hasGroupMembers = getDb().prepare(`SELECT 1 FROM group_members WHERE group_id = ? LIMIT 1`).get(targetGroupId);
+      if (hasGroupMembers) {
+        fromTable = "group_members";
+      }
+    } catch {}
+    whereClause = `WHERE is_active = 1 AND (group_id = @targetGroupId OR group_id = '' OR group_id IS NULL)`;
   }
   const rows = getDb()
-    .prepare(`SELECT role, COUNT(*) AS n FROM members ${whereClause} GROUP BY role`)
+    .prepare(`SELECT role, COUNT(*) AS n FROM ${fromTable} ${whereClause} GROUP BY role`)
     .all({ targetGroupId }) as { role: string; n: number }[];
   const out = { owner: 0, admin: 0, member: 0 };
   for (const r of rows) {
@@ -909,6 +914,10 @@ function memberEventWhere(filters: MemberEventFilters): { sql: string; params: R
   if (filters.source && filters.source !== "all") clauses.push(`source = @source`);
   if (filters.from) clauses.push(`ts >= @from`);
   if (filters.to) clauses.push(`ts <= @to`);
+  if (filters.threadId && filters.threadId !== "all") {
+    clauses.push(`(group_id = @threadId OR sync_run_id IN (SELECT id FROM member_sync_runs WHERE group_id = @threadId))`);
+    params.threadId = filters.threadId;
+  }
   return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
 
@@ -941,8 +950,27 @@ export function buildOverTargetCandidatePlan(input: {
   maxKicks: number;
   vipIds?: string[];
   now?: number;
+  threadId?: string;
 }): OverTargetCandidatePlan {
-  const total = countActiveMembers();
+  const targetThreadId = (input.threadId || "").trim();
+  let fromTable = "members";
+  let groupWhere = "";
+  let threadJoin = "";
+
+  if (targetThreadId && targetThreadId !== "all") {
+    threadJoin = `AND (i.thread_id = '${targetThreadId}')`;
+    groupWhere = `AND (m.group_id = '${targetThreadId}')`;
+    try {
+      const hasGroupMembers = getDb()
+        .prepare(`SELECT 1 FROM group_members WHERE group_id = ? LIMIT 1`)
+        .get(targetThreadId);
+      if (hasGroupMembers) {
+        fromTable = "group_members";
+      }
+    } catch {}
+  }
+
+  const total = countActiveMembers(targetThreadId || undefined);
   const overTarget = Math.max(0, total - input.target);
   const needToReview = Math.min(overTarget, input.maxKicks);
   const vipIds = [...new Set(input.vipIds ?? [])].filter(Boolean);
@@ -963,10 +991,11 @@ export function buildOverTargetCandidatePlan(input: {
            MAX(i.ts) AS last_interaction,
            COALESCE(cw.warning_count, 0) AS warning_count,
            cw.last_warned_at AS last_warned_at
-    FROM members m
-    LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
+    FROM ${fromTable} m
+    LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id ${threadJoin}
     LEFT JOIN cleanup_warnings cw ON cw.zalo_user_id = m.zalo_user_id
     WHERE m.is_active = 1
+      ${groupWhere}
       AND m.role = 'member'
       AND m.first_seen_at < @cycleStart
       AND (m.joined_at IS NULL OR m.joined_at < @cycleStart)
