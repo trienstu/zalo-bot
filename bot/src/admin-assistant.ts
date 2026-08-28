@@ -90,11 +90,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   const hasFile = Boolean(event.fileAttachment);
   const hasImage = Boolean(event.mediaUrl || event.quote?.mediaUrl);
 
-  if (!rawText && !hasFile && !hasImage) return;
-
-  // Bỏ qua tin nhắn do chính bot vừa gửi ra để tránh lặp
-  if (event.isSelf && (rawText.startsWith("🤖") || rawText.startsWith("👑") || rawText.startsWith("📋") || rawText.startsWith("✅"))) {
-    return;
+  // TUYỆT ĐỐI BỎ QUA MỌI TIN NHẮN TỰ PHÁT HOẶC ECHO CỦA CHÍNH TÀI KHOẢN BOT (CHỐNG LẶP VÔ TẬN)
+  if (event.isSelf) {
+    // Chỉ xử lý nếu chính chủ gõ lệnh bắt đầu bằng / hoặc !
+    if (!rawText.startsWith("/") && !rawText.startsWith("!")) {
+      return;
+    }
   }
 
   const lower = rawText.toLowerCase();

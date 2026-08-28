@@ -768,6 +768,12 @@ export async function runListener(): Promise<void> {
       !isGroup;
 
     if (type === "message" && isDirectUserMessage) {
+      // TUYỆT ĐỐI BỎ QUA TIN NHẮN TỰ PHÁT HOẶC ECHO CỦA CHÍNH TÀI KHOẢN BOT (CHỐNG LẶP VÔ TẬN)
+      const text = extractText(payload) || "";
+      if (payload?.isSelf && !text.startsWith("/") && !text.startsWith("!")) {
+        return;
+      }
+
       const targetUserId = String(
         (payload?.isSelf ? payload?.data?.idTo : payload?.data?.uidFrom) ??
         payload?.threadId ??
@@ -777,7 +783,6 @@ export async function runListener(): Promise<void> {
         ""
       ).trim();
       const displayName = String(payload?.data?.dName ?? "Admin");
-      const text = extractText(payload) || "";
       const media = extractMediaSummary(payload);
       const mediaUrl = media ? extractMediaUrl(payload) : null;
       const quote = extractQuote(payload);
