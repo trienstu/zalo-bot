@@ -331,78 +331,95 @@ async function handleHistoryQA(
   }
 
   // 2. Tra cứu Kho tri thức & Bộ nhớ dài hạn (Long-term Knowledge Memory)
-  const memorizedDocs = searchGroupKnowledge(threadId, question, 5);
+  let memorizedDocs: any[] = [];
+  try {
+    memorizedDocs = searchGroupKnowledge(threadId, question, 5);
+  } catch {}
 
   // 3. Lấy danh sách tin nhắn gần nhất trong nhóm để tạo ngữ cảnh
-  const relevantMessages = db
-    .prepare(
-      `SELECT display_name, text, ts, is_self
-       FROM group_messages
-       WHERE (thread_id = ? OR thread_id = '')
-         AND text IS NOT NULL
-         AND text != ''
-         AND deleted_at IS NULL
-         AND LOWER(text) NOT LIKE '%sen chúa%'
-         AND LOWER(text) NOT LIKE '%sen chua%'
-         AND text NOT LIKE '/%'
-         AND text NOT LIKE '!%'
-       ORDER BY ts DESC
-       LIMIT 80`,
-    )
-    .all(threadId) as { display_name: string; text: string; ts: number; is_self: number }[];
-
-  relevantMessages.reverse();
+  let relevantMessages: { display_name: string; text: string; ts: number; is_self: number }[] = [];
+  try {
+    relevantMessages = db
+      .prepare(
+        `SELECT display_name, text, ts, is_self
+         FROM group_messages
+         WHERE (thread_id = ? OR thread_id = '')
+           AND text IS NOT NULL
+           AND text != ''
+           AND deleted_at IS NULL
+           AND LOWER(text) NOT LIKE '%sen chúa%'
+           AND LOWER(text) NOT LIKE '%sen chua%'
+           AND text NOT LIKE '/%'
+           AND text NOT LIKE '!%'
+         ORDER BY ts DESC
+         LIMIT 80`,
+      )
+      .all(threadId) as any[];
+    relevantMessages.reverse();
+  } catch {}
 
   // 4. Lấy tóm tắt 3 ngày gần nhất (nếu có)
-  const pastSummaries = db
-    .prepare(
-      `SELECT day_label, summary_text
-       FROM daily_summaries
-       WHERE (thread_id = ? OR thread_id = '')
-       ORDER BY day_date DESC
-       LIMIT 3`,
-    )
-    .all(threadId) as { day_label: string; summary_text: string }[];
+  let pastSummaries: { day_label: string; summary_text: string }[] = [];
+  try {
+    pastSummaries = db
+      .prepare(
+        `SELECT day_label, summary_text
+         FROM daily_summaries
+         WHERE (thread_id = ? OR thread_id = '')
+         ORDER BY day_date DESC
+         LIMIT 3`,
+      )
+      .all(threadId) as any[];
+  } catch {}
 
   // 5. Lấy top 5 thành viên năng nổ nhất
-  const topMembers = db
-    .prepare(
-      `SELECT m.display_name,
-              COUNT(i.id) AS msg_count,
-              COALESCE(SUM(CASE i.type WHEN 'message' THEN 10 WHEN 'image' THEN 10 WHEN 'video' THEN 10 WHEN 'vote' THEN 3 WHEN 'reaction' THEN 1 ELSE 1 END), 0) AS points
-       FROM members m
-       JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
-       WHERE (i.thread_id = @threadId OR i.thread_id = '')
-         AND m.is_active = 1
-         AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
-         AND LOWER(m.display_name) NOT LIKE '%sen chua%'
-       GROUP BY m.zalo_user_id, m.display_name
-       ORDER BY points DESC
-       LIMIT 5`,
-    )
-    .all({ threadId }) as { display_name: string; msg_count: number; points: number }[];
+  let topMembers: { display_name: string; msg_count: number; points: number }[] = [];
+  try {
+    topMembers = db
+      .prepare(
+        `SELECT m.display_name,
+                COUNT(i.id) AS msg_count,
+                COALESCE(SUM(CASE i.type WHEN 'message' THEN 10 WHEN 'image' THEN 10 WHEN 'video' THEN 10 WHEN 'vote' THEN 3 WHEN 'reaction' THEN 1 ELSE 1 END), 0) AS points
+         FROM members m
+         JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
+         WHERE (i.thread_id = @threadId OR i.thread_id = '')
+           AND m.is_active = 1
+           AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
+           AND LOWER(m.display_name) NOT LIKE '%sen chua%'
+         GROUP BY m.zalo_user_id, m.display_name
+         ORDER BY points DESC
+         LIMIT 5`,
+      )
+      .all({ threadId }) as any[];
+  } catch {}
 
   // 6. Thống kê thành viên chưa từng nhắn tin
-  const inactiveMembers = db
-    .prepare(
-      `SELECT m.display_name,
-              COUNT(i.id) AS msg_count
-       FROM members m
-       LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND (i.thread_id = @threadId OR i.thread_id = '') AND i.type = 'message'
-       WHERE (m.group_id = @threadId OR m.group_id = '' OR m.group_id IS NULL)
-         AND m.is_active = 1
-         AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
-         AND LOWER(m.display_name) NOT LIKE '%sen chua%'
-       GROUP BY m.zalo_user_id, m.display_name
-       HAVING msg_count = 0`,
-    )
-    .all({ threadId }) as { display_name: string; msg_count: number }[];
+  let inactiveMembers: { display_name: string; msg_count: number }[] = [];
+  try {
+    inactiveMembers = db
+      .prepare(
+        `SELECT m.display_name,
+                COUNT(i.id) AS msg_count
+         FROM members m
+         LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND (i.thread_id = @threadId OR i.thread_id = '') AND i.type = 'message'
+         WHERE (m.group_id = @threadId OR m.group_id = '' OR m.group_id IS NULL)
+           AND m.is_active = 1
+           AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
+           AND LOWER(m.display_name) NOT LIKE '%sen chua%'
+         GROUP BY m.zalo_user_id, m.display_name
+         HAVING msg_count = 0`,
+      )
+      .all({ threadId }) as any[];
+  } catch {}
 
-  const totalMembersInGroup = db
-    .prepare(
-      `SELECT COUNT(*) AS total FROM members WHERE (group_id = ? OR group_id = '' OR group_id IS NULL) AND is_active = 1 AND LOWER(display_name) NOT LIKE '%sen chúa%'`,
-    )
-    .get(threadId) as { total: number } | undefined;
+  let totalMembersInGroup: { total: number } | undefined;
+  try {
+    totalMembersInGroup = db
+      .prepare(
+        `SELECT COUNT(*) AS total FROM members WHERE (group_id = ? OR group_id = '' OR group_id IS NULL) AND is_active = 1 AND LOWER(display_name) NOT LIKE '%sen chúa%'`,
+      )
+      .get(threadId) as { total: number } | undefined;
+  } catch {}
 
   // Dựng ngữ cảnh dữ liệu lịch sử
   const contextLines: string[] = [];
