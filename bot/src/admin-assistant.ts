@@ -23,32 +23,57 @@ function appendAdminHistory(userId: string, role: "user" | "model", text: string
 }
 
 /**
- * Tìm kiếm nhóm Zalo theo ID hoặc theo tên gần đúng.
+ * Chuẩn hóa chuỗi tìm kiếm (xóa dấu tiếng Việt, viết thường).
+ */
+function normalizeQuery(str: string): string {
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Tìm kiếm nhóm Zalo theo ID hoặc theo tên gần đúng / tên tắt.
  */
 function findGroup(query: string): { groupId: string; name: string; totalMembers: number; mode: string } | null {
   const db = getDb();
-  const q = query.trim().toLowerCase();
+  const rawQ = query.trim();
+  if (!rawQ) return null;
 
   // 1. Thử match chính xác group_id
-  const byId = db.prepare("SELECT group_id as groupId, name, total_members as totalMembers, mode FROM bot_groups WHERE group_id = ?").get(query.trim()) as any;
-  if (byId) return byId;
+  try {
+    const byId = db
+      .prepare("SELECT group_id as groupId, name, total_members as totalMembers, mode FROM bot_groups WHERE group_id = ?")
+      .get(rawQ) as any;
+    if (byId) return byId;
+  } catch {}
 
-  // 2. Thử match theo tên gần đúng
-  const allGroups = db.prepare("SELECT group_id as groupId, name, total_members as totalMembers, mode FROM bot_groups").all() as any[];
+  const allGroups = getAllGroupsList();
   if (allGroups.length === 0) return null;
 
-  // Ưu tiên khớp chứa từ khóa
-  const matched = allGroups.find((g) => g.name.toLowerCase().includes(q) || q.includes(g.name.toLowerCase()));
-  if (matched) return matched;
+  const cleanQ = normalizeQuery(rawQ);
 
-  // Khớp theo từ khóa viết tắt (ví dụ: "ai", "nhau", "an nhau")
-  if (q.includes("ai")) {
-    const aiGroup = allGroups.find((g) => g.name.toLowerCase().includes("ai") || g.name.toLowerCase().includes("công nghệ"));
-    if (aiGroup) return aiGroup;
+  // 2. Thử match theo tên (chứa trọn vẹn hoặc khớp chuẩn)
+  for (const g of allGroups) {
+    const cleanGName = normalizeQuery(g.name);
+    if (cleanGName === cleanQ || cleanGName.includes(cleanQ) || cleanQ.includes(cleanGName)) {
+      return g;
+    }
   }
-  if (q.includes("nhậu") || q.includes("nhau") || q.includes("ăn nhậu")) {
-    const nhauGroup = allGroups.find((g) => g.name.toLowerCase().includes("nhậu") || g.name.toLowerCase().includes("nhau"));
-    if (nhauGroup) return nhauGroup;
+
+  // 3. Khớp theo từ khóa đặc thù trong các nhóm Zalo thường gặp
+  for (const g of allGroups) {
+    const cleanGName = normalizeQuery(g.name);
+    if (cleanQ.includes("vip") && cleanGName.includes("vip")) return g;
+    if (cleanQ.includes("ai") && (cleanGName.includes("ai") || cleanGName.includes("cong nghe"))) return g;
+    if ((cleanQ.includes("nhau") || cleanQ.includes("an nhau")) && cleanGName.includes("nhau")) return g;
+    if (cleanQ.includes("hem") && cleanGName.includes("hem")) return g;
+    if ((cleanQ.includes("dxs") || cleanQ.includes("imperia") || cleanQ.includes("sensa")) && cleanGName.includes("dxs")) return g;
+    if (cleanQ.includes("nam hung") && cleanGName.includes("nam hung")) return g;
+    if (cleanQ.includes("than mat") && cleanGName.includes("than mat")) return g;
   }
 
   return null;
@@ -64,7 +89,7 @@ function getAllGroupsList(): { groupId: string; name: string; totalMembers: numb
     if (rows && rows.length > 0) return rows;
 
     // Fallback nếu bảng bot_groups chưa có dữ liệu
-    const distinctGroups = db.prepare("SELECT DISTINCT thread_id FROM group_messages WHERE thread_id != '' AND thread_id NOT LIKE 'u%' LIMIT 10").all() as { thread_id: string }[];
+    const distinctGroups = db.prepare("SELECT DISTINCT thread_id FROM group_messages WHERE thread_id != '' AND thread_id NOT LIKE 'u%' LIMIT 15").all() as { thread_id: string }[];
     if (distinctGroups && distinctGroups.length > 0) {
       return distinctGroups.map((g) => ({
         groupId: g.thread_id,
@@ -81,6 +106,19 @@ function getAllGroupsList(): { groupId: string; name: string; totalMembers: numb
 }
 
 /**
+ * Trích xuất nội dung bài viết cốt lõi được AI soạn thảo gần nhất (loại bỏ lời chào dạo đầu của bot).
+ */
+function cleanDraftedPost(text: string): string {
+  let cleaned = text.trim();
+  // Xóa lời dạo đầu kiểu "Dạ em Sen Chúa soạn xong..." hoặc "Nhiệm vụ hoàn thành xuất sắc..."
+  cleaned = cleaned.replace(/^Dạ\s+(?:em\s+)?(?:Sen Chúa\s+)?(?:xin\s+phép\s+)?(?:gửi\s+)?(?:soạn\s+)?(?:bài|thông báo|lời chúc)[^\n]*\n+/i, "");
+  cleaned = cleaned.replace(/^(?:Nhiệm vụ|Báo cáo Sếp)[^\n]*\n+/i, "");
+  cleaned = cleaned.replace(/\n+---\s*\n+Nhiệm vụ hoàn thành[^\n]*$/i, "");
+  cleaned = cleaned.replace(/\n+Sếp có cần em[^\n]*$/i, "");
+  return cleaned.trim() || text.trim();
+}
+
+/**
  * Xử lý toàn bộ tương tác 1:1 giữa Admin và Bot qua Tin nhắn trực tiếp (Direct Message).
  */
 export async function handleAdminDirectInteraction(api: any, event: MemberMessageEvent): Promise<void> {
@@ -89,6 +127,8 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   const displayName = event.displayName || "Admin";
   const hasFile = Boolean(event.fileAttachment);
   const hasImage = Boolean(event.mediaUrl || event.quote?.mediaUrl);
+
+  if (!rawText && !hasFile && !hasImage) return;
 
   // TUYỆT ĐỐI BỎ QUA MỌI TIN NHẮN TỰ PHÁT HOẶC ECHO CỦA CHÍNH TÀI KHOẢN BOT (CHỐNG LẶP VÔ TẬN)
   if (event.isSelf) {
@@ -158,8 +198,9 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       `🔹 /summary [tên_nhóm] : Kích hoạt tóm tắt thảo luận nhóm và gửi báo cáo về cho bạn\n` +
       `🔹 /top [tên_nhóm] : Xem Top 5 thành viên năng nổ nhất của nhóm\n` +
       `🔹 /taungam [tên_nhóm] : Xem danh sách thành viên nằm vùng/chưa từng chat của nhóm\n\n` +
-      `💬 TRỢ LÝ AI RIÊNG TƯ:\n` +
-      `🔹 Bạn có thể nhắn tin trò chuyện tự nhiên, gửi ảnh, gửi file PDF/Code nhờ em đọc, phân tích, soạn thảo văn bản hoặc yêu cầu "Gửi bài này vào nhóm AI" bất kỳ lúc nào!`;
+      `💬 TRỢ LÝ AI RIÊNG TƯ & RA LỆNH TỰ NHIÊN:\n` +
+      `🔹 Soạn bài rồi bảo: "Gửi bài này vào nhóm VIP" hoặc "Bắn vào nhóm AI"\n` +
+      `🔹 Hoặc yêu cầu: "Soạn tin nhắn chúc mừng rồi gửi vào nhóm VIP" -> Em sẽ tự động gửi thẳng vào nhóm cho Sếp!`;
     await sendDirectText(api, sender, helpMsg);
     return;
   }
@@ -255,38 +296,47 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     return;
   }
 
-  // 2.6. Nhận diện lệnh tắt: "Gửi bài này vào nhóm [tên nhóm]"
-  const isSendLastPost =
-    lower.includes("gửi bài này vào nhóm") ||
-    lower.includes("gui bai nay vao nhom") ||
-    lower.includes("gửi bài vào nhóm") ||
-    lower.includes("gui bai vao nhom") ||
-    lower.includes("gửi tin này vào nhóm") ||
-    lower.includes("bắn vào nhóm");
+  // 2.6. Nhận diện lệnh tự nhiên: "Gửi bài này vào nhóm [VIP]" hoặc "Gửi vào nhóm [VIP]" hoặc "Bắn vào group [VIP]"
+  const isSendIntent =
+    /gửi\s+(?:bài|tin|thông báo|lời chúc|nội dung)?(?:\s+này)?\s+(?:vào|vô|sang)\s+(?:nhóm|group)\s+([^,?.!]+)/i.test(rawText) ||
+    /bắn\s+(?:bài|tin|thông báo)?\s+(?:vào|vô|sang)\s+(?:nhóm|group)\s+([^,?.!]+)/i.test(rawText) ||
+    /chuyển\s+(?:bài|tin)?\s+(?:vào|vô|sang)\s+(?:nhóm|group)\s+([^,?.!]+)/i.test(rawText) ||
+    /đã\s+gửi\s+(?:vào|vô)\s+(?:nhóm|group)\s+([^,?.!]+)\s+chưa/i.test(rawText);
 
-  if (isSendLastPost) {
+  if (isSendIntent) {
+    const match =
+      rawText.match(/(?:vào|vô|sang)\s+(?:nhóm|group)\s+([^,?.!]+)/i) ||
+      rawText.match(/(?:nhóm|group)\s+([^,?.!]+)/i);
+    const targetQuery = (match && match[1]) ? match[1].trim() : "VIP";
+
+    const target = findGroup(targetQuery);
+    if (!target) {
+      await sendDirectText(
+        api,
+        sender,
+        `❌ Em không tìm thấy nhóm nào khớp với tên "${targetQuery}". Sếp gõ /groups để xem danh sách nhóm nhé!`,
+      );
+      return;
+    }
+
     const history = getAdminHistory(sender);
     const lastBotMsg = [...history].reverse().find((h) => h.role === "model");
     if (!lastBotMsg) {
-      await sendDirectText(api, sender, "⚠️ Em chưa thấy nội dung bài viết nào vừa soạn. Sếp hãy yêu cầu em soạn bài trước nhé!");
+      await sendDirectText(api, sender, `⚠️ Em chưa thấy nội dung bài viết nào vừa soạn. Sếp hãy bảo em soạn trước nhé!`);
       return;
     }
 
-    // Trích xuất tên nhóm từ câu nói của admin
-    const cleanQuery = rawText.replace(/gửi (bài|tin|nội dung)( này)? vào nhóm/gi, "").replace(/bắn vào nhóm/gi, "").trim();
-    const target = findGroup(cleanQuery) || findGroup("ai"); // mặc định nhóm AI nếu ko chỉ rõ
-
-    if (!target) {
-      await sendDirectText(api, sender, `❌ Không xác định được nhóm để gửi. Sếp có thể dùng: /send <tên_nhóm> <nội dung>`);
-      return;
-    }
-
+    const postToSend = cleanDraftedPost(lastBotMsg.text);
     try {
-      await sendGroupText(api, target.groupId, lastBotMsg.text);
-      await sendDirectText(api, sender, `✅ Đã gửi bài viết vừa soạn vào nhóm [${target.name}] thành công rực rỡ rồi sếp ơi! 🚀`);
+      await sendGroupText(api, target.groupId, postToSend);
+      await sendDirectText(
+        api,
+        sender,
+        `🚀 ĐÃ GỬI BÀI VÀO NHÓM [${target.name.toUpperCase()}] THÀNH CÔNG RỒI SẾP ƠI! 🎉\n\n📝 Nội dung thực tế đã gửi:\n"${postToSend}"`,
+      );
       return;
     } catch (err) {
-      await sendDirectText(api, sender, `❌ Gửi vào nhóm [${target.name}] bị lỗi: ${String(err)}`);
+      await sendDirectText(api, sender, `❌ Lỗi khi gửi vào nhóm [${target.name}]: ${String(err)}`);
       return;
     }
   }
@@ -319,7 +369,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     .join("\n\n");
 
   const groupsSummary = getAllGroupsList()
-    .map((g) => `- ${g.name} (ID: ${g.groupId}, ${g.totalMembers} TV, Mode: ${g.mode})`)
+    .map((g) => `- ${g.name} (ID: ${g.groupId}, Mode: ${g.mode})`)
     .join("\n");
 
   const systemPrompt =
@@ -329,8 +379,14 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `2. Nếu Admin gửi FILE TÀI LIỆU (PDF, Word, Excel, Code, TXT) hoặc HÌNH ẢNH: Đọc kỹ, trích xuất dữ liệu, dịch thuật, phân tích sâu, tìm lỗi code hoặc tóm tắt theo ý Admin.\n` +
     `3. Nếu Admin nhờ soạn thông báo, bài viết cho nhóm: Hãy soạn thảo thật hấp dẫn, chuyên nghiệp, có icon đẹp mắt, định dạng rõ ràng.\n` +
     `4. Danh sách các nhóm Zalo bạn đang quản lý để tham khảo:\n${groupsSummary}\n` +
-    `5. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng icon, viết hoa hoặc dấu gạch đầu dòng để làm nổi bật).\n` +
-    `6. Thái độ phục vụ: Lễ phép, thông minh, gọi Admin là 'Sếp' hoặc '${displayName}', xưng 'em' hoặc 'Sen Chúa'.`;
+    `5. ĐẶC BIỆT - KHI ADMIN YÊU CẦU BẠN GỬI HOẶC BẮN TIN NHẮN/THÔNG BÁO VÀO MỘT NHÓM CỤ THỂ:\n` +
+    `   Hãy xuất thẻ hành động ở cuối câu trả lời như sau:\n` +
+    `   [ACTION:SEND_GROUP target="TÊN_NHÓM_HOẶC_ID"]\n` +
+    `   <nội dung thực tế cần gửi vào nhóm>\n` +
+    `   [/ACTION]\n` +
+    `   Hệ thống máy chủ sẽ tự động bóc tách thẻ này và gửi tin nhắn thật vào nhóm Zalo cho Sếp ngay lập tức!\n` +
+    `6. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng icon, viết hoa hoặc dấu gạch đầu dòng để làm nổi bật).\n` +
+    `7. Thái độ phục vụ: Lễ phép, thông minh, gọi Admin là 'Sếp' hoặc '${displayName}', xưng 'em' hoặc 'Sen Chúa'.`;
 
   let fileSection = "";
   if (fileTextContent) {
@@ -353,11 +409,30 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       mediaParts: mediaPart ? [mediaPart] : undefined,
     });
 
+    // Kiểm tra và thực thi thẻ hành động [ACTION:SEND_GROUP target="..."]...[/ACTION]
+    let finalAnswer = answer;
+    const actionMatch = answer.match(/\[ACTION:SEND_GROUP\s+target=["']([^"']+)["']\]([\s\S]*?)\[\/ACTION\]/i);
+    if (actionMatch && actionMatch[1] && actionMatch[2]) {
+      const targetGroupQuery = actionMatch[1].trim();
+      const contentToSend = actionMatch[2].trim();
+      finalAnswer = answer.replace(/\[ACTION:SEND_GROUP[\s\S]*?\[\/ACTION\]/gi, "").trim();
+
+      const target = findGroup(targetGroupQuery);
+      if (target && contentToSend) {
+        try {
+          await sendGroupText(api, target.groupId, contentToSend);
+          finalAnswer += `\n\n🚀 [HỆ THỐNG]: Em đã tự động gửi nội dung trên vào nhóm [${target.name}] thành công 100%! 🎉`;
+        } catch (e) {
+          finalAnswer += `\n\n⚠️ [HỆ THỐNG]: Tự động gửi vào nhóm [${target.name}] bị lỗi: ${String(e)}`;
+        }
+      }
+    }
+
     // Lưu vào lịch sử hội thoại nhiều lượt
     appendAdminHistory(sender, "user", rawText || `[Gửi file: ${fileName || "hình ảnh"}]`);
-    appendAdminHistory(sender, "model", answer);
+    appendAdminHistory(sender, "model", finalAnswer);
 
-    await sendDirectText(api, sender, answer);
+    await sendDirectText(api, sender, finalAnswer);
     console.log(`[admin-assistant] ✅ Đã phản hồi 1:1 cho Admin ${displayName}`);
   } catch (err) {
     console.error(`[admin-assistant] ❌ Lỗi xử lý AI 1:1:`, err);
