@@ -424,22 +424,31 @@ async function handleHistoryQA(
   // Dựng ngữ cảnh dữ liệu lịch sử
   const contextLines: string[] = [];
 
-  if (memorizedDocs.length > 0) {
+  if (memorizedDocs && memorizedDocs.length > 0) {
     contextLines.push("=== KHO TRI THỨC & BỘ NHỚ TÀI LIỆU ĐÃ LƯU TRONG NHÓM ===");
     for (const doc of memorizedDocs) {
-      const dateStr = new Date(doc.createdAt + 7 * 3600 * 1000).toISOString().slice(0, 10);
-      contextLines.push(`[Tài liệu: ${doc.title || doc.fileName} (ngày ${dateStr}) do ${doc.senderName} gửi]:\n${doc.summary || doc.contentText.slice(0, 500)}`);
+      const rawTs = Number(doc.created_at || doc.createdAt) || Date.now();
+      let dateStr = "";
+      try {
+        dateStr = new Date(rawTs + 7 * 3600 * 1000).toISOString().slice(0, 10);
+      } catch {
+        dateStr = "Gần đây";
+      }
+      const title = doc.title || doc.file_name || doc.fileName || "Tài liệu";
+      const sender = doc.sender_name || doc.senderName || "Thành viên";
+      const content = doc.summary || doc.content_text || doc.contentText || "";
+      contextLines.push(`[Tài liệu: ${title} (ngày ${dateStr}) do ${sender} gửi]:\n${content.slice(0, 500)}`);
     }
   }
 
-  if (topMembers.length > 0) {
+  if (topMembers && topMembers.length > 0) {
     contextLines.push("=== BẢNG XẾP HẠNG & THÀNH VIÊN TÍCH CỰC NHẤT NHÓM ===");
     topMembers.forEach((m, idx) => {
       contextLines.push(`Top ${idx + 1}: ${m.display_name} - ${m.msg_count} tin nhắn, tổng ${m.points} điểm.`);
     });
   }
 
-  if (inactiveMembers.length > 0) {
+  if (inactiveMembers && inactiveMembers.length > 0) {
     const totalCount = totalMembersInGroup?.total ?? 0;
     contextLines.push("=== THỐNG KÊ THÀNH VIÊN CHƯA TỪNG NHẮN TIN / NẰM VÙNG / TÀU NGẦM ===");
     contextLines.push(
@@ -449,7 +458,7 @@ async function handleHistoryQA(
     );
   }
 
-  if (pastSummaries.length > 0) {
+  if (pastSummaries && pastSummaries.length > 0) {
     contextLines.push("=== TÓM TẮT CÁC NGÀY TRƯỚC ===");
     for (const s of pastSummaries) {
       contextLines.push(`[Ngày ${s.day_label}]:\n${s.summary_text}`);
@@ -457,9 +466,17 @@ async function handleHistoryQA(
   }
 
   contextLines.push("=== TIN NHẮN THẢO LUẬN CỦA CÁC THÀNH VIÊN ===");
-  for (const m of relevantMessages.slice(0, 80)) {
-    const dateStr = new Date(m.ts + 7 * 3600 * 1000).toISOString().slice(0, 16).replace("T", " ");
-    contextLines.push(`${dateStr} | ${m.display_name || "Thành viên"}: ${m.text}`);
+  if (relevantMessages && relevantMessages.length > 0) {
+    for (const m of relevantMessages.slice(0, 80)) {
+      const rawTs = Number(m.ts) || Date.now();
+      let dateStr = "";
+      try {
+        dateStr = new Date(rawTs + 7 * 3600 * 1000).toISOString().slice(0, 16).replace("T", " ");
+      } catch {
+        dateStr = "";
+      }
+      contextLines.push(`${dateStr} | ${m.display_name || "Thành viên"}: ${m.text}`);
+    }
   }
 
   const contextData = contextLines.join("\n\n");
