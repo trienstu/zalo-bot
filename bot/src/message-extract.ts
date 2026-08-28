@@ -197,10 +197,46 @@ export function extractQuote(payload: any): QuotedMessage | null {
   let mediaUrl: string | undefined;
   let mediaType: "image" | "video" | undefined;
 
-  const candidateUrl = quote.href || quote.hdUrl || quote.url || quote.thumb || quote.attach?.href || quote.attach?.url;
-  if (typeof candidateUrl === "string" && /^https?:\/\//i.test(candidateUrl)) {
-    mediaUrl = candidateUrl;
-    const msgType = String(quote.msgType || quote.type || "").toLowerCase();
+  const attach = parseObjectMaybe(quote.attach);
+  const params = parseObjectMaybe(quote.params);
+  const propertyExt = parseObjectMaybe(quote.propertyExt);
+  const contentObj = parseObjectMaybe(quote.content);
+
+  const candidateUrls = [
+    quote.href,
+    quote.hdUrl,
+    quote.url,
+    quote.thumb,
+    quote.thumbUrl,
+    attach?.href,
+    attach?.hdUrl,
+    attach?.url,
+    attach?.thumb,
+    attach?.thumbUrl,
+    params?.href,
+    params?.hdUrl,
+    params?.url,
+    params?.thumb,
+    params?.thumbUrl,
+    propertyExt?.href,
+    propertyExt?.hdUrl,
+    propertyExt?.url,
+    propertyExt?.thumb,
+    contentObj?.href,
+    contentObj?.hdUrl,
+    contentObj?.url,
+    contentObj?.thumb,
+  ];
+
+  for (const c of candidateUrls) {
+    if (typeof c === "string" && /^https?:\/\//i.test(c.trim())) {
+      mediaUrl = c.trim();
+      break;
+    }
+  }
+
+  if (mediaUrl) {
+    const msgType = String(quote.msgType || quote.type || attach?.type || params?.type || "").toLowerCase();
     mediaType = msgType.includes("video") ? "video" : "image";
   }
 

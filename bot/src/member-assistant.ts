@@ -315,11 +315,11 @@ async function handleHistoryQA(
   const relevantMessages = db
     .prepare(
       `SELECT display_name, text, ts, is_self
-       FROM messages
-       WHERE thread_id = ?
+       FROM group_messages
+       WHERE (thread_id = ? OR thread_id = '')
          AND text IS NOT NULL
          AND text != ''
-         AND is_deleted = 0
+         AND deleted_at IS NULL
          AND LOWER(text) NOT LIKE '%sen chúa%'
          AND LOWER(text) NOT LIKE '%sen chua%'
          AND text NOT LIKE '/%'
@@ -335,9 +335,9 @@ async function handleHistoryQA(
   const pastSummaries = db
     .prepare(
       `SELECT day_label, summary_text
-       FROM summaries
-       WHERE thread_id = ?
-       ORDER BY day_label DESC
+       FROM daily_summaries
+       WHERE (thread_id = ? OR thread_id = '')
+       ORDER BY day_date DESC
        LIMIT 3`,
     )
     .all(threadId) as { day_label: string; summary_text: string }[];
