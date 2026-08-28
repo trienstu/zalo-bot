@@ -188,14 +188,9 @@ export async function callGemini(
       if (!resp.ok) {
         const errText = await resp.text().catch(() => "");
         const err = new Error(`Gemini API HTTP ${resp.status}: ${errText.slice(0, 500)}`);
-        
-        // 429: Hết quota Free Tier -> Thử key tiếp theo ngay lập tức
-        if (resp.status === 429) {
-          console.warn(`[gemini] Key #${keyIdx + 1} hết quota (HTTP 429). Đang chuyển sang key tiếp theo...`);
-          lastError = err;
-          continue;
-        }
-        throw err;
+        console.warn(`[gemini] Key #${keyIdx + 1} gặp lỗi HTTP ${resp.status}. Đang tự động chuyển sang key tiếp theo...`);
+        lastError = err;
+        continue;
       }
 
       const data = (await resp.json()) as {
