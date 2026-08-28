@@ -8,8 +8,10 @@ let botKeyOffset = 0;
 
 export interface GeminiImagePart {
   data: string; // Base64 string
-  mimeType: string; // e.g. 'image/jpeg', 'image/png'
+  mimeType: string; // e.g. 'image/jpeg', 'image/png', 'application/pdf', 'audio/mp3'
 }
+
+export type GeminiMediaPart = GeminiImagePart;
 
 export async function downloadImageBase64(url: string): Promise<GeminiImagePart | null> {
   try {
@@ -34,6 +36,85 @@ export async function downloadImageBase64(url: string): Promise<GeminiImagePart 
   }
 }
 
+/**
+ * Tải và giải mã nội dung tài liệu (PDF, Text, Code, CSV, JSON, Audio, Image).
+ */
+export async function downloadFileContent(
+  url: string,
+  fileName = "",
+): Promise<{ textContent?: string; mediaPart?: GeminiMediaPart } | null> {
+  try {
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(30_000),
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+      },
+    });
+    if (!res.ok) return null;
+
+    const arrayBuffer = await res.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const contentType = (res.headers.get("content-type") || "").toLowerCase();
+    const ext = (fileName.split(".").pop() || "").toLowerCase();
+
+    // 1. File PDF (Gemini đọc native PDF)
+    if (ext === "pdf" || contentType.includes("pdf")) {
+      return {
+        mediaPart: {
+          data: buffer.toString("base64"),
+          mimeType: "application/pdf",
+        },
+      };
+    }
+
+    // 2. File Hình ảnh
+    if (["jpg", "jpeg", "png", "webp", "gif", "bmp"].includes(ext) || contentType.startsWith("image/")) {
+      const mime = contentType.split(";")[0]?.trim() || (ext === "png" ? "image/png" : "image/jpeg");
+      return {
+        mediaPart: {
+          data: buffer.toString("base64"),
+          mimeType: mime,
+        },
+      };
+    }
+
+    // 3. File Âm thanh / Voice
+    if (["mp3", "wav", "m4a", "ogg", "aac"].includes(ext) || contentType.startsWith("audio/")) {
+      const mime = contentType.split(";")[0]?.trim() || (ext === "wav" ? "audio/wav" : "audio/mp3");
+      return {
+        mediaPart: {
+          data: buffer.toString("base64"),
+          mimeType: mime,
+        },
+      };
+    }
+
+    // 4. File Text / Code / CSV / JSON / Markdown / Log
+    if (
+      ["txt", "csv", "json", "md", "log", "js", "ts", "py", "html", "css", "sql", "sh", "xml", "yaml", "yml"].includes(ext) ||
+      contentType.startsWith("text/") ||
+      contentType.includes("json") ||
+      contentType.includes("javascript")
+    ) {
+      const text = buffer.toString("utf-8");
+      return { textContent: text };
+    }
+
+    // Fallback file văn bản khác
+    if (buffer.length < 5 * 1024 * 1024) {
+      const text = buffer.toString("utf-8");
+      if (!/[\x00-\x08\x0E-\x1F]/.test(text.slice(0, 1000))) {
+        return { textContent: text };
+      }
+    }
+
+    return null;
+  } catch (e) {
+    console.warn(`[gemini] Lỗi tải file ${url.slice(0, 80)}: ${String(e)}`);
+    return null;
+  }
+}
+
 export async function callGemini(
   system: string,
   user: string,
@@ -42,6 +123,7 @@ export async function callGemini(
     temperature?: number;
     json?: boolean;
     images?: GeminiImagePart[];
+    mediaParts?: GeminiMediaPart[];
   },
 ): Promise<string> {
   const rawKey = (process.env.GEMINI_API_KEY || config.geminiApiKey || "").trim();
@@ -59,8 +141,9 @@ export async function callGemini(
   const numKeys = apiKeys.length;
 
   const userParts: Record<string, unknown>[] = [];
-  if (options?.images && options.images.length > 0) {
-    for (const img of options.images) {
+  const allMedia = [...(options?.images || []), ...(options?.mediaParts || [])];
+  if (allMedia.length > 0) {
+    for (const img of allMedia) {
       userParts.push({
         inline_data: {
           mime_type: img.mimeType || "image/jpeg",

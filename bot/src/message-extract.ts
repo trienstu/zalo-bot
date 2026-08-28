@@ -250,3 +250,63 @@ export function extractQuote(payload: any): QuotedMessage | null {
     mediaType,
   };
 }
+
+export interface FileAttachment {
+  name: string;
+  url: string;
+  size?: number;
+  extension?: string;
+}
+
+/**
+ * Trích xuất file đính kèm (PDF, Word, Excel, TXT, Code, Audio...) từ payload Zalo.
+ */
+export function extractFileAttachment(payload: any): FileAttachment | null {
+  const data = payload?.data ?? {};
+  const content = parseObjectMaybe(data?.content);
+  const params = parseObjectMaybe(content?.params);
+  const attach = parseObjectMaybe(data?.attach || content?.attach);
+
+  const candidateUrls = [
+    content?.href,
+    content?.url,
+    content?.fileUrl,
+    content?.hdUrl,
+    params?.href,
+    params?.url,
+    params?.fileUrl,
+    attach?.href,
+    attach?.url,
+    attach?.fileUrl,
+  ];
+
+  let url: string | undefined;
+  for (const c of candidateUrls) {
+    if (typeof c === "string" && /^https?:\/\//i.test(c.trim())) {
+      url = c.trim();
+      break;
+    }
+  }
+
+  const name = String(
+    content?.title ||
+    content?.fileName ||
+    content?.name ||
+    params?.title ||
+    params?.fileName ||
+    attach?.title ||
+    attach?.name ||
+    ""
+  ).trim();
+
+  if (!url) return null;
+
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  return {
+    name: name || "Tài liệu",
+    url,
+    size: Number(content?.fileSize || params?.fileSize || attach?.fileSize) || undefined,
+    extension: ext || undefined,
+  };
+}
+

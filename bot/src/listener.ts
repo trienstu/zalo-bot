@@ -61,6 +61,7 @@ import {
   extractMediaUrl,
   extractUndoTargetIds,
   extractQuote,
+  extractFileAttachment,
 } from "./message-extract.js";
 import {
   forwardZaloMessageToTelegram,
@@ -802,8 +803,9 @@ export async function runListener(): Promise<void> {
 
         const mediaUrl = media ? extractMediaUrl(payload) : null;
         const quote = extractQuote(payload);
+        const fileAttachment = extractFileAttachment(payload);
 
-        // Trợ lý tương tác thành viên (/rank, /top, /summary, /help, /hoi & Q&A lịch sử chat, đọc ảnh/quote)
+        // Trợ lý tương tác thành viên (/rank, /top, /summary, /help, /hoi, đọc tài liệu/file/ảnh & bộ nhớ dài hạn)
         // CHỈ PHẢN HỒI KHI NHÓM Ở CHẾ ĐỘ 🟢 'interactive' (Toàn quyền tương tác)
         // Khi ở chế độ 🟡 'silent' (Tàu ngầm ẩn), bot tuyệt đối im lặng không trả lời lệnh
         const currentGroupMode = getGroupMode(threadId);
@@ -816,6 +818,7 @@ export async function runListener(): Promise<void> {
             isSelf: Boolean(payload?.isSelf),
             mediaUrl,
             mediaType: media?.type,
+            fileAttachment,
             quote,
           }).catch((e) => console.warn(`[member-assistant] lỗi: ${String(e)}`));
         }

@@ -80,6 +80,21 @@ function ensureWebSchema(database: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_group_members_group_active ON group_members(group_id, is_active);
     CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(zalo_user_id);
+
+    CREATE TABLE IF NOT EXISTS group_knowledge (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      thread_id    TEXT NOT NULL,
+      title        TEXT NOT NULL DEFAULT '',
+      file_name    TEXT NOT NULL DEFAULT '',
+      file_type    TEXT NOT NULL DEFAULT 'document',
+      file_url     TEXT,
+      content_text TEXT NOT NULL,
+      summary      TEXT,
+      sender_name  TEXT NOT NULL DEFAULT '',
+      created_at   INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_group_knowledge_thread ON group_knowledge(thread_id, created_at);
   `);
 
   try {

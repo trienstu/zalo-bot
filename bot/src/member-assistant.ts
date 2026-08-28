@@ -1,6 +1,10 @@
-import { getDb } from "./db/index.js";
+import { getDb, saveGroupKnowledge, searchGroupKnowledge } from "./db/index.js";
 import { sendGroupText } from "./zalo/client.js";
-import { callGemini, downloadImageBase64, type GeminiImagePart } from "./gemini.js";
+import {
+  callGemini,
+  downloadFileContent,
+  type GeminiMediaPart,
+} from "./gemini.js";
 
 export interface MemberMessageEvent {
   threadId: string;
@@ -10,6 +14,12 @@ export interface MemberMessageEvent {
   isSelf?: boolean;
   mediaUrl?: string | null;
   mediaType?: string | null;
+  fileAttachment?: {
+    name: string;
+    url: string;
+    size?: number;
+    extension?: string;
+  } | null;
   quote?: {
     text?: string;
     senderName?: string;
@@ -296,22 +306,34 @@ async function handleHistoryQA(
   threadId: string,
   options?: {
     imageUrl?: string;
+    fileAttachment?: MemberMessageEvent["fileAttachment"];
     quote?: MemberMessageEvent["quote"];
   },
 ): Promise<string> {
   const db = getDb();
 
-  // 1. Tải ảnh nếu có đính kèm trực tiếp hoặc qua trích dẫn (Quote)
-  let imagePart: GeminiImagePart | null = null;
-  if (options?.imageUrl) {
-    console.log(`[member-assistant] 🖼️ Đang tải ảnh phân tích từ URL: ${options.imageUrl.slice(0, 80)}...`);
-    imagePart = await downloadImageBase64(options.imageUrl);
-    if (imagePart) {
-      console.log(`[member-assistant] ✅ Đã nạp ảnh thành công (${imagePart.mimeType}, size: ${Math.round(imagePart.data.length / 1024)} KB)`);
+  // 1. Tải và giải mã file đính kèm / ảnh / audio
+  let mediaPart: GeminiMediaPart | null = null;
+  let fileTextContent: string | null = null;
+  const targetUrl = options?.fileAttachment?.url || options?.imageUrl || options?.quote?.mediaUrl;
+  const fileName = options?.fileAttachment?.name || "";
+
+  if (targetUrl) {
+    console.log(`[member-assistant] 📥 Đang nạp tài liệu/file từ: ${targetUrl.slice(0, 80)} (${fileName})...`);
+    const fileRes = await downloadFileContent(targetUrl, fileName);
+    if (fileRes?.mediaPart) {
+      mediaPart = fileRes.mediaPart;
+      console.log(`[member-assistant] ✅ Đã nạp file đa phương tiện thành công (${mediaPart.mimeType}, size: ${Math.round(mediaPart.data.length / 1024)} KB)`);
+    } else if (fileRes?.textContent) {
+      fileTextContent = fileRes.textContent;
+      console.log(`[member-assistant] ✅ Đã đọc file văn bản thành công (${fileTextContent.length} ký tự)`);
     }
   }
 
-  // 2. Lấy danh sách tin nhắn gần nhất trong nhóm để tạo ngữ cảnh
+  // 2. Tra cứu Kho tri thức & Bộ nhớ dài hạn (Long-term Knowledge Memory)
+  const memorizedDocs = searchGroupKnowledge(threadId, question, 5);
+
+  // 3. Lấy danh sách tin nhắn gần nhất trong nhóm để tạo ngữ cảnh
   const relevantMessages = db
     .prepare(
       `SELECT display_name, text, ts, is_self
@@ -331,7 +353,7 @@ async function handleHistoryQA(
 
   relevantMessages.reverse();
 
-  // 3. Lấy tóm tắt 3 ngày gần nhất (nếu có)
+  // 4. Lấy tóm tắt 3 ngày gần nhất (nếu có)
   const pastSummaries = db
     .prepare(
       `SELECT day_label, summary_text
@@ -342,7 +364,7 @@ async function handleHistoryQA(
     )
     .all(threadId) as { day_label: string; summary_text: string }[];
 
-  // 4. Lấy top 5 thành viên năng nổ nhất
+  // 5. Lấy top 5 thành viên năng nổ nhất
   const topMembers = db
     .prepare(
       `SELECT m.display_name,
@@ -360,7 +382,7 @@ async function handleHistoryQA(
     )
     .all({ threadId }) as { display_name: string; msg_count: number; points: number }[];
 
-  // 5. Thống kê thành viên chưa từng nhắn tin
+  // 6. Thống kê thành viên chưa từng nhắn tin
   const inactiveMembers = db
     .prepare(
       `SELECT m.display_name,
@@ -384,6 +406,14 @@ async function handleHistoryQA(
 
   // Dựng ngữ cảnh dữ liệu lịch sử
   const contextLines: string[] = [];
+
+  if (memorizedDocs.length > 0) {
+    contextLines.push("=== KHO TRI THỨC & BỘ NHỚ TÀI LIỆU ĐÃ LƯU TRONG NHÓM ===");
+    for (const doc of memorizedDocs) {
+      const dateStr = new Date(doc.createdAt + 7 * 3600 * 1000).toISOString().slice(0, 10);
+      contextLines.push(`[Tài liệu: ${doc.title || doc.fileName} (ngày ${dateStr}) do ${doc.senderName} gửi]:\n${doc.summary || doc.contentText.slice(0, 500)}`);
+    }
+  }
 
   if (topMembers.length > 0) {
     contextLines.push("=== BẢNG XẾP HẠNG & THÀNH VIÊN TÍCH CỰC NHẤT NHÓM ===");
@@ -422,27 +452,49 @@ async function handleHistoryQA(
     quotePromptSection = `\n=== NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE TỪ ${options.quote.senderName || "THÀNH VIÊN"}): ===\n"${options.quote.text}"\n`;
   }
 
+  let fileContentSection = "";
+  if (fileTextContent) {
+    fileContentSection = `\n=== NỘI DUNG TÀI LIỆU ĐÍNH KÈM (${fileName || "File"}): ===\n${fileTextContent.slice(0, 40000)}\n`;
+  }
+
   const systemPrompt =
     "Bạn là 'Sen Chúa' - trợ lý AI cực kỳ hóm hỉnh, thông minh, vui tính và mặn mà của cộng đồng Zalo.\n" +
     "NHIỆM VỤ:\n" +
-    "1. Nếu có HÌNH ẢNH đính kèm: Hãy ĐỌC KỸ TOÀN BỘ CHỮ/NỘI DUNG trong ảnh, dịch thuật (nếu được yêu cầu dịch sang tiếng Việt hoặc ngôn ngữ khác), phân tích biểu đồ/hóa đơn, giải bài tập, bắt lỗi code hoặc mô tả chi tiết theo đúng yêu cầu của người dùng.\n" +
-    "2. Nếu có NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): Hãy hiểu rằng người dùng đang hỏi, nhờ giải thích, dịch hoặc bình luận về chính nội dung được trích dẫn đó.\n" +
-    "3. Với các câu hỏi đùa, troll, hỏi vui hoặc câu hỏi bất khả thi: Hãy đối đáp CỰC KỲ HÀI HƯỚC, duyên dáng, bắt trend theo phong cách Sen Chúa hóm hỉnh.\n" +
-    "4. Với câu hỏi về bảng xếp hạng, thành viên tích cực: Trả lời dựa trên BẢNG XẾP HẠNG & THÀNH VIÊN TÍCH CỰC được cung cấp.\n" +
-    "5. Với câu hỏi chuyên môn AI/công nghệ/mẹo MMO: Trả lời súc tích, logic, chuẩn xác.\n" +
-    "6. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (hãy dùng dấu gạch đầu dòng, viết hoa hoặc icon để làm nổi bật).";
+    "1. Nếu có FILE TÀI LIỆU (PDF, Word, Excel, Code, TXT, Âm thanh, Hình ảnh) đính kèm: Hãy ĐỌC KỸ TOÀN BỘ NỘI DUNG, trích xuất dữ liệu, dịch thuật (nếu được yêu cầu), giải thích, tìm lỗi code hoặc tóm tắt đầy đủ theo yêu cầu của người dùng.\n" +
+    "2. Nếu người dùng hỏi về kiến thức/tài liệu cũ đã từng gửi trong nhóm: Hãy tra cứu từ 'KHO TRI THỨC & BỘ NHỚ TÀI LIỆU ĐÃ LƯU' để trả lời chính xác.\n" +
+    "3. Nếu có NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): Hãy hiểu rằng người dùng đang hỏi, nhờ giải thích, dịch hoặc bình luận về chính nội dung được trích dẫn đó.\n" +
+    "4. Với các câu hỏi đùa, troll, hỏi vui hoặc câu hỏi bất khả thi: Hãy đối đáp CỰC KỲ HÀI HƯỚC, duyên dáng, bắt trend theo phong cách Sen Chúa hóm hỉnh.\n" +
+    "5. Với câu hỏi về bảng xếp hạng, thành viên tích cực: Trả lời dựa trên BẢNG XẾP HẠNG & THÀNH VIÊN TÍCH CỰC được cung cấp.\n" +
+    "6. Với câu hỏi chuyên môn AI/công nghệ/mẹo MMO: Trả lời súc tích, logic, chuẩn xác.\n" +
+    "7. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (hãy dùng dấu gạch đầu dòng, viết hoa hoặc icon để làm nổi bật).";
 
   const userPrompt =
-    `${quotePromptSection}\n` +
+    `${quotePromptSection}\n${fileContentSection}\n` +
     `DƯỚI ĐÂY LÀ DỮ LIỆU LỊCH SỬ CHAT CỦA NHÓM ĐỂ THAM KHẢO:\n` +
     `<chat_history>\n${contextData}\n</chat_history>\n\n` +
-    `YÊU CẦU / CÂU HỎI TỪ THÀNH VIÊN (${displayName}): ${question || "Hãy phân tích hình ảnh/nội dung trích dẫn trên giúp tôi."}\n\n` +
+    `YÊU CẦU / CÂU HỎI TỪ THÀNH VIÊN (${displayName}): ${question || "Hãy phân tích tài liệu/hình ảnh/nội dung trên giúp tôi."}\n\n` +
     `HÃY TRẢ LỜI THẬT DUYÊN DÁNG, CHUẨN XÁC VÀ HÓM HỈNH:`;
 
   try {
     const answer = await callGemini(systemPrompt, userPrompt, {
-      images: imagePart ? [imagePart] : undefined,
+      mediaParts: mediaPart ? [mediaPart] : undefined,
     });
+
+    // 🧠 TỰ ĐỘNG GHI NHỚ VÀO BỘ NHỚ DÀI HẠN NẾU ĐÂY LÀ TÀI LIỆU/FILE/ẢNH PHÂN TÍCH
+    if (targetUrl && (fileName || mediaPart || fileTextContent)) {
+      saveGroupKnowledge({
+        threadId,
+        title: fileName || question.slice(0, 50) || "Tài liệu",
+        fileName: fileName || "file_attachment",
+        fileType: mediaPart?.mimeType || "document",
+        fileUrl: targetUrl,
+        contentText: fileTextContent ? fileTextContent.slice(0, 5000) : question,
+        summary: answer.slice(0, 2000),
+        senderName: displayName,
+        createdAt: Date.now(),
+      });
+    }
+
     return answer;
   } catch (e) {
     console.warn("[member-assistant] Gemini QA error:", e);
@@ -456,9 +508,10 @@ async function handleHistoryQA(
 export async function handleMemberInteraction(api: any, event: MemberMessageEvent): Promise<void> {
   const rawText = (event.text || "").trim();
   const hasImage = Boolean(event.mediaUrl || event.quote?.mediaUrl);
+  const hasFile = Boolean(event.fileAttachment);
   const hasQuote = Boolean(event.quote?.text || event.quote?.mediaUrl);
 
-  if (!rawText && !hasImage) return;
+  if (!rawText && !hasImage && !hasFile) return;
 
   // Nếu là tin nhắn của chính tài khoản bot (chủ bot test từ app Zalo):
   if (event.isSelf) {
@@ -478,6 +531,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       rawText.startsWith("!") ||
       rawText.startsWith("@") ||
       hasImage ||
+      hasFile ||
       hasQuote ||
       lowerSelf.includes("sen chúa") ||
       lowerSelf.includes("sen chua") ||
@@ -600,7 +654,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
-  // 6. Lệnh /hoi [câu hỏi], Tag bot, Nhắc tên Sen Chúa, Chào hỏi, Lệnh dịch/đọc ảnh, hoặc Quote hỏi bot
+  // 6. Lệnh /hoi [câu hỏi], Tag bot, Nhắc tên Sen Chúa, Chào hỏi, Lệnh đọc file/ảnh, hoặc Quote hỏi bot
   const isTagBot =
     lower.startsWith("/hoi") ||
     lower.startsWith("!hoi") ||
@@ -608,6 +662,8 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     lower.startsWith("!dich") ||
     lower.startsWith("/docanh") ||
     lower.startsWith("!docanh") ||
+    lower.startsWith("/docfile") ||
+    lower.startsWith("/file") ||
     lower.startsWith("/anh") ||
     lower.includes("@sen chúa") ||
     lower.includes("@sen chua") ||
@@ -626,6 +682,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     lower.startsWith("sen oi") ||
     lower.includes("bot ơi") ||
     lower.includes("bot oi") ||
+    (hasFile && (lower.includes("đọc") || lower.includes("tóm tắt") || lower.includes("dịch") || lower.includes("phân tích") || lower.includes("bot") || lower.includes("sen") || lower.length === 0)) ||
     (hasImage && (lower.includes("dịch") || lower.includes("dich") || lower.includes("đọc") || lower.includes("doc") || lower.includes("phân tích") || lower.includes("phan tich") || lower.includes("này") || lower.includes("gì") || lower.includes("bot") || lower.includes("sen"))) ||
     (hasQuote && (lower.includes("bot") || lower.includes("sen") || lower.includes("dịch") || lower.includes("giải thích") || lower.includes("nghĩa là gì") || lower.startsWith("?") || lower.endsWith("?"))) ||
     (event.isSelf && lower.startsWith("@"));
@@ -641,6 +698,8 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       .replace(/^!dich\s*/i, "")
       .replace(/^\/docanh\s*/i, "")
       .replace(/^!docanh\s*/i, "")
+      .replace(/^\/docfile\s*/i, "")
+      .replace(/^\/file\s*/i, "")
       .replace(/^\/anh\s*/i, "")
       .replace(/@sen chúa/gi, "")
       .replace(/@sen chua/gi, "")
@@ -665,6 +724,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     const qLower = question.toLowerCase();
     const isGreeting =
       !hasImage &&
+      !hasFile &&
       !hasQuote &&
       (!question ||
         qLower.length < 3 ||
@@ -679,14 +739,14 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       await sendGroupText(
         api,
         threadId,
-        `🤖 Dạ Sen Chúa chào ${displayName || "bác"} ạ! Em sẵn sàng hỗ trợ tra cứu thông tin thảo luận trong nhóm, điểm tương tác, đọc hình ảnh, dịch thuật và giải đáp thắc mắc. Bạn cần hỏi gì cứ gõ: /hoi [câu hỏi], gửi ảnh kèm câu lệnh hoặc tag @Sen Chúa nhé!`,
+        `🤖 Dạ Sen Chúa chào ${displayName || "bác"} ạ! Em sẵn sàng hỗ trợ tra cứu thông tin thảo luận trong nhóm, điểm tương tác, đọc hình ảnh, tài liệu (PDF, Word, Excel, Code), dịch thuật và ghi nhớ kiến thức. Bạn cần hỏi gì cứ gõ: /hoi [câu hỏi], gửi file/ảnh kèm câu lệnh hoặc tag @Sen Chúa nhé!`,
       );
       console.log(`[member-assistant] ✅ Đã gửi lời chào cho ${displayName}`);
       return;
     }
 
     // Các câu đối đáp hài hước, trêu chọc tức thì
-    if (!hasImage && !hasQuote && ["ngáo", "ngao", "ngu", "dở", "do", "ngốc", "ngoc", "lag", "chán", "chan"].some((w) => qLower === w || qLower.startsWith(w + " ") || qLower.endsWith(" " + w))) {
+    if (!hasImage && !hasFile && !hasQuote && ["ngáo", "ngao", "ngu", "dở", "do", "ngốc", "ngoc", "lag", "chán", "chan"].some((w) => qLower === w || qLower.startsWith(w + " ") || qLower.endsWith(" " + w))) {
       await sendGroupText(
         api,
         threadId,
@@ -695,7 +755,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       return;
     }
 
-    if (!hasImage && !hasQuote && (qLower.includes("mute") || qLower.includes("ban") || qLower.includes("kick"))) {
+    if (!hasImage && !hasFile && !hasQuote && (qLower.includes("mute") || qLower.includes("ban") || qLower.includes("kick"))) {
       await sendGroupText(
         api,
         threadId,
@@ -704,7 +764,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       return;
     }
 
-    if (!hasImage && !hasQuote && (qLower.includes("1 triệu view") || qLower.includes("triệu view") || qLower.includes("1tr view") || qLower.includes("tăng view"))) {
+    if (!hasImage && !hasFile && !hasQuote && (qLower.includes("1 triệu view") || qLower.includes("triệu view") || qLower.includes("1tr view") || qLower.includes("tăng view"))) {
       await sendGroupText(
         api,
         threadId,
@@ -716,6 +776,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     // Tự động nhận diện câu hỏi xin link, tổng hợp link, tài liệu
     if (
       !hasImage &&
+      !hasFile &&
       !hasQuote &&
       (qLower.includes("tổng hợp link") ||
         qLower.includes("tong hop link") ||
@@ -751,6 +812,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     // Tự động nhận diện câu hỏi về thành viên chưa từng chat, nằm vùng, tàu ngầm
     if (
       !hasImage &&
+      !hasFile &&
       !hasQuote &&
       (qLower.includes("chưa từng chat") ||
         qLower.includes("chua tung chat") ||
@@ -777,12 +839,13 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       return;
     }
 
-    console.log(`[member-assistant] 🔍 Đang xử lý câu hỏi từ ${displayName} (${sender}): "${question}" (HasImage=${hasImage}, HasQuote=${hasQuote})...`);
+    console.log(`[member-assistant] 🔍 Đang xử lý câu hỏi từ ${displayName} (${sender}): "${question}" (HasFile=${hasFile}, HasImage=${hasImage}, HasQuote=${hasQuote})...`);
 
     try {
       const targetImageUrl = event.mediaUrl || event.quote?.mediaUrl || undefined;
       const answer = await handleHistoryQA(question, displayName, threadId, {
         imageUrl: targetImageUrl,
+        fileAttachment: event.fileAttachment,
         quote: event.quote,
       });
       const reply = `🤖 Sen Chúa trả lời @${displayName}:\n\n${answer}`;
@@ -799,3 +862,5 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 }
+
+

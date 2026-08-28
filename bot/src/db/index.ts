@@ -1816,3 +1816,96 @@ export function setGroupMode(groupId: string, mode: "interactive" | "silent" | "
     .run({ groupId, mode, now: Date.now() });
 }
 
+export interface GroupKnowledgeItem {
+  id?: number;
+  threadId: string;
+  title: string;
+  fileName: string;
+  fileType: string;
+  fileUrl?: string;
+  contentText: string;
+  summary: string;
+  senderName: string;
+  createdAt: number;
+}
+
+/**
+ * Ghi nhớ tri thức từ tài liệu/file/ảnh đã phân tích vào bộ nhớ dài hạn của nhóm.
+ */
+export function saveGroupKnowledge(item: GroupKnowledgeItem): void {
+  try {
+    getDb()
+      .prepare(
+        `INSERT INTO group_knowledge (thread_id, title, file_name, file_type, file_url, content_text, summary, sender_name, created_at)
+         VALUES (@threadId, @title, @fileName, @fileType, @fileUrl, @contentText, @summary, @senderName, @createdAt)`,
+      )
+      .run({
+        threadId: item.threadId,
+        title: item.title || item.fileName || "Tài liệu",
+        fileName: item.fileName || "",
+        fileType: item.fileType || "document",
+        fileUrl: item.fileUrl || null,
+        contentText: item.contentText || "",
+        summary: item.summary || "",
+        senderName: item.senderName || "",
+        createdAt: item.createdAt || Date.now(),
+      });
+    console.log(`[db] 🧠 Đã lưu tri thức "${item.title || item.fileName}" vào bộ nhớ dài hạn của nhóm ${item.threadId}`);
+  } catch (e) {
+    console.warn(`[db] saveGroupKnowledge lỗi: ${String(e)}`);
+  }
+}
+
+function tableExists(tableName: string): boolean {
+  try {
+    const row = getDb()
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`)
+      .get(tableName);
+    return Boolean(row);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Tra cứu kho tri thức & tài liệu đã ghi nhớ của nhóm theo từ khóa.
+ */
+export function searchGroupKnowledge(threadId: string, query?: string, limit = 10): GroupKnowledgeItem[] {
+  try {
+    if (!tableExists("group_knowledge")) return [];
+    if (query && query.trim() !== "") {
+      const words = query
+        .toLowerCase()
+        .replace(/[?,.!/\\:;]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length >= 2 && !["hỏi", "về", "gì", "cho", "xin", "file", "tài", "liệu"].includes(w));
+      if (words.length > 0) {
+        const conditions = words.map(() => `(LOWER(title) LIKE ? OR LOWER(file_name) LIKE ? OR LOWER(summary) LIKE ? OR LOWER(content_text) LIKE ?)`).join(" OR ");
+        const params: string[] = [];
+        for (const w of words) {
+          params.push(`%${w}%`, `%${w}%`, `%${w}%`, `%${w}%`);
+        }
+        return getDb()
+          .prepare(
+            `SELECT * FROM group_knowledge
+             WHERE (thread_id = ? OR thread_id = '') AND (${conditions})
+             ORDER BY created_at DESC
+             LIMIT ?`,
+          )
+          .all(threadId, ...params, limit) as GroupKnowledgeItem[];
+      }
+    }
+    return getDb()
+      .prepare(
+        `SELECT * FROM group_knowledge
+         WHERE (thread_id = ? OR thread_id = '')
+         ORDER BY created_at DESC
+         LIMIT ?`,
+      )
+      .all(threadId, limit) as GroupKnowledgeItem[];
+  } catch {
+    return [];
+  }
+}
+
+
