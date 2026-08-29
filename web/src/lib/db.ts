@@ -436,37 +436,39 @@ export interface LeaderboardRow {
 
 // ---- Reads ----
 
-export function countActiveMembers(groupId?: string): number {
+export function countActiveMembers(groupId?: string, botId?: string): number {
   const targetGroupId = (groupId || "").trim();
+  const db = getDb(botId);
   if (!targetGroupId || targetGroupId === "all") {
-    const r = getDb().prepare(`SELECT COUNT(*) AS n FROM members WHERE is_active = 1`).get() as { n: number };
+    const r = db.prepare(`SELECT COUNT(*) AS n FROM members WHERE is_active = 1`).get() as { n: number };
     return r.n;
   }
   try {
-    const hasGroupMembers = getDb().prepare(`SELECT 1 FROM group_members WHERE group_id = ? LIMIT 1`).get(targetGroupId);
+    const hasGroupMembers = db.prepare(`SELECT 1 FROM group_members WHERE group_id = ? LIMIT 1`).get(targetGroupId);
     if (hasGroupMembers) {
-      const r = getDb().prepare(`SELECT COUNT(*) AS n FROM group_members WHERE is_active = 1 AND group_id = @targetGroupId`).get({ targetGroupId }) as { n: number };
+      const r = db.prepare(`SELECT COUNT(*) AS n FROM group_members WHERE is_active = 1 AND group_id = @targetGroupId`).get({ targetGroupId }) as { n: number };
       return r.n;
     }
   } catch {}
-  const r = getDb().prepare(`SELECT COUNT(*) AS n FROM members WHERE is_active = 1 AND (group_id = @targetGroupId OR group_id = '' OR group_id IS NULL)`).get({ targetGroupId }) as { n: number };
+  const r = db.prepare(`SELECT COUNT(*) AS n FROM members WHERE is_active = 1 AND (group_id = @targetGroupId OR group_id = '' OR group_id IS NULL)`).get({ targetGroupId }) as { n: number };
   return r.n;
 }
 
-export function countByRole(groupId?: string): { owner: number; admin: number; member: number } {
+export function countByRole(groupId?: string, botId?: string): { owner: number; admin: number; member: number } {
   const targetGroupId = (groupId || "").trim();
+  const db = getDb(botId);
   let fromTable = "members";
   let whereClause = "WHERE is_active = 1";
   if (targetGroupId && targetGroupId !== "all") {
     try {
-      const hasGroupMembers = getDb().prepare(`SELECT 1 FROM group_members WHERE group_id = ? LIMIT 1`).get(targetGroupId);
+      const hasGroupMembers = db.prepare(`SELECT 1 FROM group_members WHERE group_id = ? LIMIT 1`).get(targetGroupId);
       if (hasGroupMembers) {
         fromTable = "group_members";
       }
     } catch {}
     whereClause = `WHERE is_active = 1 AND (group_id = @targetGroupId OR group_id = '' OR group_id IS NULL)`;
   }
-  const rows = getDb()
+  const rows = db
     .prepare(`SELECT role, COUNT(*) AS n FROM ${fromTable} ${whereClause} GROUP BY role`)
     .all({ targetGroupId }) as { role: string; n: number }[];
   const out = { owner: 0, admin: 0, member: 0 };
@@ -476,18 +478,19 @@ export function countByRole(groupId?: string): { owner: number; admin: number; m
   return out;
 }
 
-export function countInteractions(threadId?: string): number {
+export function countInteractions(threadId?: string, botId?: string): number {
   const targetThreadId = (threadId || "").trim();
   const primaryGroupId = "1913869945242410752";
+  const db = getDb(botId);
   if (!targetThreadId || targetThreadId === "all") {
-    const r = getDb().prepare(`SELECT COUNT(*) AS n FROM interactions`).get() as { n: number };
+    const r = db.prepare(`SELECT COUNT(*) AS n FROM interactions`).get() as { n: number };
     return r.n;
   }
   if (targetThreadId === primaryGroupId) {
-    const r = getDb().prepare(`SELECT COUNT(*) AS n FROM interactions WHERE thread_id = @targetThreadId OR thread_id = '' OR thread_id IS NULL`).get({ targetThreadId }) as { n: number };
+    const r = db.prepare(`SELECT COUNT(*) AS n FROM interactions WHERE thread_id = @targetThreadId OR thread_id = '' OR thread_id IS NULL`).get({ targetThreadId }) as { n: number };
     return r.n;
   }
-  const r = getDb().prepare(`SELECT COUNT(*) AS n FROM interactions WHERE thread_id = @targetThreadId`).get({ targetThreadId }) as { n: number };
+  const r = db.prepare(`SELECT COUNT(*) AS n FROM interactions WHERE thread_id = @targetThreadId`).get({ targetThreadId }) as { n: number };
   return r.n;
 }
 
@@ -498,12 +501,13 @@ export interface ManagedGroup {
 }
 
 /**
- * Lấy danh sách các nhóm được quản lý từ .env và dữ liệu sync trong DB.
+ * Lấy danh sách các nhóm được quản lý từ DB của bot chỉ định.
  */
-export function listManagedGroups(): ManagedGroup[] {
+export function listManagedGroups(botId?: string): ManagedGroup[] {
+  const db = getDb(botId);
   try {
-    if (dbExists() && tableExists("bot_groups")) {
-      const rows = getDb()
+    if (tableExists("bot_groups")) {
+      const rows = db
         .prepare(`SELECT group_id, name, total_members FROM bot_groups ORDER BY total_members DESC`)
         .all() as { group_id: string; name: string; total_members: number }[];
       if (rows.length > 0) {
@@ -518,20 +522,11 @@ export function listManagedGroups(): ManagedGroup[] {
     console.warn("Lỗi khi đọc bot_groups:", e);
   }
 
-  const envGroupIds = (process.env.GROUP_ID || "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
   const groupMap = new Map<string, ManagedGroup>();
 
-  for (const gid of envGroupIds) {
-    groupMap.set(gid, { id: gid, name: `Nhóm ${gid}` });
-  }
-
   try {
-    if (dbExists() && tableExists("member_sync_runs")) {
-      const runs = getDb()
+    if (tableExists("member_sync_runs")) {
+      const runs = db
         .prepare(
           `SELECT group_id, group_name, member_count
            FROM member_sync_runs
@@ -559,6 +554,19 @@ export function listManagedGroups(): ManagedGroup[] {
     console.warn("Lỗi khi đọc member_sync_runs:", e);
   }
 
+  if (groupMap.size > 0) {
+    return Array.from(groupMap.values());
+  }
+
+  const envGroupIds = (process.env.GROUP_ID || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  for (const gid of envGroupIds) {
+    groupMap.set(gid, { id: gid, name: `Nhóm ${gid}` });
+  }
+
   return Array.from(groupMap.values());
 }
 
@@ -567,7 +575,7 @@ export function listManagedGroups(): ManagedGroup[] {
  * Mỗi row interactions được tính là 1 lượt. Chỉ xếp hạng member còn active.
  * Hỗ trợ lọc theo từng nhóm cụ thể threadId.
  */
-export function listLeaderboard(period: LeaderboardPeriod, limit = 50, threadId?: string): LeaderboardRow[] {
+export function listLeaderboard(period: LeaderboardPeriod, limit = 50, threadId?: string, botId?: string): LeaderboardRow[] {
   const now = Date.now();
   const since =
     period === "7d"
@@ -587,7 +595,8 @@ export function listLeaderboard(period: LeaderboardPeriod, limit = 50, threadId?
     }
   }
 
-  const rows = getDb()
+  const db = getDb(botId);
+  const rows = db
     .prepare(
       `SELECT
          m.display_name,

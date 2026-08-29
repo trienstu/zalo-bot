@@ -74,29 +74,34 @@ function rankTrophyBadge(rank: number) {
   return null;
 }
 
+import { cookies } from "next/headers";
+
 export default async function LeaderboardPage({
   searchParams,
 }: {
   searchParams?: Promise<SearchParams>;
 }) {
+  const cookieStore = await cookies();
+  const botId = cookieStore.get("active_bot_id")?.value || "bot-1";
+
   const params = await searchParams;
   const currentTab = one(params, "tab") === "inactive" ? "inactive" : "active";
   const period = readPeriod(params);
   const activePeriod = PERIODS.find((item) => item.value === period) ?? PERIODS[0];
   const q = one(params, "q").trim();
 
-  const groups = dbExists() ? listManagedGroups() : [];
-  const defaultGroupId = groups[0]?.id || "1913869945242410752";
+  const groups = dbExists(botId) ? listManagedGroups(botId) : [];
+  const defaultGroupId = groups[0]?.id || "";
   const selectedGroupId = one(params, "group") || defaultGroupId;
   const activeGroup = groups.find((g) => g.id === selectedGroupId) || (selectedGroupId === "all" ? { id: "all", name: "Tất cả nhóm" } : groups[0]);
 
   const inactiveFilter = (one(params, "filter") || "inactive7") as "inactive7" | "inactive30" | "zero";
 
-  const rows = dbExists() ? listLeaderboard(period, 50, selectedGroupId) : [];
+  const rows = dbExists(botId) ? listLeaderboard(period, 50, selectedGroupId, botId) : [];
   const vipMap = new Set(readVip().map((v) => v.id));
 
   // Lấy danh sách thành viên không tương tác theo bộ lọc đã chọn và nhóm đã chọn
-  const inactiveMembers = dbExists()
+  const inactiveMembers = dbExists(botId)
     ? listMemberStatsFiltered({ activity: inactiveFilter, q, limit: 1000, threadId: selectedGroupId })
     : [];
 

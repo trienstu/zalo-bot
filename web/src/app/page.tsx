@@ -43,28 +43,32 @@ function warmupInfo(warmupDays: number): { collected: number; remaining: number;
   return { collected, remaining: Math.max(0, warmupDays - collected), startedAt };
 }
 
+import { cookies } from "next/headers";
+
 export default async function DashboardPage({ searchParams }: { searchParams?: Promise<SearchParams> }) {
-  if (!dbExists()) {
+  const cookieStore = await cookies();
+  const botId = cookieStore.get("active_bot_id")?.value || "bot-1";
+
+  if (!dbExists(botId)) {
     return (
       <div>
         <PageHeader title="Tổng quan" desc="Bảng điều khiển bot dọn thành viên group Zalo" />
         <EmptyState>
-          Chưa tìm thấy dữ liệu bot. Hãy chạy bot (<code>npm start</code> trong thư mục <code>bot/</code>)
-          ít nhất một lần để tạo cơ sở dữ liệu.
+          Chưa tìm thấy dữ liệu cho bot này. Hãy chọn bot khác hoặc kiểm tra lại kết nối.
         </EmptyState>
       </div>
     );
   }
 
   const params = await searchParams;
-  const groups = listManagedGroups();
+  const groups = listManagedGroups(botId);
   const defaultGroupId = groups[0]?.id || "";
   const selectedGroupId = one(params, "group") || defaultGroupId || "all";
   const activeGroup = groups.find((g) => g.id === selectedGroupId) || groups[0] || { id: "all", name: "Nhóm Zalo" };
 
-  const total = countActiveMembers();
-  const roles = countByRole();
-  const interactions = countInteractions(activeGroup.id !== "all" ? activeGroup.id : undefined);
+  const total = countActiveMembers(activeGroup.id !== "all" ? activeGroup.id : undefined, botId);
+  const roles = countByRole(activeGroup.id !== "all" ? activeGroup.id : undefined, botId);
+  const interactions = countInteractions(activeGroup.id !== "all" ? activeGroup.id : undefined, botId);
   const cfg = readConfig();
   const target = cfg.targetMemberCount ?? CONFIG_DEFAULTS.targetMemberCount;
   const warmupDays = cfg.warmupDays ?? CONFIG_DEFAULTS.warmupDays;
