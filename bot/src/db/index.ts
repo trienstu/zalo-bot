@@ -80,6 +80,10 @@ function runColumnMigrations(database: Database.Database): void {
     ["bot_groups", "custom_prompt", "TEXT NOT NULL DEFAULT ''"],
     ["bot_groups", "bot_name", "TEXT NOT NULL DEFAULT 'Sen Chúa'"],
     ["bot_groups", "welcome_msg", "TEXT NOT NULL DEFAULT ''"],
+    // Bản tin thời tiết & AQI chào buổi sáng tự động theo nhóm
+    ["bot_groups", "weather_auto", "INTEGER NOT NULL DEFAULT 0"],
+    ["bot_groups", "weather_time", "TEXT NOT NULL DEFAULT '07:00'"],
+    ["bot_groups", "weather_city", "TEXT NOT NULL DEFAULT 'Hồ Chí Minh'"],
   ];
 
   for (const [table, column, definition] of additions) {
@@ -1806,6 +1810,9 @@ export interface GroupSettings {
   customPrompt: string;
   botName: string;
   welcomeMsg: string;
+  weatherAuto: boolean;
+  weatherTime: string;
+  weatherCity: string;
   isActive: boolean;
   updatedAt: number;
 }
@@ -1820,6 +1827,9 @@ export function getGroupSettings(groupId: string): GroupSettings {
                 COALESCE(custom_prompt, '') as customPrompt,
                 COALESCE(bot_name, 'Sen Chúa') as botName,
                 COALESCE(welcome_msg, '') as welcomeMsg,
+                COALESCE(weather_auto, 0) as weatherAuto,
+                COALESCE(weather_time, '07:00') as weatherTime,
+                COALESCE(weather_city, 'Hồ Chí Minh') as weatherCity,
                 is_active as isActive, updated_at as updatedAt
          FROM bot_groups WHERE group_id = ?`,
       )
@@ -1834,6 +1844,9 @@ export function getGroupSettings(groupId: string): GroupSettings {
         customPrompt: row.customPrompt || "",
         botName: row.botName || "Sen Chúa",
         welcomeMsg: row.welcomeMsg || "",
+        weatherAuto: Boolean(row.weatherAuto),
+        weatherTime: row.weatherTime || "07:00",
+        weatherCity: row.weatherCity || "Hồ Chí Minh",
         isActive: Boolean(row.isActive),
         updatedAt: row.updatedAt || Date.now(),
       };
@@ -1849,6 +1862,9 @@ export function getGroupSettings(groupId: string): GroupSettings {
     customPrompt: "",
     botName: "Sen Chúa",
     welcomeMsg: "",
+    weatherAuto: false,
+    weatherTime: "07:00",
+    weatherCity: "Hồ Chí Minh",
     isActive: true,
     updatedAt: Date.now(),
   };
@@ -1864,13 +1880,16 @@ export function updateGroupSettings(
     customPrompt: string;
     botName: string;
     welcomeMsg: string;
+    weatherAuto: boolean;
+    weatherTime: string;
+    weatherCity: string;
   }>,
 ): void {
   const current = getGroupSettings(groupId);
   getDb()
     .prepare(
-      `INSERT INTO bot_groups (group_id, name, total_members, mode, persona, custom_prompt, bot_name, welcome_msg, is_active, updated_at)
-       VALUES (@groupId, @name, @totalMembers, @mode, @persona, @customPrompt, @botName, @welcomeMsg, @isActive, @now)
+      `INSERT INTO bot_groups (group_id, name, total_members, mode, persona, custom_prompt, bot_name, welcome_msg, weather_auto, weather_time, weather_city, is_active, updated_at)
+       VALUES (@groupId, @name, @totalMembers, @mode, @persona, @customPrompt, @botName, @welcomeMsg, @weatherAuto, @weatherTime, @weatherCity, @isActive, @now)
        ON CONFLICT(group_id) DO UPDATE SET
          name = COALESCE(@name, name),
          mode = COALESCE(@mode, mode),
@@ -1878,6 +1897,9 @@ export function updateGroupSettings(
          custom_prompt = COALESCE(@customPrompt, custom_prompt),
          bot_name = COALESCE(@botName, bot_name),
          welcome_msg = COALESCE(@welcomeMsg, welcome_msg),
+         weather_auto = COALESCE(@weatherAuto, weather_auto),
+         weather_time = COALESCE(@weatherTime, weather_time),
+         weather_city = COALESCE(@weatherCity, weather_city),
          updated_at = @now`,
     )
     .run({
@@ -1889,6 +1911,9 @@ export function updateGroupSettings(
       customPrompt: settings.customPrompt ?? current.customPrompt,
       botName: settings.botName ?? current.botName,
       welcomeMsg: settings.welcomeMsg ?? current.welcomeMsg,
+      weatherAuto: settings.weatherAuto !== undefined ? (settings.weatherAuto ? 1 : 0) : (current.weatherAuto ? 1 : 0),
+      weatherTime: settings.weatherTime ?? current.weatherTime,
+      weatherCity: settings.weatherCity ?? current.weatherCity,
       isActive: current.isActive ? 1 : 0,
       now: Date.now(),
     });
@@ -2043,6 +2068,160 @@ export function getAdminUsers(): AdminUserInfo[] {
     return [];
   }
 }
+
+// ---- QUẢN LÝ LỊCH HẸN & BÁO THỨC TỰ ĐỘNG (SCHEDULED REMINDERS) ----
+
+export interface ScheduledReminder {
+  id: number;
+  threadId: string;
+  isDirect: boolean;
+  creatorId: string;
+  creatorName: string;
+  targetType: "sender" | "all";
+  remindAt: number;
+  content: string;
+  status: "pending" | "completed" | "cancelled";
+  createdAt: number;
+}
+
+/**
+ * Tạo mới một lịch hẹn / báo thức tự động.
+ */
+export function createScheduledReminder(data: {
+  threadId: string;
+  isDirect?: boolean;
+  creatorId: string;
+  creatorName: string;
+  targetType?: "sender" | "all";
+  remindAt: number;
+  content: string;
+}): number {
+  try {
+    const result = getDb()
+      .prepare(
+        `INSERT INTO scheduled_reminders (thread_id, is_direct, creator_id, creator_name, target_type, remind_at, content, status, created_at)
+         VALUES (@threadId, @isDirect, @creatorId, @creatorName, @targetType, @remindAt, @content, 'pending', @createdAt)`,
+      )
+      .run({
+        threadId: data.threadId,
+        isDirect: data.isDirect ? 1 : 0,
+        creatorId: data.creatorId,
+        creatorName: data.creatorName || "Bạn",
+        targetType: data.targetType || "sender",
+        remindAt: data.remindAt,
+        content: data.content,
+        createdAt: Date.now(),
+      });
+    return Number(result.lastInsertRowid);
+  } catch (e) {
+    console.error("[db] createScheduledReminder error:", e);
+    return 0;
+  }
+}
+
+/**
+ * Lấy danh sách các lịch hẹn đang chờ đến hạn cần gửi.
+ */
+export function getPendingScheduledReminders(beforeTs?: number): ScheduledReminder[] {
+  try {
+    const cutoff = beforeTs || Date.now();
+    const rows = getDb()
+      .prepare(
+        `SELECT id, thread_id as threadId, is_direct as isDirect, creator_id as creatorId,
+                creator_name as creatorName, target_type as targetType, remind_at as remindAt,
+                content, status, created_at as createdAt
+         FROM scheduled_reminders
+         WHERE status = 'pending' AND remind_at <= ?
+         ORDER BY remind_at ASC`,
+      )
+      .all(cutoff) as any[];
+
+    return rows.map((r) => ({
+      id: r.id,
+      threadId: r.threadId,
+      isDirect: Boolean(r.isDirect),
+      creatorId: r.creatorId,
+      creatorName: r.creatorName,
+      targetType: r.targetType || "sender",
+      remindAt: r.remindAt,
+      content: r.content,
+      status: r.status,
+      createdAt: r.createdAt,
+    }));
+  } catch (e) {
+    console.error("[db] getPendingScheduledReminders error:", e);
+    return [];
+  }
+}
+
+/**
+ * Đánh dấu lịch hẹn đã gửi thành công.
+ */
+export function markScheduledReminderCompleted(id: number): void {
+  try {
+    getDb().prepare(`UPDATE scheduled_reminders SET status = 'completed' WHERE id = ?`).run(id);
+  } catch (e) {
+    console.error("[db] markScheduledReminderCompleted error:", e);
+  }
+}
+
+/**
+ * Lấy danh sách lịch hẹn của một người dùng.
+ */
+export function getUserScheduledReminders(creatorId: string, limit = 10): ScheduledReminder[] {
+  try {
+    const rows = getDb()
+      .prepare(
+        `SELECT id, thread_id as threadId, is_direct as isDirect, creator_id as creatorId,
+                creator_name as creatorName, target_type as targetType, remind_at as remindAt,
+                content, status, created_at as createdAt
+         FROM scheduled_reminders
+         WHERE creator_id = ? AND status = 'pending'
+         ORDER BY remind_at ASC
+         LIMIT ?`,
+      )
+      .all(creatorId, limit) as any[];
+
+    return rows.map((r) => ({
+      id: r.id,
+      threadId: r.threadId,
+      isDirect: Boolean(r.isDirect),
+      creatorId: r.creatorId,
+      creatorName: r.creatorName,
+      targetType: r.targetType || "sender",
+      remindAt: r.remindAt,
+      content: r.content,
+      status: r.status,
+      createdAt: r.createdAt,
+    }));
+  } catch (e) {
+    console.error("[db] getUserScheduledReminders error:", e);
+    return [];
+  }
+}
+
+/**
+ * Hủy một lịch hẹn.
+ */
+export function cancelScheduledReminder(id: number, creatorId?: string): boolean {
+  try {
+    let result;
+    if (creatorId) {
+      result = getDb()
+        .prepare(`UPDATE scheduled_reminders SET status = 'cancelled' WHERE id = ? AND creator_id = ? AND status = 'pending'`)
+        .run(id, creatorId);
+    } else {
+      result = getDb()
+        .prepare(`UPDATE scheduled_reminders SET status = 'cancelled' WHERE id = ? AND status = 'pending'`)
+        .run(id);
+    }
+    return result.changes > 0;
+  } catch (e) {
+    console.error("[db] cancelScheduledReminder error:", e);
+    return false;
+  }
+}
+
 
 
 

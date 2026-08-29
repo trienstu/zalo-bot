@@ -12,6 +12,7 @@ import {
   consumeSummarySendRequest,
   listGroups,
   sendGroupText,
+  sendDirectText,
   sleep,
   reloginRequestExists,
   hasSavedCredentials,
@@ -40,7 +41,10 @@ import {
   acquireLock,
   releaseLock,
   getGroupMode,
+  getPendingScheduledReminders,
+  markScheduledReminderCompleted,
 } from "./db/index.js";
+import { getMorningWeatherBriefing } from "./weather.js";
 import { syncGroupMembers } from "./member-sync.js";
 import { saveZaloImage } from "./zalo-media.js";
 import { KICK_LOCK_KEY, KICK_LOCK_STALE_MS } from "./commands/monthly-cleanup.js";
@@ -1195,6 +1199,82 @@ export async function runListener(): Promise<void> {
   }
   await syncVotesOnce(); // chạy 1 lần ngay khi start
   setInterval(() => void syncVotesOnce(), SYNC_VOTES_INTERVAL_MS);
+
+  // =========================================================================
+  // VÒNG LẶP KIỂM TRA LỊCH HẸN & BÁO THỨC TỰ ĐỘNG (MỖI 15 GIÂY)
+  // =========================================================================
+  async function checkRemindersLoop(): Promise<void> {
+    try {
+      const pending = getPendingScheduledReminders(Date.now());
+      for (const rem of pending) {
+        const timeStr = new Date(rem.remindAt).toLocaleTimeString("vi-VN", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+          timeZone: "Asia/Bangkok",
+        });
+
+        if (rem.isDirect) {
+          const msg =
+            `⏰ [BÁO THỨC / NHẮC VIỆC CÁ NHÂN] 🔔\n` +
+            `Dạ bác ơi! Đã đến giờ hẹn lúc ${timeStr} rồi nè:\n\n` +
+            `📌 Nội dung: "${rem.content}"\n\n` +
+            `✨ Chúc bác hoàn thành công việc thật tốt nhé! 💪`;
+          await sendDirectText(api, rem.creatorId, msg);
+        } else {
+          const tagText = rem.targetType === "all" ? "Cả nhóm" : `@${rem.creatorName}`;
+          const msg =
+            `⏰ [BÁO THỨC / NHẮC HẸN NHÓM] 🔔\n` +
+            `Dạ ${tagText} ơi! Đã đến giờ hẹn lúc ${timeStr} rồi nè:\n\n` +
+            `📌 Nội dung: "${rem.content}"\n\n` +
+            `✨ Anh em chú ý sắp xếp thời gian nhé! 💪`;
+          await sendGroupText(api, rem.threadId, msg);
+        }
+
+        markScheduledReminderCompleted(rem.id);
+        console.log(`[listener] ⏰ Đã kích hoạt và gửi lịch nhắc #${rem.id} ("${rem.content}")`);
+        await sleep(500);
+      }
+    } catch (e) {
+      console.warn(`[listener] checkRemindersLoop error: ${String(e)}`);
+    }
+  }
+  setInterval(() => void checkRemindersLoop(), 15000);
+
+  // =========================================================================
+  // VÒNG LẶP GỬI BẢN TIN THỜI TIẾT & CHÀO BUỔI SÁNG TỰ ĐỘNG (MỖI 30 GIÂY)
+  // =========================================================================
+  const weatherSentLog = new Map<string, string>(); // groupId -> 'YYYY-MM-DD'
+  async function checkMorningWeatherBriefingLoop(): Promise<void> {
+    try {
+      const now = new Date();
+      const todayStr = now.toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" }); // YYYY-MM-DD
+      const currentHM = now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Bangkok" }); // HH:mm
+
+      const db = getDb();
+      const groupsWithWeather = db.prepare(
+        `SELECT group_id as groupId, name, weather_auto as weatherAuto,
+                COALESCE(weather_time, '07:00') as weatherTime,
+                COALESCE(weather_city, 'Hồ Chí Minh') as weatherCity
+         FROM bot_groups
+         WHERE weather_auto = 1`
+      ).all() as any[];
+
+      for (const g of groupsWithWeather) {
+        const targetTime = (g.weatherTime || "07:00").trim();
+        if (currentHM === targetTime && weatherSentLog.get(g.groupId) !== todayStr) {
+          weatherSentLog.set(g.groupId, todayStr);
+          console.log(`[listener] ☀️ Đang gửi Bản tin thời tiết sáng ${todayStr} (${targetTime}) cho nhóm [${g.name}]...`);
+          const briefing = await getMorningWeatherBriefing(g.weatherCity, g.name);
+          await sendGroupText(api, g.groupId, briefing);
+          await sleep(1000);
+        }
+      }
+    } catch (e) {
+      console.warn(`[listener] checkMorningWeatherBriefingLoop error: ${String(e)}`);
+    }
+  }
+  setInterval(() => void checkMorningWeatherBriefingLoop(), 30000);
 }
 
 function normalizeGroupEventType(ev: any): string {

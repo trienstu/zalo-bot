@@ -2,6 +2,8 @@ import { getDb, isUserAdmin, addAdminUser, setGroupMode } from "./db/index.js";
 import { sendDirectText, sendGroupText } from "./zalo/client.js";
 import { callGemini, downloadFileContent, type GeminiMediaPart } from "./gemini.js";
 import type { MemberMessageEvent } from "./member-assistant.js";
+import { getWeatherReport } from "./weather.js";
+import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam } from "./reminder.js";
 
 // Lưu lịch sử trò chuyện nhiều lượt (Multi-turn Chat) giữa Admin và Bot (Lưu tối đa 12 lượt gần nhất)
 const adminChatSessions = new Map<string, { role: "user" | "model"; text: string }[]>();
@@ -189,23 +191,58 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   if (lower === "/help" || lower === "help" || lower === "!help" || lower === "/menu" || lower === "menu") {
     const helpMsg =
       `👑 BẢNG LỆNH QUẢN TRỊ & ĐIỀU KHIỂN BOT (1:1 VỚI ADMIN):\n\n` +
-      `📋 QUẢN LÝ NHÓM:\n` +
+      `⏰ ĐẶT HẸN & NHẮC VIỆC CÁ NHÂN:\n` +
+      `🔹 /nhacnho [thời gian] [nội dung] : Đặt hẹn nhắc việc (VD: /nhacnho 20p Uống nước, /hengio 17:30 Đi đón con)\n` +
+      `🔹 /dsnhac : Xem danh sách các lịch hẹn đang chờ của bạn\n` +
+      `🔹 /huynhac [mã_số] : Hủy lịch hẹn theo mã\n` +
+      `🔹 Hoặc chat tự nhiên: "Nhắc tôi 30 phút nữa gọi cho anh Nam", "8h tối mai nhắc tôi xem bóng đá"\n\n` +
+      `☀️ TRA CỨU THỜI TIẾT & CHẤT LƯỢNG KHÔNG KHÍ (AQI):\n` +
+      `🔹 /thoitiet : Xem thời tiết & bụi mịn PM2.5 khu vực hiện tại\n` +
+      `🔹 /thoitiet [tên_thành_phố] : Xem thời tiết TP.HCM, Hà Nội, Đà Lạt, Đà Nẵng...\n\n` +
+      `📋 QUẢN LÝ NHÓM ZALO:\n` +
       `🔹 /groups : Xem danh sách & ID tất cả các nhóm Zalo Bot đang tham gia\n` +
       `🔹 /send [tên_nhóm/id] [nội dung] : Gửi tin nhắn/thông báo vào nhóm chỉ định\n` +
       `🔹 /broadcast [nội dung] : Bắn thông báo cùng lúc đến TẤT CẢ các nhóm\n` +
       `🔹 /mode [tên_nhóm] [interactive/silent] : Đổi chế độ nhóm (Tương tác / Tàu ngầm)\n\n` +
-      `📊 TRA CỨU & BÁO CÁO:\n` +
-      `🔹 /summary [tên_nhóm] : Kích hoạt tóm tắt thảo luận nhóm và gửi báo cáo về cho bạn\n` +
-      `🔹 /top [tên_nhóm] : Xem Top 5 thành viên năng nổ nhất của nhóm\n` +
-      `🔹 /taungam [tên_nhóm] : Xem danh sách thành viên nằm vùng/chưa từng chat của nhóm\n\n` +
       `💬 TRỢ LÝ AI RIÊNG TƯ & RA LỆNH TỰ NHIÊN:\n` +
       `🔹 Soạn bài rồi bảo: "Gửi bài này vào nhóm VIP" hoặc "Bắn vào nhóm AI"\n` +
-      `🔹 Hoặc yêu cầu: "Soạn tin nhắn chúc mừng rồi gửi vào nhóm VIP" -> Em sẽ tự động gửi thẳng vào nhóm cho Sếp!`;
+      `🔹 Phân tích file tài liệu (PDF, Word, Excel, Code) hoặc ảnh bằng AI.`;
     await sendDirectText(api, sender, helpMsg);
     return;
   }
 
-  // 2.2. Lệnh /groups hoặc /dsnhom
+  // 2.2. Lệnh /thoitiet [Địa điểm]
+  if (lower.startsWith("/thoitiet") || lower.startsWith("!thoitiet")) {
+    const cityInput = rawText.replace(/^\/(?:thoitiet|!thoitiet)\s*/i, "").trim() || "Hồ Chí Minh";
+    const weatherMsg = await getWeatherReport(cityInput);
+    await sendDirectText(api, sender, weatherMsg);
+    return;
+  }
+
+  // 2.3. Lệnh /nhacnho, /hengio [thời gian] [nội dung]
+  if (lower.startsWith("/nhacnho ") || lower.startsWith("!nhacnho ") || lower.startsWith("/hengio ") || lower.startsWith("!hengio ")) {
+    const args = rawText.replace(/^\/(?:nhacnho|!nhacnho|hengio|!hengio)\s+/i, "").trim();
+    const reply = handleSetReminder(sender, true, sender, displayName, args);
+    await sendDirectText(api, sender, reply);
+    return;
+  }
+
+  // 2.4. Lệnh /dsnhac, /lichnhac (Danh sách lịch hẹn)
+  if (lower === "/dsnhac" || lower === "!dsnhac" || lower === "/lichnhac" || lower === "dsnhac") {
+    const reply = handleListReminders(sender);
+    await sendDirectText(api, sender, reply);
+    return;
+  }
+
+  // 2.5. Lệnh /huynhac [ID] (Hủy lịch hẹn)
+  if (lower.startsWith("/huynhac ") || lower.startsWith("!huynhac ")) {
+    const idStr = rawText.replace(/^\/(?:huynhac|!huynhac)\s+/i, "").trim();
+    const reply = handleCancelReminder(sender, idStr);
+    await sendDirectText(api, sender, reply);
+    return;
+  }
+
+  // 2.6. Lệnh /groups hoặc /dsnhom
   if (lower === "/groups" || lower === "/dsnhom" || lower === "groups" || lower === "!groups") {
     const groups = getAllGroupsList();
     if (groups.length === 0) {
@@ -339,6 +376,25 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       await sendDirectText(api, sender, `❌ Lỗi khi gửi vào nhóm [${target.name}]: ${String(err)}`);
       return;
     }
+  }
+
+  // 2.7. Tự động nhận diện câu nhắc lịch tự nhiên (ví dụ: "Nhắc tôi 20 phút nữa...", "15:30 chiều nay nhắc tôi...")
+  if (/^nhắc\s+(?:tôi|tao|mình|em|anh)/i.test(rawText) || /(?:phút|tiếng|h|giờ)\s+nữa\s+nhắc/i.test(rawText)) {
+    const parsed = parseNaturalTimeVietnam(rawText);
+    if (parsed) {
+      const reply = handleSetReminder(sender, true, sender, displayName, rawText);
+      await sendDirectText(api, sender, reply);
+      return;
+    }
+  }
+
+  // 2.8. Tự động nhận diện câu hỏi thời tiết tự nhiên (ví dụ: "Thời tiết hôm nay thế nào", "Thời tiết Hà Nội có mưa không")
+  if (/(?:thời tiết|thoi tiet|dự báo thời tiết|du bao thoi tiet)/i.test(rawText) && !hasFile && !hasImage) {
+    const cityMatch = rawText.match(/(?:tại|ở|khu vực|tỉnh|thành phố)\s+([A-ZÀ-Ỹa-zà-ỹ\s]+)/i);
+    const candidateCity = cityMatch?.[1]?.trim() || "Hồ Chí Minh";
+    const weatherMsg = await getWeatherReport(candidateCity);
+    await sendDirectText(api, sender, weatherMsg);
+    return;
   }
 
   // =========================================================================

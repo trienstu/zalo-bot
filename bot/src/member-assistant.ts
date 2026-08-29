@@ -5,6 +5,8 @@ import {
   downloadFileContent,
   type GeminiMediaPart,
 } from "./gemini.js";
+import { getWeatherReport } from "./weather.js";
+import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam } from "./reminder.js";
 
 export interface MemberMessageEvent {
   threadId: string;
@@ -291,6 +293,15 @@ function handleHelpCommand(): string {
   return (
     `🤖 TRỢ LÝ CỘNG ĐỒNG — SEN CHÚA\n\n` +
     `Các lệnh bạn có thể sử dụng:\n` +
+    `⏰ ĐẶT HẸN & BÁO THỨC:\n` +
+    `🔹 /nhacnho [thời gian] [nội dung]: Đặt lịch hẹn nhắc việc (VD: /nhacnho 20p Đi họp, /hengio 17:30 Đón con, /hengio 8h tối mai Kèo bóng đá)\n` +
+    `🔹 /dsnhac: Xem danh sách các lịch hẹn đang chờ của bạn\n` +
+    `🔹 /huynhac [mã_số]: Hủy lịch hẹn theo mã\n` +
+    `🔹 Hoặc tag bot: "@Sen Chúa 8h tối mai nhắc cả nhóm có kèo bóng đá nhé"\n\n` +
+    `☀️ THỜI TIẾT & BỤI MỊN (AQI):\n` +
+    `🔹 /thoitiet: Xem thời tiết & bụi mịn PM2.5 hôm nay\n` +
+    `🔹 /thoitiet [địa điểm]: Xem thời tiết TP.HCM, Hà Nội, Đà Lạt, Đà Nẵng...\n\n` +
+    `📊 TƯƠNG TÁC & TRI THỨC:\n` +
     `🔹 /rank hoặc /diem: Tra cứu thứ hạng & điểm tương tác của bạn\n` +
     `🔹 /top: Xem Top 5 thành viên tích cực nhất nhóm\n` +
     `🔹 /taungam: Xem thống kê các thành viên nằm vùng / chưa từng gửi tin nhắn\n` +
@@ -723,7 +734,47 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
-  // 6. Lệnh /hoi [câu hỏi], Tag bot, Nhắc tên Sen Chúa, Chào hỏi, Lệnh đọc file/ảnh
+  // 6. Lệnh /thoitiet [Địa điểm]
+  if (lower.startsWith("/thoitiet") || lower.startsWith("!thoitiet")) {
+    userCooldowns.set(sender, now);
+    const groupSettings = getGroupSettings(threadId);
+    const cityInput = rawText.replace(/^\/(?:thoitiet|!thoitiet)\s*/i, "").trim() || groupSettings.weatherCity || "Hồ Chí Minh";
+    const weatherMsg = await getWeatherReport(cityInput);
+    await sendGroupText(api, threadId, weatherMsg);
+    console.log(`[member-assistant] ✅ Đã phản hồi /thoitiet (${cityInput}) cho ${displayName}`);
+    return;
+  }
+
+  // 7. Lệnh /nhacnho, /hengio [thời gian] [nội dung]
+  if (lower.startsWith("/nhacnho ") || lower.startsWith("!nhacnho ") || lower.startsWith("/hengio ") || lower.startsWith("!hengio ")) {
+    userCooldowns.set(sender, now);
+    const args = rawText.replace(/^\/(?:nhacnho|!nhacnho|hengio|!hengio)\s+/i, "").trim();
+    const reply = handleSetReminder(threadId, false, sender, displayName, args);
+    await sendGroupText(api, threadId, reply);
+    console.log(`[member-assistant] ✅ Đã lưu lịch hẹn cho ${displayName}`);
+    return;
+  }
+
+  // 8. Lệnh /dsnhac, /lichnhac
+  if (lower === "/dsnhac" || lower === "!dsnhac" || lower === "/lichnhac" || lower === "dsnhac") {
+    userCooldowns.set(sender, now);
+    const reply = handleListReminders(sender);
+    await sendGroupText(api, threadId, reply);
+    console.log(`[member-assistant] ✅ Đã gửi dsnhac cho ${displayName}`);
+    return;
+  }
+
+  // 9. Lệnh /huynhac [ID]
+  if (lower.startsWith("/huynhac ") || lower.startsWith("!huynhac ")) {
+    userCooldowns.set(sender, now);
+    const idStr = rawText.replace(/^\/(?:huynhac|!huynhac)\s+/i, "").trim();
+    const reply = handleCancelReminder(sender, idStr);
+    await sendGroupText(api, threadId, reply);
+    console.log(`[member-assistant] ✅ Đã hủy lịch hẹn cho ${displayName}`);
+    return;
+  }
+
+  // 10. Lệnh /hoi [câu hỏi], Tag bot, Nhắc tên Sen Chúa, Chào hỏi, Lệnh đọc file/ảnh
   // QUY TẮC: BOT CHỈ TRẢ LỜI KHI THÀNH VIÊN THỰC SỰ GỌI TÊN HOẶC DÙNG LỆNH CỦA BOT.
   // Tránh việc thành viên chat bình thường/quote với nhau mà bot tự ý xen vào.
   const mentionsBot =
@@ -823,6 +874,28 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         `🤖 Dạ Sen Chúa chào ${displayName || "bác"} ạ! Em sẵn sàng hỗ trợ tra cứu thông tin thảo luận trong nhóm, điểm tương tác, đọc hình ảnh, tài liệu (PDF, Word, Excel, Code), dịch thuật và ghi nhớ kiến thức. Bạn cần hỏi gì cứ gõ: /hoi [câu hỏi], gửi file/ảnh kèm câu lệnh hoặc tag @Sen Chúa nhé!`,
       );
       console.log(`[member-assistant] ✅ Đã gửi lời chào cho ${displayName}`);
+      return;
+    }
+
+    // Tự động nhận diện câu nhắc lịch tự nhiên (ví dụ: "@Sen Chúa nhắc tôi 20 phút nữa...", "@Sen Chúa 8h tối mai nhắc cả nhóm...")
+    if (/^nhắc\s+(?:tôi|tao|mình|em|anh|cả nhóm|mọi người)/i.test(question) || /(?:phút|tiếng|h|giờ)\s+nữa\s+nhắc/i.test(question) || /nhắc\s+(?:cả nhóm|mọi người|anh em)/i.test(question)) {
+      const parsed = parseNaturalTimeVietnam(question);
+      if (parsed) {
+        const reply = handleSetReminder(threadId, false, sender, displayName, question);
+        await sendGroupText(api, threadId, reply);
+        console.log(`[member-assistant] ✅ Đã lưu nhắc lịch tự nhiên cho ${displayName}`);
+        return;
+      }
+    }
+
+    // Tự động nhận diện câu hỏi thời tiết tự nhiên (ví dụ: "@Sen Chúa thời tiết TP.HCM hôm nay thế nào")
+    if (/(?:thời tiết|thoi tiet|dự báo thời tiết|du bao thoi tiet)/i.test(question) && !hasFile && !hasImage) {
+      const groupSettings = getGroupSettings(threadId);
+      const cityMatch = question.match(/(?:tại|ở|khu vực|tỉnh|thành phố)\s+([A-ZÀ-Ỹa-zà-ỹ\s]+)/i);
+      const candidateCity = cityMatch?.[1]?.trim() || groupSettings.weatherCity || "Hồ Chí Minh";
+      const weatherMsg = await getWeatherReport(candidateCity);
+      await sendGroupText(api, threadId, weatherMsg);
+      console.log(`[member-assistant] ✅ Đã phản hồi thời tiết tự nhiên (${candidateCity}) cho ${displayName}`);
       return;
     }
 

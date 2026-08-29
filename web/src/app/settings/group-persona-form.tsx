@@ -14,8 +14,30 @@ export interface GroupItem {
   customPrompt: string;
   botName: string;
   welcomeMsg: string;
+  weatherAuto?: boolean;
+  weatherTime?: string;
+  weatherCity?: string;
   isActive: boolean;
 }
+
+const POPULAR_CITIES = [
+  "TP. Hồ Chí Minh",
+  "Hà Nội",
+  "Đà Nẵng",
+  "Đà Lạt",
+  "Cần Thơ",
+  "Hải Phòng",
+  "Nha Trang",
+  "Bình Dương",
+  "Đồng Nai",
+  "Vũng Tàu",
+  "Buôn Ma Thuột",
+  "Quy Nhơn",
+  "Huế",
+  "Quảng Ninh",
+  "Thanh Hóa",
+  "Nghệ An",
+];
 
 const PERSONA_PRESETS = [
   {
@@ -81,6 +103,10 @@ function GroupPersonaFormInner() {
   const [botName, setBotName] = useState("Sen Chúa");
   const [welcomeMsg, setWelcomeMsg] = useState("");
   const [mode, setMode] = useState<GroupItem["mode"]>("interactive");
+  const [weatherAuto, setWeatherAuto] = useState<boolean>(false);
+  const [weatherTime, setWeatherTime] = useState<string>("07:00");
+  const [weatherCity, setWeatherCity] = useState<string>("Hồ Chí Minh");
+  const [testingWeather, setTestingWeather] = useState<boolean>(false);
 
   useEffect(() => {
     fetchGroups();
@@ -122,6 +148,9 @@ function GroupPersonaFormInner() {
     setBotName(g.botName || "Sen Chúa");
     setWelcomeMsg(g.welcomeMsg || "");
     setMode(g.mode || "interactive");
+    setWeatherAuto(Boolean(g.weatherAuto));
+    setWeatherTime(g.weatherTime || "07:00");
+    setWeatherCity(g.weatherCity || "Hồ Chí Minh");
   }
 
   async function handleSave() {
@@ -140,6 +169,9 @@ function GroupPersonaFormInner() {
           botName,
           welcomeMsg,
           mode,
+          weatherAuto,
+          weatherTime,
+          weatherCity,
         }),
       });
       const data = (await res.json()) as { ok: boolean; message?: string; error?: string };
@@ -149,7 +181,7 @@ function GroupPersonaFormInner() {
         setGroups((prev) =>
           prev.map((g) =>
             g.id === selectedId
-              ? { ...g, persona, customPrompt, botName, welcomeMsg, mode }
+              ? { ...g, persona, customPrompt, botName, welcomeMsg, mode, weatherAuto, weatherTime, weatherCity }
               : g,
           ),
         );
@@ -160,6 +192,34 @@ function GroupPersonaFormInner() {
       setMsg({ text: `Lỗi kết nối: ${String(e)}`, ok: false });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleTestWeather() {
+    if (!selectedId) return;
+    setTestingWeather(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "test_weather",
+          groupId: selectedId,
+          groupName: selectedGroup?.name,
+          weatherCity,
+        }),
+      });
+      const data = (await res.json()) as { ok: boolean; message?: string; error?: string };
+      if (data.ok) {
+        setMsg({ text: data.message || "Đã gửi bản tin thử nghiệm vào nhóm Zalo!", ok: true });
+      } else {
+        setMsg({ text: data.error || "Lỗi gửi bản tin thử nghiệm", ok: false });
+      }
+    } catch (e) {
+      setMsg({ text: `Lỗi kết nối: ${String(e)}`, ok: false });
+    } finally {
+      setTestingWeather(false);
     }
   }
 
@@ -352,8 +412,85 @@ function GroupPersonaFormInner() {
             </div>
           </div>
 
-          {/* 3. Khung xem trước phản hồi mẫu (Live Preview) */}
-          <div className="mt-2 p-4 rounded-xl border border-white/10 bg-slate-950/60 backdrop-blur-md">
+          {/* 3. Bản Tin Thời Tiết & Chào Buổi Sáng Tự Động */}
+          <div className="p-4 rounded-xl border border-cyan-500/30 bg-gradient-to-br from-cyan-950/30 to-slate-900/60 backdrop-blur-md flex flex-col gap-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-cyan-500/20">
+              <div className="flex items-center gap-2">
+                <span className="text-xl">☀️</span>
+                <div>
+                  <h4 className="text-sm font-bold text-cyan-300">Bản Tin Thời Tiết & Chào Buổi Sáng Tự Động</h4>
+                  <p className="text-xs text-slate-400">Tự động gửi dự báo thời tiết, nhiệt độ, xác suất mưa và bụi mịn (AQI) vào nhóm mỗi sáng.</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleTestWeather}
+                  disabled={testingWeather}
+                  className="px-3 py-1.5 rounded-lg border border-cyan-500/40 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 text-xs font-semibold flex items-center gap-1.5 transition-all"
+                  title="Gửi thử ngay một bản tin mẫu vào nhóm để kiểm tra"
+                >
+                  {testingWeather ? (
+                    <>
+                      <span className="inline-block w-3.5 h-3.5 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" />
+                      <span>Đang gửi thử...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>🚀</span> Gửi thử vào nhóm
+                    </>
+                  )}
+                </button>
+
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={weatherAuto}
+                    onChange={(e) => setWeatherAuto(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-cyan-500"></div>
+                </label>
+              </div>
+            </div>
+
+            {weatherAuto && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                    📍 Tỉnh / Thành phố dự báo cho nhóm:
+                  </label>
+                  <select
+                    value={weatherCity}
+                    onChange={(e) => setWeatherCity(e.target.value)}
+                    className="w-full bg-slate-800/90 border border-cyan-500/30 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400 transition-all"
+                  >
+                    {POPULAR_CITIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                    ⏰ Khung giờ tự động gửi mỗi sáng (HH:mm):
+                  </label>
+                  <input
+                    type="time"
+                    value={weatherTime}
+                    onChange={(e) => setWeatherTime(e.target.value)}
+                    className="w-full bg-slate-800/90 border border-cyan-500/30 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400 transition-all"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 4. Khung xem trước phản hồi mẫu (Live Preview) */}
+          <div className="mt-1 p-4 rounded-xl border border-white/10 bg-slate-950/60 backdrop-blur-md">
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2 text-xs font-semibold text-slate-300 uppercase tracking-wider">
                 <span>💬</span> Xem trước phản hồi mẫu của [{botName}]:

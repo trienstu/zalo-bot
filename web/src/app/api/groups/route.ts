@@ -60,6 +60,15 @@ export async function GET() {
       if (!cols.some((c) => c.name === "welcome_msg")) {
         db.exec(`ALTER TABLE bot_groups ADD COLUMN welcome_msg TEXT NOT NULL DEFAULT ''`);
       }
+      if (!cols.some((c) => c.name === "weather_auto")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN weather_auto INTEGER NOT NULL DEFAULT 0`);
+      }
+      if (!cols.some((c) => c.name === "weather_time")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN weather_time TEXT NOT NULL DEFAULT '07:00'`);
+      }
+      if (!cols.some((c) => c.name === "weather_city")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN weather_city TEXT NOT NULL DEFAULT 'Hồ Chí Minh'`);
+      }
     } catch {}
 
     // 1. Đọc danh sách group đã lưu trong bot_groups
@@ -72,6 +81,9 @@ export async function GET() {
       custom_prompt?: string;
       bot_name?: string;
       welcome_msg?: string;
+      weather_auto?: number;
+      weather_time?: string;
+      weather_city?: string;
       is_active: number;
     }[];
 
@@ -90,8 +102,8 @@ export async function GET() {
       if (syncRuns.length > 0) {
         for (const sr of syncRuns) {
           db.prepare(
-            `INSERT OR REPLACE INTO bot_groups (group_id, name, total_members, mode, persona, custom_prompt, bot_name, welcome_msg, is_active, updated_at)
-             VALUES (?, ?, ?, 'interactive', 'humorous', '', 'Sen Chúa', '', 0, ?)`,
+            `INSERT OR REPLACE INTO bot_groups (group_id, name, total_members, mode, persona, custom_prompt, bot_name, welcome_msg, weather_auto, weather_time, weather_city, is_active, updated_at)
+             VALUES (?, ?, ?, 'interactive', 'humorous', '', 'Sen Chúa', '', 0, '07:00', 'Hồ Chí Minh', 0, ?)`,
           ).run(sr.group_id, sr.name || `Nhóm ${sr.group_id.slice(-4)}`, sr.total_members || 0, Date.now());
         }
         savedGroups = db.prepare("SELECT * FROM bot_groups ORDER BY total_members DESC").all() as any[];
@@ -110,8 +122,8 @@ export async function GET() {
 
       for (const mt of msgThreads) {
         db.prepare(
-          `INSERT OR IGNORE INTO bot_groups (group_id, name, total_members, mode, persona, custom_prompt, bot_name, welcome_msg, is_active, updated_at)
-           VALUES (?, ?, 0, 'interactive', 'humorous', '', 'Sen Chúa', '', 0, ?)`,
+          `INSERT OR IGNORE INTO bot_groups (group_id, name, total_members, mode, persona, custom_prompt, bot_name, welcome_msg, weather_auto, weather_time, weather_city, is_active, updated_at)
+           VALUES (?, ?, 0, 'interactive', 'humorous', '', 'Sen Chúa', '', 0, '07:00', 'Hồ Chí Minh', 0, ?)`,
         ).run(mt.group_id, `Nhóm Zalo ${mt.group_id.slice(-6)}`, Date.now());
       }
       savedGroups = db.prepare("SELECT * FROM bot_groups ORDER BY total_members DESC").all() as any[];
@@ -130,6 +142,9 @@ export async function GET() {
       customPrompt: g.custom_prompt || "",
       botName: g.bot_name || "Sen Chúa",
       welcomeMsg: g.welcome_msg || "",
+      weatherAuto: Boolean(g.weather_auto),
+      weatherTime: g.weather_time || "07:00",
+      weatherCity: g.weather_city || "Hồ Chí Minh",
       isActive: g.is_active === 1,
     }));
 
@@ -143,7 +158,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as {
-      action?: "scan" | "select" | "set_mode" | "update_persona";
+      action?: "scan" | "select" | "set_mode" | "update_persona" | "test_weather";
       groupId?: string;
       groupName?: string;
       mode?: "interactive" | "silent" | "disabled";
@@ -151,6 +166,9 @@ export async function POST(request: Request) {
       customPrompt?: string;
       botName?: string;
       welcomeMsg?: string;
+      weatherAuto?: boolean;
+      weatherTime?: string;
+      weatherCity?: string;
     };
 
     const dbPath = getBotDbPath();
@@ -191,6 +209,15 @@ export async function POST(request: Request) {
       if (!cols.some((c) => c.name === "welcome_msg")) {
         db.exec(`ALTER TABLE bot_groups ADD COLUMN welcome_msg TEXT NOT NULL DEFAULT ''`);
       }
+      if (!cols.some((c) => c.name === "weather_auto")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN weather_auto INTEGER NOT NULL DEFAULT 0`);
+      }
+      if (!cols.some((c) => c.name === "weather_time")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN weather_time TEXT NOT NULL DEFAULT '07:00'`);
+      }
+      if (!cols.some((c) => c.name === "weather_city")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN weather_city TEXT NOT NULL DEFAULT 'Hồ Chí Minh'`);
+      }
     } catch {}
 
     if (body.action === "update_persona" && body.groupId) {
@@ -200,6 +227,9 @@ export async function POST(request: Request) {
              custom_prompt = COALESCE(?, custom_prompt),
              bot_name = COALESCE(?, bot_name),
              welcome_msg = COALESCE(?, welcome_msg),
+             weather_auto = COALESCE(?, weather_auto),
+             weather_time = COALESCE(?, weather_time),
+             weather_city = COALESCE(?, weather_city),
              mode = COALESCE(?, mode),
              updated_at = ?
          WHERE group_id = ?`,
@@ -208,6 +238,9 @@ export async function POST(request: Request) {
         body.customPrompt ?? null,
         body.botName ?? null,
         body.welcomeMsg ?? null,
+        body.weatherAuto !== undefined ? (body.weatherAuto ? 1 : 0) : null,
+        body.weatherTime ?? null,
+        body.weatherCity ?? null,
         body.mode ?? null,
         Date.now(),
         body.groupId,
@@ -215,8 +248,68 @@ export async function POST(request: Request) {
       db.close();
       return NextResponse.json({
         ok: true,
-        message: `Đã lưu cá tính & chỉ thị Prompt cho nhóm thành công!`,
+        message: `Đã lưu cài đặt cá tính AI & bản tin thời tiết cho nhóm thành công!`,
       });
+    }
+
+    if (body.action === "test_weather" && body.groupId) {
+      const city = body.weatherCity || "Hồ Chí Minh";
+      const targetGroup = db.prepare("SELECT name FROM bot_groups WHERE group_id = ?").get(body.groupId) as { name?: string } | undefined;
+      const groupName = targetGroup?.name || body.groupName || `Nhóm ${body.groupId.slice(-4)}`;
+      db.close();
+
+      // Đẩy yêu cầu gửi tin nhắn vào group qua file request của bot listener
+      try {
+        const reqPath = path.resolve(path.dirname(dbPath), "summary-send-request.json");
+        fs.mkdirSync(path.dirname(reqPath), { recursive: true });
+        
+        // Gọi API weather để tạo nội dung
+        const locRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=vi&format=json`).then((r) => r.json()).catch(() => null);
+        const lat = locRes?.results?.[0]?.latitude ?? (city.toLowerCase().includes("hà nội") ? 21.0285 : 10.8231);
+        const lon = locRes?.results?.[0]?.longitude ?? (city.toLowerCase().includes("hà nội") ? 105.8542 : 106.6297);
+        const cityName = locRes?.results?.[0]?.name || city;
+
+        const wRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max&timezone=Asia%2FBangkok`).then((r) => r.json()).catch(() => null);
+        const aqiRes = await fetch(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&current=pm2_5&timezone=Asia%2FBangkok`).then((r) => r.json()).catch(() => null);
+
+        const temp = Math.round(wRes?.current?.temperature_2m ?? 28);
+        const tempMin = Math.round(wRes?.daily?.temperature_2m_min?.[0] ?? temp - 3);
+        const tempMax = Math.round(wRes?.daily?.temperature_2m_max?.[0] ?? temp + 3);
+        const rainProb = Math.round(wRes?.daily?.precipitation_probability_max?.[0] ?? 20);
+        const pm25 = Math.round(aqiRes?.current?.pm2_5 ?? 25);
+
+        const aqiText = pm25 <= 35 ? "🟢 Tốt / Khá trong lành" : "🟠 Kém / Nên đeo khẩu trang";
+        const dateStr = new Date().toLocaleDateString("vi-VN", { weekday: "long", day: "numeric", month: "numeric", year: "numeric", timeZone: "Asia/Bangkok" });
+
+        const testBriefing = [
+          `🌅 [TEST PREVIEW] CHÀO BUỔI SÁNG CẢ NHÀ [${groupName.toUpperCase()}]! ☀️`,
+          `📅 ${dateStr}`,
+          `📍 Dự báo thời tiết tại ${cityName}:`,
+          `━━━━━━━━━━━━━━━━━━`,
+          `🌤️ Trời nắng dịu, có mây rải rác | 🌡️ ${temp}°C (${tempMin}°C - ${tempMax}°C)`,
+          `🌧️ Xác suất mưa: ${rainProb}% | 🍃 Bụi mịn PM2.5: ${pm25} µg/m³ (${aqiText})`,
+          `━━━━━━━━━━━━━━━━━━`,
+          `💡 Nhắc nhở ngày mới:`,
+          `• ${rainProb >= 50 ? "☔ Nhớ mang ô/áo mưa khi ra ngoài!" : "✨ Thời tiết thuận lợi cho các hoạt động và công việc."}`,
+          `\n✨ Chúc anh em một ngày làm việc hiệu quả và tràn đầy năng lượng! 💪`,
+        ].join("\n");
+
+        fs.writeFileSync(reqPath, JSON.stringify({
+          requestedAt: Date.now(),
+          targetThreadId: body.groupId,
+          summaryText: testBriefing,
+        }), "utf8");
+
+        return NextResponse.json({
+          ok: true,
+          message: `Đã gửi bản tin thử nghiệm vào nhóm [${groupName}]!`,
+        });
+      } catch (e) {
+        return NextResponse.json({
+          ok: false,
+          error: `Lỗi khi gửi bản tin thử nghiệm: ${String(e)}`,
+        });
+      }
     }
 
     if (body.action === "scan") {

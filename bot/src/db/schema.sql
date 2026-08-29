@@ -457,7 +457,7 @@ CREATE INDEX IF NOT EXISTS idx_telegram_forwards_zalo
   ON telegram_forwards(thread_id, zalo_message_id);
 CREATE INDEX IF NOT EXISTS idx_telegram_forwards_ts ON telegram_forwards(ts);
 
--- Quản lý danh sách nhóm, chế độ hoạt động và cá tính AI riêng biệt
+-- Quản lý danh sách nhóm, chế độ hoạt động, cá tính AI và cấu hình thời tiết buổi sáng
 CREATE TABLE IF NOT EXISTS bot_groups (
   group_id       TEXT PRIMARY KEY,
   name           TEXT NOT NULL,
@@ -467,6 +467,9 @@ CREATE TABLE IF NOT EXISTS bot_groups (
   custom_prompt  TEXT NOT NULL DEFAULT '',
   bot_name       TEXT NOT NULL DEFAULT 'Sen Chúa',
   welcome_msg    TEXT NOT NULL DEFAULT '',
+  weather_auto   INTEGER NOT NULL DEFAULT 0,
+  weather_time   TEXT NOT NULL DEFAULT '07:00',
+  weather_city   TEXT NOT NULL DEFAULT 'Hồ Chí Minh',
   is_active      INTEGER NOT NULL DEFAULT 0,
   creator_id     TEXT,
   updated_at     INTEGER NOT NULL
@@ -487,5 +490,22 @@ CREATE TABLE IF NOT EXISTS group_knowledge (
 );
 
 CREATE INDEX IF NOT EXISTS idx_group_knowledge_thread ON group_knowledge(thread_id, created_at);
+
+-- Lịch nhắc nhở & báo thức tự động (hỗ trợ cả nhóm Zalo và tin nhắn riêng 1:1)
+CREATE TABLE IF NOT EXISTS scheduled_reminders (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id    TEXT NOT NULL,
+  is_direct    INTEGER NOT NULL DEFAULT 0,
+  creator_id   TEXT NOT NULL,
+  creator_name TEXT NOT NULL,
+  target_type  TEXT NOT NULL DEFAULT 'sender',
+  remind_at    INTEGER NOT NULL,
+  content      TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'pending',
+  created_at   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_reminders_status_time ON scheduled_reminders(status, remind_at);
+CREATE INDEX IF NOT EXISTS idx_scheduled_reminders_creator ON scheduled_reminders(creator_id, status);
 
 
