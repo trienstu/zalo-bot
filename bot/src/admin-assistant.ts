@@ -157,8 +157,8 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       const reply =
         `👑 XÁC THỰC THÀNH CÔNG! CHÀO MỪNG SẾP ${displayName.toUpperCase()}!\n\n` +
         `✅ Tài khoản Zalo của Sếp (${sender}) đã được cấp quyền SUPER ADMIN vĩnh viễn.\n` +
-        `Từ bây giờ Sếp có thể nhắn tin riêng trực tiếp để ra lệnh hoặc hỏi đáp với em bất kỳ lúc nào mà không cần nhập lại mật khẩu.\n\n` +
-        `👉 Gõ /help để xem danh sách các lệnh điều khiển từ xa nhé Sếp!`;
+        `Từ bây giờ Sếp có thể nhắn tin riêng trực tiếp để ra lệnh điều khiển các nhóm hoặc hỏi đáp với em bất kỳ lúc nào.\n\n` +
+        `👉 Gõ /help để xem danh sách các lệnh quản trị nhé Sếp!`;
       await sendDirectText(api, sender, reply);
       return;
     } else {
@@ -171,43 +171,46 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     }
   }
 
-  // Nếu chưa phải là Admin:
-  if (!isAdmin) {
-    await sendDirectText(
-      api,
-      sender,
-      `🤖 Dạ chào bạn ${displayName}! Đây là kênh điều khiển riêng của Bot Sen Chúa.\n\n` +
-      `🔒 Để xác thực quyền Quản trị viên (Admin) và sử dụng các tính năng điều khiển từ xa, bạn vui lòng gõ:\n` +
-      `👉 /admin <mật_khẩu_admin>`,
-    );
-    return;
-  }
-
   // =========================================================================
-  // 2. DANH SÁCH LỆNH QUẢN TRỊ ĐIỀU KHIỂN TỪ XA
+  // 2. CÁC TÍNH NĂNG DÀNH CHO TẤT CẢ NGƯỜI DÙNG (CẢ ADMIN & NGƯỜI DÙNG THƯỜNG)
   // =========================================================================
 
   // 2.1. Lệnh /help hoặc /menu
   if (lower === "/help" || lower === "help" || lower === "!help" || lower === "/menu" || lower === "menu") {
-    const helpMsg =
-      `👑 BẢNG LỆNH QUẢN TRỊ & ĐIỀU KHIỂN BOT (1:1 VỚI ADMIN):\n\n` +
-      `⏰ ĐẶT HẸN & NHẮC VIỆC CÁ NHÂN:\n` +
-      `🔹 /nhacnho [thời gian] [nội dung] : Đặt hẹn nhắc việc (VD: /nhacnho 20p Uống nước, /hengio 17:30 Đi đón con)\n` +
-      `🔹 /dsnhac : Xem danh sách các lịch hẹn đang chờ của bạn\n` +
-      `🔹 /huynhac [mã_số] : Hủy lịch hẹn theo mã\n` +
-      `🔹 Hoặc chat tự nhiên: "Nhắc tôi 30 phút nữa gọi cho anh Nam", "8h tối mai nhắc tôi xem bóng đá"\n\n` +
-      `☀️ TRA CỨU THỜI TIẾT & CHẤT LƯỢNG KHÔNG KHÍ (AQI):\n` +
-      `🔹 /thoitiet : Xem thời tiết & bụi mịn PM2.5 khu vực hiện tại\n` +
-      `🔹 /thoitiet [tên_thành_phố] : Xem thời tiết TP.HCM, Hà Nội, Đà Lạt, Đà Nẵng...\n\n` +
-      `📋 QUẢN LÝ NHÓM ZALO:\n` +
-      `🔹 /groups : Xem danh sách & ID tất cả các nhóm Zalo Bot đang tham gia\n` +
-      `🔹 /send [tên_nhóm/id] [nội dung] : Gửi tin nhắn/thông báo vào nhóm chỉ định\n` +
-      `🔹 /broadcast [nội dung] : Bắn thông báo cùng lúc đến TẤT CẢ các nhóm\n` +
-      `🔹 /mode [tên_nhóm] [interactive/silent] : Đổi chế độ nhóm (Tương tác / Tàu ngầm)\n\n` +
-      `💬 TRỢ LÝ AI RIÊNG TƯ & RA LỆNH TỰ NHIÊN:\n` +
-      `🔹 Soạn bài rồi bảo: "Gửi bài này vào nhóm VIP" hoặc "Bắn vào nhóm AI"\n` +
-      `🔹 Phân tích file tài liệu (PDF, Word, Excel, Code) hoặc ảnh bằng AI.`;
-    await sendDirectText(api, sender, helpMsg);
+    if (isAdmin) {
+      const helpMsg =
+        `👑 BẢNG LỆNH QUẢN TRỊ & ĐIỀU KHIỂN BOT (1:1 VỚI ADMIN):\n\n` +
+        `⏰ ĐẶT HẸN & NHẮC VIỆC CÁ NHÂN:\n` +
+        `🔹 /nhacnho [thời gian] [nội dung] : Đặt hẹn nhắc việc (VD: /nhacnho 20p Uống nước, /hengio 17:30 Đi đón con)\n` +
+        `🔹 /dsnhac : Xem danh sách các lịch hẹn đang chờ của bạn\n` +
+        `🔹 /huynhac [mã_số] : Hủy lịch hẹn theo mã\n` +
+        `🔹 Hoặc chat tự nhiên: "Nhắc tôi 30 phút nữa gọi cho anh Nam", "8h tối mai nhắc tôi xem bóng đá"\n\n` +
+        `☀️ TRA CỨU THỜI TIẾT & CHẤT LƯỢNG KHÔNG KHÍ (AQI):\n` +
+        `🔹 /thoitiet : Xem thời tiết & bụi mịn PM2.5 khu vực hiện tại\n` +
+        `🔹 /thoitiet [tên_thành_phố] : Xem thời tiết TP.HCM, Hà Nội, Đà Lạt, Đà Nẵng...\n\n` +
+        `📋 QUẢN LÝ NHÓM ZALO:\n` +
+        `🔹 /groups : Xem danh sách & ID tất cả các nhóm Zalo Bot đang tham gia\n` +
+        `🔹 /send [tên_nhóm/id] [nội dung] : Gửi tin nhắn/thông báo vào nhóm chỉ định\n` +
+        `🔹 /broadcast [nội dung] : Bắn thông báo cùng lúc đến TẤT CẢ các nhóm\n` +
+        `🔹 /mode [tên_nhóm] [interactive/silent] : Đổi chế độ nhóm (Tương tác / Tàu ngầm)\n\n` +
+        `💬 TRỢ LÝ AI RIÊNG TƯ & RA LỆNH TỰ NHIÊN:\n` +
+        `🔹 Soạn bài rồi bảo: "Gửi bài này vào nhóm VIP" hoặc "Bắn vào nhóm AI"\n` +
+        `🔹 Phân tích file tài liệu (PDF, Word, Excel, Code) hoặc ảnh bằng AI.`;
+      await sendDirectText(api, sender, helpMsg);
+    } else {
+      const helpMsg =
+        `🤖 BẢNG HƯỚNG DẪN TRỢ LÝ AI SEN CHÚA:\n\n` +
+        `⏰ ĐẶT HẸN & NHẮC VIỆC CÁ NHÂN:\n` +
+        `🔹 /nhacnho [thời gian] [nội dung] : Đặt hẹn nhắc việc (VD: /nhacnho 20p Uống nước)\n` +
+        `🔹 /dsnhac : Xem danh sách các lịch hẹn của bạn\n` +
+        `🔹 /huynhac [mã_số] : Hủy lịch hẹn theo mã\n` +
+        `🔹 Hoặc chat tự nhiên: "17h nhắc mình đi đón con nhé", "20 phút nữa nhắc mình vào họp"\n\n` +
+        `☀️ TRA CỨU THỜI TIẾT:\n` +
+        `🔹 /thoitiet [tên_thành_phố] (VD: /thoitiet Hà Nội, /thoitiet Đà Lạt)\n\n` +
+        `💬 TRÒ CHUYỆN & HỖ TRỢ AI:\n` +
+        `🔹 Bạn có thể nhắn tin hỏi đáp, tâm sự, nhờ giải toán, viết văn, dịch thuật hoặc gửi hình ảnh/tài liệu cho mình phân tích nhé!`;
+      await sendDirectText(api, sender, helpMsg);
+    }
     return;
   }
 
@@ -242,8 +245,44 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     return;
   }
 
-  // 2.6. Lệnh /groups hoặc /dsnhom
+  // 2.6. Tự động nhận diện câu nhắc lịch tự nhiên (ví dụ: "16h45 nhắc anh đi lấy nước nhé", "Nhắc tôi 20 phút nữa...", "15:30 chiều nay...")
+  const isReminderIntent =
+    lower.includes("nhắc") ||
+    lower.includes("nhac") ||
+    lower.includes("hẹn") ||
+    lower.includes("hen") ||
+    lower.includes("báo thức") ||
+    lower.includes("bao thuc") ||
+    /(?:phút|phut|tiếng|tieng|h|giờ|gio|mai|hôm nay)/i.test(rawText);
+
+  if (isReminderIntent) {
+    const parsed = parseNaturalTimeVietnam(rawText);
+    if (parsed) {
+      const reply = handleSetReminder(sender, true, sender, displayName, rawText);
+      await sendDirectText(api, sender, reply);
+      return;
+    }
+  }
+
+  // 2.7. Tự động nhận diện câu hỏi thời tiết tự nhiên (ví dụ: "Thời tiết hôm nay thế nào", "Thời tiết Hà Nội có mưa không")
+  if (/(?:thời tiết|thoi tiet|dự báo thời tiết|du bao thoi tiet)/i.test(rawText) && !hasFile && !hasImage) {
+    const cityMatch = rawText.match(/(?:tại|ở|khu vực|tỉnh|thành phố)\s+([A-ZÀ-Ỹa-zà-ỹ\s]+)/i);
+    const candidateCity = cityMatch?.[1]?.trim() || "Hồ Chí Minh";
+    const weatherMsg = await getWeatherReport(candidateCity);
+    await sendDirectText(api, sender, weatherMsg);
+    return;
+  }
+
+  // =========================================================================
+  // 3. CÁC LỆNH QUẢN TRỊ NHÓM (CHỈ DÀNH CHO ADMIN)
+  // =========================================================================
+
+  // 3.1. Lệnh /groups hoặc /dsnhom
   if (lower === "/groups" || lower === "/dsnhom" || lower === "groups" || lower === "!groups") {
+    if (!isAdmin) {
+      await sendDirectText(api, sender, "⚠️ Lệnh xem danh sách nhóm chỉ dành riêng cho Admin của Bot.");
+      return;
+    }
     const groups = getAllGroupsList();
     if (groups.length === 0) {
       await sendDirectText(api, sender, "📋 Hiện tại Bot chưa ghi nhận nhóm nào trong cơ sở dữ liệu.");
@@ -259,8 +298,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     return;
   }
 
-  // 2.3. Lệnh /send [tên_nhóm] [nội dung]
+  // 3.2. Lệnh /send [tên_nhóm] [nội dung]
   if (lower.startsWith("/send ") || lower.startsWith("!send ")) {
+    if (!isAdmin) {
+      await sendDirectText(api, sender, "⚠️ Bạn không có quyền gửi tin nhắn điều khiển vào các nhóm.");
+      return;
+    }
     const match = rawText.match(/^\/(?:send|!send)\s+([^\s]+)\s+([\s\S]+)$/i);
     if (!match || !match[1] || !match[2]) {
       await sendDirectText(api, sender, "⚠️ Cú pháp chưa đúng! Vui lòng dùng: /send <tên_nhóm_hoặc_id> <nội_dung_tin_nhắn>");
@@ -284,8 +327,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     return;
   }
 
-  // 2.4. Lệnh /broadcast [nội dung]
+  // 3.3. Lệnh /broadcast [nội dung]
   if (lower.startsWith("/broadcast ") || lower.startsWith("!broadcast ")) {
+    if (!isAdmin) {
+      await sendDirectText(api, sender, "⚠️ Lệnh phát thông báo toàn hệ thống chỉ dành cho Admin.");
+      return;
+    }
     const messageToSend = rawText.replace(/^\/(?:broadcast|!broadcast)\s+/i, "").trim();
     if (!messageToSend) {
       await sendDirectText(api, sender, "⚠️ Vui lòng nhập nội dung cần broadcast! Cú pháp: /broadcast <nội_dung>");
@@ -310,8 +357,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     return;
   }
 
-  // 2.5. Lệnh /mode [tên_nhóm] [interactive/silent]
+  // 3.4. Lệnh /mode [tên_nhóm] [interactive/silent]
   if (lower.startsWith("/mode ") || lower.startsWith("!mode ")) {
+    if (!isAdmin) {
+      await sendDirectText(api, sender, "⚠️ Lệnh thay đổi chế độ nhóm chỉ dành cho Admin.");
+      return;
+    }
     const parts = rawText.split(/\s+/);
     if (parts.length < 3 || !parts[1] || !parts[2]) {
       await sendDirectText(api, sender, "⚠️ Cú pháp: /mode <tên_nhóm/id> <interactive|silent>");
@@ -333,83 +384,57 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     return;
   }
 
-  // 2.6. Nhận diện lệnh tự nhiên: "Gửi bài này vào nhóm [VIP]" hoặc "Gửi vào nhóm [VIP]" hoặc "Bắn vào group [VIP]"
-  const isSendIntent =
-    /gửi\s+(?:bài|tin|thông báo|lời chúc|nội dung)?(?:\s+này)?\s+(?:vào|vô|sang)\s+(?:nhóm|group)\s+([^,?.!]+)/i.test(rawText) ||
-    /bắn\s+(?:bài|tin|thông báo)?\s+(?:vào|vô|sang)\s+(?:nhóm|group)\s+([^,?.!]+)/i.test(rawText) ||
-    /chuyển\s+(?:bài|tin)?\s+(?:vào|vô|sang)\s+(?:nhóm|group)\s+([^,?.!]+)/i.test(rawText) ||
-    /đã\s+gửi\s+(?:vào|vô)\s+(?:nhóm|group)\s+([^,?.!]+)\s+chưa/i.test(rawText);
+  // 3.5. Nhận diện lệnh tự nhiên gửi bài vào nhóm (Chỉ Admin)
+  if (isAdmin) {
+    const isSendIntent =
+      /gửi\s+(?:bài|tin|thông báo|lời chúc|nội dung)?(?:\s+này)?\s+(?:vào|vô|sang)\s+(?:nhóm|group)\s+([^,?.!]+)/i.test(rawText) ||
+      /bắn\s+(?:bài|tin|thông báo)?\s+(?:vào|vô|sang)\s+(?:nhóm|group)\s+([^,?.!]+)/i.test(rawText) ||
+      /chuyển\s+(?:bài|tin)?\s+(?:vào|vô|sang)\s+(?:nhóm|group)\s+([^,?.!]+)/i.test(rawText) ||
+      /đã\s+gửi\s+(?:vào|vô)\s+(?:nhóm|group)\s+([^,?.!]+)\s+chưa/i.test(rawText);
 
-  if (isSendIntent) {
-    const match =
-      rawText.match(/(?:vào|vô|sang)\s+(?:nhóm|group)\s+([^,?.!]+)/i) ||
-      rawText.match(/(?:nhóm|group)\s+([^,?.!]+)/i);
-    const targetQuery = (match && match[1]) ? match[1].trim() : "VIP";
+    if (isSendIntent) {
+      const match =
+        rawText.match(/(?:vào|vô|sang)\s+(?:nhóm|group)\s+([^,?.!]+)/i) ||
+        rawText.match(/(?:nhóm|group)\s+([^,?.!]+)/i);
+      const targetQuery = (match && match[1]) ? match[1].trim() : "VIP";
 
-    const target = findGroup(targetQuery);
-    if (!target) {
-      await sendDirectText(
-        api,
-        sender,
-        `❌ Em không tìm thấy nhóm nào khớp với tên "${targetQuery}". Sếp gõ /groups để xem danh sách nhóm nhé!`,
-      );
-      return;
+      const target = findGroup(targetQuery);
+      if (!target) {
+        await sendDirectText(
+          api,
+          sender,
+          `❌ Em không tìm thấy nhóm nào khớp với tên "${targetQuery}". Sếp gõ /groups để xem danh sách nhóm nhé!`,
+        );
+        return;
+      }
+
+      const history = getAdminHistory(sender);
+      const lastBotMsg = [...history].reverse().find((h) => h.role === "model");
+      if (!lastBotMsg) {
+        await sendDirectText(api, sender, `⚠️ Em chưa thấy nội dung bài viết nào vừa soạn. Sếp hãy bảo em soạn trước nhé!`);
+        return;
+      }
+
+      const postToSend = cleanDraftedPost(lastBotMsg.text);
+      try {
+        await sendGroupText(api, target.groupId, postToSend);
+        await sendDirectText(
+          api,
+          sender,
+          `🚀 ĐÃ GỬI BÀI VÀO NHÓM [${target.name.toUpperCase()}] THÀNH CÔNG RỒI SẾP ƠI! 🎉\n\n📝 Nội dung thực tế đã gửi:\n"${postToSend}"`,
+        );
+        return;
+      } catch (err) {
+        await sendDirectText(api, sender, `❌ Lỗi khi gửi vào nhóm [${target.name}]: ${String(err)}`);
+        return;
+      }
     }
-
-    const history = getAdminHistory(sender);
-    const lastBotMsg = [...history].reverse().find((h) => h.role === "model");
-    if (!lastBotMsg) {
-      await sendDirectText(api, sender, `⚠️ Em chưa thấy nội dung bài viết nào vừa soạn. Sếp hãy bảo em soạn trước nhé!`);
-      return;
-    }
-
-    const postToSend = cleanDraftedPost(lastBotMsg.text);
-    try {
-      await sendGroupText(api, target.groupId, postToSend);
-      await sendDirectText(
-        api,
-        sender,
-        `🚀 ĐÃ GỬI BÀI VÀO NHÓM [${target.name.toUpperCase()}] THÀNH CÔNG RỒI SẾP ƠI! 🎉\n\n📝 Nội dung thực tế đã gửi:\n"${postToSend}"`,
-      );
-      return;
-    } catch (err) {
-      await sendDirectText(api, sender, `❌ Lỗi khi gửi vào nhóm [${target.name}]: ${String(err)}`);
-      return;
-    }
-  }
-
-  // 2.7. Tự động nhận diện câu nhắc lịch tự nhiên (ví dụ: "16h45 nhắc anh đi lấy nước nhé", "Nhắc tôi 20 phút nữa...", "15:30 chiều nay...")
-  const isReminderIntent =
-    lower.includes("nhắc") ||
-    lower.includes("nhac") ||
-    lower.includes("hẹn") ||
-    lower.includes("hen") ||
-    lower.includes("báo thức") ||
-    lower.includes("bao thuc") ||
-    /(?:phút|phut|tiếng|tieng|h|giờ|gio|mai|hôm nay)/i.test(rawText);
-
-  if (isReminderIntent) {
-    const parsed = parseNaturalTimeVietnam(rawText);
-    if (parsed) {
-      const reply = handleSetReminder(sender, true, sender, displayName, rawText);
-      await sendDirectText(api, sender, reply);
-      return;
-    }
-  }
-
-  // 2.8. Tự động nhận diện câu hỏi thời tiết tự nhiên (ví dụ: "Thời tiết hôm nay thế nào", "Thời tiết Hà Nội có mưa không")
-  if (/(?:thời tiết|thoi tiet|dự báo thời tiết|du bao thoi tiet)/i.test(rawText) && !hasFile && !hasImage) {
-    const cityMatch = rawText.match(/(?:tại|ở|khu vực|tỉnh|thành phố)\s+([A-ZÀ-Ỹa-zà-ỹ\s]+)/i);
-    const candidateCity = cityMatch?.[1]?.trim() || "Hồ Chí Minh";
-    const weatherMsg = await getWeatherReport(candidateCity);
-    await sendDirectText(api, sender, weatherMsg);
-    return;
   }
 
   // =========================================================================
-  // 3. TRỢ LÝ AI CÁ NHÂN 1:1 ĐA PHƯƠNG TIỆN & HIỂU NGỮ CẢNH (MULTI-TURN CHAT)
+  // 4. TRỢ LÝ AI CÁ NHÂN 1:1 ĐA PHƯƠNG TIỆN & HIỂU NGỮ CẢNH (MULTI-TURN CHAT)
   // =========================================================================
-  console.log(`[admin-assistant] 💬 Nhận tin nhắn 1:1 từ Admin ${displayName}: "${rawText}" (File=${hasFile}, Image=${hasImage})`);
+  console.log(`[admin-assistant] 💬 Nhận tin nhắn 1:1 từ ${isAdmin ? "Admin" : "User"} ${displayName}: "${rawText}" (File=${hasFile}, Image=${hasImage})`);
 
   // Tải file hoặc hình ảnh nếu có
   let mediaPart: GeminiMediaPart | null = null;
@@ -430,28 +455,36 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   // Lấy lịch sử trò chuyện nhiều lượt
   const history = getAdminHistory(sender);
   const historyText = history
-    .map((h) => `${h.role === "user" ? `Admin (${displayName})` : "Sen Chúa (Trợ lý)"}: ${h.text}`)
+    .map((h) => `${h.role === "user" ? `${displayName}` : "Sen Chúa (Trợ lý)"}: ${h.text}`)
     .join("\n\n");
 
-  const groupsSummary = getAllGroupsList()
-    .map((g) => `- ${g.name} (ID: ${g.groupId}, Mode: ${g.mode})`)
-    .join("\n");
+  const groupsSummary = isAdmin
+    ? getAllGroupsList()
+        .map((g) => `- ${g.name} (ID: ${g.groupId}, Mode: ${g.mode})`)
+        .join("\n")
+    : "";
 
-  const systemPrompt =
-    `Bạn là 'Sen Chúa' - Trợ lý AI cá nhân cao cấp, thông minh, tận tâm và hóm hỉnh phục vụ riêng cho Admin/Chủ bot (${displayName}).\n` +
-    `NHIỆM VỤ CỦA BẠN TRONG TIN NHẮN 1:1:\n` +
-    `1. Nhớ kỹ toàn bộ ngữ cảnh hội thoại trước đó với Admin để tư vấn, hỗ trợ, sửa đổi bài viết, giải đáp liền mạch.\n` +
-    `2. Nếu Admin gửi FILE TÀI LIỆU (PDF, Word, Excel, Code, TXT) hoặc HÌNH ẢNH: Đọc kỹ, trích xuất dữ liệu, dịch thuật, phân tích sâu, tìm lỗi code hoặc tóm tắt theo ý Admin.\n` +
-    `3. Nếu Admin nhờ soạn thông báo, bài viết cho nhóm: Hãy soạn thảo thật hấp dẫn, chuyên nghiệp, có icon đẹp mắt, định dạng rõ ràng.\n` +
-    `4. Danh sách các nhóm Zalo bạn đang quản lý để tham khảo:\n${groupsSummary}\n` +
-    `5. ĐẶC BIỆT - KHI ADMIN YÊU CẦU BẠN GỬI HOẶC BẮN TIN NHẮN/THÔNG BÁO VÀO MỘT NHÓM CỤ THỂ:\n` +
-    `   Hãy xuất thẻ hành động ở cuối câu trả lời như sau:\n` +
-    `   [ACTION:SEND_GROUP target="TÊN_NHÓM_HOẶC_ID"]\n` +
-    `   <nội dung thực tế cần gửi vào nhóm>\n` +
-    `   [/ACTION]\n` +
-    `   Hệ thống máy chủ sẽ tự động bóc tách thẻ này và gửi tin nhắn thật vào nhóm Zalo cho Sếp ngay lập tức!\n` +
-    `6. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng icon, viết hoa hoặc dấu gạch đầu dòng để làm nổi bật).\n` +
-    `7. Thái độ phục vụ: Lễ phép, thông minh, gọi Admin là 'Sếp' hoặc '${displayName}', xưng 'em' hoặc 'Sen Chúa'.`;
+  const systemPrompt = isAdmin
+    ? `Bạn là 'Sen Chúa' - Trợ lý AI cá nhân cao cấp, thông minh, tận tâm và hóm hỉnh phục vụ riêng cho Admin/Chủ bot (${displayName}).\n` +
+      `NHIỆM VỤ CỦA BẠN TRONG TIN NHẮN 1:1:\n` +
+      `1. Nhớ kỹ toàn bộ ngữ cảnh hội thoại trước đó với Admin để tư vấn, hỗ trợ, sửa đổi bài viết, giải đáp liền mạch.\n` +
+      `2. Nếu Admin gửi FILE TÀI LIỆU (PDF, Word, Excel, Code, TXT) hoặc HÌNH ẢNH: Đọc kỹ, trích xuất dữ liệu, dịch thuật, phân tích sâu, tìm lỗi code hoặc tóm tắt theo ý Admin.\n` +
+      `3. Nếu Admin nhờ soạn thông báo, bài viết cho nhóm: Hãy soạn thảo thật hấp dẫn, chuyên nghiệp, có icon đẹp mắt, định dạng rõ ràng.\n` +
+      `4. Danh sách các nhóm Zalo bạn đang quản lý để tham khảo:\n${groupsSummary}\n` +
+      `5. ĐẶC BIỆT - KHI ADMIN YÊU CẦU BẠN GỬI HOẶC BẮN TIN NHẮN/THÔNG BÁO VÀO MỘT NHÓM CỤ THỂ:\n` +
+      `   Hãy xuất thẻ hành động ở cuối câu trả lời như sau:\n` +
+      `   [ACTION:SEND_GROUP target="TÊN_NHÓM_HOẶC_ID"]\n` +
+      `   <nội dung thực tế cần gửi vào nhóm>\n` +
+      `   [/ACTION]\n` +
+      `   Hệ thống máy chủ sẽ tự động bóc tách thẻ này và gửi tin nhắn thật vào nhóm Zalo cho Sếp ngay lập tức!\n` +
+      `6. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng icon, viết hoa hoặc dấu gạch đầu dòng để làm nổi bật).\n` +
+      `7. Thái độ phục vụ: Lễ phép, thông minh, gọi Admin là 'Sếp' hoặc '${displayName}', xưng 'em' hoặc 'Sen Chúa'.`
+    : `Bạn là 'Sen Chúa' - Trợ lý AI thông minh, thân thiện, duyên dáng và hóm hỉnh của Zalo đang trò chuyện 1:1 với bạn ${displayName}.\n` +
+      `NHIỆM VỤ CỦA BẠN:\n` +
+      `1. Trò chuyện tự nhiên, vui vẻ, giải đáp mọi câu hỏi, tư vấn học tập, công việc, tâm sự, dịch thuật, phân tích hình ảnh/tài liệu khi được gửi tới.\n` +
+      `2. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng icon, viết hoa hoặc dấu gạch đầu dòng để làm nổi bật).\n` +
+      `3. Thái độ: Lễ phép, thân thiện, gần gũi, xưng 'em' hoặc 'mình', gọi người dùng là '${displayName}' hoặc 'bạn'.\n` +
+      `4. Bạn là trợ lý trò chuyện cá nhân, không có quyền can thiệp vào các nhóm Zalo khác.`;
 
   let fileSection = "";
   if (fileTextContent) {
