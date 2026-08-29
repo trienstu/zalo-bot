@@ -64,7 +64,9 @@ Cách dùng:
 `;
 
 async function main(): Promise<void> {
-  const cmd = process.argv[2];
+  const nonFlagArgs = process.argv.slice(2).filter((a) => !a.startsWith("--bot=") && !a.startsWith("--bot"));
+  const cmd = nonFlagArgs[0] || "start";
+  const restArgs = nonFlagArgs.slice(1);
 
   switch (cmd) {
     case "start":
@@ -77,7 +79,7 @@ async function main(): Promise<void> {
       runExportMembers();
       break;
     case "import-interactions":
-      runImportInteractions(process.argv[3]);
+      runImportInteractions(restArgs[0]);
       break;
     case "sync-members":
       await runSyncMembers();
@@ -95,7 +97,7 @@ async function main(): Promise<void> {
       await runSyncLeaderboard();
       break;
     case "sync-posts":
-      await runSyncPosts(process.argv.slice(3));
+      await runSyncPosts(restArgs);
       break;
     case "telegram-test":
       await runTelegramTest();
@@ -131,13 +133,13 @@ async function main(): Promise<void> {
       await runDailyJobsSafe();
       break;
     case "backfill-telegram-jobs":
-      await runBackfillTelegramJobs(process.argv.slice(3));
+      await runBackfillTelegramJobs(restArgs);
       break;
     case "sync-jobs":
-      await runSyncJobs(process.argv.slice(3));
+      await runSyncJobs(restArgs);
       break;
     case "backfill-job-titles":
-      runBackfillJobTitles(process.argv.slice(3));
+      runBackfillJobTitles(restArgs);
       break;
     default:
       console.log(USAGE);
