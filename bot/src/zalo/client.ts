@@ -628,8 +628,96 @@ export async function fetchGroupPollVotes(
 // ---- Mutating group calls (co-admin) ----
 
 /**
- * Gửi text message vào group. Chỉ dùng cho cảnh báo ngày 25 (tài khoản co-admin).
- * Shape sendMessage của zca-js đã đổi vài lần, nên wrapper thử 2 dạng phổ biến.
+ * Tách nội dung tin nhắn dài thành các phần nhỏ <= 1400 ký tự để Zalo không báo lỗi 118 (Nội dung quá dài)
+ */
+function splitIntoZaloChunks(text: string, maxLen = 1400): string[] {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxLen) return [trimmed];
+
+  const chunks: string[] = [];
+  const paragraphs = trimmed.split("\n\n");
+  let currentChunk = "";
+
+  for (const para of paragraphs) {
+    if ((currentChunk + "\n\n" + para).length <= maxLen) {
+      currentChunk = currentChunk ? currentChunk + "\n\n" + para : para;
+    } else {
+      if (currentChunk) {
+        chunks.push(currentChunk.trim());
+        currentChunk = "";
+      }
+
+      if (para.length <= maxLen) {
+        currentChunk = para;
+      } else {
+        // Cắt nhỏ tiếp theo từng dòng đơn (\n)
+        const lines = para.split("\n");
+        for (const line of lines) {
+          if ((currentChunk + "\n" + line).length <= maxLen) {
+            currentChunk = currentChunk ? currentChunk + "\n" + line : line;
+          } else {
+            if (currentChunk) {
+              chunks.push(currentChunk.trim());
+              currentChunk = "";
+            }
+            if (line.length <= maxLen) {
+              currentChunk = line;
+            } else {
+              // Cắt cứng theo ký tự
+              for (let i = 0; i < line.length; i += maxLen) {
+                chunks.push(line.slice(i, i + maxLen).trim());
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (currentChunk.trim()) {
+    chunks.push(currentChunk.trim());
+  }
+
+  return chunks.filter(Boolean);
+}
+
+async function sendSingleGroupChunk(api: ZaloApi, threadIdStr: string, text: string): Promise<void> {
+  // Method 1: { msg }, ThreadType.Group
+  try {
+    await api.sendMessage({ msg: text }, threadIdStr, ThreadType.Group);
+    return;
+  } catch (e1) {}
+
+  // Method 2: raw string, ThreadType.Group
+  try {
+    await api.sendMessage(text, threadIdStr, ThreadType.Group);
+    return;
+  } catch (e2) {}
+
+  // Method 3: { msg }, 1
+  try {
+    await api.sendMessage({ msg: text }, threadIdStr, 1);
+    return;
+  } catch (e3) {}
+
+  // Method 4: raw string, 1
+  try {
+    await api.sendMessage(text, threadIdStr, 1);
+    return;
+  } catch (e4) {}
+
+  // Method 5: { msg }
+  try {
+    await api.sendMessage({ msg: text }, threadIdStr);
+    return;
+  } catch (e5) {}
+
+  // Method 6: raw string
+  await api.sendMessage(text, threadIdStr);
+}
+
+/**
+ * Gửi text message vào group. Hỗ trợ tự động phân đoạn tin nhắn dài nếu vượt quá giới hạn Zalo.
  */
 export async function sendGroupText(api: ZaloApi, groupId: string, text: string): Promise<void> {
   if (typeof api.sendMessage !== "function") {
@@ -638,51 +726,54 @@ export async function sendGroupText(api: ZaloApi, groupId: string, text: string)
   }
 
   const threadIdStr = String(groupId).trim();
-  console.log(`[sendGroupText] 📤 Đang gửi tin vào nhóm [${threadIdStr}]: "${text.slice(0, 60)}..."`);
+  const chunks = splitIntoZaloChunks(text, 1400);
 
-  // Thử lần lượt các cú pháp sendMessage của zca-js
-  try {
-    await api.sendMessage({ msg: text }, threadIdStr, ThreadType.Group);
-    console.log(`[sendGroupText] ✅ Đã gửi thành công vào nhóm [${threadIdStr}] (Method 1: {msg}, Group)`);
-    return;
-  } catch (e1) {
-    console.warn(`[sendGroupText] Method 1 thất bại: ${String(e1)}, đang thử Method 2...`);
+  console.log(`[sendGroupText] 📤 Đang gửi tin vào nhóm [${threadIdStr}] (${chunks.length} phần, tổng ${text.length} ký tự)...`);
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i]!;
+    await sendSingleGroupChunk(api, threadIdStr, chunk);
+    if (i < chunks.length - 1) {
+      await sleep(800);
+    }
   }
 
-  try {
-    await api.sendMessage(text, threadIdStr, ThreadType.Group);
-    console.log(`[sendGroupText] ✅ Đã gửi thành công vào nhóm [${threadIdStr}] (Method 2: string, Group)`);
-    return;
-  } catch (e2) {
-    console.warn(`[sendGroupText] Method 2 thất bại: ${String(e2)}, đang thử Method 3...`);
-  }
+  console.log(`[sendGroupText] ✅ Đã gửi thành công ${chunks.length} phần vào nhóm [${threadIdStr}]`);
+}
 
+async function sendSingleDirectChunk(api: ZaloApi, targetId: string, text: string): Promise<void> {
+  // Method 1: { msg }, ThreadType.User
   try {
-    await api.sendMessage({ msg: text }, threadIdStr, 1);
-    console.log(`[sendGroupText] ✅ Đã gửi thành công vào nhóm [${threadIdStr}] (Method 3: {msg}, 1)`);
+    await api.sendMessage({ msg: text }, targetId, ThreadType.User);
     return;
-  } catch (e3) {
-    console.warn(`[sendGroupText] Method 3 thất bại: ${String(e3)}, đang thử Method 4...`);
-  }
+  } catch (e1) {}
 
+  // Method 2: raw string, ThreadType.User
   try {
-    await api.sendMessage(text, threadIdStr, 1);
-    console.log(`[sendGroupText] ✅ Đã gửi thành công vào nhóm [${threadIdStr}] (Method 4: string, 1)`);
+    await api.sendMessage(text, targetId, ThreadType.User);
     return;
-  } catch (e4) {
-    console.warn(`[sendGroupText] Method 4 thất bại: ${String(e4)}, đang thử Method 5...`);
-  }
+  } catch (e2) {}
 
+  // Method 3: { msg }, 0
   try {
-    await api.sendMessage({ msg: text }, threadIdStr);
-    console.log(`[sendGroupText] ✅ Đã gửi thành công vào nhóm [${threadIdStr}] (Method 5: {msg})`);
+    await api.sendMessage({ msg: text }, targetId, 0);
     return;
-  } catch (e5) {
-    console.warn(`[sendGroupText] Method 5 thất bại: ${String(e5)}, đang thử Method 6...`);
-  }
+  } catch (e3) {}
 
-  await api.sendMessage(text, threadIdStr);
-  console.log(`[sendGroupText] ✅ Đã gửi thành công vào nhóm [${threadIdStr}] (Method 6: raw string)`);
+  // Method 4: raw string, 0
+  try {
+    await api.sendMessage(text, targetId, 0);
+    return;
+  } catch (e4) {}
+
+  // Method 5: { msg }
+  try {
+    await api.sendMessage({ msg: text }, targetId);
+    return;
+  } catch (e5) {}
+
+  // Method 6: raw string
+  await api.sendMessage(text, targetId);
 }
 
 /**
@@ -694,47 +785,19 @@ export async function sendDirectText(api: ZaloApi, userId: string, text: string)
   }
 
   const targetId = String(userId).trim();
-  console.log(`[sendDirectText] 📤 Đang gửi tin nhắn 1:1 đến [${targetId}]: "${text.slice(0, 60)}..."`);
+  const chunks = splitIntoZaloChunks(text, 1400);
 
-  // Method 1: { msg }, ThreadType.User
-  try {
-    await api.sendMessage({ msg: text }, targetId, ThreadType.User);
-    console.log(`[sendDirectText] ✅ Đã gửi 1:1 thành công đến [${targetId}] (Method 1: {msg}, User)`);
-    return;
-  } catch (e1) {
-    console.warn(`[sendDirectText] Method 1 thất bại: ${String(e1)}, đang thử Method 2...`);
+  console.log(`[sendDirectText] 📤 Đang gửi tin nhắn 1:1 đến [${targetId}] (${chunks.length} phần, tổng ${text.length} ký tự)...`);
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i]!;
+    await sendSingleDirectChunk(api, targetId, chunk);
+    if (i < chunks.length - 1) {
+      await sleep(800);
+    }
   }
 
-  // Method 2: raw string, ThreadType.User
-  try {
-    await api.sendMessage(text, targetId, ThreadType.User);
-    console.log(`[sendDirectText] ✅ Đã gửi 1:1 thành công đến [${targetId}] (Method 2: string, User)`);
-    return;
-  } catch (e2) {
-    console.warn(`[sendDirectText] Method 2 thất bại: ${String(e2)}, đang thử Method 3...`);
-  }
-
-  // Method 3: { msg }, 0 (User type = 0)
-  try {
-    await api.sendMessage({ msg: text }, targetId, 0);
-    console.log(`[sendDirectText] ✅ Đã gửi 1:1 thành công đến [${targetId}] (Method 3: {msg}, 0)`);
-    return;
-  } catch (e3) {
-    console.warn(`[sendDirectText] Method 3 thất bại: ${String(e3)}, đang thử Method 4...`);
-  }
-
-  // Method 4: raw string, 0
-  try {
-    await api.sendMessage(text, targetId, 0);
-    console.log(`[sendDirectText] ✅ Đã gửi 1:1 thành công đến [${targetId}] (Method 4: string, 0)`);
-    return;
-  } catch (e4) {
-    console.warn(`[sendDirectText] Method 4 thất bại: ${String(e4)}, đang thử Method 5...`);
-  }
-
-  // Method 5: fallback
-  await api.sendMessage(text, targetId);
-  console.log(`[sendDirectText] ✅ Đã gửi 1:1 thành công đến [${targetId}] (Method 5: direct target)`);
+  console.log(`[sendDirectText] ✅ Đã gửi 1:1 thành công ${chunks.length} phần đến [${targetId}]`);
 }
 
 /**
