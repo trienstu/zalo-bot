@@ -638,28 +638,34 @@ export function listActiveMemberOptions(limit = 5000): MemberOption[] {
     .all({ limit: Math.min(Math.max(limit, 1), 5000) }) as MemberOption[];
 }
 
-function tableExists(name: string): boolean {
-  const row = getDb()
+function tableExists(name: string, botId?: string): boolean {
+  const row = getDb(botId)
     .prepare(`SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = @name`)
     .get({ name }) as { ok: number } | undefined;
   return row !== undefined;
 }
 
 /** Thống kê member còn active: count + lần cuối, sắp ít tương tác nhất lên đầu. */
-export function listMemberStats(limit = 2000): MemberStatRow[] {
-  return getDb()
+export function listMemberStats(limit = 2000, botId?: string): MemberStatRow[] {
+  const db = getDb(botId);
+  return db
     .prepare(
-      `SELECT m.zalo_user_id, m.display_name, m.role, m.joined_at, m.first_seen_at,
-              COALESCE(SUM(${INTERACTION_WEIGHT_SQL}), 0) AS interaction_count,
-              MAX(i.ts)   AS last_interaction,
-              COALESCE(cw.warning_count, 0) AS warning_count,
-              cw.last_warned_at AS last_warned_at
+      `SELECT
+         m.zalo_user_id,
+         m.display_name,
+         m.role,
+         COALESCE(SUM(${INTERACTION_WEIGHT_SQL}), 0) AS interaction_count,
+         MAX(i.ts) AS last_interaction,
+         m.joined_at,
+         m.first_seen_at,
+         COUNT(w.id) AS warning_count,
+         MAX(w.created_at) AS last_warned_at
        FROM members m
        LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
-       LEFT JOIN cleanup_warnings cw ON cw.zalo_user_id = m.zalo_user_id
+       LEFT JOIN warnings w ON w.zalo_user_id = m.zalo_user_id
        WHERE m.is_active = 1
        GROUP BY m.zalo_user_id
-       ORDER BY interaction_count ASC, last_interaction ASC
+       ORDER BY interaction_count ASC, last_interaction ASC NULLS FIRST, m.joined_at ASC
        LIMIT @limit`,
     )
     .all({ limit }) as MemberStatRow[];
@@ -1239,19 +1245,19 @@ function mediaWhere(filters: MessageFilters): { sql: string; params: Record<stri
   };
 }
 
-export function countGroupMessages(filters: MessageFilters = {}): number {
-  if (!tableExists("group_messages")) return 0;
+export function countGroupMessages(filters: MessageFilters = {}, botId?: string): number {
+  if (!tableExists("group_messages", botId)) return 0;
   const where = mediaWhere(filters);
-  const row = getDb()
+  const row = getDb(botId)
     .prepare(`SELECT COUNT(*) AS n FROM group_messages ${where.sql}`)
     .get(where.params) as { n: number };
   return row.n;
 }
 
-export function listGroupMessages(filters: MessageFilters = {}): GroupMessageRow[] {
-  if (!tableExists("group_messages")) return [];
+export function listGroupMessages(filters: MessageFilters = {}, botId?: string): GroupMessageRow[] {
+  if (!tableExists("group_messages", botId)) return [];
   const where = mediaWhere(filters);
-  return getDb()
+  return getDb(botId)
     .prepare(
       `SELECT *
        FROM group_messages
@@ -1262,12 +1268,12 @@ export function listGroupMessages(filters: MessageFilters = {}): GroupMessageRow
     .all(where.params) as GroupMessageRow[];
 }
 
-export function summarizeGroupMedia(filters: MessageFilters = {}): MediaSummary {
-  if (!tableExists("group_media_events")) {
+export function summarizeGroupMedia(filters: MessageFilters = {}, botId?: string): MediaSummary {
+  if (!tableExists("group_media_events", botId)) {
     return { imageEvents: 0, imageCount: 0, videoEvents: 0, videoCount: 0 };
   }
   const where = messageWhere(filters);
-  const row = getDb()
+  const row = getDb(botId)
     .prepare(
       `SELECT
          COALESCE(SUM(CASE WHEN media_type = 'image' THEN 1 ELSE 0 END), 0) AS imageEvents,
@@ -1281,10 +1287,10 @@ export function summarizeGroupMedia(filters: MessageFilters = {}): MediaSummary 
   return row;
 }
 
-export function listGroupMediaEvents(filters: MessageFilters = {}): GroupMediaEventRow[] {
-  if (!tableExists("group_media_events")) return [];
+export function listGroupMediaEvents(filters: MessageFilters = {}, botId?: string): GroupMediaEventRow[] {
+  if (!tableExists("group_media_events", botId)) return [];
   const where = messageWhere(filters);
-  return getDb()
+  return getDb(botId)
     .prepare(
       `SELECT *
        FROM group_media_events
@@ -1325,10 +1331,10 @@ function dailySummaryWhere(filters: DailySummaryFilters): {
   return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
 
-export function listDailySummaries(filters: DailySummaryFilters = {}): DailySummaryRow[] {
-  if (!tableExists("daily_summaries")) return [];
+export function listDailySummaries(filters: DailySummaryFilters = {}, botId?: string): DailySummaryRow[] {
+  if (!tableExists("daily_summaries", botId)) return [];
   const where = dailySummaryWhere(filters);
-  return getDb()
+  return getDb(botId)
     .prepare(
       `SELECT *
        FROM daily_summaries

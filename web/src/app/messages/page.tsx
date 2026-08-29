@@ -70,26 +70,31 @@ function exportHref(params: SearchParams | undefined): string {
   return `/api/messages/export${qs.toString() ? `?${qs.toString()}` : ""}`;
 }
 
+import { cookies } from "next/headers";
+
 export default async function MessagesPage({ searchParams }: { searchParams?: Promise<SearchParams> }) {
-  if (!dbExists()) {
+  const cookieStore = await cookies();
+  const botId = cookieStore.get("active_bot_id")?.value || "bot-1";
+
+  if (!dbExists(botId)) {
     return (
       <div>
         <PageHeader title="Tin nhắn" />
-        <EmptyState>Chưa có dữ liệu. Chạy bot trước.</EmptyState>
+        <EmptyState>Chưa có dữ liệu cho bot này. Hãy chọn bot khác hoặc kiểm tra lại kết nối.</EmptyState>
       </div>
     );
   }
 
   const params = await searchParams;
-  const groups = listManagedGroups();
+  const groups = listManagedGroups(botId);
   const selectedGroupId = one(params, "group") || "all";
   const activeGroup = groups.find((g) => g.id === selectedGroupId) || { id: "all", name: "Tất cả nhóm" };
 
   const filters = parseFilters(params);
-  const messages = listGroupMessages(filters);
-  const total = countGroupMessages(filters);
-  const media = summarizeGroupMedia(filters);
-  const mediaEvents = listGroupMediaEvents({ ...filters, limit: 50 });
+  const messages = listGroupMessages(filters, botId);
+  const total = countGroupMessages(filters, botId);
+  const media = summarizeGroupMedia(filters, botId);
+  const mediaEvents = listGroupMediaEvents({ ...filters, limit: 50 }, botId);
 
   return (
     <div>
