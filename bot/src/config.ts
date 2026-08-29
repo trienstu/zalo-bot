@@ -62,14 +62,6 @@ export const activeBotId = getActiveBotId();
 
 // Xác định thư mục session và db theo botId một cách thông minh và linh hoạt
 function resolvePaths(bId: string) {
-  if (process.env.SQLITE_DB_PATH?.trim()) {
-    const customDb = process.env.SQLITE_DB_PATH.trim();
-    return {
-      dbPath: customDb,
-      sessionDir: process.env.SESSION_DIR?.trim() || path.join(path.dirname(customDb), "session"),
-    };
-  }
-
   // Danh sách các thư mục gốc có thể chứa data
   const candidateRoots = [
     path.resolve(process.cwd(), "..", "data"),
@@ -104,6 +96,24 @@ function resolvePaths(bId: string) {
         return { dbPath, sessionDir };
       }
     }
+
+    // Nếu chưa có, tạo mặc định trong candidateRoots[0]/bots/bId
+    const root = candidateRoots[0] || path.resolve(process.cwd(), "data");
+    const bDir = path.join(root, "bots", bId);
+    fs.mkdirSync(bDir, { recursive: true });
+    return {
+      dbPath: path.join(bDir, "bot.db"),
+      sessionDir: path.join(bDir, "session"),
+    };
+  }
+
+  // Cho bot-1
+  if (process.env.SQLITE_DB_PATH?.trim()) {
+    const customDb = process.env.SQLITE_DB_PATH.trim();
+    return {
+      dbPath: customDb,
+      sessionDir: process.env.SESSION_DIR?.trim() || path.join(path.dirname(customDb), "session"),
+    };
   }
 
   // Fallback mặc định cho bot-1
