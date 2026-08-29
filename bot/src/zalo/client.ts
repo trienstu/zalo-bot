@@ -263,9 +263,12 @@ export function consumeSummarySendRequest(): SummarySendRequest | null {
   } catch {
     data = null;
   } finally {
-    try {
-      fs.rmSync(requestPath, { force: true });
-    } catch {}
+    // Xóa toàn bộ file request ở tất cả các đường dẫn để tránh bị trigger lặp lại
+    for (const p of candidatePaths) {
+      try {
+        if (fs.existsSync(p)) fs.rmSync(p, { force: true });
+      } catch {}
+    }
   }
 
   const obj = (data ?? {}) as {

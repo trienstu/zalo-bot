@@ -456,34 +456,75 @@ function GroupPersonaFormInner() {
             </div>
 
             {weatherAuto && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
-                    📍 Tỉnh / Thành phố dự báo cho nhóm:
-                  </label>
-                  <select
-                    value={weatherCity}
-                    onChange={(e) => setWeatherCity(e.target.value)}
-                    className="w-full bg-slate-800/90 border border-cyan-500/30 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400 transition-all"
-                  >
-                    {POPULAR_CITIES.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
+              <div className="flex flex-col gap-4 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                      📍 Địa điểm dự báo (Chọn 1 hoặc nhiều tỉnh thành):
+                    </label>
+                    <input
+                      type="text"
+                      value={weatherCity}
+                      onChange={(e) => setWeatherCity(e.target.value)}
+                      placeholder="Ví dụ: Hà Nội, TP. Hồ Chí Minh, Đà Nẵng"
+                      className="w-full bg-slate-800/90 border border-cyan-500/30 rounded-xl px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-400 transition-all"
+                    />
+                    <span className="text-[11px] text-slate-400 mt-1 block">
+                      💡 Mẹo: Bấm các nút bên dưới để thêm/bỏ nhanh, hoặc gõ tên thành phố ngăn cách bằng dấu phẩy.
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                      ⏰ Khung giờ tự động gửi mỗi sáng (HH:mm):
+                    </label>
+                    <input
+                      type="time"
+                      value={weatherTime}
+                      onChange={(e) => setWeatherTime(e.target.value)}
+                      className="w-full bg-slate-800/90 border border-cyan-500/30 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400 transition-all"
+                    />
+                    <span className="text-[11px] text-slate-400 mt-1 block">
+                      Đúng giờ này mỗi sáng, Bot sẽ tự động tổng hợp thời tiết và gửi vào nhóm.
+                    </span>
+                  </div>
                 </div>
 
-                <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1.5">
-                    ⏰ Khung giờ tự động gửi mỗi sáng (HH:mm):
-                  </label>
-                  <input
-                    type="time"
-                    value={weatherTime}
-                    onChange={(e) => setWeatherTime(e.target.value)}
-                    className="w-full bg-slate-800/90 border border-cyan-500/30 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-400 transition-all"
-                  />
+                {/* Danh sách nút chọn nhanh tỉnh thành */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] text-slate-400 mr-1">Thêm nhanh:</span>
+                  {POPULAR_CITIES.map((c) => {
+                    const isSelected = weatherCity
+                      .split(/[,;\n+]/)
+                      .map((s) => s.trim().toLowerCase())
+                      .includes(c.toLowerCase());
+                    return (
+                      <button
+                        key={c}
+                        type="button"
+                        onClick={() => {
+                          const currentList = weatherCity
+                            .split(/[,;\n+]/)
+                            .map((s) => s.trim())
+                            .filter(Boolean);
+                          if (isSelected) {
+                            const nextList = currentList.filter((s) => s.toLowerCase() !== c.toLowerCase());
+                            setWeatherCity(nextList.join(", ") || "Hồ Chí Minh");
+                          } else {
+                            const nextList = [...currentList.filter((s) => s.toLowerCase() !== c.toLowerCase()), c];
+                            setWeatherCity(nextList.join(", "));
+                          }
+                        }}
+                        className={`text-xs px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                          isSelected
+                            ? "bg-cyan-500/25 border-cyan-400 text-cyan-200 font-semibold shadow-sm shadow-cyan-500/20"
+                            : "bg-slate-800/60 border-slate-700 hover:border-slate-500 text-slate-300"
+                        }`}
+                      >
+                        {isSelected ? `✓ ${c}` : `+ ${c}`}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}

@@ -248,24 +248,57 @@ export async function fetchWeatherData(cityInput = "Hồ Chí Minh"): Promise<We
  * Tạo bản tin tra cứu thời tiết tức thì
  */
 export async function getWeatherReport(cityInput = "Hồ Chí Minh"): Promise<string> {
-  const data = await fetchWeatherData(cityInput);
-  if (!data) {
-    return `⚠️ Dạ hiện tại em chưa lấy được dữ liệu thời tiết cho khu vực "${cityInput}". Bác thử lại với tên thành phố khác (ví dụ: Hà Nội, TP.HCM, Đà Lạt, Đà Nẵng...) nhé!`;
+  const cities = cityInput
+    .split(/[,;\n+]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const targetCities = cities.length > 0 ? cities.slice(0, 4) : ["Hồ Chí Minh"];
+
+  if (targetCities.length === 1) {
+    const data = await fetchWeatherData(targetCities[0]);
+    if (!data) {
+      return `⚠️ Dạ hiện tại em chưa lấy được dữ liệu thời tiết cho khu vực "${targetCities[0]}". Bác thử lại với tên thành phố khác (ví dụ: Hà Nội, TP.HCM, Đà Lạt, Đà Nẵng...) nhé!`;
+    }
+
+    const lines = [
+      `☀️ BẢN TIN THỜI TIẾT & CHẤT LƯỢNG KHÔNG KHÍ 🌤️`,
+      `📍 Khu vực: ${data.city}`,
+      ``,
+      `🌡️ Nhiệt độ: ${data.temp}°C (Cảm nhận như ${data.feelsLike}°C, dao động ${data.tempMin}°C - ${data.tempMax}°C)`,
+      `${data.weatherIcon} Trạng thái: ${data.weatherDesc}`,
+      `💧 Độ ẩm: ${data.humidity}% | 💨 Gió: ${data.windSpeed} km/h`,
+      `🌧️ Khả năng mưa: ${data.rainProb}% | ☀️ Chỉ số UV: ${data.uvIndex}/10`,
+      `🍃 Bụi mịn PM2.5: ${data.pm25} µg/m³ (${data.aqiIcon} ${data.aqiDesc})`,
+      ``,
+      `💡 Lời khuyên cho bạn:`,
+      ...data.advisories.map((a) => `• ${a}`),
+    ];
+
+    return lines.join("\n");
+  }
+
+  // Nhiều địa điểm
+  const weatherResults = (await Promise.all(targetCities.map((c) => fetchWeatherData(c)))).filter(Boolean) as NonNullable<
+    Awaited<ReturnType<typeof fetchWeatherData>>
+  >[];
+
+  if (weatherResults.length === 0) {
+    return `⚠️ Dạ hiện tại em chưa lấy được dữ liệu thời tiết cho các khu vực này. Bác vui lòng thử lại nhé!`;
   }
 
   const lines = [
-    `☀️ BẢN TIN THỜI TIẾT & CHẤT LƯỢNG KHÔNG KHÍ 🌤️`,
-    `📍 Khu vực: ${data.city}`,
-    `━━━━━━━━━━━━━━━━━━`,
-    `🌡️ Nhiệt độ hiện tại: ${data.temp}°C (Cảm nhận như ${data.feelsLike}°C)`,
-    `📊 Dao động trong ngày: ${data.tempMin}°C ➔ ${data.tempMax}°C`,
-    `${data.weatherIcon} Trạng thái: ${data.weatherDesc}`,
-    `💧 Độ ẩm: ${data.humidity}% | 💨 Gió: ${data.windSpeed} km/h`,
-    `🌧️ Khả năng có mưa: ${data.rainProb}% | ☀️ Chỉ số UV: ${data.uvIndex}/10`,
-    `🍃 Chất lượng không khí (PM2.5: ${data.pm25} µg/m³): ${data.aqiIcon} ${data.aqiDesc}`,
-    `━━━━━━━━━━━━━━━━━━`,
-    `💡 Lời khuyên cho bạn:`,
-    ...data.advisories.map((a) => `• ${a}`),
+    `☀️ BẢN TIN THỜI TIẾT CÁC KHU VỰC 🌤️`,
+    ``,
+    ...weatherResults.map(
+      (w) =>
+        `📍 ${w.city}: ${w.weatherIcon} ${w.temp}°C (${w.tempMin}°C - ${w.tempMax}°C) | 🌧️ Mưa: ${w.rainProb}% | 🍃 Bụi mịn: ${w.aqiIcon} ${w.aqiDesc}`
+    ),
+    ``,
+    `💡 Nhắc nhở:`,
+    weatherResults.some((w) => w.rainProb >= 50)
+      ? `• ☔ Một số khu vực có khả năng mưa cao, anh em nhớ mang theo ô hoặc áo mưa khi ra ngoài nhé!`
+      : `• ✨ Thời tiết tại các khu vực khá thuận lợi cho các hoạt động và công việc.`,
   ];
 
   return lines.join("\n");
@@ -275,7 +308,6 @@ export async function getWeatherReport(cityInput = "Hồ Chí Minh"): Promise<st
  * Tạo bản tin chào buổi sáng tự động gửi vào nhóm Zalo hoặc tin nhắn 1:1
  */
 export async function getMorningWeatherBriefing(cityInput = "Hồ Chí Minh", groupName?: string): Promise<string> {
-  const data = await fetchWeatherData(cityInput);
   const now = new Date();
   const dateStr = now.toLocaleDateString("vi-VN", {
     weekday: "long",
@@ -285,23 +317,67 @@ export async function getMorningWeatherBriefing(cityInput = "Hồ Chí Minh", gr
     timeZone: "Asia/Bangkok",
   });
 
-  const greetingTarget = groupName ? `Cả Nhà [${groupName}]` : "Bạn";
+  const greetingTarget = groupName ? `CẢ NHÀ [${groupName.toUpperCase()}]` : "BẠN";
 
-  if (!data) {
-    return `🌅 CHÀO BUỔI SÁNG ${greetingTarget.toUpperCase()}! ☀️\nChúc mọi người một ngày mới tràn đầy năng lượng, công việc hanh thông và gặp nhiều may mắn nhé! 🚀`;
+  const cities = (cityInput || "Hồ Chí Minh")
+    .split(/[,;\n+]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const targetCities = cities.length > 0 ? cities.slice(0, 5) : ["Hồ Chí Minh"];
+
+  // 1 địa điểm
+  if (targetCities.length === 1) {
+    const data = await fetchWeatherData(targetCities[0]);
+    if (!data) {
+      return `🌅 CHÀO BUỔI SÁNG ${greetingTarget}! ☀️\n📅 ${dateStr}\n\nChúc anh em một ngày mới tràn đầy năng lượng, công việc hanh thông và gặt hái nhiều thành công! 💪`;
+    }
+
+    const lines = [
+      `🌅 CHÀO BUỔI SÁNG ${greetingTarget}! ☀️`,
+      `📅 ${dateStr}`,
+      ``,
+      `📍 Dự báo thời tiết tại ${data.city}:`,
+      `${data.weatherIcon} ${data.weatherDesc} | 🌡️ ${data.temp}°C (${data.tempMin}°C - ${data.tempMax}°C)`,
+      `🌧️ Xác suất mưa: ${data.rainProb}% | 🍃 Bụi mịn PM2.5: ${data.pm25} µg/m³ (${data.aqiIcon} ${data.aqiDesc})`,
+      ``,
+      `💡 Nhắc nhở ngày mới:`,
+      ...data.advisories.map((a) => `• ${a}`),
+      ``,
+      `✨ Chúc anh em một ngày làm việc hiệu quả và tràn đầy năng lượng! 💪`,
+    ];
+
+    return lines.join("\n");
+  }
+
+  // Nhiều địa điểm
+  const weatherResults = (await Promise.all(targetCities.map((c) => fetchWeatherData(c)))).filter(Boolean) as NonNullable<
+    Awaited<ReturnType<typeof fetchWeatherData>>
+  >[];
+
+  if (weatherResults.length === 0) {
+    return `🌅 CHÀO BUỔI SÁNG ${greetingTarget}! ☀️\n📅 ${dateStr}\n\n✨ Chúc anh em một ngày làm việc hiệu quả và tràn đầy năng lượng! 💪`;
   }
 
   const lines = [
-    `🌅 CHÀO BUỔI SÁNG ${greetingTarget.toUpperCase()}! ☀️`,
+    `🌅 CHÀO BUỔI SÁNG ${greetingTarget}! ☀️`,
     `📅 ${dateStr}`,
-    `📍 Dự báo thời tiết tại ${data.city}:`,
-    `━━━━━━━━━━━━━━━━━━`,
-    `${data.weatherIcon} ${data.weatherDesc} | 🌡️ ${data.temp}°C (${data.tempMin}°C - ${data.tempMax}°C)`,
-    `🌧️ Xác suất mưa: ${data.rainProb}% | 🍃 Bụi mịn PM2.5: ${data.aqiIcon} ${data.aqiDesc}`,
-    `━━━━━━━━━━━━━━━━━━`,
+    ``,
+    `📍 Dự báo thời tiết các khu vực hôm nay:`,
+    ...weatherResults.map(
+      (w) =>
+        `• 📍 ${w.city}: ${w.weatherIcon} ${w.temp}°C (${w.tempMin}°C - ${w.tempMax}°C) | 🌧️ Mưa: ${w.rainProb}% | 🍃 ${w.aqiIcon} ${w.aqiDesc}`
+    ),
+    ``,
     `💡 Nhắc nhở ngày mới:`,
-    ...data.advisories.map((a) => `• ${a}`),
-    `\n✨ Chúc anh em một ngày làm việc hiệu quả và gặt hái nhiều thành công! 💪`,
+    weatherResults.some((w) => w.rainProb >= 50)
+      ? `• ☔ Có khu vực mưa cao, nhớ mang theo ô hoặc áo mưa khi ra ngoài!`
+      : `• ✨ Thời tiết các khu vực khá thuận lợi cho các hoạt động và công việc.`,
+    weatherResults.some((w) => w.uvIndex >= 7)
+      ? `• 🕶️ Chỉ số UV trưa khá cao, bạn nên che chắn cẩn thận khi ra đường.`
+      : `• ☕ Chúc bạn có những giờ phút làm việc thật sảng khoái và may mắn!`,
+    ``,
+    `✨ Chúc anh em một ngày làm việc hiệu quả và tràn đầy năng lượng! 💪`,
   ];
 
   return lines.join("\n");
