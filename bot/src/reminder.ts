@@ -9,13 +9,46 @@ import {
 } from "./db/index.js";
 
 /**
+ * Lấy ngày giờ hiện tại ở Việt Nam (GMT+7)
+ */
+function getVietnamNow() {
+  const now = new Date();
+  const vnFormatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bangkok",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const parts = vnFormatter.formatToParts(now);
+  const getPart = (type: string) => parseInt(parts.find((p) => p.type === type)?.value || "0", 10);
+  return {
+    year: getPart("year"),
+    month: getPart("month") - 1, // 0-indexed
+    day: getPart("day"),
+    hour: getPart("hour"),
+    minute: getPart("minute"),
+  };
+}
+
+/**
+ * Tạo timestamp chuẩn xác theo giờ Việt Nam (GMT+7) độc lập với múi giờ VPS
+ */
+function makeVietnamTimestamp(year: number, month: number, day: number, hour: number, minute: number): number {
+  return Date.UTC(year, month, day, hour - 7, minute, 0, 0);
+}
+
+/**
  * Phân tích chuỗi thời gian tự nhiên tiếng Việt thành Unix timestamp (epoch milliseconds)
  */
 export function parseNaturalTimeVietnam(text: string): { remindAt: number; content: string; targetType: "sender" | "all" } | null {
   const raw = text.trim();
   if (!raw) return null;
 
-  const now = new Date();
+  const vn = getVietnamNow();
   let remindAt: number | null = null;
   let cleanContent = raw;
   let targetType: "sender" | "all" = "sender";
@@ -47,10 +80,7 @@ export function parseNaturalTimeVietnam(text: string): { remindAt: number; conte
       h = 0;
     }
 
-    const targetDate = new Date();
-    targetDate.setDate(targetDate.getDate() + 1);
-    targetDate.setHours(h, m, 0, 0);
-    remindAt = targetDate.getTime();
+    remindAt = makeVietnamTimestamp(vn.year, vn.month, vn.day + 1, h, m);
     cleanContent = tomorrowMatch[4]?.trim() || "Có việc cần làm";
   }
 
@@ -86,11 +116,11 @@ export function parseNaturalTimeVietnam(text: string): { remindAt: number; conte
       const m = parseInt(specificDateMatch[2], 10);
       const day = parseInt(specificDateMatch[3], 10);
       const month = parseInt(specificDateMatch[4], 10) - 1;
-      const year = specificDateMatch[5] ? parseInt(specificDateMatch[5], 10) : now.getFullYear();
+      const year = specificDateMatch[5] ? parseInt(specificDateMatch[5], 10) : vn.year;
 
-      const targetDate = new Date(year, month, day, h, m, 0, 0);
-      if (targetDate.getTime() > Date.now()) {
-        remindAt = targetDate.getTime();
+      const targetTs = makeVietnamTimestamp(year, month, day, h, m);
+      if (targetTs > Date.now()) {
+        remindAt = targetTs;
         cleanContent = specificDateMatch[6]?.trim() || "Có việc cần làm";
       }
     }
@@ -111,15 +141,14 @@ export function parseNaturalTimeVietnam(text: string): { remindAt: number; conte
       }
 
       if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
-        const targetDate = new Date();
-        targetDate.setHours(h, m, 0, 0);
+        let targetTs = makeVietnamTimestamp(vn.year, vn.month, vn.day, h, m);
 
-        // Nếu giờ đó trong ngày hôm nay đã qua rồi (quá 2 phút), tự động chuyển sang ngày mai
-        if (targetDate.getTime() <= Date.now() - 2 * 60 * 1000) {
-          targetDate.setDate(targetDate.getDate() + 1);
+        // Nếu giờ đó trong ngày hôm nay ở VN đã qua rồi (quá 2 phút), tự động chuyển sang ngày mai
+        if (targetTs <= Date.now() - 2 * 60 * 1000) {
+          targetTs = makeVietnamTimestamp(vn.year, vn.month, vn.day + 1, h, m);
         }
 
-        remindAt = targetDate.getTime();
+        remindAt = targetTs;
         cleanContent = todayMatch[4]?.trim() || "Có việc cần làm";
       }
     }
@@ -161,11 +190,14 @@ export function formatReminderTime(ts: number): string {
   if (diffMins <= 0) return `${timeStr} ngay bây giờ`;
   if (diffMins < 60) return `sau ${diffMins} phút nữa (lúc ${timeStr})`;
 
-  const isToday = d.getDate() === now.getDate() && d.getMonth() === now.getMonth();
-  const isTomorrow = d.getDate() === now.getDate() + 1 && d.getMonth() === now.getMonth();
+  const vnNowStr = now.toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
+  const vnTargetStr = d.toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
 
-  if (isToday) return `lúc ${timeStr} hôm nay`;
-  if (isTomorrow) return `lúc ${timeStr} ngày mai (${dateStr})`;
+  if (vnTargetStr === vnNowStr) return `lúc ${timeStr} hôm nay`;
+
+  const tomorrow = new Date(now.getTime() + 86400000);
+  const vnTomorrowStr = tomorrow.toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
+  if (vnTargetStr === vnTomorrowStr) return `lúc ${timeStr} ngày mai (${dateStr})`;
 
   return `lúc ${timeStr} ngày ${dateStr}`;
 }
