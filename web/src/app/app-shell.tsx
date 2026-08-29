@@ -31,6 +31,7 @@ import {
   PanelLeftOpen,
   ChevronDown,
 } from "lucide-react";
+import { BotSwitcher } from "@/components/bot-switcher";
 
 interface GroupItem {
   id: string;
@@ -513,18 +514,20 @@ function AppShellInner({
               })}
             </nav>
 
-            {/* Nút tác vụ nhanh bên phải */}
-            <div className="hidden sm:flex items-center gap-2 shrink-0">
+            {/* Nút tác vụ nhanh bên phải: Bot Switcher & Đồng bộ TV */}
+            <div className="flex items-center gap-2 shrink-0">
+              <BotSwitcher />
+
               {activeGroup && (
-                <div className="hidden xl:flex items-center gap-1.5 rounded-xl bg-slate-950 border border-slate-800 px-3 py-1 text-xs">
-                  <span className="text-slate-400">Đang chọn:</span>
+                <div className="hidden 2xl:flex items-center gap-1.5 rounded-xl bg-slate-950 border border-slate-800 px-3 py-1 text-xs">
+                  <span className="text-slate-400">Nhóm:</span>
                   <span className="font-bold text-cyan-300 truncate max-w-[140px]">{activeGroup.name}</span>
                 </div>
               )}
               <button
                 onClick={() => handleSyncMembers(activeGroupId)}
                 disabled={syncingMembers}
-                className="flex items-center gap-1.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 px-2.5 sm:px-3 py-1.5 text-xs font-bold text-cyan-300 hover:bg-cyan-500/20 transition-all"
+                className="hidden sm:flex items-center gap-1.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 px-2.5 sm:px-3 py-1.5 text-xs font-bold text-cyan-300 hover:bg-cyan-500/20 transition-all"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${syncingMembers ? "animate-spin text-cyan-300" : ""}`} />
                 <span className="hidden md:inline">{syncingMembers ? "Đang đồng bộ..." : "Đồng bộ TV"}</span>

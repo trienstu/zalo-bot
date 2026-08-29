@@ -14,12 +14,15 @@ const QR_DIR =
   process.env.WEB_QR_DIR?.trim() ||
   path.resolve(process.cwd(), "..", "bot", "data");
 
-const STATUS_PATH = path.join(QR_DIR, "login-status.json");
-const QR_IMAGE_PATH = path.join(QR_DIR, "qr.png");
-const RELOGIN_REQUEST_PATH = path.join(QR_DIR, "relogin-request.json");
-const MEMBER_SYNC_REQUEST_PATH = path.join(QR_DIR, "member-sync-request.json");
-const PERMISSION_CHECK_REQUEST_PATH = path.join(QR_DIR, "permission-check-request.json");
-const KICK_NOW_REQUEST_PATH = path.join(QR_DIR, "kick-now-request.json");
+import { getBotInfo } from "./bot-registry";
+
+export function getBotDataDir(botId = "bot-1"): string {
+  const info = getBotInfo(botId);
+  if (info && info.dbPath) {
+    return path.dirname(info.dbPath);
+  }
+  return QR_DIR;
+}
 
 export type LoginState =
   | "ready"
@@ -46,14 +49,15 @@ const KNOWN_STATES: LoginState[] = [
 ];
 
 /**
- * Đọc login-status.json. File không tồn tại / hỏng → state "unknown".
- * Bot ghi { state, qr, updatedAt, displayName? } — ta chỉ lấy phần web cần,
- * bỏ qua `qr` (ảnh phục vụ riêng qua /api/qr/image).
+ * Đọc login-status.json theo từng botId. File không tồn tại / hỏng → state "unknown".
  */
-export function readLoginStatus(): LoginStatus {
+export function readLoginStatus(botId = "bot-1"): LoginStatus {
+  const dir = getBotDataDir(botId);
+  const statusPath = path.join(dir, "login-status.json");
+
   let raw: string;
   try {
-    raw = fs.readFileSync(STATUS_PATH, "utf8");
+    raw = fs.readFileSync(statusPath, "utf8");
   } catch {
     return { state: "unknown", updatedAt: null, displayName: null };
   }
@@ -82,37 +86,43 @@ export function readLoginStatus(): LoginStatus {
 }
 
 /** Đường dẫn file ảnh QR (cho route image đọc trực tiếp). */
-export function qrImagePath(): string {
-  return QR_IMAGE_PATH;
+export function qrImagePath(botId = "bot-1"): string {
+  const dir = getBotDataDir(botId);
+  return path.join(dir, "qr.png");
 }
 
 /** Ảnh QR có tồn tại không. */
-export function qrImageExists(): boolean {
-  return fs.existsSync(QR_IMAGE_PATH);
+export function qrImageExists(botId = "bot-1"): boolean {
+  return fs.existsSync(qrImagePath(botId));
 }
 
 /** Đường dẫn marker để dashboard yêu cầu bot tự xoá session và login lại. */
-export function reloginRequestPath(): string {
-  return RELOGIN_REQUEST_PATH;
+export function reloginRequestPath(botId = "bot-1"): string {
+  const dir = getBotDataDir(botId);
+  return path.join(dir, "relogin-request.json");
 }
 
 /** Đường dẫn marker để dashboard yêu cầu bot sync member ngay. */
-export function memberSyncRequestPath(): string {
-  return MEMBER_SYNC_REQUEST_PATH;
+export function memberSyncRequestPath(botId = "bot-1"): string {
+  const dir = getBotDataDir(botId);
+  return path.join(dir, "member-sync-request.json");
 }
 
 /** Đường dẫn marker để dashboard yêu cầu bot kiểm tra quyền group. */
-export function permissionCheckRequestPath(): string {
-  return PERMISSION_CHECK_REQUEST_PATH;
+export function permissionCheckRequestPath(botId = "bot-1"): string {
+  const dir = getBotDataDir(botId);
+  return path.join(dir, "permission-check-request.json");
 }
 
 /** Đường dẫn marker để dashboard yêu cầu bot kick 1 người ngay (không qua duyệt Telegram). */
-export function kickNowRequestPath(): string {
-  return KICK_NOW_REQUEST_PATH;
+export function kickNowRequestPath(botId = "bot-1"): string {
+  const dir = getBotDataDir(botId);
+  return path.join(dir, "kick-now-request.json");
 }
 
 /** Đường dẫn marker để dashboard yêu cầu bot quét danh sách tất cả nhóm Zalo. */
-export function groupScanRequestPath(): string {
-  return path.join(QR_DIR, "group-scan-request.json");
+export function groupScanRequestPath(botId = "bot-1"): string {
+  const dir = getBotDataDir(botId);
+  return path.join(dir, "group-scan-request.json");
 }
 

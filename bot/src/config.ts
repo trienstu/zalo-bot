@@ -46,9 +46,54 @@ function readOptionalPositiveInt(name: string): number | null {
   return n;
 }
 
-const sessionDir = process.env.SESSION_DIR?.trim() || "./data";
+// Parse --bot=<botId> từ process.argv hoặc process.env.BOT_ID
+export function getActiveBotId(): string {
+  if (process.env.BOT_ID && process.env.BOT_ID.trim()) {
+    return process.env.BOT_ID.trim();
+  }
+  const arg = process.argv.find((a) => a.startsWith("--bot="));
+  if (arg) {
+    return arg.split("=")[1]?.trim() || "bot-1";
+  }
+  return "bot-1";
+}
+
+export const activeBotId = getActiveBotId();
+
+// Xác định thư mục session và db theo botId
+function resolvePaths(bId: string) {
+  if (process.env.SQLITE_DB_PATH?.trim()) {
+    const customDb = process.env.SQLITE_DB_PATH.trim();
+    return {
+      dbPath: customDb,
+      sessionDir: process.env.SESSION_DIR?.trim() || path.join(path.dirname(customDb), "session"),
+    };
+  }
+
+  const multiBotDir = path.resolve(process.cwd(), "data", "bots", bId);
+  const legacyBotDir = path.resolve(process.cwd(), "data");
+
+  // Nếu thư mục multi-bot tồn tại hoặc bId != 'bot-1'
+  if (bId !== "bot-1" || fs.existsSync(multiBotDir)) {
+    return {
+      dbPath: path.join(multiBotDir, "bot.db"),
+      sessionDir: path.join(multiBotDir, "session"),
+    };
+  }
+
+  // Mặc định fallback về legacy path
+  return {
+    dbPath: path.join(legacyBotDir, "bot.db"),
+    sessionDir: path.join(legacyBotDir, "session"),
+  };
+}
+
+const resolvedPaths = resolvePaths(activeBotId);
 
 export const config = {
+  /** ID định danh bot trong hệ thống multi-bot */
+  botId: activeBotId,
+
   /** Danh sách các ID group Zalo cần quản lý (phân tách bởi dấu phẩy). */
   groupIds: (process.env.GROUP_ID || "")
     .split(",")
@@ -74,12 +119,12 @@ export const config = {
   targetMemberCount: readInt("TARGET_MEMBER_COUNT", 965),
 
   /** Đường dẫn file SQLite. */
-  dbPath: process.env.SQLITE_DB_PATH?.trim() || "./data/bot.db",
+  dbPath: resolvedPaths.dbPath,
 
   /** Thư mục lưu session đăng nhập Zalo. */
-  sessionDir,
+  sessionDir: resolvedPaths.sessionDir,
   /** Session tài khoản co-admin (dùng cho mọi lệnh). */
-  sessionPath: path.join(sessionDir, "session.json"),
+  sessionPath: path.join(resolvedPaths.sessionDir, "session.json"),
 
   /** Số ngày làm nóng trước khi được phép kick (brainstorm: 30). */
   warmupDays: readInt("WARMUP_DAYS", 30),
@@ -365,7 +410,7 @@ export const config = {
    * Để trong SESSION_DIR vì đó là chỗ đã được gắn ổ đĩa bền trên VPS; mất file
    * chỉ tốn một lần tải lại.
    */
-  ocrCacheDir: process.env.OCR_CACHE_DIR?.trim() || path.join(sessionDir, "ocr-cache"),
+  ocrCacheDir: process.env.OCR_CACHE_DIR?.trim() || path.join(resolvedPaths.sessionDir, "ocr-cache"),
 
   /**
    * Thư mục giữ ảnh Zalo tải về chờ đọc chữ.
@@ -373,7 +418,7 @@ export const config = {
    * Phải tải NGAY lúc nhận tin: URL media Zalo là URL tạm, tới lúc cron tóm tắt
    * chạy (mỗi ngày một lần) thì nhiều khả năng đã chết. Ảnh đọc xong bị xoá.
    */
-  zaloMediaDir: process.env.ZALO_MEDIA_DIR?.trim() || path.join(sessionDir, "media"),
+  zaloMediaDir: process.env.ZALO_MEDIA_DIR?.trim() || path.join(resolvedPaths.sessionDir, "media"),
 
   /** Ảnh Zalo chưa kịp đọc quá số ngày này thì dọn đi, tránh đầy đĩa. */
   zaloMediaKeepDays: Math.max(1, readInt("ZALO_MEDIA_KEEP_DAYS", 3)),

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { cookies } from "next/headers";
+import { getBotInfo } from "@/lib/bot-registry";
 
 export const dynamic = "force-dynamic";
 
@@ -20,9 +22,23 @@ function getBotDbPath(): string {
   return path.resolve(process.cwd(), "..", "bot", "data", "bot.db");
 }
 
+async function getActiveBotDbPath(): Promise<string> {
+  let botId = "bot-1";
+  try {
+    const cookieStore = await cookies();
+    botId = cookieStore.get("active_bot_id")?.value || "bot-1";
+  } catch {}
+
+  const botInfo = getBotInfo(botId);
+  if (botInfo && botInfo.dbPath) {
+    return botInfo.dbPath;
+  }
+  return getBotDbPath();
+}
+
 export async function GET() {
   try {
-    const dbPath = getBotDbPath();
+    const dbPath = await getActiveBotDbPath();
     if (!fs.existsSync(dbPath)) {
       return NextResponse.json({ groups: [] });
     }

@@ -105,30 +105,41 @@ function ensureWebSchema(database: Database.Database): void {
   } catch {}
 }
 
-export function getDb(): Database.Database {
-  if (db) return db;
-  if (!fs.existsSync(DB_PATH)) {
-    throw new DbNotReadyError(
-      `Không tìm thấy DB của bot tại ${DB_PATH}. Chạy bot (npm start) ít nhất 1 lần, ` +
-        `hoặc đặt WEB_DB_PATH trỏ đúng file bot.db.`,
-    );
+import { getBotInfo } from "./bot-registry";
+
+const dbConnections = new Map<string, Database.Database>();
+
+export function getDb(botId = "bot-1"): Database.Database {
+  const targetBotId = botId || "bot-1";
+  const existing = dbConnections.get(targetBotId);
+  if (existing) return existing;
+
+  const botInfo = getBotInfo(targetBotId);
+  const targetPath = botInfo?.dbPath || DB_PATH;
+
+  if (!fs.existsSync(targetPath)) {
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   }
+
   // Mở chung file bot đang dùng (WAL). KHÔNG set journal_mode ở đây (bot là chủ).
   // busy_timeout: chờ tối đa 5s nếu bot đang giữ write-lock thay vì lỗi SQLITE_BUSY ngay.
-  db = new Database(DB_PATH);
-  db.pragma("busy_timeout = 5000");
-  db.pragma("foreign_keys = ON");
-  ensureWebSchema(db);
-  return db;
+  const newDb = new Database(targetPath);
+  newDb.pragma("busy_timeout = 5000");
+  newDb.pragma("foreign_keys = ON");
+  ensureWebSchema(newDb);
+  dbConnections.set(targetBotId, newDb);
+  return newDb;
 }
 
 /** Kiểm tra DB có tồn tại không (cho trang hiển thị thông báo thân thiện). */
-export function dbExists(): boolean {
-  return fs.existsSync(DB_PATH);
+export function dbExists(botId = "bot-1"): boolean {
+  const botInfo = getBotInfo(botId);
+  return fs.existsSync(botInfo?.dbPath || DB_PATH);
 }
 
-export function dbPath(): string {
-  return DB_PATH;
+export function dbPath(botId = "bot-1"): string {
+  const botInfo = getBotInfo(botId);
+  return botInfo?.dbPath || DB_PATH;
 }
 
 // ---- Types ----
