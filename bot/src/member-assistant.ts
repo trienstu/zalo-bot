@@ -877,8 +877,17 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       return;
     }
 
-    // Tự động nhận diện câu nhắc lịch tự nhiên (ví dụ: "@Sen Chúa nhắc tôi 20 phút nữa...", "@Sen Chúa 8h tối mai nhắc cả nhóm...")
-    if (/^nhắc\s+(?:tôi|tao|mình|em|anh|cả nhóm|mọi người)/i.test(question) || /(?:phút|tiếng|h|giờ)\s+nữa\s+nhắc/i.test(question) || /nhắc\s+(?:cả nhóm|mọi người|anh em)/i.test(question)) {
+    // Tự động nhận diện câu nhắc lịch tự nhiên (ví dụ: "@Sen Chúa 16h45 nhắc cả nhóm...", "@Sen Chúa nhắc tôi 20 phút nữa...")
+    const isReminderIntent =
+      qLower.includes("nhắc") ||
+      qLower.includes("nhac") ||
+      qLower.includes("hẹn") ||
+      qLower.includes("hen") ||
+      qLower.includes("báo thức") ||
+      qLower.includes("bao thuc") ||
+      /(?:phút|phut|tiếng|tieng|h|giờ|gio|mai|hôm nay)/i.test(question);
+
+    if (isReminderIntent) {
       const parsed = parseNaturalTimeVietnam(question);
       if (parsed) {
         const reply = handleSetReminder(threadId, false, sender, displayName, question);

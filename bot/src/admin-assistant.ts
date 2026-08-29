@@ -378,8 +378,17 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     }
   }
 
-  // 2.7. Tự động nhận diện câu nhắc lịch tự nhiên (ví dụ: "Nhắc tôi 20 phút nữa...", "15:30 chiều nay nhắc tôi...")
-  if (/^nhắc\s+(?:tôi|tao|mình|em|anh)/i.test(rawText) || /(?:phút|tiếng|h|giờ)\s+nữa\s+nhắc/i.test(rawText)) {
+  // 2.7. Tự động nhận diện câu nhắc lịch tự nhiên (ví dụ: "16h45 nhắc anh đi lấy nước nhé", "Nhắc tôi 20 phút nữa...", "15:30 chiều nay...")
+  const isReminderIntent =
+    lower.includes("nhắc") ||
+    lower.includes("nhac") ||
+    lower.includes("hẹn") ||
+    lower.includes("hen") ||
+    lower.includes("báo thức") ||
+    lower.includes("bao thuc") ||
+    /(?:phút|phut|tiếng|tieng|h|giờ|gio|mai|hôm nay)/i.test(rawText);
+
+  if (isReminderIntent) {
     const parsed = parseNaturalTimeVietnam(rawText);
     if (parsed) {
       const reply = handleSetReminder(sender, true, sender, displayName, rawText);

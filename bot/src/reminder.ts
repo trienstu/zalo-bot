@@ -54,7 +54,31 @@ export function parseNaturalTimeVietnam(text: string): { remindAt: number; conte
     cleanContent = tomorrowMatch[4]?.trim() || "Có việc cần làm";
   }
 
-  // 2. Mẫu: "HH:mm DD/MM" (ví dụ: "15:00 30/08 họp ban quản trị")
+  // 2. Mẫu: "N phút nữa", "N p nữa", "N phút", "Np" (ví dụ: "15p uống nước", "20 phút nữa vào họp")
+  if (!remindAt) {
+    const minMatch = raw.match(/(?:nhắc\s+(?:tôi|tao|mình|em|anh|cả nhóm|mọi người)\s+)?(\d+)\s*(?:phút|phut|p)\s*(?:nữa|sau)?\s*[:,-]?\s*(.*)/i);
+    if (minMatch && minMatch[1]) {
+      const mins = parseInt(minMatch[1], 10);
+      if (mins > 0 && mins <= 1440 * 30) {
+        remindAt = Date.now() + mins * 60 * 1000;
+        cleanContent = minMatch[2]?.trim() || "Có việc cần làm";
+      }
+    }
+  }
+
+  // 3. Mẫu: "N tiếng nữa", "N giờ nữa", "N h nữa" (ví dụ: "2 tiếng nữa gọi điện", "1 giờ sau họp")
+  if (!remindAt) {
+    const hourMatch = raw.match(/(?:nhắc\s+(?:tôi|tao|mình|em|anh|cả nhóm|mọi người)\s+)?(\d+)\s*(?:tiếng|tieng|giờ|gio)\s*(?:nữa|sau)\s*[:,-]?\s*(.*)/i);
+    if (hourMatch && hourMatch[1]) {
+      const hours = parseInt(hourMatch[1], 10);
+      if (hours > 0 && hours <= 720) {
+        remindAt = Date.now() + hours * 3600 * 1000;
+        cleanContent = hourMatch[2]?.trim() || "Có việc cần làm";
+      }
+    }
+  }
+
+  // 4. Mẫu: "HH:mm DD/MM" (ví dụ: "15:00 30/08 họp ban quản trị")
   if (!remindAt) {
     const specificDateMatch = raw.match(/(?:nhắc\s+(?:tôi|tao|mình|em|anh|cả nhóm|mọi người)\s+)?(\d{1,2})[:h](\d{2})\s+(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?\s*[:,-]?\s*(.*)/i);
     if (specificDateMatch && specificDateMatch[1] && specificDateMatch[2] && specificDateMatch[3] && specificDateMatch[4]) {
@@ -72,56 +96,43 @@ export function parseNaturalTimeVietnam(text: string): { remindAt: number; conte
     }
   }
 
-  // 3. Mẫu: "HH:mm hôm nay", "HH:mm" (ví dụ: "17:30 đón con", "21:00 nộp bài")
+  // 5. Mẫu: "HH:mm hôm nay", "HHh hôm nay", "HHh", "HH:mm" (ví dụ: "16h45 đi lấy nước", "17h đi họp", "17:30 đón con")
   if (!remindAt) {
-    const todayMatch = raw.match(/(?:nhắc\s+(?:tôi|tao|mình|em|anh|cả nhóm|mọi người)\s+)?(?:lúc\s*)?(\d{1,2})[:h](\d{2})\s*(?:hôm nay)?\s*[:,-]?\s*(.*)/i);
-    if (todayMatch && todayMatch[1] && todayMatch[2]) {
-      const h = parseInt(todayMatch[1], 10);
-      const m = parseInt(todayMatch[2], 10);
+    const todayMatch = raw.match(/(?:nhắc\s+(?:tôi|tao|mình|em|anh|cả nhóm|mọi người)\s+)?(?:lúc\s*)?(\d{1,2})(?:[:h](\d{2}))?\s*(?:h|giờ)?\s*(sáng|trưa|chiều|tối|đêm)?\s*(?:hôm nay)?\s*[:,-]?\s*(.*)/i);
+    if (todayMatch && todayMatch[1]) {
+      let h = parseInt(todayMatch[1], 10);
+      const m = todayMatch[2] ? parseInt(todayMatch[2], 10) : 0;
+      const period = todayMatch[3]?.toLowerCase();
 
-      const targetDate = new Date();
-      targetDate.setHours(h, m, 0, 0);
-
-      // Nếu giờ đó trong ngày hôm nay đã qua rồi, tự động chuyển sang ngày mai
-      if (targetDate.getTime() <= Date.now()) {
-        targetDate.setDate(targetDate.getDate() + 1);
+      if (period === "tối" || period === "chiều") {
+        if (h < 12) h += 12;
+      } else if (period === "sáng" && h === 12) {
+        h = 0;
       }
 
-      remindAt = targetDate.getTime();
-      cleanContent = todayMatch[3]?.trim() || "Có việc cần làm";
-    }
-  }
+      if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+        const targetDate = new Date();
+        targetDate.setHours(h, m, 0, 0);
 
-  // 4. Mẫu: "N phút nữa", "N p nữa", "N phút", "Np" (ví dụ: "15p uống nước", "20 phút nữa vào họp")
-  if (!remindAt) {
-    const minMatch = raw.match(/(?:nhắc\s+(?:tôi|tao|mình|em|anh|cả nhóm|mọi người)\s+)?(\d+)\s*(?:phút|phut|p)\s*(?:nữa|sau)?\s*[:,-]?\s*(.*)/i);
-    if (minMatch && minMatch[1]) {
-      const mins = parseInt(minMatch[1], 10);
-      if (mins > 0 && mins <= 1440 * 30) {
-        remindAt = Date.now() + mins * 60 * 1000;
-        cleanContent = minMatch[2]?.trim() || "Có việc cần làm";
-      }
-    }
-  }
+        // Nếu giờ đó trong ngày hôm nay đã qua rồi (quá 2 phút), tự động chuyển sang ngày mai
+        if (targetDate.getTime() <= Date.now() - 2 * 60 * 1000) {
+          targetDate.setDate(targetDate.getDate() + 1);
+        }
 
-  // 5. Mẫu: "N tiếng nữa", "N giờ nữa", "N h nữa", "Nh" (ví dụ: "2 tiếng nữa gọi điện", "1 giờ sau họp")
-  if (!remindAt) {
-    const hourMatch = raw.match(/(?:nhắc\s+(?:tôi|tao|mình|em|anh|cả nhóm|mọi người)\s+)?(\d+)\s*(?:tiếng|tieng|giờ|gio|h)\s*(?:nữa|sau)\s*[:,-]?\s*(.*)/i);
-    if (hourMatch && hourMatch[1]) {
-      const hours = parseInt(hourMatch[1], 10);
-      if (hours > 0 && hours <= 720) {
-        remindAt = Date.now() + hours * 3600 * 1000;
-        cleanContent = hourMatch[2]?.trim() || "Có việc cần làm";
+        remindAt = targetDate.getTime();
+        cleanContent = todayMatch[4]?.trim() || "Có việc cần làm";
       }
     }
   }
 
   if (!remindAt) return null;
 
-  // Xóa bớt các từ thừa ở đầu nội dung
+  // Xóa bớt các từ thừa ở đầu và cuối nội dung
   cleanContent = cleanContent
-    .replace(/^(nhắc|nhac|báo|bao|làm|lam|rằng|rang|là|la|rồi|nhe|nhé|nha|nhá|ạ|a)\s+/gi, "")
+    .replace(/^(?:nhắc|nhac)?\s*(?:tôi|tao|mình|em|anh|cả nhóm|mọi người|anh em|cho em|cho anh)?\s*/gi, "")
+    .replace(/^(?:báo|bao|làm|lam|rằng|rang|là|la|rồi)\s+/gi, "")
     .replace(/^[:,-]\s*/, "")
+    .replace(/\s*(?:nhe|nhé|nha|nhá|ạ|a|nghen|nhen)$/gi, "")
     .trim();
 
   if (!cleanContent) {
