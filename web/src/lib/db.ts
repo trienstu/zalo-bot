@@ -1247,16 +1247,16 @@ function mediaWhere(filters: MessageFilters): { sql: string; params: Record<stri
 
 export function countGroupMessages(filters: MessageFilters = {}, botId?: string): number {
   if (!tableExists("group_messages", botId)) return 0;
-  const where = mediaWhere(filters);
+  const where = messageWhere(filters);
   const row = getDb(botId)
     .prepare(`SELECT COUNT(*) AS n FROM group_messages ${where.sql}`)
     .get(where.params) as { n: number };
-  return row.n;
+  return row?.n || 0;
 }
 
 export function listGroupMessages(filters: MessageFilters = {}, botId?: string): GroupMessageRow[] {
   if (!tableExists("group_messages", botId)) return [];
-  const where = mediaWhere(filters);
+  const where = messageWhere(filters);
   return getDb(botId)
     .prepare(
       `SELECT *
@@ -1272,7 +1272,7 @@ export function summarizeGroupMedia(filters: MessageFilters = {}, botId?: string
   if (!tableExists("group_media_events", botId)) {
     return { imageEvents: 0, imageCount: 0, videoEvents: 0, videoCount: 0 };
   }
-  const where = messageWhere(filters);
+  const where = mediaWhere(filters);
   const row = getDb(botId)
     .prepare(
       `SELECT
@@ -1284,12 +1284,12 @@ export function summarizeGroupMedia(filters: MessageFilters = {}, botId?: string
        ${where.sql}`,
     )
     .get(where.params) as MediaSummary;
-  return row;
+  return row || { imageEvents: 0, imageCount: 0, videoEvents: 0, videoCount: 0 };
 }
 
 export function listGroupMediaEvents(filters: MessageFilters = {}, botId?: string): GroupMediaEventRow[] {
   if (!tableExists("group_media_events", botId)) return [];
-  const where = messageWhere(filters);
+  const where = mediaWhere(filters);
   return getDb(botId)
     .prepare(
       `SELECT *
