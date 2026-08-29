@@ -171,46 +171,37 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     }
   }
 
+  // Nếu người nhắn tin không phải là Admin (và không phải lệnh đăng nhập Admin):
+  // Hoàn toàn IM LẶNG - để tài khoản hoạt động như một Zalo cá nhân bình thường.
+  if (!isAdmin) {
+    return;
+  }
+
   // =========================================================================
-  // 2. CÁC TÍNH NĂNG DÀNH CHO TẤT CẢ NGƯỜI DÙNG (CẢ ADMIN & NGƯỜI DÙNG THƯỜNG)
+  // 2. TRỢ LÝ ĐIỀU KHIỂN & RA LỆNH 1:1 DÀNH RIÊNG CHO ADMIN
   // =========================================================================
 
   // 2.1. Lệnh /help hoặc /menu
   if (lower === "/help" || lower === "help" || lower === "!help" || lower === "/menu" || lower === "menu") {
-    if (isAdmin) {
-      const helpMsg =
-        `👑 BẢNG LỆNH QUẢN TRỊ & ĐIỀU KHIỂN BOT (1:1 VỚI ADMIN):\n\n` +
-        `⏰ ĐẶT HẸN & NHẮC VIỆC CÁ NHÂN:\n` +
-        `🔹 /nhacnho [thời gian] [nội dung] : Đặt hẹn nhắc việc (VD: /nhacnho 20p Uống nước, /hengio 17:30 Đi đón con)\n` +
-        `🔹 /dsnhac : Xem danh sách các lịch hẹn đang chờ của bạn\n` +
-        `🔹 /huynhac [mã_số] : Hủy lịch hẹn theo mã\n` +
-        `🔹 Hoặc chat tự nhiên: "Nhắc tôi 30 phút nữa gọi cho anh Nam", "8h tối mai nhắc tôi xem bóng đá"\n\n` +
-        `☀️ TRA CỨU THỜI TIẾT & CHẤT LƯỢNG KHÔNG KHÍ (AQI):\n` +
-        `🔹 /thoitiet : Xem thời tiết & bụi mịn PM2.5 khu vực hiện tại\n` +
-        `🔹 /thoitiet [tên_thành_phố] : Xem thời tiết TP.HCM, Hà Nội, Đà Lạt, Đà Nẵng...\n\n` +
-        `📋 QUẢN LÝ NHÓM ZALO:\n` +
-        `🔹 /groups : Xem danh sách & ID tất cả các nhóm Zalo Bot đang tham gia\n` +
-        `🔹 /send [tên_nhóm/id] [nội dung] : Gửi tin nhắn/thông báo vào nhóm chỉ định\n` +
-        `🔹 /broadcast [nội dung] : Bắn thông báo cùng lúc đến TẤT CẢ các nhóm\n` +
-        `🔹 /mode [tên_nhóm] [interactive/silent] : Đổi chế độ nhóm (Tương tác / Tàu ngầm)\n\n` +
-        `💬 TRỢ LÝ AI RIÊNG TƯ & RA LỆNH TỰ NHIÊN:\n` +
-        `🔹 Soạn bài rồi bảo: "Gửi bài này vào nhóm VIP" hoặc "Bắn vào nhóm AI"\n` +
-        `🔹 Phân tích file tài liệu (PDF, Word, Excel, Code) hoặc ảnh bằng AI.`;
-      await sendDirectText(api, sender, helpMsg);
-    } else {
-      const helpMsg =
-        `🤖 BẢNG HƯỚNG DẪN TRỢ LÝ AI SEN CHÚA:\n\n` +
-        `⏰ ĐẶT HẸN & NHẮC VIỆC CÁ NHÂN:\n` +
-        `🔹 /nhacnho [thời gian] [nội dung] : Đặt hẹn nhắc việc (VD: /nhacnho 20p Uống nước)\n` +
-        `🔹 /dsnhac : Xem danh sách các lịch hẹn của bạn\n` +
-        `🔹 /huynhac [mã_số] : Hủy lịch hẹn theo mã\n` +
-        `🔹 Hoặc chat tự nhiên: "17h nhắc mình đi đón con nhé", "20 phút nữa nhắc mình vào họp"\n\n` +
-        `☀️ TRA CỨU THỜI TIẾT:\n` +
-        `🔹 /thoitiet [tên_thành_phố] (VD: /thoitiet Hà Nội, /thoitiet Đà Lạt)\n\n` +
-        `💬 TRÒ CHUYỆN & HỖ TRỢ AI:\n` +
-        `🔹 Bạn có thể nhắn tin hỏi đáp, tâm sự, nhờ giải toán, viết văn, dịch thuật hoặc gửi hình ảnh/tài liệu cho mình phân tích nhé!`;
-      await sendDirectText(api, sender, helpMsg);
-    }
+    const helpMsg =
+      `👑 BẢNG LỆNH QUẢN TRỊ & ĐIỀU KHIỂN BOT (1:1 VỚI ADMIN):\n\n` +
+      `⏰ ĐẶT HẸN & NHẮC VIỆC CÁ NHÂN:\n` +
+      `🔹 /nhacnho [thời gian] [nội dung] : Đặt hẹn nhắc việc (VD: /nhacnho 20p Uống nước, /hengio 17:30 Đi đón con)\n` +
+      `🔹 /dsnhac : Xem danh sách các lịch hẹn đang chờ của bạn\n` +
+      `🔹 /huynhac [mã_số] : Hủy lịch hẹn theo mã\n` +
+      `🔹 Hoặc chat tự nhiên: "Nhắc tôi 30 phút nữa gọi cho anh Nam", "8h tối mai nhắc tôi xem bóng đá"\n\n` +
+      `☀️ TRA CỨU THỜI TIẾT & CHẤT LƯỢNG KHÔNG KHÍ (AQI):\n` +
+      `🔹 /thoitiet : Xem thời tiết & bụi mịn PM2.5 khu vực hiện tại\n` +
+      `🔹 /thoitiet [tên_thành_phố] : Xem thời tiết TP.HCM, Hà Nội, Đà Lạt, Đà Nẵng...\n\n` +
+      `📋 QUẢN LÝ NHÓM ZALO:\n` +
+      `🔹 /groups : Xem danh sách & ID tất cả các nhóm Zalo Bot đang tham gia\n` +
+      `🔹 /send [tên_nhóm/id] [nội dung] : Gửi tin nhắn/thông báo vào nhóm chỉ định\n` +
+      `🔹 /broadcast [nội dung] : Bắn thông báo cùng lúc đến TẤT CẢ các nhóm\n` +
+      `🔹 /mode [tên_nhóm] [interactive/silent] : Đổi chế độ nhóm (Tương tác / Tàu ngầm)\n\n` +
+      `💬 TRỢ LÝ AI RIÊNG TƯ & RA LỆNH TỰ NHIÊN:\n` +
+      `🔹 Soạn bài rồi bảo: "Gửi bài này vào nhóm VIP" hoặc "Bắn vào nhóm AI"\n` +
+      `🔹 Phân tích file tài liệu (PDF, Word, Excel, Code) hoặc ảnh bằng AI.`;
+    await sendDirectText(api, sender, helpMsg);
     return;
   }
 
