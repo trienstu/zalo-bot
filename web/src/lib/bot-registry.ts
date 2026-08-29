@@ -16,20 +16,29 @@ export interface BotMetadata {
   memberCount?: number;
 }
 
-function getDataRootDir(): string {
-  const candidates = [
-    path.resolve(process.cwd(), "data"),
-    path.resolve(process.cwd(), "..", "bot", "data"),
-    path.resolve(process.cwd(), "bot", "data"),
+function getAllCandidateRoots(): string[] {
+  return [
     path.resolve(process.cwd(), "..", "data"),
+    path.resolve(process.cwd(), "data"),
+    path.resolve(process.cwd(), "bot", "data"),
+    path.resolve(process.cwd(), "..", "bot", "data"),
   ];
+}
+
+function getDataRootDir(): string {
+  const candidates = getAllCandidateRoots();
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
   }
-  return path.resolve(process.cwd(), "..", "bot", "data");
+  return path.resolve(process.cwd(), "..", "data");
 }
 
 export function getBotsDir(): string {
+  const candidates = getAllCandidateRoots();
+  for (const c of candidates) {
+    const b = path.join(c, "bots");
+    if (fs.existsSync(b)) return b;
+  }
   const root = getDataRootDir();
   const botsDir = path.join(root, "bots");
   if (!fs.existsSync(botsDir)) {
@@ -42,23 +51,58 @@ export function getBotsDir(): string {
  * Đọc thông tin chi tiết của 1 Bot theo botId
  */
 export function getBotInfo(botId: string): BotMetadata | null {
-  const root = getDataRootDir();
-  const botsDir = getBotsDir();
-  const specificBotDir = path.join(botsDir, botId);
+  const candidateRoots = getAllCandidateRoots();
+  let targetDir = "";
+  let dbPath = "";
+  let sessionDir = "";
 
-  let targetDir = specificBotDir;
-  let dbPath = path.join(specificBotDir, "bot.db");
-  let sessionDir = path.join(specificBotDir, "session");
+  if (botId !== "bot-1") {
+    for (const root of candidateRoots) {
+      const bDir = path.join(root, "bots", botId);
+      if (fs.existsSync(bDir)) {
+        targetDir = bDir;
+        const dbCandidates = [
+          path.join(bDir, "bot.db"),
+          path.join(bDir, "data", "bot.db"),
+          path.join(bDir, "bot", "data", "bot.db"),
+        ];
+        dbPath = dbCandidates.find((p) => fs.existsSync(p)) || path.join(bDir, "bot.db");
 
-  // Nếu là bot-1 và chưa có thư mục riêng trong data/bots/bot-1, fallback về legacy data/
-  if (botId === "bot-1" && !fs.existsSync(specificBotDir)) {
-    targetDir = root;
-    dbPath = path.join(root, "bot.db");
-    sessionDir = path.join(root, "session");
+        const sessionCandidates = [
+          path.join(bDir, "session"),
+          bDir,
+          path.join(bDir, "data"),
+          path.join(bDir, "bot", "data"),
+        ];
+        sessionDir =
+          sessionCandidates.find((p) => fs.existsSync(path.join(p, "session.json"))) ||
+          path.join(bDir, "session");
+        break;
+      }
+    }
+  } else {
+    // bot-1
+    for (const root of candidateRoots) {
+      const bDir = path.join(root, "bots", "bot-1");
+      if (fs.existsSync(bDir)) {
+        targetDir = bDir;
+        dbPath = path.join(bDir, "bot.db");
+        sessionDir = path.join(bDir, "session");
+        break;
+      }
+      if (fs.existsSync(path.join(root, "bot.db")) || fs.existsSync(path.join(root, "session.json"))) {
+        targetDir = root;
+        dbPath = path.join(root, "bot.db");
+        sessionDir = root;
+        break;
+      }
+    }
   }
 
-  if (!fs.existsSync(dbPath) && !fs.existsSync(targetDir)) {
-    return null;
+  if (!targetDir) {
+    targetDir = path.join(getDataRootDir(), "bots", botId);
+    dbPath = path.join(targetDir, "bot.db");
+    sessionDir = path.join(targetDir, "session");
   }
 
   // Đọc file meta.json nếu có
@@ -90,8 +134,18 @@ export function getBotInfo(botId: string): BotMetadata | null {
         const rowAvatar = db.prepare("SELECT value FROM bot_state WHERE key = 'bot_avatar_url'").get() as { value: string } | undefined;
         if (rowAvatar?.value && !avatarUrl) avatarUrl = rowAvatar.value;
 
-        const rowGroups = db.prepare("SELECT COUNT(*) AS total FROM group_settings").get() as { total: number } | undefined;
-        groupCount = rowGroups?.total || 0;
+        try {
+          const rowGroups = db.prepare("SELECT COUNT(*) AS total FROM bot_groups").get() as { total: number } | undefined;
+          if (rowGroups && rowGroups.total > 0) {
+            groupCount = rowGroups.total;
+          } else {
+            const rowLegacy = db.prepare("SELECT COUNT(*) AS total FROM group_settings").get() as { total: number } | undefined;
+            groupCount = rowLegacy?.total || 0;
+          }
+        } catch {
+          const rowLegacy = db.prepare("SELECT COUNT(*) AS total FROM group_settings").get() as { total: number } | undefined;
+          groupCount = rowLegacy?.total || 0;
+        }
 
         const rowMembers = db.prepare("SELECT COUNT(*) AS total FROM members WHERE is_active = 1").get() as { total: number } | undefined;
         memberCount = rowMembers?.total || 0;
@@ -101,8 +155,19 @@ export function getBotInfo(botId: string): BotMetadata | null {
   }
 
   // Kiểm tra trạng thái online: session.json tồn tại và có cookie
-  const sessionFile = path.join(sessionDir, "session.json");
-  const isOnline = fs.existsSync(sessionFile) && fs.statSync(sessionFile).size > 10;
+  const sessionCandidates = [
+    path.join(sessionDir, "session.json"),
+    path.join(targetDir, "session.json"),
+    path.join(targetDir, "session", "session.json"),
+    path.join(targetDir, "data", "session.json"),
+  ];
+  let isOnline = false;
+  for (const sf of sessionCandidates) {
+    if (fs.existsSync(sf) && fs.statSync(sf).size > 10) {
+      isOnline = true;
+      break;
+    }
+  }
 
   return {
     id: botId,
@@ -123,39 +188,42 @@ export function getBotInfo(botId: string): BotMetadata | null {
  * Lấy danh sách toàn bộ các Bot trong hệ thống
  */
 export function listAllBots(): BotMetadata[] {
-  const botsDir = getBotsDir();
-  const root = getDataRootDir();
+  const candidateRoots = getAllCandidateRoots();
   const botMap = new Map<string, BotMetadata>();
 
   // 1. Luôn thêm bot-1 (Bot mặc định / Legacy)
   const defaultBot = getBotInfo("bot-1");
   if (defaultBot) {
     botMap.set("bot-1", defaultBot);
-  } else {
-    // Nếu chưa có file nào, tạo placeholder cho bot-1
+  }
+
+  // 2. Quét các thư mục con trong data/bots/ ở mọi candidate roots
+  for (const root of candidateRoots) {
+    const botsDir = path.join(root, "bots");
+    if (fs.existsSync(botsDir)) {
+      const entries = fs.readdirSync(botsDir, { withFileTypes: true });
+      for (const ent of entries) {
+        if (ent.isDirectory() && !ent.name.startsWith(".")) {
+          const info = getBotInfo(ent.name);
+          if (info) {
+            botMap.set(ent.name, info);
+          }
+        }
+      }
+    }
+  }
+
+  if (botMap.size === 0) {
     botMap.set("bot-1", {
       id: "bot-1",
       name: "Bot 1 (Sen Chúa)",
       isOnline: false,
       createdAt: Date.now(),
-      dbPath: path.join(root, "bot.db"),
-      sessionDir: path.join(root, "session"),
+      dbPath: path.join(getDataRootDir(), "bot.db"),
+      sessionDir: getDataRootDir(),
       groupCount: 0,
       memberCount: 0,
     });
-  }
-
-  // 2. Quét các thư mục con trong data/bots/
-  if (fs.existsSync(botsDir)) {
-    const entries = fs.readdirSync(botsDir, { withFileTypes: true });
-    for (const ent of entries) {
-      if (ent.isDirectory() && !ent.name.startsWith(".")) {
-        const info = getBotInfo(ent.name);
-        if (info) {
-          botMap.set(ent.name, info);
-        }
-      }
-    }
   }
 
   return Array.from(botMap.values()).sort((a, b) => a.id.localeCompare(b.id));

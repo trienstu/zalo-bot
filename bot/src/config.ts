@@ -60,7 +60,7 @@ export function getActiveBotId(): string {
 
 export const activeBotId = getActiveBotId();
 
-// Xác định thư mục session và db theo botId
+// Xác định thư mục session và db theo botId một cách thông minh và linh hoạt
 function resolvePaths(bId: string) {
   if (process.env.SQLITE_DB_PATH?.trim()) {
     const customDb = process.env.SQLITE_DB_PATH.trim();
@@ -70,21 +70,56 @@ function resolvePaths(bId: string) {
     };
   }
 
-  const multiBotDir = path.resolve(process.cwd(), "data", "bots", bId);
-  const legacyBotDir = path.resolve(process.cwd(), "data");
+  // Danh sách các thư mục gốc có thể chứa data
+  const candidateRoots = [
+    path.resolve(process.cwd(), "..", "data"),
+    path.resolve(process.cwd(), "data"),
+    path.resolve(process.cwd(), "bot", "data"),
+    path.resolve(process.cwd(), "..", "bot", "data"),
+  ];
 
-  // Nếu thư mục multi-bot tồn tại hoặc bId != 'bot-1'
-  if (bId !== "bot-1" || fs.existsSync(multiBotDir)) {
-    return {
-      dbPath: path.join(multiBotDir, "bot.db"),
-      sessionDir: path.join(multiBotDir, "session"),
-    };
+  if (bId !== "bot-1") {
+    for (const root of candidateRoots) {
+      const bDir = path.join(root, "bots", bId);
+      if (fs.existsSync(bDir)) {
+        // Tìm file bot.db
+        const dbCandidates = [
+          path.join(bDir, "bot.db"),
+          path.join(bDir, "data", "bot.db"),
+          path.join(bDir, "bot", "data", "bot.db"),
+        ];
+        const dbPath = dbCandidates.find((p) => fs.existsSync(p)) || path.join(bDir, "bot.db");
+
+        // Tìm thư mục session
+        const sessionCandidates = [
+          path.join(bDir, "session"),
+          bDir,
+          path.join(bDir, "data"),
+          path.join(bDir, "bot", "data"),
+        ];
+        const sessionDir =
+          sessionCandidates.find((p) => fs.existsSync(path.join(p, "session.json"))) ||
+          path.join(bDir, "session");
+
+        return { dbPath, sessionDir };
+      }
+    }
   }
 
-  // Mặc định fallback về legacy path
+  // Fallback mặc định cho bot-1
+  for (const root of candidateRoots) {
+    if (fs.existsSync(path.join(root, "bot.db")) || fs.existsSync(path.join(root, "session.json"))) {
+      return {
+        dbPath: path.join(root, "bot.db"),
+        sessionDir: root,
+      };
+    }
+  }
+
+  const defaultDir = path.resolve(process.cwd(), "data");
   return {
-    dbPath: path.join(legacyBotDir, "bot.db"),
-    sessionDir: path.join(legacyBotDir, "session"),
+    dbPath: path.join(defaultDir, "bot.db"),
+    sessionDir: defaultDir,
   };
 }
 
