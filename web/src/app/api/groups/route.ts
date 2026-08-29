@@ -187,7 +187,7 @@ export async function POST(request: Request) {
       weatherCity?: string;
     };
 
-    const dbPath = getBotDbPath();
+    const dbPath = await getActiveBotDbPath();
     if (!fs.existsSync(dbPath)) {
       return NextResponse.json({ ok: false, error: "Chưa có database bot" }, { status: 400 });
     }

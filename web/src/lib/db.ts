@@ -35,6 +35,177 @@ let db: Database.Database | null = null;
 
 function ensureWebSchema(database: Database.Database): void {
   database.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version     TEXT PRIMARY KEY,
+      applied_at  INTEGER NOT NULL,
+      note        TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS bot_state (
+      key         TEXT PRIMARY KEY,
+      value       TEXT NOT NULL,
+      updated_at  INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS bot_groups (
+      group_id       TEXT PRIMARY KEY,
+      name           TEXT NOT NULL,
+      total_members  INTEGER NOT NULL DEFAULT 0,
+      mode           TEXT NOT NULL DEFAULT 'interactive',
+      persona        TEXT NOT NULL DEFAULT 'humorous',
+      custom_prompt  TEXT NOT NULL DEFAULT '',
+      bot_name       TEXT NOT NULL DEFAULT 'Sen Chúa',
+      welcome_msg    TEXT NOT NULL DEFAULT '',
+      weather_auto   INTEGER NOT NULL DEFAULT 0,
+      weather_time   TEXT NOT NULL DEFAULT '07:00',
+      weather_city   TEXT NOT NULL DEFAULT 'Hồ Chí Minh',
+      is_active      INTEGER NOT NULL DEFAULT 0,
+      creator_id     TEXT,
+      updated_at     INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS group_settings (
+      group_id       TEXT PRIMARY KEY,
+      mode           TEXT NOT NULL DEFAULT 'interactive',
+      updated_at     INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS bot_errors (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      source      TEXT NOT NULL,
+      code        TEXT NOT NULL DEFAULT '',
+      message     TEXT NOT NULL,
+      detail      TEXT,
+      created_at  INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS members (
+      zalo_user_id   TEXT PRIMARY KEY,
+      display_name   TEXT NOT NULL DEFAULT '',
+      role           TEXT NOT NULL DEFAULT 'member',
+      joined_at      INTEGER,
+      first_seen_at  INTEGER NOT NULL,
+      is_active      INTEGER NOT NULL DEFAULT 1,
+      left_at        INTEGER,
+      group_id       TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS group_members (
+      zalo_user_id   TEXT NOT NULL,
+      group_id       TEXT NOT NULL,
+      display_name   TEXT NOT NULL DEFAULT '',
+      role           TEXT NOT NULL DEFAULT 'member',
+      joined_at      INTEGER,
+      first_seen_at  INTEGER NOT NULL,
+      is_active      INTEGER NOT NULL DEFAULT 1,
+      left_at        INTEGER,
+      PRIMARY KEY (zalo_user_id, group_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS member_sync_runs (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      requested_by   TEXT NOT NULL DEFAULT 'system',
+      started_at     INTEGER NOT NULL,
+      finished_at    INTEGER,
+      status         TEXT NOT NULL,
+      group_id       TEXT,
+      group_name     TEXT,
+      member_count   INTEGER,
+      snapshot_count INTEGER,
+      upserted       INTEGER,
+      marked_left    INTEGER,
+      error          TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS member_events (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      zalo_user_id   TEXT NOT NULL,
+      display_name   TEXT NOT NULL DEFAULT '',
+      role           TEXT,
+      event_type     TEXT NOT NULL,
+      source         TEXT NOT NULL,
+      sync_run_id    INTEGER,
+      ts             INTEGER NOT NULL,
+      note           TEXT,
+      group_id       TEXT,
+      FOREIGN KEY (sync_run_id) REFERENCES member_sync_runs(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS interactions (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      zalo_user_id   TEXT NOT NULL,
+      type           TEXT NOT NULL,
+      ts             INTEGER NOT NULL,
+      source         TEXT NOT NULL DEFAULT 'listener',
+      thread_id      TEXT NOT NULL DEFAULT '',
+      FOREIGN KEY (zalo_user_id) REFERENCES members(zalo_user_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS group_messages (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      thread_id      TEXT NOT NULL,
+      message_id     TEXT NOT NULL,
+      zalo_user_id   TEXT NOT NULL,
+      display_name   TEXT NOT NULL DEFAULT '',
+      text           TEXT NOT NULL,
+      msg_type       TEXT NOT NULL DEFAULT '',
+      ts             INTEGER NOT NULL,
+      is_self        INTEGER NOT NULL DEFAULT 0,
+      source         TEXT NOT NULL DEFAULT 'listener',
+      created_at     INTEGER NOT NULL,
+      deleted_at     INTEGER,
+      deleted_source TEXT NOT NULL DEFAULT '',
+      FOREIGN KEY (zalo_user_id) REFERENCES members(zalo_user_id),
+      UNIQUE (thread_id, message_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS group_media_events (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      thread_id      TEXT NOT NULL,
+      message_id     TEXT NOT NULL,
+      zalo_user_id   TEXT NOT NULL,
+      display_name   TEXT NOT NULL DEFAULT '',
+      media_type     TEXT NOT NULL,
+      media_count    INTEGER NOT NULL DEFAULT 1,
+      msg_type       TEXT NOT NULL DEFAULT '',
+      ts             INTEGER NOT NULL,
+      is_self        INTEGER NOT NULL DEFAULT 0,
+      source         TEXT NOT NULL DEFAULT 'listener',
+      created_at     INTEGER NOT NULL,
+      deleted_at     INTEGER,
+      deleted_source TEXT NOT NULL DEFAULT '',
+      media_url      TEXT NOT NULL DEFAULT '',
+      local_path     TEXT NOT NULL DEFAULT '',
+      ocr_text       TEXT NOT NULL DEFAULT '',
+      ocr_at         INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS daily_summaries (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      day_date          TEXT NOT NULL,
+      day_label         TEXT NOT NULL,
+      day_start_ts      INTEGER NOT NULL,
+      thread_id         TEXT NOT NULL DEFAULT '',
+      summary_text      TEXT NOT NULL,
+      parts_json        TEXT NOT NULL,
+      total_messages    INTEGER NOT NULL,
+      included_messages INTEGER NOT NULL,
+      unique_senders    INTEGER NOT NULL,
+      images            INTEGER NOT NULL DEFAULT 0,
+      videos            INTEGER NOT NULL DEFAULT 0,
+      top_senders_json  TEXT NOT NULL DEFAULT '[]',
+      model             TEXT NOT NULL,
+      transcript_chars  INTEGER NOT NULL,
+      prompt_tokens     INTEGER,
+      completion_tokens INTEGER,
+      cost_usd          REAL,
+      duration_ms       INTEGER NOT NULL,
+      sent_zalo         INTEGER NOT NULL DEFAULT 0,
+      sent_telegram     INTEGER NOT NULL DEFAULT 0,
+      created_at        INTEGER NOT NULL,
+      UNIQUE(day_date, thread_id)
+    );
+
     CREATE TABLE IF NOT EXISTS cleanup_draft_plans (
       id                INTEGER PRIMARY KEY AUTOINCREMENT,
       created_at        INTEGER NOT NULL,
@@ -63,24 +234,6 @@ function ensureWebSchema(database: Database.Database): void {
       UNIQUE (draft_plan_id, zalo_user_id)
     );
 
-    CREATE INDEX IF NOT EXISTS idx_cleanup_draft_items_plan
-      ON cleanup_draft_plan_items(draft_plan_id, rank);
-
-    CREATE TABLE IF NOT EXISTS group_members (
-      zalo_user_id   TEXT NOT NULL,
-      group_id       TEXT NOT NULL,
-      display_name   TEXT NOT NULL DEFAULT '',
-      role           TEXT NOT NULL DEFAULT 'member',
-      joined_at      INTEGER,
-      first_seen_at  INTEGER NOT NULL,
-      is_active      INTEGER NOT NULL DEFAULT 1,
-      left_at        INTEGER,
-      PRIMARY KEY (zalo_user_id, group_id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_group_members_group_active ON group_members(group_id, is_active);
-    CREATE INDEX IF NOT EXISTS idx_group_members_user ON group_members(zalo_user_id);
-
     CREATE TABLE IF NOT EXISTS group_knowledge (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
       thread_id    TEXT NOT NULL,
@@ -93,16 +246,7 @@ function ensureWebSchema(database: Database.Database): void {
       sender_name  TEXT NOT NULL DEFAULT '',
       created_at   INTEGER NOT NULL
     );
-
-    CREATE INDEX IF NOT EXISTS idx_group_knowledge_thread ON group_knowledge(thread_id, created_at);
   `);
-
-  try {
-    const cols = database.prepare("PRAGMA table_info(member_events)").all() as { name: string }[];
-    if (cols.length > 0 && !cols.some((c) => c.name === "group_id")) {
-      database.exec("ALTER TABLE member_events ADD COLUMN group_id TEXT");
-    }
-  } catch {}
 }
 
 import { getBotInfo } from "./bot-registry";
@@ -506,7 +650,7 @@ export interface ManagedGroup {
 export function listManagedGroups(botId?: string): ManagedGroup[] {
   const db = getDb(botId);
   try {
-    if (tableExists("bot_groups")) {
+    if (tableExists("bot_groups", botId)) {
       const rows = db
         .prepare(`SELECT group_id, name, total_members FROM bot_groups ORDER BY total_members DESC`)
         .all() as { group_id: string; name: string; total_members: number }[];
@@ -525,7 +669,7 @@ export function listManagedGroups(botId?: string): ManagedGroup[] {
   const groupMap = new Map<string, ManagedGroup>();
 
   try {
-    if (tableExists("member_sync_runs")) {
+    if (tableExists("member_sync_runs", botId)) {
       const runs = db
         .prepare(
           `SELECT group_id, group_name, member_count
