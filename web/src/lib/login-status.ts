@@ -18,6 +18,9 @@ import { getBotInfo } from "./bot-registry";
 
 export function getBotDataDir(botId = "bot-1"): string {
   const info = getBotInfo(botId);
+  if (info && info.sessionDir && fs.existsSync(info.sessionDir)) {
+    return info.sessionDir;
+  }
   if (info && info.dbPath) {
     return path.dirname(info.dbPath);
   }

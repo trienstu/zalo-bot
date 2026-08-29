@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { dbExists, listGroupMessages, type MessageFilters } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +17,13 @@ function csvCell(value: unknown): string {
 }
 
 export async function GET(request: Request) {
-  if (!dbExists()) {
+  let botId = "bot-1";
+  try {
+    const cookieStore = await cookies();
+    botId = cookieStore.get("active_bot_id")?.value || "bot-1";
+  } catch {}
+
+  if (!dbExists(botId)) {
     return NextResponse.json({ error: "Bot chưa tạo DB." }, { status: 503 });
   }
 
@@ -29,9 +36,10 @@ export async function GET(request: Request) {
     to: parseDateMs(url.searchParams.get("to"), true),
     self: self === "self" || self === "member" ? self : "all",
     limit: Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 5000) : 5000,
+    threadId: url.searchParams.get("group") ?? undefined,
   };
 
-  const rows = listGroupMessages(filters).slice().reverse();
+  const rows = listGroupMessages(filters, botId).slice().reverse();
   // Cột deleted để người mở file biết tin nào đã bị thu hồi, không dùng lại nhầm.
   const header = ["ts", "display_name", "zalo_user_id", "is_self", "deleted", "text"];
   const lines = [header.join(",")];

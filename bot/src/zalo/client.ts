@@ -92,19 +92,29 @@ function writeLoginStatus(state: LoginState, extra?: Record<string, unknown>): v
   }
 }
 
+function findRequestFile(filename: string): string | null {
+  const candidates = [
+    path.join(config.sessionDir, filename),
+    path.join(path.dirname(config.dbPath), filename),
+    path.join(path.dirname(config.dbPath), "session", filename),
+  ];
+  return candidates.find((p) => fs.existsSync(p)) || null;
+}
+
 /**
  * Nhận yêu cầu đăng nhập lại do dashboard ghi vào SESSION_DIR.
  * Marker được xoá trước để PM2 restart không tạo vòng lặp; credential/QR cũ được
  * dọn bởi chính bot thay vì cho web process trực tiếp thao tác secret.
  */
 export function consumeReloginRequest(): boolean {
-  const requestPath = path.join(config.sessionDir, RELOGIN_REQUEST_FILE);
-  if (!fs.existsSync(requestPath)) return false;
+  const requestPath = findRequestFile(RELOGIN_REQUEST_FILE);
+  if (!requestPath) return false;
 
   try {
     fs.rmSync(requestPath, { force: true });
     for (const file of LOGIN_RUNTIME_FILES) {
       fs.rmSync(path.join(config.sessionDir, file), { force: true });
+      fs.rmSync(path.join(path.dirname(config.dbPath), file), { force: true });
     }
     return true;
   } catch (e) {
@@ -114,14 +124,14 @@ export function consumeReloginRequest(): boolean {
 }
 
 export function reloginRequestExists(): boolean {
-  return fs.existsSync(path.join(config.sessionDir, RELOGIN_REQUEST_FILE));
+  return findRequestFile(RELOGIN_REQUEST_FILE) !== null;
 }
 
 const GROUP_SCAN_REQUEST_FILE = "group-scan-request.json";
 
 export function consumeGroupScanRequest(): boolean {
-  const requestPath = path.join(config.sessionDir, GROUP_SCAN_REQUEST_FILE);
-  if (!fs.existsSync(requestPath)) return false;
+  const requestPath = findRequestFile(GROUP_SCAN_REQUEST_FILE);
+  if (!requestPath) return false;
   try {
     fs.rmSync(requestPath, { force: true });
     return true;
@@ -137,8 +147,8 @@ export interface MemberSyncRequest {
 }
 
 export function consumeMemberSyncRequest(): MemberSyncRequest | null {
-  const requestPath = path.join(config.sessionDir, MEMBER_SYNC_REQUEST_FILE);
-  if (!fs.existsSync(requestPath)) return null;
+  const requestPath = findRequestFile(MEMBER_SYNC_REQUEST_FILE);
+  if (!requestPath) return null;
 
   let data: unknown;
   try {
@@ -162,8 +172,8 @@ export interface PermissionCheckRequest {
 }
 
 export function consumePermissionCheckRequest(): PermissionCheckRequest | null {
-  const requestPath = path.join(config.sessionDir, PERMISSION_CHECK_REQUEST_FILE);
-  if (!fs.existsSync(requestPath)) return null;
+  const requestPath = findRequestFile(PERMISSION_CHECK_REQUEST_FILE);
+  if (!requestPath) return null;
 
   let data: unknown;
   try {

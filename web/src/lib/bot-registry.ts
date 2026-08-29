@@ -57,43 +57,62 @@ export function getBotInfo(botId: string): BotMetadata | null {
   let sessionDir = "";
 
   if (botId !== "bot-1") {
+    // 1. Tìm dbPath thật sự tồn tại
     for (const root of candidateRoots) {
       const bDir = path.join(root, "bots", botId);
-      if (fs.existsSync(bDir)) {
+      const dbCandidates = [
+        path.join(bDir, "bot.db"),
+        path.join(bDir, "data", "bot.db"),
+        path.join(bDir, "bot", "data", "bot.db"),
+      ];
+      const foundDb =
+        dbCandidates.find((p) => fs.existsSync(p) && fs.statSync(p).size > 0) ||
+        dbCandidates.find((p) => fs.existsSync(p));
+      if (foundDb) {
+        dbPath = foundDb;
         targetDir = bDir;
-        const dbCandidates = [
-          path.join(bDir, "bot.db"),
-          path.join(bDir, "data", "bot.db"),
-          path.join(bDir, "bot", "data", "bot.db"),
-        ];
-        dbPath = dbCandidates.find((p) => fs.existsSync(p)) || path.join(bDir, "bot.db");
-
-        const sessionCandidates = [
-          path.join(bDir, "session"),
-          bDir,
-          path.join(bDir, "data"),
-          path.join(bDir, "bot", "data"),
-        ];
-        sessionDir =
-          sessionCandidates.find((p) => fs.existsSync(path.join(p, "session.json"))) ||
-          path.join(bDir, "session");
         break;
       }
+    }
+
+    // 2. Tìm sessionDir thật sự tồn tại
+    for (const root of candidateRoots) {
+      const bDir = path.join(root, "bots", botId);
+      const sessionCandidates = [
+        path.join(bDir, "session"),
+        bDir,
+        path.join(bDir, "data"),
+        path.join(bDir, "bot", "data"),
+      ];
+      const foundSession = sessionCandidates.find((p) => fs.existsSync(path.join(p, "session.json")));
+      if (foundSession) {
+        sessionDir = foundSession;
+        break;
+      }
+    }
+
+    if (!targetDir && candidateRoots[0]) {
+      targetDir = path.join(candidateRoots[0], "bots", botId);
+    }
+    if (!dbPath && targetDir) {
+      dbPath = path.join(targetDir, "bot.db");
+    }
+    if (!sessionDir && targetDir) {
+      sessionDir = path.join(targetDir, "session");
     }
   } else {
     // bot-1
     for (const root of candidateRoots) {
       const bDir = path.join(root, "bots", "bot-1");
-      if (fs.existsSync(bDir)) {
-        targetDir = bDir;
-        dbPath = path.join(bDir, "bot.db");
-        sessionDir = path.join(bDir, "session");
-        break;
-      }
-      if (fs.existsSync(path.join(root, "bot.db")) || fs.existsSync(path.join(root, "session.json"))) {
-        targetDir = root;
-        dbPath = path.join(root, "bot.db");
-        sessionDir = root;
+      const dbCandidates = [
+        path.join(bDir, "bot.db"),
+        path.join(root, "bot.db"),
+      ];
+      const foundDb = dbCandidates.find((p) => fs.existsSync(p));
+      if (foundDb) {
+        dbPath = foundDb;
+        targetDir = path.dirname(foundDb);
+        sessionDir = fs.existsSync(path.join(targetDir, "session")) ? path.join(targetDir, "session") : targetDir;
         break;
       }
     }

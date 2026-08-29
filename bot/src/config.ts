@@ -71,30 +71,50 @@ function resolvePaths(bId: string) {
   ];
 
   if (bId !== "bot-1") {
+    let dbPath = "";
+    let sessionDir = "";
+
+    // 1. Tìm dbPath thật sự tồn tại
     for (const root of candidateRoots) {
       const bDir = path.join(root, "bots", bId);
-      if (fs.existsSync(bDir)) {
-        // Tìm file bot.db
-        const dbCandidates = [
-          path.join(bDir, "bot.db"),
-          path.join(bDir, "data", "bot.db"),
-          path.join(bDir, "bot", "data", "bot.db"),
-        ];
-        const dbPath = dbCandidates.find((p) => fs.existsSync(p)) || path.join(bDir, "bot.db");
-
-        // Tìm thư mục session
-        const sessionCandidates = [
-          path.join(bDir, "session"),
-          bDir,
-          path.join(bDir, "data"),
-          path.join(bDir, "bot", "data"),
-        ];
-        const sessionDir =
-          sessionCandidates.find((p) => fs.existsSync(path.join(p, "session.json"))) ||
-          path.join(bDir, "session");
-
-        return { dbPath, sessionDir };
+      const dbCandidates = [
+        path.join(bDir, "bot.db"),
+        path.join(bDir, "data", "bot.db"),
+        path.join(bDir, "bot", "data", "bot.db"),
+      ];
+      const foundDb =
+        dbCandidates.find((p) => fs.existsSync(p) && fs.statSync(p).size > 0) ||
+        dbCandidates.find((p) => fs.existsSync(p));
+      if (foundDb) {
+        dbPath = foundDb;
+        break;
       }
+    }
+
+    // 2. Tìm sessionDir thật sự tồn tại
+    for (const root of candidateRoots) {
+      const bDir = path.join(root, "bots", bId);
+      const sessionCandidates = [
+        path.join(bDir, "session"),
+        bDir,
+        path.join(bDir, "data"),
+        path.join(bDir, "bot", "data"),
+      ];
+      const foundSession = sessionCandidates.find((p) => fs.existsSync(path.join(p, "session.json")));
+      if (foundSession) {
+        sessionDir = foundSession;
+        break;
+      }
+    }
+
+    if (dbPath && sessionDir) {
+      return { dbPath, sessionDir };
+    }
+    if (dbPath && !sessionDir) {
+      return { dbPath, sessionDir: path.join(path.dirname(dbPath), "session") };
+    }
+    if (!dbPath && sessionDir) {
+      return { dbPath: path.join(sessionDir, "bot.db"), sessionDir };
     }
 
     // Nếu chưa có, tạo mặc định trong candidateRoots[0]/bots/bId

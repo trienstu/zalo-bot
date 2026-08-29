@@ -1035,9 +1035,15 @@ export async function runListener(): Promise<void> {
   api.listener.on("group_event", (ev: any) => {
     try {
       const threadId = String(ev?.threadId ?? ev?.data?.groupId ?? ev?.groupId ?? "");
-      if (!isTargetThread(threadId)) return;
       const type = normalizeGroupEventType(ev);
       const now2 = Date.now();
+
+      // Nếu là event nhóm mới / bot được add vào nhóm → quét danh sách nhóm ngay
+      if (threadId && (!isTargetThread(threadId) || isJoinGroupEvent(type))) {
+        void runGroupScan("group_event").catch(() => {});
+      }
+
+      if (!isTargetThread(threadId)) return;
       // Thành viên mới join → ghi nhận (first_seen_at = giờ; luật miễn người mới ở M2).
       if (isJoinGroupEvent(type)) {
         for (const m of normalizeEventMembers(ev)) {

@@ -382,9 +382,17 @@ export async function POST(request: Request) {
 
     if (body.action === "scan") {
       try {
-        const reqPath = path.resolve(path.dirname(dbPath), "group-scan-request.json");
-        fs.mkdirSync(path.dirname(reqPath), { recursive: true });
-        fs.writeFileSync(reqPath, JSON.stringify({ requestedAt: Date.now(), requestedBy: "dashboard" }), "utf8");
+        const payload = JSON.stringify({ requestedAt: Date.now(), requestedBy: "dashboard" });
+        const reqPaths = [
+          path.resolve(path.dirname(dbPath), "group-scan-request.json"),
+          path.resolve(path.dirname(dbPath), "session", "group-scan-request.json"),
+        ];
+        for (const p of reqPaths) {
+          try {
+            fs.mkdirSync(path.dirname(p), { recursive: true });
+            fs.writeFileSync(p, payload, "utf8");
+          } catch {}
+        }
       } catch (e) {
         console.warn("[api/groups] Không ghi được file group-scan-request:", e);
       }
@@ -410,11 +418,25 @@ export async function POST(request: Request) {
     }
 
     if (body.action === "set_mode" && body.groupId && body.mode) {
-      db.prepare("UPDATE bot_groups SET mode = ?, updated_at = ? WHERE group_id = ?").run(
-        body.mode,
-        Date.now(),
-        body.groupId,
-      );
+      db.prepare(
+        `INSERT INTO bot_groups (group_id, name, total_members, mode, is_active, updated_at)
+         VALUES (@groupId, @name, 0, @mode, 0, @now)
+         ON CONFLICT(group_id) DO UPDATE SET
+           mode = @mode,
+           updated_at = @now`
+      ).run({
+        groupId: body.groupId,
+        name: `Nhóm ${body.groupId.slice(-4)}`,
+        mode: body.mode,
+        now: Date.now(),
+      });
+      try {
+        db.prepare(
+          `INSERT INTO group_settings (group_id, mode, updated_at)
+           VALUES (?, ?, ?)
+           ON CONFLICT(group_id) DO UPDATE SET mode = excluded.mode, updated_at = excluded.updated_at`
+        ).run(body.groupId, body.mode, Date.now());
+      } catch {}
       db.close();
       return NextResponse.json({ ok: true, message: `Đã cập nhật chế độ cho nhóm: ${body.mode}` });
     }
