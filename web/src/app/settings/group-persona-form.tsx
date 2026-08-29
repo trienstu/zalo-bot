@@ -233,8 +233,8 @@ function GroupPersonaFormInner() {
           <div className="flex items-center gap-2.5">
             <span className="text-2xl">🤖</span>
             <div>
-              <CardTitle className="text-xl font-bold bg-gradient-to-r from-amber-400 via-orange-300 to-rose-400 bg-clip-text text-transparent">
-                Cá Tính AI & Prompt Riêng Từng Nhóm
+              <CardTitle className="text-xl font-bold bg-gradient-to-r from-amber-400 via-orange-300 to-cyan-400 bg-clip-text text-transparent">
+                Cá Tính AI, Prompt & Thời Tiết Buổi Sáng
               </CardTitle>
               {selectedGroup && (
                 <div className="flex items-center gap-2 mt-1.5 flex-wrap">
@@ -250,7 +250,7 @@ function GroupPersonaFormInner() {
             </div>
           </div>
           <p className="text-xs md:text-sm text-slate-400 mt-2">
-            Thiết lập phong cách trả lời, xưng hô và kịch bản chỉ thị System Prompt độc quyền cho nhóm đang chọn ở cột trái.
+            Thiết lập phong cách phản hồi, kịch bản chỉ thị Prompt và lịch tự động gửi Bản tin thời tiết buổi sáng cho nhóm đang chọn ở cột trái.
           </p>
         </div>
 
@@ -264,11 +264,11 @@ function GroupPersonaFormInner() {
               {saving ? (
                 <>
                   <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  Đang lưu...
+                  Đang lưu cài đặt...
                 </>
               ) : (
                 <>
-                  <span>💾</span> Lưu Cá Tính Nhóm
+                  <span>💾</span> Lưu Cài Đặt Nhóm
                 </>
               )}
             </Button>
