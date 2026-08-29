@@ -294,11 +294,27 @@ export async function POST(request: Request) {
           `\n✨ Chúc anh em một ngày làm việc hiệu quả và tràn đầy năng lượng! 💪`,
         ].join("\n");
 
-        fs.writeFileSync(reqPath, JSON.stringify({
+        const payload = JSON.stringify({
+          requestId: `weather_test_${Date.now()}`,
+          parts: [testBriefing],
+          groupId: body.groupId,
           requestedAt: Date.now(),
-          targetThreadId: body.groupId,
-          summaryText: testBriefing,
-        }), "utf8");
+          requestedBy: "web_test_weather",
+        });
+
+        const targetPaths = [
+          path.resolve(path.dirname(dbPath), "session", "summary-send-request.json"),
+          path.resolve(path.dirname(dbPath), "summary-send-request.json"),
+          path.resolve(process.cwd(), "..", "bot", "data", "session", "summary-send-request.json"),
+          path.resolve(process.cwd(), "..", "bot", "data", "summary-send-request.json"),
+        ];
+
+        for (const p of targetPaths) {
+          try {
+            fs.mkdirSync(path.dirname(p), { recursive: true });
+            fs.writeFileSync(p, payload, "utf8");
+          } catch {}
+        }
 
         return NextResponse.json({
           ok: true,

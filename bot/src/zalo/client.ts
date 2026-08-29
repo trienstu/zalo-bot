@@ -241,8 +241,21 @@ export interface SummarySendRequest {
  * Yêu cầu gửi bản tóm tắt ngay từ dashboard vào nhóm Zalo.
  */
 export function consumeSummarySendRequest(): SummarySendRequest | null {
-  const requestPath = path.join(config.sessionDir, SUMMARY_SEND_REQUEST_FILE);
-  if (!fs.existsSync(requestPath)) return null;
+  const candidatePaths = [
+    path.join(config.sessionDir, SUMMARY_SEND_REQUEST_FILE),
+    path.join(path.dirname(config.dbPath), SUMMARY_SEND_REQUEST_FILE),
+    path.resolve(process.cwd(), "data", SUMMARY_SEND_REQUEST_FILE),
+    path.resolve(process.cwd(), "data", "session", SUMMARY_SEND_REQUEST_FILE),
+  ];
+
+  let requestPath: string | null = null;
+  for (const p of candidatePaths) {
+    if (fs.existsSync(p)) {
+      requestPath = p;
+      break;
+    }
+  }
+  if (!requestPath) return null;
 
   let data: unknown;
   try {
@@ -250,24 +263,38 @@ export function consumeSummarySendRequest(): SummarySendRequest | null {
   } catch {
     data = null;
   } finally {
-    fs.rmSync(requestPath, { force: true });
+    try {
+      fs.rmSync(requestPath, { force: true });
+    } catch {}
   }
 
   const obj = (data ?? {}) as {
     requestId?: unknown;
     parts?: unknown;
+    summaryText?: unknown;
     groupId?: unknown;
+    targetThreadId?: unknown;
     requestedAt?: unknown;
     requestedBy?: unknown;
   };
-  const requestId = typeof obj.requestId === "string" && obj.requestId.trim() ? obj.requestId.trim() : null;
-  const parts = Array.isArray(obj.parts) ? obj.parts.map(String).filter((s) => s.trim()) : [];
-  if (!requestId || parts.length === 0) return null;
+  const requestId = typeof obj.requestId === "string" && obj.requestId.trim() ? obj.requestId.trim() : `req_${Date.now()}`;
+  let parts: string[] = [];
+  if (Array.isArray(obj.parts)) {
+    parts = obj.parts.map(String).filter((s) => s.trim());
+  } else if (typeof obj.summaryText === "string" && obj.summaryText.trim()) {
+    parts = [obj.summaryText.trim()];
+  }
+  if (parts.length === 0) return null;
+
+  const targetGid =
+    (typeof obj.groupId === "string" && obj.groupId.trim()) ||
+    (typeof obj.targetThreadId === "string" && obj.targetThreadId.trim()) ||
+    undefined;
 
   return {
     requestId,
     parts,
-    groupId: typeof obj.groupId === "string" && obj.groupId.trim() ? obj.groupId.trim() : undefined,
+    groupId: targetGid,
     requestedAt: typeof obj.requestedAt === "number" ? obj.requestedAt : Date.now(),
     requestedBy: typeof obj.requestedBy === "string" && obj.requestedBy.trim() ? obj.requestedBy.trim() : "dashboard",
   };
