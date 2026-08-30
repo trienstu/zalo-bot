@@ -108,6 +108,10 @@ function AppShellInner({
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
 
   function getActiveBotId(): string {
+    if (typeof window !== "undefined") {
+      const urlBotId = searchParams?.get("botId");
+      if (urlBotId) return urlBotId;
+    }
     if (typeof document === "undefined") return "bot-1";
     const match = document.cookie.match(new RegExp("(^| )active_bot_id=([^;]+)"));
     return match ? decodeURIComponent(match[2] || "") : "bot-1";
