@@ -593,18 +593,25 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
 
   if (!rawText && !hasImage && !hasFile) return;
 
+  // TUYỆT ĐỐI BỎ QUA các tin nhắn thông báo tự động / báo thức / nhắc hẹn của bot để tránh lặp vô tận (Bot-to-Bot Loop)
+  if (
+    rawText.startsWith("🤖") ||
+    rawText.startsWith("⏰") ||
+    rawText.startsWith("🌸") ||
+    rawText.startsWith("🌅") ||
+    rawText.startsWith("↪") ||
+    rawText.startsWith("📊") ||
+    rawText.startsWith("🏆") ||
+    rawText.startsWith("📋") ||
+    rawText.includes("[BÁO THỨC") ||
+    rawText.includes("LỊCH HẸN THÀNH CÔNG") ||
+    rawText.includes("[Mã #")
+  ) {
+    return;
+  }
+
   // Nếu là tin nhắn của chính tài khoản bot (chủ bot test từ app Zalo):
   if (event.isSelf) {
-    // Bỏ qua tin nhắn do bot trả lời tự động để tránh lặp vô tận
-    if (
-      rawText.startsWith("🤖") ||
-      rawText.startsWith("📊") ||
-      rawText.startsWith("🏆") ||
-      rawText.startsWith("📋")
-    ) {
-      return;
-    }
-
     const lowerSelf = rawText.toLowerCase();
     const isCommand =
       rawText.startsWith("/") ||

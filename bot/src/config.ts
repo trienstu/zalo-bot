@@ -63,7 +63,10 @@ export const activeBotId = getActiveBotId();
 // Xác định thư mục session và db theo botId một cách thông minh và linh hoạt
 function resolvePaths(bId: string) {
   // Danh sách các thư mục gốc có thể chứa data
+  const home = process.env.HOME || "/home/congtrien125";
   const candidateRoots = [
+    path.resolve(home, "zalo-bot", "data"),
+    path.resolve(home, "zalo-bot", "bot", "data"),
     path.resolve(process.cwd(), "..", "data"),
     path.resolve(process.cwd(), "data"),
     path.resolve(process.cwd(), "bot", "data"),

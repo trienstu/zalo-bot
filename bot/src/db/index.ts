@@ -430,31 +430,34 @@ export function getLatestMemberSyncRun(): MemberSyncRunRow | undefined {
     .get() as MemberSyncRunRow | undefined;
 }
 
-// ---- Interactions (append-only) ----
+export const logInteraction = recordInteraction;
 
-/**
- * Ghi 1 tương tác. INSERT OR IGNORE để seed lịch sử chạy lại không nhân đôi
- * (unique index dedupe theo user+ts+type+source).
- */
-export function logInteraction(input: {
+export function recordInteraction(input: {
   zaloUserId: string;
   type: InteractionType;
   ts: number;
   source?: InteractionSource;
   threadId?: string;
 }): void {
-  getDb()
-    .prepare(
-      `INSERT OR IGNORE INTO interactions (zalo_user_id, type, ts, source, thread_id)
-       VALUES (@id, @type, @ts, @source, @threadId)`,
-    )
-    .run({
-      id: input.zaloUserId,
-      type: input.type,
-      ts: input.ts,
-      source: input.source ?? "listener",
-      threadId: input.threadId ?? "",
-    });
+  const db = getDb();
+  if (input.zaloUserId) {
+    try {
+      db.prepare(
+        `INSERT OR IGNORE INTO members (zalo_user_id, display_name, role, first_seen_at, is_active)
+         VALUES (?, '', 'member', ?, 1)`,
+      ).run(input.zaloUserId, input.ts || Date.now());
+    } catch {}
+  }
+  db.prepare(
+    `INSERT OR IGNORE INTO interactions (zalo_user_id, type, ts, source, thread_id)
+     VALUES (@id, @type, @ts, @source, @threadId)`,
+  ).run({
+    id: input.zaloUserId,
+    type: input.type,
+    ts: input.ts,
+    source: input.source ?? "listener",
+    threadId: input.threadId ?? "",
+  });
 }
 
 /**
@@ -485,6 +488,15 @@ export function logReactionOnce(input: {
     }
   }
 
+  if (input.zaloUserId) {
+    try {
+      db.prepare(
+        `INSERT OR IGNORE INTO members (zalo_user_id, display_name, role, first_seen_at, is_active)
+         VALUES (?, '', 'member', ?, 1)`,
+      ).run(input.zaloUserId, input.ts || Date.now());
+    } catch {}
+  }
+
   db.prepare(
     `INSERT OR IGNORE INTO interactions (zalo_user_id, type, ts, source, thread_id)
      VALUES (@id, 'reaction', @ts, @source, @threadId)`,
@@ -502,9 +514,18 @@ export function logReactionOnce(input: {
 
 /** Lưu text message để sau này export/tổng hợp blog. Dedupe theo thread_id + message_id. */
 export function saveGroupMessage(input: GroupMessageInput): void {
-  getDb()
-    .prepare(
-      `INSERT OR IGNORE INTO group_messages
+  const db = getDb();
+  if (input.zaloUserId) {
+    try {
+      db.prepare(
+        `INSERT OR IGNORE INTO members (zalo_user_id, display_name, role, first_seen_at, is_active)
+         VALUES (?, ?, 'member', ?, 1)`,
+      ).run(input.zaloUserId, input.displayName ?? "", input.now || Date.now());
+    } catch {}
+  }
+
+  db.prepare(
+    `INSERT OR IGNORE INTO group_messages
          (thread_id, message_id, zalo_user_id, display_name, text, msg_type, ts, is_self, source, created_at)
        VALUES
          (@threadId, @messageId, @zaloUserId, @displayName, @text, @msgType, @ts, @isSelf, @source, @now)`,
@@ -530,9 +551,18 @@ export function saveGroupMessage(input: GroupMessageInput): void {
  * vẫn có giá trị nguyên như trước: đếm ảnh/video cho bản tóm tắt.
  */
 export function saveGroupMediaEvent(input: GroupMediaEventInput): void {
-  getDb()
-    .prepare(
-      `INSERT OR IGNORE INTO group_media_events
+  const db = getDb();
+  if (input.zaloUserId) {
+    try {
+      db.prepare(
+        `INSERT OR IGNORE INTO members (zalo_user_id, display_name, role, first_seen_at, is_active)
+         VALUES (?, ?, 'member', ?, 1)`,
+      ).run(input.zaloUserId, input.displayName ?? "", input.now || Date.now());
+    } catch {}
+  }
+
+  db.prepare(
+    `INSERT OR IGNORE INTO group_media_events
          (thread_id, message_id, zalo_user_id, display_name, media_type, media_count,
           msg_type, ts, is_self, source, created_at, media_url, local_path)
        VALUES
