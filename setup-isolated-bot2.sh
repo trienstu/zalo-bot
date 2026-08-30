@@ -71,7 +71,7 @@ module.exports = {
 };
 ECO1_EOF
 
-# 5. Tạo ecosystem cho Bot 2 (Cổng 3001)
+# 5. Tạo ecosystem cho Bot 2 (Cổng nội bộ 3002, Nginx nhận 3001)
 cat << 'ECO2_EOF' > "${BOT2_DIR}/ecosystem.config.cjs"
 module.exports = {
   apps: [
@@ -86,13 +86,13 @@ module.exports = {
     {
       name: "zalo-web-2",
       script: "node_modules/next/dist/bin/next",
-      args: "start -H 127.0.0.1 -p 3001",
+      args: "start -H 127.0.0.1 -p 3002",
       cwd: "/home/congtrien125/zalo-bot-2/web",
       autorestart: true,
       time: true,
       env: {
         NODE_ENV: "production",
-        PORT: "3001"
+        PORT: "3002"
       }
     }
   ]
@@ -124,7 +124,7 @@ server {
     server_name _;
 
     location / {
-        proxy_pass http://127.0.0.1:3001;
+        proxy_pass http://127.0.0.1:3002;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
