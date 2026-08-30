@@ -254,6 +254,18 @@ import { getBotInfo } from "./bot-registry";
 const dbConnections = new Map<string, Database.Database>();
 
 export function getDb(botId = "bot-1"): Database.Database {
+  if (process.env.WEB_DB_PATH?.trim() && fs.existsSync(process.env.WEB_DB_PATH.trim())) {
+    const p = process.env.WEB_DB_PATH.trim();
+    const existing = dbConnections.get(p);
+    if (existing && existing.open) return existing;
+    const newDb = new Database(p);
+    newDb.pragma("busy_timeout = 5000");
+    newDb.pragma("foreign_keys = ON");
+    ensureWebSchema(newDb);
+    dbConnections.set(p, newDb);
+    return newDb;
+  }
+
   const targetBotId = botId || "bot-1";
   const existing = dbConnections.get(targetBotId);
   if (existing && existing.open) return existing;

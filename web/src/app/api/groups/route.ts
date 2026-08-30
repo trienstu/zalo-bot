@@ -8,6 +8,9 @@ import { getBotInfo } from "@/lib/bot-registry";
 export const dynamic = "force-dynamic";
 
 function getBotDbPath(): string {
+  if (process.env.WEB_DB_PATH?.trim() && fs.existsSync(process.env.WEB_DB_PATH.trim())) {
+    return process.env.WEB_DB_PATH.trim();
+  }
   const possiblePaths = [
     process.env.SQLITE_DB_PATH,
     path.resolve(process.cwd(), "data", "bot.db"),
@@ -23,6 +26,10 @@ function getBotDbPath(): string {
 }
 
 async function getActiveBotDbPath(overrideBotId?: string): Promise<string> {
+  if (process.env.WEB_DB_PATH?.trim() && fs.existsSync(process.env.WEB_DB_PATH.trim())) {
+    return process.env.WEB_DB_PATH.trim();
+  }
+
   let botId = overrideBotId;
   if (!botId) {
     try {
