@@ -7,10 +7,15 @@ import { getBotInfo } from "@/lib/bot-registry";
 
 export const dynamic = "force-dynamic";
 
-function getBotDbPath(): string {
+function getBotDbPath(reqUrl?: string, hostHeader?: string): string {
   const home = process.env.HOME || "/home/congtrien125";
   const port = String(process.env.PORT || process.env.WEB_PORT || "");
-  const isBot2 = port === "3002" || port === "3001" || process.env.BOT_ID === "bot-2" || process.env.WEB_DB_PATH?.includes("bot-2");
+  const isPort3002 =
+    port === "3002" ||
+    port === "3001" ||
+    (reqUrl && (reqUrl.includes(":3002") || reqUrl.includes(":3001"))) ||
+    (hostHeader && (hostHeader.includes(":3001") || hostHeader.includes(":3002")));
+  const isBot2 = isPort3002 || process.env.BOT_ID === "bot-2" || process.env.WEB_DB_PATH?.includes("bot-2");
 
   if (isBot2) {
     const p = path.resolve(home, "zalo-bot", "data", "bots", "bot-2", "bot.db");
@@ -24,10 +29,19 @@ function getBotDbPath(): string {
   return path.resolve(home, "zalo-bot", "bot", "data", "bot.db");
 }
 
-async function getActiveBotDbPath(overrideBotId?: string): Promise<string> {
+async function getActiveBotDbPath(overrideBotId?: string, reqUrl?: string, hostHeader?: string): Promise<string> {
   const home = process.env.HOME || "/home/congtrien125";
   const port = String(process.env.PORT || process.env.WEB_PORT || "");
-  const isBot2 = port === "3002" || port === "3001" || process.env.BOT_ID === "bot-2" || process.env.WEB_DB_PATH?.includes("bot-2");
+  const isPort3002 =
+    port === "3002" ||
+    port === "3001" ||
+    (reqUrl && (reqUrl.includes(":3002") || reqUrl.includes(":3001"))) ||
+    (hostHeader && (hostHeader.includes(":3001") || hostHeader.includes(":3002")));
+  const isBot2 =
+    isPort3002 ||
+    process.env.BOT_ID === "bot-2" ||
+    process.env.WEB_DB_PATH?.includes("bot-2") ||
+    overrideBotId === "bot-2";
 
   if (isBot2) {
     const p = path.resolve(home, "zalo-bot", "data", "bots", "bot-2", "bot.db");
@@ -64,24 +78,30 @@ async function getActiveBotDbPath(overrideBotId?: string): Promise<string> {
   if (botInfo && botInfo.dbPath && fs.existsSync(botInfo.dbPath)) {
     return botInfo.dbPath;
   }
-  return getBotDbPath();
+  return getBotDbPath(reqUrl, hostHeader);
 }
 
 export async function GET(request: Request) {
   try {
-    let botId = "bot-1";
+    let botId = "";
+    let reqUrl = request.url;
+    let hostHeader = request.headers.get("host") || "";
     try {
-      const { searchParams } = new URL(request.url);
-      botId = searchParams.get("botId") || "";
+      const url = new URL(request.url);
+      botId = url.searchParams.get("botId") || "";
       if (!botId) {
-        const cookieStore = await cookies();
-        botId = cookieStore.get("active_bot_id")?.value || "bot-1";
+        if (url.port === "3002" || url.port === "3001" || hostHeader.includes(":3001") || hostHeader.includes(":3002")) {
+          botId = "bot-2";
+        } else {
+          const cookieStore = await cookies();
+          botId = cookieStore.get("active_bot_id")?.value || "bot-1";
+        }
       }
     } catch {
       botId = "bot-1";
     }
 
-    const dbPath = await getActiveBotDbPath(botId);
+    const dbPath = await getActiveBotDbPath(botId, reqUrl, hostHeader);
     if (!fs.existsSync(dbPath)) {
       return NextResponse.json({ groups: [] });
     }
@@ -232,16 +252,23 @@ export async function POST(request: Request) {
     };
 
     let botId = body.botId;
+    const reqUrl = request.url;
+    const hostHeader = request.headers.get("host") || "";
     if (!botId) {
       try {
-        const cookieStore = await cookies();
-        botId = cookieStore.get("active_bot_id")?.value || "bot-1";
+        const url = new URL(request.url);
+        if (url.port === "3002" || url.port === "3001" || hostHeader.includes(":3001") || hostHeader.includes(":3002")) {
+          botId = "bot-2";
+        } else {
+          const cookieStore = await cookies();
+          botId = cookieStore.get("active_bot_id")?.value || "bot-1";
+        }
       } catch {
         botId = "bot-1";
       }
     }
 
-    const dbPath = await getActiveBotDbPath(botId);
+    const dbPath = await getActiveBotDbPath(botId, reqUrl, hostHeader);
     if (!fs.existsSync(dbPath)) {
       return NextResponse.json({ ok: false, error: "Chưa có database bot" }, { status: 400 });
     }
