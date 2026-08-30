@@ -22,23 +22,52 @@ function getBotDbPath(): string {
   return path.resolve(process.cwd(), "..", "bot", "data", "bot.db");
 }
 
-async function getActiveBotDbPath(): Promise<string> {
-  let botId = "bot-1";
-  try {
-    const cookieStore = await cookies();
-    botId = cookieStore.get("active_bot_id")?.value || "bot-1";
-  } catch {}
+async function getActiveBotDbPath(overrideBotId?: string): Promise<string> {
+  let botId = overrideBotId;
+  if (!botId) {
+    try {
+      const cookieStore = await cookies();
+      botId = cookieStore.get("active_bot_id")?.value || "bot-1";
+    } catch {
+      botId = "bot-1";
+    }
+  }
 
-  const botInfo = getBotInfo(botId);
-  if (botInfo && botInfo.dbPath) {
+  const home = process.env.HOME || "/home/congtrien125";
+  if (botId && botId !== "bot-1") {
+    const candidates = [
+      path.resolve(home, "zalo-bot", "data", "bots", botId, "bot.db"),
+      path.resolve(home, "zalo-bot", "bot", "data", "bots", botId, "bot.db"),
+      path.resolve(process.cwd(), "..", "data", "bots", botId, "bot.db"),
+      path.resolve(process.cwd(), "data", "bots", botId, "bot.db"),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c) && fs.statSync(c).size > 0) return c;
+    }
+  }
+
+  const botInfo = getBotInfo(botId || "bot-1");
+  if (botInfo && botInfo.dbPath && fs.existsSync(botInfo.dbPath)) {
     return botInfo.dbPath;
   }
   return getBotDbPath();
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const dbPath = await getActiveBotDbPath();
+    let botId = "bot-1";
+    try {
+      const { searchParams } = new URL(request.url);
+      botId = searchParams.get("botId") || "";
+      if (!botId) {
+        const cookieStore = await cookies();
+        botId = cookieStore.get("active_bot_id")?.value || "bot-1";
+      }
+    } catch {
+      botId = "bot-1";
+    }
+
+    const dbPath = await getActiveBotDbPath(botId);
     if (!fs.existsSync(dbPath)) {
       return NextResponse.json({ groups: [] });
     }
@@ -174,6 +203,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as {
+      botId?: string;
       action?: "scan" | "select" | "set_mode" | "update_persona" | "test_weather";
       groupId?: string;
       groupName?: string;
@@ -187,7 +217,17 @@ export async function POST(request: Request) {
       weatherCity?: string;
     };
 
-    const dbPath = await getActiveBotDbPath();
+    let botId = body.botId;
+    if (!botId) {
+      try {
+        const cookieStore = await cookies();
+        botId = cookieStore.get("active_bot_id")?.value || "bot-1";
+      } catch {
+        botId = "bot-1";
+      }
+    }
+
+    const dbPath = await getActiveBotDbPath(botId);
     if (!fs.existsSync(dbPath)) {
       return NextResponse.json({ ok: false, error: "Chưa có database bot" }, { status: 400 });
     }

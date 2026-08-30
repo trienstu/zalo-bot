@@ -73,8 +73,9 @@ function exportHref(params: SearchParams | undefined): string {
 import { cookies } from "next/headers";
 
 export default async function MessagesPage({ searchParams }: { searchParams?: Promise<SearchParams> }) {
+  const params = await searchParams;
   const cookieStore = await cookies();
-  const botId = cookieStore.get("active_bot_id")?.value || "bot-1";
+  const botId = one(params, "botId") || cookieStore.get("active_bot_id")?.value || "bot-1";
 
   if (!dbExists(botId)) {
     return (
@@ -85,7 +86,6 @@ export default async function MessagesPage({ searchParams }: { searchParams?: Pr
     );
   }
 
-  const params = await searchParams;
   const groups = listManagedGroups(botId);
   const selectedGroupId = one(params, "group") || "all";
   const activeGroup = groups.find((g) => g.id === selectedGroupId) || { id: "all", name: "Tất cả nhóm" };

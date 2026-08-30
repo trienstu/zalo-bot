@@ -107,11 +107,18 @@ function AppShellInner({
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
 
+  function getActiveBotId(): string {
+    if (typeof document === "undefined") return "bot-1";
+    const match = document.cookie.match(new RegExp("(^| )active_bot_id=([^;]+)"));
+    return match ? decodeURIComponent(match[2] || "") : "bot-1";
+  }
+
   // Lấy danh sách nhóm động từ API
   async function loadGroups() {
     setLoadingGroups(true);
     try {
-      const res = await fetch("/api/groups");
+      const bId = getActiveBotId();
+      const res = await fetch(`/api/groups?botId=${encodeURIComponent(bId)}`);
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.groups)) {
@@ -126,10 +133,11 @@ function AppShellInner({
   async function handleSyncGroups() {
     setSyncingGroups(true);
     try {
+      const bId = getActiveBotId();
       const res = await fetch("/api/groups", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "scan" }),
+        body: JSON.stringify({ action: "scan", botId: bId }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -146,10 +154,11 @@ function AppShellInner({
   async function handleSyncMembers(targetGroupId?: string) {
     setSyncingMembers(true);
     try {
+      const bId = getActiveBotId();
       await fetch("/api/member-sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ groupId: targetGroupId || activeGroupId }),
+        body: JSON.stringify({ groupId: targetGroupId || activeGroupId, botId: bId }),
       });
     } catch {}
     setTimeout(() => {
@@ -160,6 +169,7 @@ function AppShellInner({
 
   // Đổi chế độ hoạt động cho nhóm: 'interactive' | 'silent' | 'disabled'
   async function handleSetGroupMode(groupId: string, mode: "interactive" | "silent" | "disabled") {
+    const bId = getActiveBotId();
     setGroups((prev) =>
       prev.map((g) => (g.id === groupId ? { ...g, mode, icon: mode === "silent" ? "🟡" : mode === "disabled" ? "🔴" : "🟢" } : g)),
     );
@@ -168,7 +178,7 @@ function AppShellInner({
       await fetch("/api/groups", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "set_mode", groupId, mode }),
+        body: JSON.stringify({ action: "set_mode", groupId, mode, botId: bId }),
       });
     } catch {}
   }
