@@ -76,8 +76,8 @@ export function BotSwitcher() {
     setBotCookie(targetBotId);
     setActiveBotId(targetBotId);
     setOpenDropdown(false);
-    // Reload page to refresh all server components & DB context
-    window.location.reload();
+    // Reload page to refresh all server components & DB context with explicit botId
+    window.location.href = window.location.pathname + (targetBotId === "bot-1" ? "" : `?botId=${encodeURIComponent(targetBotId)}`);
   }
 
   async function handleCreateBot(e: React.FormEvent) {

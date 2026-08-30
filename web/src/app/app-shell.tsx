@@ -220,8 +220,13 @@ function AppShellInner({
   );
 
   const buildNavHref = (baseHref: string) => {
-    if (!activeGroupId) return baseHref;
-    return `${baseHref}${baseHref.includes("?") ? "&" : "?"}group=${activeGroupId}`;
+    const bId = getActiveBotId();
+    const qs = new URLSearchParams();
+    if (activeGroupId) qs.set("group", activeGroupId);
+    if (bId && bId !== "bot-1") qs.set("botId", bId);
+    const queryString = qs.toString();
+    if (!queryString) return baseHref;
+    return `${baseHref}${baseHref.includes("?") ? "&" : "?"}${queryString}`;
   };
 
   // 1. TRANG CÔNG KHAI THUẦN TÚY: Kho Kiến Thức (/hub)
