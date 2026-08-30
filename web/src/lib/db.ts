@@ -256,17 +256,44 @@ const dbConnections = new Map<string, Database.Database>();
 export function getDb(botId = "bot-1"): Database.Database {
   const targetBotId = botId || "bot-1";
   const existing = dbConnections.get(targetBotId);
-  if (existing) return existing;
+  if (existing && existing.open) return existing;
 
+  const home = process.env.HOME || "/home/congtrien125";
   const botInfo = getBotInfo(targetBotId);
-  const targetPath = botInfo?.dbPath || DB_PATH;
+  let targetPath = botInfo?.dbPath;
+
+  if (!targetPath || !fs.existsSync(targetPath)) {
+    const candidates = targetBotId === "bot-1"
+      ? [
+          path.resolve(home, "zalo-bot", "bot", "data", "bot.db"),
+          path.resolve(home, "zalo-bot", "data", "bot.db"),
+          path.resolve(process.cwd(), "..", "bot", "data", "bot.db"),
+          path.resolve(process.cwd(), "bot", "data", "bot.db"),
+          path.resolve(process.cwd(), "data", "bot.db"),
+          DB_PATH,
+        ]
+      : [
+          path.resolve(home, "zalo-bot", "data", "bots", targetBotId, "bot.db"),
+          path.resolve(home, "zalo-bot", "bot", "data", "bots", targetBotId, "bot.db"),
+          path.resolve(process.cwd(), "..", "data", "bots", targetBotId, "bot.db"),
+          path.resolve(process.cwd(), "data", "bots", targetBotId, "bot.db"),
+        ];
+    for (const c of candidates) {
+      if (fs.existsSync(c) && fs.statSync(c).size > 0) {
+        targetPath = c;
+        break;
+      }
+    }
+  }
+
+  if (!targetPath) {
+    targetPath = targetBotId === "bot-1" ? DB_PATH : path.resolve(home, "zalo-bot", "data", "bots", targetBotId, "bot.db");
+  }
 
   if (!fs.existsSync(targetPath)) {
     fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   }
 
-  // Mở chung file bot đang dùng (WAL). KHÔNG set journal_mode ở đây (bot là chủ).
-  // busy_timeout: chờ tối đa 5s nếu bot đang giữ write-lock thay vì lỗi SQLITE_BUSY ngay.
   const newDb = new Database(targetPath);
   newDb.pragma("busy_timeout = 5000");
   newDb.pragma("foreign_keys = ON");
@@ -277,8 +304,15 @@ export function getDb(botId = "bot-1"): Database.Database {
 
 /** Kiểm tra DB có tồn tại không (cho trang hiển thị thông báo thân thiện). */
 export function dbExists(botId = "bot-1"): boolean {
-  const botInfo = getBotInfo(botId);
-  return fs.existsSync(botInfo?.dbPath || DB_PATH);
+  const targetBotId = botId || "bot-1";
+  const home = process.env.HOME || "/home/congtrien125";
+  const botInfo = getBotInfo(targetBotId);
+  if (botInfo?.dbPath && fs.existsSync(botInfo.dbPath)) return true;
+  if (targetBotId !== "bot-1") {
+    const directPath = path.resolve(home, "zalo-bot", "data", "bots", targetBotId, "bot.db");
+    if (fs.existsSync(directPath)) return true;
+  }
+  return fs.existsSync(DB_PATH);
 }
 
 export function dbPath(botId = "bot-1"): string {
