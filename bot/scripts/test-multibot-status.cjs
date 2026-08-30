@@ -93,12 +93,16 @@ async function run() {
   // Test Messages on Web 2
   console.log('\n--- 4. TEST TRANG TIN NHẮN WEB 2 (/messages) ---');
   const msgRes = await getHttp(3002, '/messages');
-  const matchDòng = msgRes.data.match(/hiển thị [0-9]+ dòng[^<]*/);
-  const matchSelf = msgRes.data.match(/Self trong trang[^\"]*\"children\":\"([^\"]+)/);
-  const matchImg = msgRes.data.match(/Ảnh đã gửi[^\"]*\"children\":\"([^\"]+)/);
-  console.log(`  Render text: ${matchDòng ? matchDòng[0] : 'N/A'}`);
-  console.log(`  Tin bot gửi : ${matchSelf ? matchSelf[1] : 'N/A'}`);
-  console.log(`  Ảnh đã gửi  : ${matchImg ? matchImg[1] : 'N/A'}`);
+  if (msgRes && msgRes.data) {
+    const matchDòng = msgRes.data.match(/hiển thị [0-9]+ dòng[^<]*/);
+    const matchSelf = msgRes.data.match(/Self trong trang[^\"]*\"children\":\"([^\"]+)/);
+    const matchImg = msgRes.data.match(/Ảnh đã gửi[^\"]*\"children\":\"([^\"]+)/);
+    console.log(`  Render text: ${matchDòng ? matchDòng[0] : 'N/A'}`);
+    console.log(`  Tin bot gửi : ${matchSelf ? matchSelf[1] : 'N/A'}`);
+    console.log(`  Ảnh đã gửi  : ${matchImg ? matchImg[1] : 'N/A'}`);
+  } else {
+    console.log('  Web 2 /messages chưa sẵn sàng');
+  }
 
   // Test POST set_mode to interactive
   console.log('\n--- 5. TEST THAY ĐỔI CHẾ ĐỘ SANG 🟢 TƯƠNG TÁC QUA HTTP POST ---');
