@@ -254,6 +254,24 @@ import { getBotInfo } from "./bot-registry";
 const dbConnections = new Map<string, Database.Database>();
 
 export function getDb(botId = "bot-1"): Database.Database {
+  const home = process.env.HOME || "/home/congtrien125";
+  const port = String(process.env.PORT || process.env.WEB_PORT || "");
+  const isBot2 = port === "3002" || port === "3001" || process.env.BOT_ID === "bot-2" || process.env.WEB_DB_PATH?.includes("bot-2") || botId === "bot-2";
+
+  if (isBot2) {
+    const p = path.resolve(home, "zalo-bot", "data", "bots", "bot-2", "bot.db");
+    if (fs.existsSync(p)) {
+      const existing = dbConnections.get(p);
+      if (existing && existing.open) return existing;
+      const newDb = new Database(p);
+      newDb.pragma("busy_timeout = 5000");
+      newDb.pragma("foreign_keys = ON");
+      ensureWebSchema(newDb);
+      dbConnections.set(p, newDb);
+      return newDb;
+    }
+  }
+
   if (process.env.WEB_DB_PATH?.trim() && fs.existsSync(process.env.WEB_DB_PATH.trim())) {
     const p = process.env.WEB_DB_PATH.trim();
     const existing = dbConnections.get(p);
@@ -270,7 +288,6 @@ export function getDb(botId = "bot-1"): Database.Database {
   const existing = dbConnections.get(targetBotId);
   if (existing && existing.open) return existing;
 
-  const home = process.env.HOME || "/home/congtrien125";
   const botInfo = getBotInfo(targetBotId);
   let targetPath = botInfo?.dbPath;
 

@@ -8,24 +8,32 @@ import { getBotInfo } from "@/lib/bot-registry";
 export const dynamic = "force-dynamic";
 
 function getBotDbPath(): string {
+  const home = process.env.HOME || "/home/congtrien125";
+  const port = String(process.env.PORT || process.env.WEB_PORT || "");
+  const isBot2 = port === "3002" || port === "3001" || process.env.BOT_ID === "bot-2" || process.env.WEB_DB_PATH?.includes("bot-2");
+
+  if (isBot2) {
+    const p = path.resolve(home, "zalo-bot", "data", "bots", "bot-2", "bot.db");
+    if (fs.existsSync(p)) return p;
+  }
+
   if (process.env.WEB_DB_PATH?.trim() && fs.existsSync(process.env.WEB_DB_PATH.trim())) {
     return process.env.WEB_DB_PATH.trim();
   }
-  const possiblePaths = [
-    process.env.SQLITE_DB_PATH,
-    path.resolve(process.cwd(), "data", "bot.db"),
-    path.resolve(process.cwd(), "..", "bot", "data", "bot.db"),
-    path.resolve(process.cwd(), "bot", "data", "bot.db"),
-    path.resolve(process.cwd(), "..", "data", "bot.db"),
-  ].filter(Boolean) as string[];
 
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) return p;
-  }
-  return path.resolve(process.cwd(), "..", "bot", "data", "bot.db");
+  return path.resolve(home, "zalo-bot", "bot", "data", "bot.db");
 }
 
 async function getActiveBotDbPath(overrideBotId?: string): Promise<string> {
+  const home = process.env.HOME || "/home/congtrien125";
+  const port = String(process.env.PORT || process.env.WEB_PORT || "");
+  const isBot2 = port === "3002" || port === "3001" || process.env.BOT_ID === "bot-2" || process.env.WEB_DB_PATH?.includes("bot-2");
+
+  if (isBot2) {
+    const p = path.resolve(home, "zalo-bot", "data", "bots", "bot-2", "bot.db");
+    if (fs.existsSync(p)) return p;
+  }
+
   if (process.env.WEB_DB_PATH?.trim() && fs.existsSync(process.env.WEB_DB_PATH.trim())) {
     return process.env.WEB_DB_PATH.trim();
   }
@@ -40,7 +48,6 @@ async function getActiveBotDbPath(overrideBotId?: string): Promise<string> {
     }
   }
 
-  const home = process.env.HOME || "/home/congtrien125";
   if (botId && botId !== "bot-1") {
     const candidates = [
       path.resolve(home, "zalo-bot", "data", "bots", botId, "bot.db"),
