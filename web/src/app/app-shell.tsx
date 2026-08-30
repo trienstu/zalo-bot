@@ -233,6 +233,14 @@ function AppShellInner({
     return `${baseHref}${baseHref.includes("?") ? "&" : "?"}${queryString}`;
   };
 
+  const buildGroupHref = (groupId: string) => {
+    const bId = getActiveBotId();
+    const qs = new URLSearchParams();
+    qs.set("group", groupId);
+    if (bId && bId !== "bot-1") qs.set("botId", bId);
+    return `${pathname}?${qs.toString()}`;
+  };
+
   // 1. TRANG CÔNG KHAI THUẦN TÚY: Kho Kiến Thức (/hub)
   const isHubPublicPage = pathname === "/hub" || pathname.startsWith("/hub/");
   if (isHubPublicPage) {
@@ -354,7 +362,7 @@ function AppShellInner({
               >
                 <div className="flex items-start justify-between gap-2">
                   <Link
-                    href={`${pathname}?group=${g.id}`}
+                    href={buildGroupHref(g.id)}
                     onClick={() => {
                       if (isMobile) setMobileSidebarOpen(false);
                     }}
