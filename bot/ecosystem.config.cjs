@@ -72,7 +72,7 @@ module.exports = {
     {
       name: "zalo-web-2",
       script: "npm",
-      args: "start -- -H 127.0.0.1 -p 3001",
+      args: "start -- -H 0.0.0.0 -p 3001",
       cwd: path.resolve(__dirname, "../web"),
       autorestart: true,
       restart_delay: 5000,
