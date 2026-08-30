@@ -17,14 +17,11 @@ export interface BotMetadata {
 }
 
 function getAllCandidateRoots(): string[] {
-  const home = process.env.HOME || "/home/congtrien125";
   return [
-    path.resolve(home, "zalo-bot", "data"),
-    path.resolve(home, "zalo-bot", "bot", "data"),
+    path.resolve(process.cwd(), "..", "bot", "data"),
+    path.resolve(process.cwd(), "bot", "data"),
     path.resolve(process.cwd(), "..", "data"),
     path.resolve(process.cwd(), "data"),
-    path.resolve(process.cwd(), "bot", "data"),
-    path.resolve(process.cwd(), "..", "bot", "data"),
   ];
 }
 
