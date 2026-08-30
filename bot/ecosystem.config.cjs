@@ -55,7 +55,7 @@ module.exports = {
     {
       name: "zalo-bot-2",
       script: "dist/index.js",
-      args: "start",
+      args: "start -- --bot=bot-2",
       cwd: __dirname,
       autorestart: true,
       restart_delay: 5000,
@@ -63,6 +63,7 @@ module.exports = {
       time: true,
       env: {
         NODE_ENV: "production",
+        BOT_ID: "bot-2",
         SQLITE_DB_PATH: bot2DbPath,
         SESSION_DIR: bot2SessionDir,
         VIP_LIST_PATH: bot2VipPath,

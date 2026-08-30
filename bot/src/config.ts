@@ -2,16 +2,34 @@ import dotenv from "dotenv";
 import path from "node:path";
 import fs from "node:fs";
 
-// Tự động nạp .env từ mọi vị trí (root repo, bot dir, parent dir)
-const envPaths = [
-  path.resolve(process.cwd(), ".env"),
-  path.resolve(process.cwd(), "bot/.env"),
-  path.resolve(process.cwd(), "../.env"),
-  path.resolve(process.cwd(), "../bot/.env"),
-];
-for (const p of envPaths) {
-  if (fs.existsSync(p)) {
-    dotenv.config({ path: p, override: true });
+// Tự động nạp .env phù hợp theo botId (tránh bot 2 nạp đè session của bot 1)
+const initialBotId = process.env.BOT_ID || process.argv.find((a) => a.startsWith("--bot="))?.split("=")[1]?.trim() || "bot-1";
+
+if (initialBotId && initialBotId !== "bot-1") {
+  const home = process.env.HOME || "/home/congtrien125";
+  const botEnvCandidates = [
+    path.resolve(home, "zalo-bot", "data", "bots", initialBotId, ".env"),
+    path.resolve(home, "zalo-bot", "bot", "data", "bots", initialBotId, ".env"),
+    path.resolve(process.cwd(), "data", "bots", initialBotId, ".env"),
+    path.resolve(process.cwd(), "..", "data", "bots", initialBotId, ".env"),
+  ];
+  for (const p of botEnvCandidates) {
+    if (fs.existsSync(p)) {
+      dotenv.config({ path: p, override: true });
+      break;
+    }
+  }
+} else {
+  const envPaths = [
+    path.resolve(process.cwd(), ".env"),
+    path.resolve(process.cwd(), "bot/.env"),
+    path.resolve(process.cwd(), "../.env"),
+    path.resolve(process.cwd(), "../bot/.env"),
+  ];
+  for (const p of envPaths) {
+    if (fs.existsSync(p)) {
+      dotenv.config({ path: p, override: true });
+    }
   }
 }
 
