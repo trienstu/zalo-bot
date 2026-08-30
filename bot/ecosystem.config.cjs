@@ -71,8 +71,8 @@ module.exports = {
     },
     {
       name: "zalo-web-2",
-      script: "npm",
-      args: "start -- -H 127.0.0.1 -p 3002",
+      script: path.resolve(__dirname, "../web/node_modules/next/dist/bin/next"),
+      args: "start -H 127.0.0.1 -p 3002",
       cwd: path.resolve(__dirname, "../web-2"),
       autorestart: true,
       restart_delay: 5000,
