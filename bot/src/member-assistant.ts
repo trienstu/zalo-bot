@@ -610,21 +610,23 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
-  // Nếu là tin nhắn của chính tài khoản bot (chủ bot test từ app Zalo):
+  // TUYỆT ĐỐI KHÔNG TỰ TRẢ LỜI CHÍNH MÌNH (CHỐNG LẶP BOT-TO-BOT VÀ SELF-REPLY):
+  // Nếu là tin nhắn của chính bot (isSelf), CHỈ xử lý khi bắt đầu bằng lệnh gõ tay rõ ràng (/, !)
+  // Tuyệt đối KHÔNG cho phép tin nhắn của chính bot kích hoạt AI QA hay trả lời lại chính mình.
   if (event.isSelf) {
-    const lowerSelf = rawText.toLowerCase();
-    const isCommand =
-      rawText.startsWith("/") ||
-      rawText.startsWith("!") ||
-      rawText.startsWith("@") ||
-      hasImage ||
-      hasFile ||
-      hasQuote ||
-      lowerSelf.includes("sen chúa") ||
-      lowerSelf.includes("sen chua") ||
-      lowerSelf.startsWith("sen") ||
-      lowerSelf.startsWith("bot");
-    if (!isCommand) return;
+    const isExplicitCommand = rawText.startsWith("/") || rawText.startsWith("!");
+    if (!isExplicitCommand) return;
+  }
+
+  // Nếu tên người gửi là tên Bot (Sen Chúa / Mộc Miên) -> Tuyệt đối bỏ qua
+  const lowerName = (event.displayName || "").toLowerCase();
+  if (
+    lowerName.includes("sen chúa") ||
+    lowerName.includes("sen chua") ||
+    lowerName.includes("mộc miên") ||
+    lowerName.includes("moc mien")
+  ) {
+    return;
   }
 
   const sender = event.sender;
