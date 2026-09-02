@@ -638,9 +638,9 @@ export async function fetchGroupPollVotes(
 // ---- Mutating group calls (co-admin) ----
 
 /**
- * Tách nội dung tin nhắn dài thành các phần nhỏ <= 1400 ký tự để Zalo không báo lỗi 118 (Nội dung quá dài)
+ * Tách nội dung tin nhắn dài thành các phần nhỏ <= 2050 ký tự để Zalo không báo lỗi 118 (Nội dung quá dài)
  */
-function splitIntoZaloChunks(text: string, maxLen = 1400): string[] {
+function splitIntoZaloChunks(text: string, maxLen = 2050): string[] {
   const trimmed = text.trim();
   if (trimmed.length <= maxLen) return [trimmed];
 
@@ -736,7 +736,7 @@ export async function sendGroupText(api: ZaloApi, groupId: string, text: string)
   }
 
   const threadIdStr = String(groupId).trim();
-  const chunks = splitIntoZaloChunks(text, 1400);
+  const chunks = splitIntoZaloChunks(text, 2050);
 
   console.log(`[sendGroupText] 📤 Đang gửi tin vào nhóm [${threadIdStr}] (${chunks.length} phần, tổng ${text.length} ký tự)...`);
 
@@ -795,7 +795,7 @@ export async function sendDirectText(api: ZaloApi, userId: string, text: string)
   }
 
   const targetId = String(userId).trim();
-  const chunks = splitIntoZaloChunks(text, 1400);
+  const chunks = splitIntoZaloChunks(text, 2050);
 
   console.log(`[sendDirectText] 📤 Đang gửi tin nhắn 1:1 đến [${targetId}] (${chunks.length} phần, tổng ${text.length} ký tự)...`);
 
