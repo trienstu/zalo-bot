@@ -803,6 +803,14 @@ export function listLeaderboard(period: LeaderboardPeriod, limit = 50, threadId?
   }
 
   const db = getDb(botId);
+  let exclusionClause = "";
+  if (tableExists("leaderboard_exclusions", botId)) {
+    exclusionClause = `AND m.zalo_user_id NOT IN (
+      SELECT zalo_user_id FROM leaderboard_exclusions 
+      WHERE group_id = '' OR group_id = @targetThreadId OR @targetThreadId = ''
+    )`;
+  }
+
   const rows = db
     .prepare(
       `SELECT
@@ -820,6 +828,9 @@ export function listLeaderboard(period: LeaderboardPeriod, limit = 50, threadId?
          ${threadClause}
          AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
          AND LOWER(m.display_name) NOT LIKE '%sen chua%'
+         AND LOWER(m.display_name) NOT LIKE '%mộc miên%'
+         AND LOWER(m.display_name) NOT LIKE '%moc mien%'
+         ${exclusionClause}
        GROUP BY i.zalo_user_id, m.display_name
        ORDER BY interaction_count DESC, last_interaction DESC, LOWER(m.display_name) ASC
        LIMIT @limit`,

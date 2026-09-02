@@ -521,4 +521,17 @@ CREATE TABLE IF NOT EXISTS blocked_members (
 
 CREATE INDEX IF NOT EXISTS idx_blocked_members_user ON blocked_members(zalo_user_id, group_id);
 
+-- Danh sách thành viên bị ẩn khỏi Bảng xếp hạng / Top (Group hoặc Toàn cục)
+CREATE TABLE IF NOT EXISTS leaderboard_exclusions (
+  zalo_user_id TEXT NOT NULL,
+  group_id     TEXT NOT NULL DEFAULT '',
+  display_name TEXT NOT NULL DEFAULT '',
+  hidden_by    TEXT NOT NULL DEFAULT '',
+  reason       TEXT NOT NULL DEFAULT '',
+  created_at   INTEGER NOT NULL,
+  PRIMARY KEY (zalo_user_id, group_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_leaderboard_exclusions_user ON leaderboard_exclusions(zalo_user_id, group_id);
+
 

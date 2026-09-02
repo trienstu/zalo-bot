@@ -7,6 +7,10 @@ import {
   blockMember,
   unblockMember,
   listBlockedMembers,
+  isMemberHiddenFromLeaderboard,
+  hideMemberFromLeaderboard,
+  unhideMemberFromLeaderboard,
+  listLeaderboardExclusions,
   isUserAdmin,
 } from "./db/index.js";
 import { sendGroupText } from "./zalo/client.js";
@@ -63,6 +67,17 @@ function fmtAgoVi(ts: number | null): string {
  */
 function handleRankCommand(sender: string, displayName: string, threadId: string): string {
   const db = getDb();
+
+  // Nếu thành viên đã được Admin ẩn khỏi bảng xếp hạng
+  if (isMemberHiddenFromLeaderboard(sender, threadId)) {
+    return (
+      `📊 THÔNG TIN TƯƠNG TÁC\n\n` +
+      `👤 Thành viên: ${displayName}\n` +
+      `👑 Tài khoản của bạn đã được miễn tham gia bảng xếp hạng đua top (theo yêu cầu của Quản trị viên) để nhường sân chơi cho anh em trong nhóm nhé!`
+    );
+  }
+
+  // Tự động phân nhánh: nếu đã có bảng group_members thì tính theo nhóm, chưa có thì fallback về members
   let fromTable = "members";
   try {
     const hasGroupMembers = db.prepare(`SELECT 1 FROM group_members WHERE group_id = ? LIMIT 1`).get(threadId);
@@ -89,6 +104,11 @@ function handleRankCommand(sender: string, displayName: string, threadId: string
        WHERE m.is_active = 1
          AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
          AND LOWER(m.display_name) NOT LIKE '%sen chua%'
+         AND LOWER(m.display_name) NOT LIKE '%mộc miên%'
+         AND LOWER(m.display_name) NOT LIKE '%moc mien%'
+         AND m.zalo_user_id NOT IN (
+           SELECT zalo_user_id FROM leaderboard_exclusions WHERE group_id = '' OR group_id = @threadId
+         )
        GROUP BY m.zalo_user_id
        ORDER BY total_points DESC, last_interaction DESC`,
     )
@@ -157,6 +177,11 @@ function handleTopCommand(threadId: string): string {
          AND m.is_active = 1
          AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
          AND LOWER(m.display_name) NOT LIKE '%sen chua%'
+         AND LOWER(m.display_name) NOT LIKE '%mộc miên%'
+         AND LOWER(m.display_name) NOT LIKE '%moc mien%'
+         AND m.zalo_user_id NOT IN (
+           SELECT zalo_user_id FROM leaderboard_exclusions WHERE group_id = '' OR group_id = @threadId
+         )
        GROUP BY m.zalo_user_id, m.display_name
        ORDER BY total_points DESC
        LIMIT 5`,
@@ -405,10 +430,13 @@ function handleHelpCommand(): string {
     `🔹 /link [từ khóa]: Tổng hợp tất cả link/tài liệu/video đã chia sẻ trong nhóm\n` +
     `🔹 /hoi [câu hỏi] hoặc tag @Sen Chúa: Hỏi đáp kiến thức tra cứu từ lịch sử chat của nhóm\n` +
     `🔹 /help: Hiển thị hướng dẫn này\n\n` +
-    `🚫 QUẢN TRỊ VIÊN — CHẶN BOT TRẢ LỜI:\n` +
+    `🚫 QUẢN TRỊ VIÊN — ĐIỀU HÀNH NHÓM:\n` +
     `🔹 /chanbot: Quote tin nhắn người cần chặn rồi gõ /chanbot (hoặc /chanbot [Tên/ID])\n` +
     `🔹 /bochanbot: Quote tin nhắn người cần bỏ chặn rồi gõ /bochanbot\n` +
-    `🔹 /dschan: Xem danh sách thành viên đang bị chặn bot trả lời trong nhóm`
+    `🔹 /dschan: Xem danh sách thành viên đang bị chặn bot trả lời\n` +
+    `🔹 /anrank: Quote tin nhắn người cần ẩn rồi gõ /anrank (hoặc /anrank [Tên/ID]) để không cho hiển thị trên BXH đua top\n` +
+    `🔹 /hienrank: Quote tin nhắn người cần hiện lại BXH rồi gõ /hienrank\n` +
+    `🔹 /dsanrank: Xem danh sách thành viên đang được ẩn khỏi BXH`
   );
 }
 
@@ -506,12 +534,17 @@ async function handleHistoryQA(
          FROM members m
          JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
          WHERE (i.thread_id = @threadId OR i.thread_id = '')
-           AND m.is_active = 1
-           AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
-           AND LOWER(m.display_name) NOT LIKE '%sen chua%'
-         GROUP BY m.zalo_user_id, m.display_name
-         ORDER BY points DESC
-         LIMIT 5`,
+            AND m.is_active = 1
+            AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
+            AND LOWER(m.display_name) NOT LIKE '%sen chua%'
+            AND LOWER(m.display_name) NOT LIKE '%mộc miên%'
+            AND LOWER(m.display_name) NOT LIKE '%moc mien%'
+            AND m.zalo_user_id NOT IN (
+              SELECT zalo_user_id FROM leaderboard_exclusions WHERE group_id = '' OR group_id = @threadId
+            )
+          GROUP BY m.zalo_user_id, m.display_name
+          ORDER BY points DESC
+          LIMIT 5`,
       )
       .all({ threadId }) as any[];
   } catch {}
@@ -1132,6 +1165,184 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       api,
       threadId,
       `📋 DANH SÁCH THÀNH VIÊN BỊ CHẶN TRẢ LỜI (${list.length} người):\n\n${lines.join("\n\n")}\n\n💡 Mẹo: Gõ /bochanbot [ID hoặc quote] để mở lại quyền tương tác.`
+    );
+    return;
+  }
+
+  // 9.4. Lệnh Quản trị viên: /anrank, /goxephang [quote hoặc tên/ID]
+  const isAnRank =
+    lower.startsWith("/anrank") ||
+    lower.startsWith("!anrank") ||
+    lower.startsWith("/goxephang") ||
+    lower.startsWith("!goxephang") ||
+    strippedLower.startsWith("/anrank") ||
+    strippedLower.startsWith("!anrank") ||
+    strippedLower.startsWith("/goxephang") ||
+    strippedLower.startsWith("!goxephang") ||
+    lower.includes("/anrank") ||
+    lower.includes("/goxephang");
+
+  if (isAnRank) {
+    userCooldowns.set(sender, now);
+    const isGroupAdmin = isGroupAdminOrSuperAdmin(threadId, sender);
+    if (!isGroupAdmin) {
+      await sendGroupText(api, threadId, `⛔ Bạn không có quyền sử dụng lệnh này (Chỉ Quản trị viên / Trưởng nhóm mới có quyền ẩn thành viên khỏi BXH).`);
+      return;
+    }
+
+    let targetUserId = event.quote?.senderId?.trim() || "";
+    let targetName = event.quote?.senderName?.trim() || "";
+
+    if (!targetUserId && event.mentions && event.mentions.length > 0) {
+      const firstMention = event.mentions[0];
+      if (firstMention?.uid) {
+        targetUserId = String(firstMention.uid);
+      }
+    }
+
+    let param = rawText.replace(/^\/(?:anrank|!anrank|goxephang|!goxephang)\s*/i, "").trim();
+    if (!param && strippedCmd) {
+      param = strippedCmd.replace(/^\/(?:anrank|!anrank|goxephang|!goxephang)\s*/i, "").trim();
+    }
+    const tagMatch = rawText.match(/@([^\s/!]+)/);
+    if (!param && tagMatch && tagMatch[1]) {
+      param = tagMatch[1].trim();
+    }
+
+    if (!targetUserId && param) {
+      const cleanParam = param.replace(/^@/, "").trim();
+      const found = findMemberInGroup(threadId, cleanParam);
+      if (found) {
+        targetUserId = found.zalo_user_id;
+        targetName = found.display_name;
+      } else if (/^\d+$/.test(cleanParam)) {
+        targetUserId = cleanParam;
+        targetName = cleanParam;
+      }
+    }
+
+    if (!targetUserId) {
+      await sendGroupText(
+        api,
+        threadId,
+        `⚠️ HƯỚNG DẪN ẨN THÀNH VIÊN KHỎI BẢNG XẾP HẠNG:\n\n` +
+        `🔹 Cách 1: Reply (Quote) tin nhắn của người cần ẩn rồi gõ: /anrank\n` +
+        `🔹 Cách 2: Gõ /anrank @Tên_thành_viên hoặc /anrank [User_ID]`
+      );
+      return;
+    }
+
+    hideMemberFromLeaderboard({
+      zaloUserId: targetUserId,
+      groupId: threadId,
+      displayName: targetName || targetUserId,
+      hiddenBy: displayName,
+      reason: "Admin ẩn khỏi bảng xếp hạng",
+    });
+
+    await sendGroupText(
+      api,
+      threadId,
+      `🙈 ĐÃ ẨN KHỎI BẢNG XẾP HẠNG THÀNH CÔNG!\n\n` +
+      `👤 Thành viên: ${targetName || targetUserId}\n` +
+      `📌 Thành viên này sẽ không còn xuất hiện trong /top, bảng xếp hạng Web và các bản vinh danh tóm tắt ngày để nhường sân chơi cho các anh em khác.`
+    );
+    return;
+  }
+
+  // 9.5. Lệnh Quản trị viên: /hienrank, /moxephang [quote hoặc tên/ID]
+  const isHienRank =
+    lower.startsWith("/hienrank") ||
+    lower.startsWith("!hienrank") ||
+    lower.startsWith("/moxephang") ||
+    lower.startsWith("!moxephang") ||
+    strippedLower.startsWith("/hienrank") ||
+    strippedLower.startsWith("!hienrank") ||
+    strippedLower.startsWith("/moxephang") ||
+    strippedLower.startsWith("!moxephang") ||
+    lower.includes("/hienrank") ||
+    lower.includes("/moxephang");
+
+  if (isHienRank) {
+    userCooldowns.set(sender, now);
+    const isGroupAdmin = isGroupAdminOrSuperAdmin(threadId, sender);
+    if (!isGroupAdmin) {
+      await sendGroupText(api, threadId, `⛔ Bạn không có quyền sử dụng lệnh này.`);
+      return;
+    }
+
+    let targetUserId = event.quote?.senderId?.trim() || "";
+    let targetName = event.quote?.senderName?.trim() || "";
+
+    if (!targetUserId && event.mentions && event.mentions.length > 0) {
+      const firstMention = event.mentions[0];
+      if (firstMention?.uid) {
+        targetUserId = String(firstMention.uid);
+      }
+    }
+
+    let param = rawText.replace(/^\/(?:hienrank|!hienrank|moxephang|!moxephang)\s*/i, "").trim();
+    if (!param && strippedCmd) {
+      param = strippedCmd.replace(/^\/(?:hienrank|!hienrank|moxephang|!moxephang)\s*/i, "").trim();
+    }
+    const tagMatch = rawText.match(/@([^\s/!]+)/);
+    if (!param && tagMatch && tagMatch[1]) {
+      param = tagMatch[1].trim();
+    }
+
+    if (!targetUserId && param) {
+      const cleanParam = param.replace(/^@/, "").trim();
+      const found = findMemberInGroup(threadId, cleanParam);
+      if (found) {
+        targetUserId = found.zalo_user_id;
+        targetName = found.display_name;
+      } else if (/^\d+$/.test(cleanParam)) {
+        targetUserId = cleanParam;
+        targetName = cleanParam;
+      }
+    }
+
+    if (!targetUserId) {
+      await sendGroupText(
+        api,
+        threadId,
+        `⚠️ HƯỚNG DẪN HIỆN LẠI BẢNG XẾP HẠNG:\n\n` +
+        `🔹 Cách 1: Reply (Quote) tin nhắn của người cần hiện lại rồi gõ: /hienrank\n` +
+        `🔹 Cách 2: Gõ /hienrank @Tên_thành_viên hoặc /hienrank [User_ID]`
+      );
+      return;
+    }
+
+    const ok = unhideMemberFromLeaderboard(targetUserId, threadId);
+    if (ok) {
+      await sendGroupText(
+        api,
+        threadId,
+        `✅ ĐÃ HIỆN LẠI BẢNG XẾP HẠNG THÀNH CÔNG!\n\n👤 Thành viên: ${targetName || targetUserId} giờ đây sẽ được tính điểm và xếp hạng bình thường trên BXH.`
+      );
+    } else {
+      await sendGroupText(api, threadId, `ℹ️ Thành viên này hiện không nằm trong danh sách ẩn.`);
+    }
+    return;
+  }
+
+  // 9.6. Lệnh Quản trị viên: /dsanrank (Xem danh sách đang bị ẩn)
+  if (lower === "/dsanrank" || lower === "!dsanrank" || lower === "/dsan" || lower === "!dsan") {
+    userCooldowns.set(sender, now);
+    const list = listLeaderboardExclusions(threadId);
+    if (list.length === 0) {
+      await sendGroupText(api, threadId, `📋 DANH SÁCH ẨN KHỎI BẢNG XẾP HẠNG\n\nHiện không có thành viên nào bị ẩn khỏi BXH trong nhóm này.`);
+      return;
+    }
+    const lines = list.map((m, idx) => {
+      const d = new Date(m.createdAt + 7 * 3600 * 1000);
+      const dateStr = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")} ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+      return `${idx + 1}. 👤 ${m.displayName || m.zaloUserId} (ID: ${m.zaloUserId})\n   🕒 Ẩn lúc: ${dateStr} bởi ${m.hiddenBy}`;
+    });
+    await sendGroupText(
+      api,
+      threadId,
+      `📋 DANH SÁCH THÀNH VIÊN BỊ ẨN KHỎI BXH (${list.length} người):\n\n${lines.join("\n\n")}\n\n💡 Mẹo: Gõ /hienrank [ID hoặc quote] để đưa họ trở lại bảng xếp hạng.`
     );
     return;
   }

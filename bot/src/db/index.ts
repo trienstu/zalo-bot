@@ -112,6 +112,17 @@ function runColumnMigrations(database: Database.Database): void {
       PRIMARY KEY (zalo_user_id, group_id)
     );
     CREATE INDEX IF NOT EXISTS idx_blocked_members_user ON blocked_members(zalo_user_id, group_id);
+
+    CREATE TABLE IF NOT EXISTS leaderboard_exclusions (
+      zalo_user_id TEXT NOT NULL,
+      group_id     TEXT NOT NULL DEFAULT '',
+      display_name TEXT NOT NULL DEFAULT '',
+      hidden_by    TEXT NOT NULL DEFAULT '',
+      reason       TEXT NOT NULL DEFAULT '',
+      created_at   INTEGER NOT NULL,
+      PRIMARY KEY (zalo_user_id, group_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_leaderboard_exclusions_user ON leaderboard_exclusions(zalo_user_id, group_id);
   `);
 }
 
@@ -2380,6 +2391,125 @@ export function listBlockedMembers(groupId?: string): BlockedMemberRow[] {
     return rows as BlockedMemberRow[];
   } catch (e) {
     console.error("[db] listBlockedMembers error:", e);
+    return [];
+  }
+}
+
+// ---- QUẢN LÝ ẨN KHỎI BẢNG XẾP HẠNG (LEADERBOARD EXCLUSIONS) ----
+
+export interface LeaderboardExclusionRow {
+  zaloUserId: string;
+  groupId: string;
+  displayName: string;
+  hiddenBy: string;
+  reason: string;
+  createdAt: number;
+}
+
+/**
+ * Kiểm tra xem thành viên có đang bị ẩn khỏi bảng xếp hạng không.
+ */
+export function isMemberHiddenFromLeaderboard(zaloUserId: string, groupId?: string): boolean {
+  try {
+    const db = getDb();
+    const row = db
+      .prepare(
+        `SELECT 1 FROM leaderboard_exclusions 
+         WHERE zalo_user_id = ? AND (group_id = '' OR group_id = ? OR ? IS NULL)
+         LIMIT 1`,
+      )
+      .get(zaloUserId, groupId || "", groupId || null);
+    return Boolean(row);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Ẩn một thành viên khỏi bảng xếp hạng: không tính rank, không hiển thị trong /top, web leaderboard, daily summary.
+ */
+export function hideMemberFromLeaderboard(input: {
+  zaloUserId: string;
+  groupId?: string;
+  displayName?: string;
+  hiddenBy?: string;
+  reason?: string;
+}): void {
+  try {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO leaderboard_exclusions (zalo_user_id, group_id, display_name, hidden_by, reason, created_at)
+       VALUES (@zaloUserId, @groupId, @displayName, @hiddenBy, @reason, @createdAt)
+       ON CONFLICT(zalo_user_id, group_id) DO UPDATE SET
+         display_name = @displayName,
+         hidden_by = @hiddenBy,
+         reason = @reason,
+         created_at = @createdAt`,
+    ).run({
+      zaloUserId: input.zaloUserId,
+      groupId: input.groupId || "",
+      displayName: input.displayName || "",
+      hiddenBy: input.hiddenBy || "Admin",
+      reason: input.reason || "Admin yêu cầu ẩn khỏi bảng xếp hạng",
+      createdAt: Date.now(),
+    });
+    console.log(`[db] 🙈 Đã ẩn thành viên khỏi BXH: ${input.displayName || input.zaloUserId} (nhóm: ${input.groupId || 'Toàn cục'})`);
+  } catch (e) {
+    console.error("[db] hideMemberFromLeaderboard error:", e);
+  }
+}
+
+/**
+ * Cho phép thành viên xuất hiện lại trên bảng xếp hạng.
+ */
+export function unhideMemberFromLeaderboard(zaloUserId: string, groupId?: string): boolean {
+  try {
+    const db = getDb();
+    let res;
+    if (groupId) {
+      res = db
+        .prepare(`DELETE FROM leaderboard_exclusions WHERE zalo_user_id = ? AND (group_id = ? OR group_id = '')`)
+        .run(zaloUserId, groupId);
+    } else {
+      res = db.prepare(`DELETE FROM leaderboard_exclusions WHERE zalo_user_id = ?`).run(zaloUserId);
+    }
+    return res.changes > 0;
+  } catch (e) {
+    console.error("[db] unhideMemberFromLeaderboard error:", e);
+    return false;
+  }
+}
+
+/**
+ * Liệt kê danh sách thành viên đang bị ẩn khỏi bảng xếp hạng.
+ */
+export function listLeaderboardExclusions(groupId?: string): LeaderboardExclusionRow[] {
+  try {
+    const db = getDb();
+    let rows: any[];
+    if (groupId) {
+      rows = db
+        .prepare(
+          `SELECT zalo_user_id as zaloUserId, group_id as groupId, display_name as displayName,
+                  hidden_by as hiddenBy, reason, created_at as createdAt
+           FROM leaderboard_exclusions
+           WHERE group_id = '' OR group_id = ?
+           ORDER BY created_at DESC`,
+        )
+        .all(groupId);
+    } else {
+      rows = db
+        .prepare(
+          `SELECT zalo_user_id as zaloUserId, group_id as groupId, display_name as displayName,
+                  hidden_by as hiddenBy, reason, created_at as createdAt
+           FROM leaderboard_exclusions
+           ORDER BY created_at DESC`,
+        )
+        .all();
+    }
+    return rows as LeaderboardExclusionRow[];
+  } catch (e) {
+    console.error("[db] listLeaderboardExclusions error:", e);
     return [];
   }
 }
