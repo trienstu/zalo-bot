@@ -218,8 +218,8 @@ export interface FoundResource {
  * Hỗ trợ lọc đa từ khóa thông minh (ví dụ: "github", "zalo", "bot").
  */
 export function searchRelevantLinksAndResources(
-  threadId: string,
-  query: string,
+  _threadId?: string,
+  query: string = "",
   limit = 20,
 ): FoundResource[] {
   const db = getDb();
@@ -232,13 +232,12 @@ export function searchRelevantLinksAndResources(
       .prepare(
         `SELECT display_name, text, ts
          FROM group_messages
-         WHERE (thread_id = ? OR thread_id = '')
-           AND deleted_at IS NULL
+         WHERE deleted_at IS NULL
            AND (text LIKE '%http://%' OR text LIKE '%https://%')
          ORDER BY ts DESC
-         LIMIT 500`,
+         LIMIT 1000`,
       )
-      .all(threadId) as { display_name: string; text: string; ts: number }[];
+      .all() as { display_name: string; text: string; ts: number }[];
 
     for (const r of rows) {
       const matches = r.text.match(urlRegex);
@@ -265,11 +264,10 @@ export function searchRelevantLinksAndResources(
       .prepare(
         `SELECT title, summary, content_text, file_url, sender_name, created_at
          FROM group_knowledge
-         WHERE (thread_id = ? OR thread_id = '')
          ORDER BY created_at DESC
          LIMIT 100`,
       )
-      .all(threadId) as any[];
+      .all() as any[];
 
     for (const k of knowledges) {
       const rawText = `${k.title || ""} ${k.summary || ""} ${k.content_text || ""} ${k.file_url || ""}`;
@@ -289,6 +287,53 @@ export function searchRelevantLinksAndResources(
     }
   } catch (err) {
     console.warn("[searchRelevantLinks] Lỗi quét group_knowledge:", err);
+  }
+
+  // 3. Quét toàn bộ Kho Kiến Thức & Tóm tắt lịch sử (/hub - daily_summaries) của tất cả các ngày trước
+  try {
+    const summaries = db
+      .prepare(
+        `SELECT day_label, summary_text, created_at
+         FROM daily_summaries
+         ORDER BY day_date DESC`,
+      )
+      .all() as any[];
+
+    for (const s of summaries) {
+      const summaryText = s.summary_text || "";
+      const matches = summaryText.match(urlRegex);
+      if (!matches) continue;
+
+      const lines = summaryText.split("\n");
+      for (const line of lines) {
+        const lineMatches = line.match(urlRegex);
+        if (!lineMatches) continue;
+        for (const u of lineMatches) {
+          const cleanUrl = u.replace(/[.,;!?)]+$/, "");
+          if (allLinks.some((l) => l.url === cleanUrl)) continue;
+
+          const cleanLine = line
+            .replace(urlRegex, "")
+            .replace(/^[-*•\s\d.:]+/, "")
+            .trim();
+
+          let sender = `Kho Hub (ngày ${s.day_label || "trước"})`;
+          const senderMatch = cleanLine.match(/(?:do|bởi|Người gửi:?)\s+([A-Za-z0-9_\sÀ-ỹ]+?)(?:\s+chia sẻ|\s*$|[.,;-])/i);
+          if (senderMatch && senderMatch[1]) {
+            sender = senderMatch[1].trim();
+          }
+
+          allLinks.push({
+            url: cleanUrl,
+            sender,
+            context: cleanLine.slice(0, 180) || "Tài nguyên tổng hợp từ Kho Hub",
+            ts: Number(s.created_at) || Date.now(),
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("[searchRelevantLinks] Lỗi quét daily_summaries:", err);
   }
 
   // 3. Tách từ khóa tìm kiếm (loại trừ từ dừng tiếng Việt)
