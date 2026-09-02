@@ -170,72 +170,158 @@ function handleTopCommand(threadId: string): string {
   );
 }
 
+export interface FoundResource {
+  url: string;
+  sender: string;
+  context: string;
+  ts: number;
+}
+
 /**
- * Tổng hợp toàn bộ link & tài liệu được chia sẻ trong nhóm.
+ * Tra cứu toàn diện danh sách đường link & tài nguyên trong lịch sử nhóm (cả tin nhắn lẫn kho tri thức).
+ * Hỗ trợ lọc đa từ khóa thông minh (ví dụ: "github", "zalo", "bot").
  */
-function handleLinksCommand(threadId: string, keywordFilter?: string): string {
+export function searchRelevantLinksAndResources(
+  threadId: string,
+  query: string,
+  limit = 20,
+): FoundResource[] {
   const db = getDb();
-  const rows = db
-    .prepare(
-      `SELECT display_name, text, ts
-       FROM group_messages
-       WHERE (thread_id = ? OR thread_id = '')
-         AND deleted_at IS NULL
-         AND (text LIKE '%http://%' OR text LIKE '%https://%')
-       ORDER BY ts DESC
-       LIMIT 60`,
-    )
-    .all(threadId) as { display_name: string; text: string; ts: number }[];
-
+  const allLinks: FoundResource[] = [];
   const urlRegex = /(https?:\/\/[^\s]+)/gi;
-  const links: { url: string; sender: string; context: string; ts: number }[] = [];
 
-  for (const r of rows) {
-    const matches = r.text.match(urlRegex);
-    if (matches) {
+  // 1. Quét lịch sử tin nhắn chứa link (tối đa 500 tin nhắn gần nhất có chứa link)
+  try {
+    const rows = db
+      .prepare(
+        `SELECT display_name, text, ts
+         FROM group_messages
+         WHERE (thread_id = ? OR thread_id = '')
+           AND deleted_at IS NULL
+           AND (text LIKE '%http://%' OR text LIKE '%https://%')
+         ORDER BY ts DESC
+         LIMIT 500`,
+      )
+      .all(threadId) as { display_name: string; text: string; ts: number }[];
+
+    for (const r of rows) {
+      const matches = r.text.match(urlRegex);
+      if (!matches) continue;
       for (const u of matches) {
         const cleanUrl = u.replace(/[.,;!?)]+$/, "");
-        if (!links.some((l) => l.url === cleanUrl)) {
-          const cleanContext = r.text.replace(urlRegex, "").replace(/\s+/g, " ").trim();
-          links.push({
+        if (allLinks.some((l) => l.url === cleanUrl)) continue;
+        const cleanContext = r.text.replace(urlRegex, "").replace(/\s+/g, " ").trim();
+        allLinks.push({
+          url: cleanUrl,
+          sender: r.display_name || "Thành viên",
+          context: cleanContext.slice(0, 180) || "Chia sẻ đường link",
+          ts: r.ts,
+        });
+      }
+    }
+  } catch (err) {
+    console.warn("[searchRelevantLinks] Lỗi quét group_messages:", err);
+  }
+
+  // 2. Quét thêm từ Kho tri thức nhóm (group_knowledge) nếu có
+  try {
+    const knowledges = db
+      .prepare(
+        `SELECT title, summary, content_text, file_url, sender_name, created_at
+         FROM group_knowledge
+         WHERE (thread_id = ? OR thread_id = '')
+         ORDER BY created_at DESC
+         LIMIT 100`,
+      )
+      .all(threadId) as any[];
+
+    for (const k of knowledges) {
+      const rawText = `${k.title || ""} ${k.summary || ""} ${k.content_text || ""} ${k.file_url || ""}`;
+      const matches = rawText.match(urlRegex);
+      if (matches) {
+        for (const u of matches) {
+          const cleanUrl = u.replace(/[.,;!?)]+$/, "");
+          if (allLinks.some((l) => l.url === cleanUrl)) continue;
+          allLinks.push({
             url: cleanUrl,
-            sender: r.display_name || "Thành viên",
-            context: cleanContext.slice(0, 120) || "Chia sẻ đường link",
-            ts: r.ts,
+            sender: k.sender_name || "Kho Tri Thức",
+            context: (k.title || k.summary || "Tài liệu lưu trữ").slice(0, 180),
+            ts: Number(k.created_at) || Date.now(),
           });
         }
       }
     }
+  } catch (err) {
+    console.warn("[searchRelevantLinks] Lỗi quét group_knowledge:", err);
   }
 
-  let filtered = links;
-  if (keywordFilter) {
-    const k = keywordFilter.toLowerCase();
-    filtered = links.filter(
-      (l) =>
-        l.url.toLowerCase().includes(k) ||
-        l.context.toLowerCase().includes(k) ||
-        l.sender.toLowerCase().includes(k),
-    );
+  // 3. Tách từ khóa tìm kiếm (loại trừ từ dừng tiếng Việt)
+  const stopWords = new Set([
+    "sen", "chúa", "chua", "mộc", "miên", "moc", "mien", "bot",
+    "liệt", "kê", "liet", "ke", "toàn", "bộ", "toan", "bo", "danh", "sách", "sach",
+    "link", "đường", "duong", "dẫn", "dan", "có", "co", "liên", "quan", "lien",
+    "tới", "toi", "đến", "den", "từ", "tu", "trước", "truoc", "giờ", "gio",
+    "trong", "tài", "nguyên", "tai", "nguyen", "nhóm", "nhom", "giúp", "giup",
+    "mình", "minh", "với", "voi", "nhé", "nhe", "ạ", "ơi", "oi", "hỏi", "cho", "em"
+  ]);
+
+  const rawWords = query
+    .toLowerCase()
+    .replace(/[.,;!?/\\@#$%^&*()_+={}\[\]|~`"':<>]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 2 && !stopWords.has(w));
+
+  const keywords = Array.from(new Set(rawWords));
+  if (/github|repo/i.test(query) && !keywords.includes("github")) keywords.push("github");
+  if (/zalo/i.test(query) && !keywords.includes("zalo")) keywords.push("zalo");
+
+  if (keywords.length === 0) {
+    return allLinks.slice(0, limit);
   }
 
-  if (filtered.length === 0) {
-    if (keywordFilter) {
-      return `🔗 TỔNG HỢP LINK CHIA SẺ\n\nKhông tìm thấy link nào khớp với từ khóa "${keywordFilter}" trong lịch sử chat gần đây của nhóm.`;
+  // 4. Chấm điểm độ khớp: URL hoặc Ngữ cảnh chứa từ khóa
+  const scored = allLinks.map((item) => {
+    const textToMatch = `${item.url.toLowerCase()} ${item.context.toLowerCase()}`;
+    let matchCount = 0;
+    for (const kw of keywords) {
+      if (textToMatch.includes(kw)) {
+        matchCount++;
+      }
     }
-    return `🔗 TỔNG HỢP LINK CHIA SẺ\n\nChưa có link hoặc tài liệu nào được chia sẻ trong lịch sử chat gần đây của nhóm.`;
+    return { item, matchCount };
+  });
+
+  const matched = scored
+    .filter((s) => s.matchCount > 0)
+    .sort((a, b) => b.matchCount - a.matchCount || b.item.ts - a.item.ts)
+    .map((s) => s.item);
+
+  return matched.slice(0, limit);
+}
+
+/**
+ * Trích xuất danh sách link/tài liệu được chia sẻ gần nhất trong nhóm theo lệnh /link [từ khóa]
+ */
+function handleLinksCommand(threadId: string, keywordFilter?: string): string {
+  const links = searchRelevantLinksAndResources(threadId, keywordFilter || "", 15);
+
+  if (links.length === 0) {
+    if (keywordFilter) {
+      return `🔗 TỔNG HỢP LINK CHIA SẺ\n\nKhông tìm thấy link nào khớp với từ khóa "${keywordFilter}" trong lịch sử nhóm.`;
+    }
+    return `🔗 TỔNG HỢP LINK CHIA SẺ\n\nChưa có link hoặc tài liệu nào được chia sẻ trong lịch sử nhóm.`;
   }
 
-  const items = filtered.slice(0, 15).map((l, idx) => {
+  const items = links.map((l, idx) => {
     const d = new Date(l.ts + 7 * 3600 * 1000);
     const timeStr = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")} ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
     return `${idx + 1}. ${l.url}\n   👤 ${l.sender} (${timeStr})\n   📝 ${l.context}`;
   });
 
   return (
-    `🔗 TỔNG HỢP LINK & TÀI LIỆU TRONG NHÓM (${filtered.length} link gần nhất)\n\n` +
+    `🔗 TỔNG HỢP LINK & TÀI LIỆU TRONG NHÓM (${links.length} link tìm thấy)\n\n` +
     items.join("\n\n") +
-    `\n\n💡 Mẹo: Gõ /link [từ khóa] để lọc link theo chủ đề!`
+    `\n\n💡 Mẹo: Bạn có thể gõ /link [từ khóa] hoặc hỏi tự nhiên "@Sen Chúa tìm link..."!`
   );
 }
 
@@ -346,6 +432,17 @@ async function handleHistoryQA(
   try {
     memorizedDocs = searchGroupKnowledge(threadId, question, 5);
   } catch {}
+
+  // 2.5. Tra cứu toàn diện kho link / repo / tài nguyên nếu câu hỏi có ý định tìm kiếm
+  const isResourceQuery = /link|repo|github|tài liệu|tai lieu|chia sẻ|chia se|dự án|du an|mã nguồn|ma nguon|source/i.test(question);
+  let relevantLinks: FoundResource[] = [];
+  if (isResourceQuery) {
+    try {
+      relevantLinks = searchRelevantLinksAndResources(threadId, question, 20);
+    } catch (e) {
+      console.warn("[handleGeminiGroupQA] Lỗi searchRelevantLinksAndResources:", e);
+    }
+  }
 
   // 3. Lấy danh sách tin nhắn gần nhất trong nhóm để tạo ngữ cảnh
   let relevantMessages: { display_name: string; text: string; ts: number; is_self: number }[] = [];
@@ -469,6 +566,22 @@ async function handleHistoryQA(
     );
   }
 
+  if (relevantLinks && relevantLinks.length > 0) {
+    contextLines.push("=== KHO TÀI LIỆU & LINK LIÊN QUAN TRONG LỊCH SỬ NHÓM KHỚP VỚI CÂU HỎI ===");
+    relevantLinks.forEach((l, idx) => {
+      const d = new Date(l.ts + 7 * 3600 * 1000);
+      const timeStr = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
+      contextLines.push(`${idx + 1}. URL: ${l.url}\n   Người chia sẻ: ${l.sender} (${timeStr})\n   Ngữ cảnh/lời bình đi kèm: ${l.context}`);
+    });
+    contextLines.push(
+      "CHỈ DẪN QUAN TRỌNG: Thành viên đang yêu cầu tìm kiếm/liệt kê đường link hoặc repo. Bạn HÃY SỬ DỤNG TRỰC TIẾP danh sách link ở trên để tổng hợp, trình bày đẹp mắt từng link (kèm ai là người chia sẻ, ngày nào, tóm tắt nội dung/lời bình). Giữ nguyên link URL đầy đủ, tuyệt đối không bịa link ảo!"
+    );
+  } else if (isResourceQuery) {
+    contextLines.push(
+      "=== KẾT QUẢ TÌM KIẾM LINK TRONG LỊCH SỬ NHÓM ===\nHiện tại hệ thống đã quét toàn bộ lịch sử tin nhắn và kho tri thức nhưng chưa tìm thấy link nào khớp với từ khóa của thành viên. Hãy thông báo lịch sự rằng nhóm chưa từng chia sẻ link phù hợp."
+    );
+  }
+
   if (pastSummaries && pastSummaries.length > 0) {
     contextLines.push("=== TÓM TẮT CÁC NGÀY TRƯỚC ===");
     for (const s of pastSummaries) {
@@ -544,9 +657,10 @@ async function handleHistoryQA(
     `NHIỆM VỤ CHUNG:\n` +
     `1. Nếu có FILE TÀI LIỆU (PDF, Word, Excel, Code, TXT, Âm thanh, Hình ảnh) đính kèm: ĐỌC KỸ TOÀN BỘ NỘI DUNG, trích xuất dữ liệu, dịch thuật, phân tích chuyên sâu hoặc tóm tắt đầy đủ.\n` +
     `2. Nếu người dùng hỏi về kiến thức/tài liệu cũ đã từng gửi trong nhóm: Tra cứu từ 'KHO TRI THỨC & BỘ NHỚ TÀI LIỆU ĐÃ LƯU' để trả lời chính xác.\n` +
-    `3. Nếu có NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): Hiểu rằng người dùng đang hỏi hoặc bình luận về chính nội dung được trích dẫn đó.\n` +
-    `4. Luôn trả lời chuẩn theo phong cách cá tính được quy định ở trên.\n` +
-    `5. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (hãy dùng dấu gạch đầu dòng, viết hoa hoặc icon để làm nổi bật).`;
+    `3. Nếu câu hỏi yêu cầu tìm kiếm link/repo/tài nguyên: Dựa vào 'KHO TÀI LIỆU & LINK LIÊN QUAN' được cung cấp để liệt kê đầy đủ link và lời bình thực tế, tuyệt đối không tự bịa link.\n` +
+    `4. Nếu có NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): Hiểu rằng người dùng đang hỏi hoặc bình luận về chính nội dung được trích dẫn đó.\n` +
+    `5. Luôn trả lời chuẩn theo phong cách cá tính được quy định ở trên.\n` +
+    `6. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (hãy dùng dấu gạch đầu dòng, viết hoa hoặc icon để làm nổi bật).`;
 
   const userPrompt =
     `${quotePromptSection}\n${fileContentSection}\n` +
