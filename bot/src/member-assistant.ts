@@ -837,7 +837,8 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
 
   if (!rawText && !hasImage && !hasFile) return;
 
-  // TUYỆT ĐỐI BỎ QUA các tin nhắn thông báo tự động / báo thức / nhắc hẹn của bot để tránh lặp vô tận (Bot-to-Bot Loop)
+  // 1. TUYỆT ĐỐI BỎ QUA các tin nhắn do chính Bot sinh ra (Chống Bot-to-Bot Loop & Self-Reply):
+  // Tất cả tin nhắn do bot gửi ra đều có icon 🤖 hoặc các tiền tố/mẫu định dạng bên dưới.
   if (
     rawText.startsWith("🤖") ||
     rawText.startsWith("⏰") ||
@@ -847,6 +848,14 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     rawText.startsWith("📊") ||
     rawText.startsWith("🏆") ||
     rawText.startsWith("📋") ||
+    rawText.startsWith("🙈") ||
+    rawText.startsWith("⛔") ||
+    rawText.startsWith("ℹ️") ||
+    rawText.startsWith("✅") ||
+    rawText.startsWith("⚠️") ||
+    rawText.includes("Sen Chúa trả lời") ||
+    rawText.includes("Mộc Miên trả lời") ||
+    rawText.includes("trả lời @") ||
     rawText.includes("[BÁO THỨC") ||
     rawText.includes("LỊCH HẸN THÀNH CÔNG") ||
     rawText.includes("[Mã #")
@@ -854,23 +863,26 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
-  // TUYỆT ĐỐI KHÔNG TỰ TRẢ LỜI CHÍNH MÌNH (CHỐNG LẶP BOT-TO-BOT VÀ SELF-REPLY):
-  // Nếu là tin nhắn của chính bot (isSelf), CHỈ xử lý khi bắt đầu bằng lệnh gõ tay rõ ràng (/, !)
-  // Tuyệt đối KHÔNG cho phép tin nhắn của chính bot kích hoạt AI QA hay trả lời lại chính mình.
+  // 2. Nếu là tin nhắn từ chính tài khoản bot (isSelf):
+  // Chỉ bỏ qua nếu là tin nhắn chat vu vơ không có ý định gọi bot.
+  // Nếu chủ bot gõ lệnh (/, !) HOẶC gọi đích danh bot ("sen chúa", "mộc miên", "bot", tag, quote, file, ảnh):
+  // Cho phép bot xử lý và phản hồi bình thường!
   if (event.isSelf) {
-    const isExplicitCommand = rawText.startsWith("/") || rawText.startsWith("!");
-    if (!isExplicitCommand) return;
-  }
-
-  // Nếu tên người gửi là tên Bot (Sen Chúa / Mộc Miên) -> Tuyệt đối bỏ qua
-  const lowerName = (event.displayName || "").toLowerCase();
-  if (
-    lowerName.includes("sen chúa") ||
-    lowerName.includes("sen chua") ||
-    lowerName.includes("mộc miên") ||
-    lowerName.includes("moc mien")
-  ) {
-    return;
+    const lowerSelf = rawText.toLowerCase();
+    const isExplicitIntent =
+      rawText.startsWith("/") ||
+      rawText.startsWith("!") ||
+      rawText.startsWith("@") ||
+      hasImage ||
+      hasFile ||
+      hasQuote ||
+      lowerSelf.includes("sen chúa") ||
+      lowerSelf.includes("sen chua") ||
+      lowerSelf.includes("mộc miên") ||
+      lowerSelf.includes("moc mien") ||
+      lowerSelf.startsWith("sen") ||
+      lowerSelf.startsWith("bot");
+    if (!isExplicitIntent) return;
   }
 
   const sender = event.sender;

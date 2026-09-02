@@ -2292,6 +2292,7 @@ export interface BlockedMemberRow {
  */
 export function isMemberBlocked(zaloUserId: string, groupId?: string): boolean {
   try {
+    if (isUserAdmin(zaloUserId)) return false;
     const db = getDb();
     const row = db
       .prepare(
