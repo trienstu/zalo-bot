@@ -866,6 +866,7 @@ export async function runListener(): Promise<void> {
         // Khi ở chế độ 🟡 'silent' (Tàu ngầm ẩn), bot tuyệt đối im lặng không trả lời lệnh
         const currentGroupMode = getGroupMode(threadId);
         if (currentGroupMode === "interactive") {
+          const mentions = Array.isArray(payload?.data?.mentions) ? payload.data.mentions : [];
           void handleMemberInteraction(api, {
             threadId,
             sender,
@@ -876,6 +877,7 @@ export async function runListener(): Promise<void> {
             mediaType: media?.type,
             fileAttachment,
             quote,
+            mentions,
           }).catch((e) => console.warn(`[member-assistant] lỗi: ${String(e)}`));
         }
       }

@@ -26,6 +26,7 @@ export interface MemberMessageEvent {
   isSelf?: boolean;
   mediaUrl?: string | null;
   mediaType?: string | null;
+  mentions?: { uid: string; pos?: number; len?: number }[];
   fileAttachment?: {
     name: string;
     url: string;
@@ -956,7 +957,17 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   }
 
   // 9.1. Lệnh Quản trị viên: /chanbot [quote hoặc tên/ID]
-  if (lower === "/chanbot" || lower.startsWith("/chanbot ") || lower === "!chanbot" || lower.startsWith("!chanbot ")) {
+  // 9.1. Lệnh Quản trị viên: /chanbot [quote hoặc tên/ID]
+  const strippedCmd = rawText.replace(/^@[^\s]+\s*/, "").trim();
+  const strippedLower = strippedCmd.toLowerCase();
+  const isChanBot =
+    lower.startsWith("/chanbot") ||
+    lower.startsWith("!chanbot") ||
+    strippedLower.startsWith("/chanbot") ||
+    strippedLower.startsWith("!chanbot") ||
+    lower.includes("/chanbot");
+
+  if (isChanBot) {
     userCooldowns.set(sender, now);
     const isGroupAdmin = isGroupAdminOrSuperAdmin(threadId, sender);
     if (!isGroupAdmin) {
@@ -967,15 +978,34 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     let targetUserId = event.quote?.senderId?.trim() || "";
     let targetName = event.quote?.senderName?.trim() || "";
 
-    const param = rawText.replace(/^\/(?:chanbot|!chanbot)\s*/i, "").trim();
+    // Nếu không có quote senderId, kiểm tra nếu có tag mention trong payload
+    if (!targetUserId && event.mentions && event.mentions.length > 0) {
+      const firstMention = event.mentions[0];
+      if (firstMention?.uid) {
+        targetUserId = String(firstMention.uid);
+      }
+    }
+
+    // Tham số sau /chanbot
+    let param = rawText.replace(/^\/(?:chanbot|!chanbot)\s*/i, "").trim();
+    if (!param && strippedCmd) {
+      param = strippedCmd.replace(/^\/(?:chanbot|!chanbot)\s*/i, "").trim();
+    }
+    // Nếu trong rawText có @Tên (ví dụ "@Kevin /chanbot" hoặc "/chanbot @Kevin")
+    const tagMatch = rawText.match(/@([^\s/!]+)/);
+    if (!param && tagMatch && tagMatch[1]) {
+      param = tagMatch[1].trim();
+    }
+
     if (!targetUserId && param) {
-      const found = findMemberInGroup(threadId, param);
+      const cleanParam = param.replace(/^@/, "").trim();
+      const found = findMemberInGroup(threadId, cleanParam);
       if (found) {
         targetUserId = found.zalo_user_id;
         targetName = found.display_name;
-      } else if (/^\d+$/.test(param)) {
-        targetUserId = param;
-        targetName = param;
+      } else if (/^\d+$/.test(cleanParam)) {
+        targetUserId = cleanParam;
+        targetName = cleanParam;
       }
     }
 
@@ -985,7 +1015,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         threadId,
         `⚠️ HƯỚNG DẪN CHẶN BOT TRẢ LỜI:\n\n` +
         `🔹 Cách 1: Reply (Quote) tin nhắn của thành viên muốn chặn rồi gõ: /chanbot\n` +
-        `🔹 Cách 2: Gõ /chanbot [Tên_thành_viên hoặc User_ID]`
+        `🔹 Cách 2: Gõ /chanbot @Tên_thành_viên hoặc /chanbot [User_ID]`
       );
       return;
     }
@@ -1009,16 +1039,20 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   }
 
   // 9.2. Lệnh Quản trị viên: /bochanbot [quote hoặc tên/ID]
-  if (
-    lower === "/bochanbot" ||
-    lower.startsWith("/bochanbot ") ||
-    lower === "!bochanbot" ||
-    lower.startsWith("!bochanbot ") ||
-    lower === "/gohanbot" ||
-    lower.startsWith("/gohanbot ") ||
-    lower === "/mochanbot" ||
-    lower.startsWith("/mochanbot ")
-  ) {
+  const isBoChanBot =
+    lower.startsWith("/bochanbot") ||
+    lower.startsWith("!bochanbot") ||
+    lower.startsWith("/gohanbot") ||
+    lower.startsWith("/mochanbot") ||
+    strippedLower.startsWith("/bochanbot") ||
+    strippedLower.startsWith("!bochanbot") ||
+    strippedLower.startsWith("/gohanbot") ||
+    strippedLower.startsWith("/mochanbot") ||
+    lower.includes("/bochanbot") ||
+    lower.includes("/gohanbot") ||
+    lower.includes("/mochanbot");
+
+  if (isBoChanBot) {
     userCooldowns.set(sender, now);
     const isGroupAdmin = isGroupAdminOrSuperAdmin(threadId, sender);
     if (!isGroupAdmin) {
@@ -1029,15 +1063,31 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     let targetUserId = event.quote?.senderId?.trim() || "";
     let targetName = event.quote?.senderName?.trim() || "";
 
-    const param = rawText.replace(/^\/(?:bochanbot|!bochanbot|gohanbot|mochanbot)\s*/i, "").trim();
+    if (!targetUserId && event.mentions && event.mentions.length > 0) {
+      const firstMention = event.mentions[0];
+      if (firstMention?.uid) {
+        targetUserId = String(firstMention.uid);
+      }
+    }
+
+    let param = rawText.replace(/^\/(?:bochanbot|!bochanbot|gohanbot|mochanbot)\s*/i, "").trim();
+    if (!param && strippedCmd) {
+      param = strippedCmd.replace(/^\/(?:bochanbot|!bochanbot|gohanbot|mochanbot)\s*/i, "").trim();
+    }
+    const tagMatch = rawText.match(/@([^\s/!]+)/);
+    if (!param && tagMatch && tagMatch[1]) {
+      param = tagMatch[1].trim();
+    }
+
     if (!targetUserId && param) {
-      const found = findMemberInGroup(threadId, param);
+      const cleanParam = param.replace(/^@/, "").trim();
+      const found = findMemberInGroup(threadId, cleanParam);
       if (found) {
         targetUserId = found.zalo_user_id;
         targetName = found.display_name;
-      } else if (/^\d+$/.test(param)) {
-        targetUserId = param;
-        targetName = param;
+      } else if (/^\d+$/.test(cleanParam)) {
+        targetUserId = cleanParam;
+        targetName = cleanParam;
       }
     }
 
@@ -1047,7 +1097,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         threadId,
         `⚠️ HƯỚNG DẪN BỎ CHẶN:\n\n` +
         `🔹 Cách 1: Reply (Quote) tin nhắn của người cần bỏ chặn rồi gõ: /bochanbot\n` +
-        `🔹 Cách 2: Gõ /bochanbot [Tên_thành_viên hoặc User_ID]`
+        `🔹 Cách 2: Gõ /bochanbot @Tên_thành_viên hoặc /bochanbot [User_ID]`
       );
       return;
     }
