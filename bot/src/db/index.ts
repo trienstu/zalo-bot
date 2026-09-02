@@ -100,6 +100,19 @@ function runColumnMigrations(database: Database.Database): void {
   database.exec(
     `CREATE INDEX IF NOT EXISTS idx_job_raw_text_hash ON job_raw(text_hash, posted_at)`,
   );
+
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS blocked_members (
+      zalo_user_id TEXT NOT NULL,
+      group_id     TEXT NOT NULL DEFAULT '',
+      display_name TEXT NOT NULL DEFAULT '',
+      blocked_by   TEXT NOT NULL DEFAULT '',
+      reason       TEXT NOT NULL DEFAULT '',
+      created_at   INTEGER NOT NULL,
+      PRIMARY KEY (zalo_user_id, group_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_blocked_members_user ON blocked_members(zalo_user_id, group_id);
+  `);
 }
 
 // ---- Types ----
@@ -2249,6 +2262,125 @@ export function cancelScheduledReminder(id: number, creatorId?: string): boolean
   } catch (e) {
     console.error("[db] cancelScheduledReminder error:", e);
     return false;
+  }
+}
+
+// ---- QUẢN LÝ CHẶN BOT TRẢ LỜI THÀNH VIÊN (BLOCKED MEMBERS) ----
+
+export interface BlockedMemberRow {
+  zaloUserId: string;
+  groupId: string;
+  displayName: string;
+  blockedBy: string;
+  reason: string;
+  createdAt: number;
+}
+
+/**
+ * Kiểm tra xem thành viên có đang bị chặn bot trả lời không (xét cả theo nhóm cụ thể hoặc toàn cục).
+ */
+export function isMemberBlocked(zaloUserId: string, groupId?: string): boolean {
+  try {
+    const db = getDb();
+    const row = db
+      .prepare(
+        `SELECT 1 FROM blocked_members 
+         WHERE zalo_user_id = ? AND (group_id = '' OR group_id = ? OR ? IS NULL)
+         LIMIT 1`,
+      )
+      .get(zaloUserId, groupId || "", groupId || null);
+    return Boolean(row);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Chặn một thành viên: bot sẽ hoàn toàn không phản hồi bất kỳ tin nhắn/tag/lệnh nào từ người này.
+ */
+export function blockMember(input: {
+  zaloUserId: string;
+  groupId?: string;
+  displayName?: string;
+  blockedBy?: string;
+  reason?: string;
+}): void {
+  try {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO blocked_members (zalo_user_id, group_id, display_name, blocked_by, reason, created_at)
+       VALUES (@zaloUserId, @groupId, @displayName, @blockedBy, @reason, @createdAt)
+       ON CONFLICT(zalo_user_id, group_id) DO UPDATE SET
+         display_name = @displayName,
+         blocked_by = @blockedBy,
+         reason = @reason,
+         created_at = @createdAt`,
+    ).run({
+      zaloUserId: input.zaloUserId,
+      groupId: input.groupId || "",
+      displayName: input.displayName || "",
+      blockedBy: input.blockedBy || "Admin",
+      reason: input.reason || "Chặn theo yêu cầu của Quản trị viên",
+      createdAt: Date.now(),
+    });
+    console.log(`[db] ⛔ Đã chặn bot trả lời thành viên: ${input.displayName || input.zaloUserId} (nhóm: ${input.groupId || 'Toàn cục'})`);
+  } catch (e) {
+    console.error("[db] blockMember error:", e);
+  }
+}
+
+/**
+ * Gỡ chặn một thành viên.
+ */
+export function unblockMember(zaloUserId: string, groupId?: string): boolean {
+  try {
+    const db = getDb();
+    let res;
+    if (groupId) {
+      res = db
+        .prepare(`DELETE FROM blocked_members WHERE zalo_user_id = ? AND (group_id = ? OR group_id = '')`)
+        .run(zaloUserId, groupId);
+    } else {
+      res = db.prepare(`DELETE FROM blocked_members WHERE zalo_user_id = ?`).run(zaloUserId);
+    }
+    return res.changes > 0;
+  } catch (e) {
+    console.error("[db] unblockMember error:", e);
+    return false;
+  }
+}
+
+/**
+ * Liệt kê danh sách thành viên đang bị chặn bot trả lời.
+ */
+export function listBlockedMembers(groupId?: string): BlockedMemberRow[] {
+  try {
+    const db = getDb();
+    let rows: any[];
+    if (groupId) {
+      rows = db
+        .prepare(
+          `SELECT zalo_user_id as zaloUserId, group_id as groupId, display_name as displayName,
+                  blocked_by as blockedBy, reason, created_at as createdAt
+           FROM blocked_members
+           WHERE group_id = '' OR group_id = ?
+           ORDER BY created_at DESC`,
+        )
+        .all(groupId);
+    } else {
+      rows = db
+        .prepare(
+          `SELECT zalo_user_id as zaloUserId, group_id as groupId, display_name as displayName,
+                  blocked_by as blockedBy, reason, created_at as createdAt
+           FROM blocked_members
+           ORDER BY created_at DESC`,
+        )
+        .all();
+    }
+    return rows as BlockedMemberRow[];
+  } catch (e) {
+    console.error("[db] listBlockedMembers error:", e);
+    return [];
   }
 }
 

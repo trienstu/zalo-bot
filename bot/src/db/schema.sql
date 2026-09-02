@@ -508,4 +508,17 @@ CREATE TABLE IF NOT EXISTS scheduled_reminders (
 CREATE INDEX IF NOT EXISTS idx_scheduled_reminders_status_time ON scheduled_reminders(status, remind_at);
 CREATE INDEX IF NOT EXISTS idx_scheduled_reminders_creator ON scheduled_reminders(creator_id, status);
 
+-- Danh sách thành viên bị chặn bot tương tác / trả lời (Group hoặc Toàn cục)
+CREATE TABLE IF NOT EXISTS blocked_members (
+  zalo_user_id TEXT NOT NULL,
+  group_id     TEXT NOT NULL DEFAULT '',
+  display_name TEXT NOT NULL DEFAULT '',
+  blocked_by   TEXT NOT NULL DEFAULT '',
+  reason       TEXT NOT NULL DEFAULT '',
+  created_at   INTEGER NOT NULL,
+  PRIMARY KEY (zalo_user_id, group_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_blocked_members_user ON blocked_members(zalo_user_id, group_id);
+
 

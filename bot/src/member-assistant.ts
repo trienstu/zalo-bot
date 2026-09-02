@@ -1,4 +1,14 @@
-import { getDb, saveGroupKnowledge, searchGroupKnowledge, getGroupSettings } from "./db/index.js";
+import {
+  getDb,
+  saveGroupKnowledge,
+  searchGroupKnowledge,
+  getGroupSettings,
+  isMemberBlocked,
+  blockMember,
+  unblockMember,
+  listBlockedMembers,
+  isUserAdmin,
+} from "./db/index.js";
 import { sendGroupText } from "./zalo/client.js";
 import {
   callGemini,
@@ -393,7 +403,11 @@ function handleHelpCommand(): string {
     `🔹 /taungam: Xem thống kê các thành viên nằm vùng / chưa từng gửi tin nhắn\n` +
     `🔹 /link [từ khóa]: Tổng hợp tất cả link/tài liệu/video đã chia sẻ trong nhóm\n` +
     `🔹 /hoi [câu hỏi] hoặc tag @Sen Chúa: Hỏi đáp kiến thức tra cứu từ lịch sử chat của nhóm\n` +
-    `🔹 /help: Hiển thị hướng dẫn này`
+    `🔹 /help: Hiển thị hướng dẫn này\n\n` +
+    `🚫 QUẢN TRỊ VIÊN — CHẶN BOT TRẢ LỜI:\n` +
+    `🔹 /chanbot: Quote tin nhắn người cần chặn rồi gõ /chanbot (hoặc /chanbot [Tên/ID])\n` +
+    `🔹 /bochanbot: Quote tin nhắn người cần bỏ chặn rồi gõ /bochanbot\n` +
+    `🔹 /dschan: Xem danh sách thành viên đang bị chặn bot trả lời trong nhóm`
   );
 }
 
@@ -696,6 +710,43 @@ async function handleHistoryQA(
   }
 }
 
+function isGroupAdminOrSuperAdmin(threadId: string, userId: string): boolean {
+  if (isUserAdmin(userId)) return true;
+  try {
+    const member = getDb()
+      .prepare(`SELECT role FROM group_members WHERE group_id = ? AND zalo_user_id = ?`)
+      .get(threadId, userId) as { role: string } | undefined;
+    if (member && (member.role === "admin" || member.role === "owner" || member.role === "creator")) return true;
+    const globalMember = getDb()
+      .prepare(`SELECT role FROM members WHERE zalo_user_id = ?`)
+      .get(userId) as { role: string } | undefined;
+    if (globalMember && (globalMember.role === "admin" || globalMember.role === "owner")) return true;
+  } catch {}
+  return false;
+}
+
+function findMemberInGroup(threadId: string, query: string): { zalo_user_id: string; display_name: string } | null {
+  const db = getDb();
+  const q = query.trim().toLowerCase();
+  try {
+    const byId = db
+      .prepare(`SELECT zalo_user_id, display_name FROM group_members WHERE group_id = ? AND zalo_user_id = ?`)
+      .get(threadId, query.trim()) as any;
+    if (byId) return byId;
+
+    const byName = db
+      .prepare(`SELECT zalo_user_id, display_name FROM group_members WHERE group_id = ? AND LOWER(display_name) LIKE ? LIMIT 1`)
+      .get(threadId, `%${q}%`) as any;
+    if (byName) return byName;
+
+    const byGeneral = db
+      .prepare(`SELECT zalo_user_id, display_name FROM members WHERE LOWER(display_name) LIKE ? LIMIT 1`)
+      .get(`%${q}%`) as any;
+    if (byGeneral) return byGeneral;
+  } catch {}
+  return null;
+}
+
 /**
  * Xử lý tin nhắn đến từ thành viên: kiểm tra lệnh hoặc câu hỏi.
  */
@@ -746,6 +797,13 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   const sender = event.sender;
   const displayName = event.displayName || "Bạn";
   const threadId = event.threadId;
+
+  // ⛔ KIỂM TRA THÀNH VIÊN BỊ CHẶN BOT TRẢ LỜI:
+  // Nếu thành viên này nằm trong danh sách đen bị chặn -> Bot TUYỆT ĐỐI IM LẶNG 100%, không tương tác (kể cả tag bot hay lệnh /hoi).
+  if (isMemberBlocked(sender, threadId)) {
+    console.log(`[member-assistant] ⛔ Thành viên ${displayName} (${sender}) đang bị chặn bot trả lời trong nhóm [${threadId}]. Bỏ qua.`);
+    return;
+  }
 
   // Kiểm tra cooldown (bỏ qua cooldown đối với chính tài khoản chủ bot để tiện test lệnh)
   const now = Date.now();
@@ -894,6 +952,137 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     const reply = handleCancelReminder(sender, idStr);
     await sendGroupText(api, threadId, reply);
     console.log(`[member-assistant] ✅ Đã hủy lịch hẹn cho ${displayName}`);
+    return;
+  }
+
+  // 9.1. Lệnh Quản trị viên: /chanbot [quote hoặc tên/ID]
+  if (lower === "/chanbot" || lower.startsWith("/chanbot ") || lower === "!chanbot" || lower.startsWith("!chanbot ")) {
+    userCooldowns.set(sender, now);
+    const isGroupAdmin = isGroupAdminOrSuperAdmin(threadId, sender);
+    if (!isGroupAdmin) {
+      await sendGroupText(api, threadId, `⛔ Bạn không có quyền sử dụng lệnh này (Chỉ Quản trị viên / Trưởng nhóm mới có quyền chặn bot trả lời).`);
+      return;
+    }
+
+    let targetUserId = event.quote?.senderId?.trim() || "";
+    let targetName = event.quote?.senderName?.trim() || "";
+
+    const param = rawText.replace(/^\/(?:chanbot|!chanbot)\s*/i, "").trim();
+    if (!targetUserId && param) {
+      const found = findMemberInGroup(threadId, param);
+      if (found) {
+        targetUserId = found.zalo_user_id;
+        targetName = found.display_name;
+      } else if (/^\d+$/.test(param)) {
+        targetUserId = param;
+        targetName = param;
+      }
+    }
+
+    if (!targetUserId) {
+      await sendGroupText(
+        api,
+        threadId,
+        `⚠️ HƯỚNG DẪN CHẶN BOT TRẢ LỜI:\n\n` +
+        `🔹 Cách 1: Reply (Quote) tin nhắn của thành viên muốn chặn rồi gõ: /chanbot\n` +
+        `🔹 Cách 2: Gõ /chanbot [Tên_thành_viên hoặc User_ID]`
+      );
+      return;
+    }
+
+    blockMember({
+      zaloUserId: targetUserId,
+      groupId: threadId,
+      displayName: targetName || targetUserId,
+      blockedBy: displayName,
+      reason: "Admin chặn qua lệnh /chanbot",
+    });
+
+    await sendGroupText(
+      api,
+      threadId,
+      `⛔ ĐÃ CHẶN TƯƠNG TÁC THÀNH CÔNG!\n\n` +
+      `👤 Thành viên: ${targetName || targetUserId}\n` +
+      `📌 Từ bây giờ, bot sẽ hoàn toàn im lặng và KHÔNG trả lời bất kỳ tin nhắn, câu hỏi, tag tên hay lệnh nào từ thành viên này.`
+    );
+    return;
+  }
+
+  // 9.2. Lệnh Quản trị viên: /bochanbot [quote hoặc tên/ID]
+  if (
+    lower === "/bochanbot" ||
+    lower.startsWith("/bochanbot ") ||
+    lower === "!bochanbot" ||
+    lower.startsWith("!bochanbot ") ||
+    lower === "/gohanbot" ||
+    lower.startsWith("/gohanbot ") ||
+    lower === "/mochanbot" ||
+    lower.startsWith("/mochanbot ")
+  ) {
+    userCooldowns.set(sender, now);
+    const isGroupAdmin = isGroupAdminOrSuperAdmin(threadId, sender);
+    if (!isGroupAdmin) {
+      await sendGroupText(api, threadId, `⛔ Bạn không có quyền sử dụng lệnh này.`);
+      return;
+    }
+
+    let targetUserId = event.quote?.senderId?.trim() || "";
+    let targetName = event.quote?.senderName?.trim() || "";
+
+    const param = rawText.replace(/^\/(?:bochanbot|!bochanbot|gohanbot|mochanbot)\s*/i, "").trim();
+    if (!targetUserId && param) {
+      const found = findMemberInGroup(threadId, param);
+      if (found) {
+        targetUserId = found.zalo_user_id;
+        targetName = found.display_name;
+      } else if (/^\d+$/.test(param)) {
+        targetUserId = param;
+        targetName = param;
+      }
+    }
+
+    if (!targetUserId) {
+      await sendGroupText(
+        api,
+        threadId,
+        `⚠️ HƯỚNG DẪN BỎ CHẶN:\n\n` +
+        `🔹 Cách 1: Reply (Quote) tin nhắn của người cần bỏ chặn rồi gõ: /bochanbot\n` +
+        `🔹 Cách 2: Gõ /bochanbot [Tên_thành_viên hoặc User_ID]`
+      );
+      return;
+    }
+
+    const ok = unblockMember(targetUserId, threadId);
+    if (ok) {
+      await sendGroupText(
+        api,
+        threadId,
+        `✅ ĐÃ BỎ CHẶN THÀNH CÔNG!\n\n👤 Thành viên: ${targetName || targetUserId} giờ đây đã có thể trò chuyện và hỏi bot bình thường.`
+      );
+    } else {
+      await sendGroupText(api, threadId, `ℹ️ Thành viên này hiện không nằm trong danh sách chặn.`);
+    }
+    return;
+  }
+
+  // 9.3. Lệnh Quản trị viên: /dschan (Xem danh sách đang bị chặn)
+  if (lower === "/dschan" || lower === "!dschan" || lower === "/dschanbot" || lower === "!dschanbot") {
+    userCooldowns.set(sender, now);
+    const list = listBlockedMembers(threadId);
+    if (list.length === 0) {
+      await sendGroupText(api, threadId, `📋 DANH SÁCH CHẶN BOT TRẢ LỜI\n\nHiện không có thành viên nào bị chặn tương tác trong nhóm này.`);
+      return;
+    }
+    const lines = list.map((m, idx) => {
+      const d = new Date(m.createdAt + 7 * 3600 * 1000);
+      const dateStr = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")} ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+      return `${idx + 1}. 👤 ${m.displayName || m.zaloUserId} (ID: ${m.zaloUserId})\n   🕒 Chặn lúc: ${dateStr} bởi ${m.blockedBy}`;
+    });
+    await sendGroupText(
+      api,
+      threadId,
+      `📋 DANH SÁCH THÀNH VIÊN BỊ CHẶN TRẢ LỜI (${list.length} người):\n\n${lines.join("\n\n")}\n\n💡 Mẹo: Gõ /bochanbot [ID hoặc quote] để mở lại quyền tương tác.`
+    );
     return;
   }
 
