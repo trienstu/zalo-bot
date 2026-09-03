@@ -1819,14 +1819,33 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     }
 
     // Tự động nhận diện câu nhắc lịch tự nhiên (ví dụ: "@Sen Chúa 16h45 nhắc cả nhóm...", "@Sen Chúa nhắc tôi 20 phút nữa...")
-    const isReminderIntent =
+    const hasExplicitReminderWord =
       qLower.includes("nhắc") ||
       qLower.includes("nhac") ||
       qLower.includes("hẹn") ||
       qLower.includes("hen") ||
       qLower.includes("báo thức") ||
       qLower.includes("bao thuc") ||
-      /(?:phút|phut|tiếng|tieng|h|giờ|gio|mai|hôm nay)/i.test(question);
+      qLower.includes("đặt lịch") ||
+      qLower.includes("dat lich") ||
+      qLower.includes("remind") ||
+      qLower.includes("alarm");
+
+    // Loại trừ các câu nhờ vả / xin thời gian / hỏi đáp tư vấn (ví dụ: "cho anh 5 phút tư vấn...")
+    const isConsultationOrQuestion =
+      /(?:cho|xin|dành|danh|mất|mat|tốn|ton|đợi|doi|chờ|cho)\s+(?:anh|em|tôi|tao|mình|minh|bác|bac|chú|chu)?\s*\d+\s*(?:phút|phut|p|tiếng|tieng|h|giờ|gio)/i.test(
+        question,
+      ) ||
+      /(?:tư vấn|tu van|hỏi|hoi|giải thích|giai thich|phân tích|phan tich|hướng dẫn|huong dan|tóm tắt|tom tat|xem hộ|xem ho)/i.test(
+        question,
+      );
+
+    const isReminderIntent =
+      !isConsultationOrQuestion &&
+      (hasExplicitReminderWord ||
+        /(?:^\d+\s*(?:phút|phut|p|tiếng|tieng|giờ|gio)\s*(?:nữa|sau)|(?:mai|hôm nay)\s*\d{1,2}[:h]\d{2}|\b\d{1,2}[:h]\d{2}\s*(?:mai|hôm nay))/i.test(
+          question,
+        ));
 
     if (isReminderIntent) {
       const parsed = parseNaturalTimeVietnam(question);

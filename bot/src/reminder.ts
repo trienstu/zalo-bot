@@ -55,6 +55,25 @@ export function parseNaturalTimeVietnam(text: string): { remindAt: number; conte
 
   const lower = raw.toLowerCase();
 
+  // 0. BẢO VỆ NGỮ CẢNH: Loại trừ tuyệt đối các câu nhờ vả / xin thời gian / hỏi đáp tư vấn (False Positives)
+  // Ví dụ: "cho anh 5 phút tư vấn...", "cho em 5phút...", "xin 5 phút...", "dành 10 phút...", "mất 5 phút..."
+  const isConversationalRequest =
+    /(?:cho|xin|dành|danh|mất|mat|tốn|ton|đợi|doi|chờ|cho)\s+(?:anh|em|tôi|tao|mình|minh|bác|bac|chú|chu)?\s*\d+\s*(?:phút|phut|p|tiếng|tieng|h|giờ|gio)/i.test(
+      raw,
+    ) ||
+    /(?:tư vấn|tu van|hỏi|hoi|giải thích|giai thich|phân tích|phan tich|hướng dẫn|huong dan|tóm tắt|tom tat|xem hộ|xem ho|review)/i.test(
+      raw,
+    );
+
+  const hasExplicitReminderWord =
+    /(?:nhắc|nhac|báo thức|bao thuc|hẹn giờ|hen gio|đặt lịch|dat lich|nhớ nhắc|nho nhac|remind|alarm)/i.test(
+      raw,
+    );
+
+  if (isConversationalRequest && !hasExplicitReminderWord) {
+    return null;
+  }
+
   // Kiểm tra target (nhắc cả nhóm hay chỉ nhắc người gửi)
   if (
     lower.includes("nhắc cả nhóm") ||
