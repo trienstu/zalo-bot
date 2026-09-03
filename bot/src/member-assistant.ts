@@ -406,6 +406,260 @@ function handleLinksCommand(threadId: string, keywordFilter?: string): string {
   );
 }
 
+export interface DiscussionMessageSnippet {
+  displayName: string;
+  text: string;
+  timeStr: string;
+  isMain: boolean;
+}
+
+export interface DiscussionThreadSnippet {
+  topic: string;
+  mainAuthor: string;
+  dateStr: string;
+  messages: DiscussionMessageSnippet[];
+}
+
+/**
+ * Tra cứu sâu các đoạn thảo luận & quy trình trong lịch sử chat của nhóm (group_messages).
+ * Tự động phân tích từ khóa, nhận diện tên người chia sẻ (VD: bác Huy, anh Nam, Vũ Trọng...),
+ * tìm các tin nhắn gốc và mở rộng cửa sổ ngữ cảnh (Context Window) 2 tin trước + 4 tin sau.
+ */
+export function searchRelevantDiscussions(
+  threadId: string,
+  question: string,
+  limit = 3,
+): DiscussionThreadSnippet[] {
+  const db = getDb();
+  const results: DiscussionThreadSnippet[] = [];
+
+  const stopWords = new Set([
+    "sen", "chúa", "chua", "mộc", "miên", "moc", "mien", "bot",
+    "tìm", "lại", "tim", "lai", "cho", "mình", "minh", "em", "với", "voi",
+    "nhé", "nhe", "nha", "ạ", "ơi", "oi", "hỏi", "hoi", "giúp", "giup",
+    "có", "co", "ai", "nào", "nao", "gì", "gi", "ở", "o", "đâu", "dau",
+    "như", "nhu", "thế", "the", "ra", "sao", "chia", "sẻ", "se", "nói", "noi",
+    "bàn", "ban", "về", "ve", "trong", "nhóm", "nhom", "từ", "tu", "trước", "truoc",
+    "bác", "bac", "anh", "chị", "chi", "sếp", "sep", "ông", "ong", "bạn", "ban"
+  ]);
+
+  // Nhận diện người chia sẻ được nhắc tới (VD: "bác Huy", "anh Nam", "Vũ Trọng", "Hoa Van")
+  let authorHint = "";
+  const authorMatch = question.match(/(?:bác|anh|chị|sếp|ông|bạn)\s+([A-Za-z0-9_\sÀ-ỹ]{2,20}?)(?:\s+chia|\s+nói|\s+hướng|\s+bảo|\s+dạy|\s*$|[.,;?!])/i);
+  if (authorMatch && authorMatch[1]) {
+    const candidate = authorMatch[1].trim();
+    if (!stopWords.has(candidate.toLowerCase())) {
+      authorHint = candidate;
+    }
+  }
+
+  // Tách từ khóa chủ đề (VD: quy trình, video, thời trang, ai, prompt, tool...)
+  const rawWords = question
+    .toLowerCase()
+    .replace(/[.,;!?/\\@#$%^&*()_+={}\[\]|~`"':<>]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 2 && !stopWords.has(w));
+
+  const keywords = Array.from(new Set(rawWords));
+  if (keywords.length === 0 && !authorHint) {
+    return [];
+  }
+
+  try {
+    const params: any[] = [];
+    let sql = `SELECT id, message_id, display_name, text, ts, thread_id
+               FROM group_messages
+               WHERE deleted_at IS NULL
+                 AND text != ''
+                 AND text NOT LIKE '/%'
+                 AND text NOT LIKE '!%'
+                 AND text NOT LIKE '🤖%'
+                 AND LOWER(display_name) NOT LIKE '%sen chúa%'
+                 AND LOWER(display_name) NOT LIKE '%sen chua%'`;
+
+    if (threadId) {
+      sql += ` AND (thread_id = ? OR thread_id = '')`;
+      params.push(threadId);
+    }
+
+    if (authorHint) {
+      sql += ` AND LOWER(display_name) LIKE ?`;
+      params.push(`%${authorHint.toLowerCase()}%`);
+    }
+
+    sql += ` ORDER BY ts DESC LIMIT 100`;
+
+    const candidateRows = db.prepare(sql).all(...params) as any[];
+
+    const scoredCandidates = candidateRows.map((row) => {
+      const lowerText = row.text.toLowerCase();
+      let matchCount = 0;
+      for (const kw of keywords) {
+        if (lowerText.includes(kw)) matchCount++;
+      }
+      return { row, matchCount };
+    });
+
+    const bestMatches = scoredCandidates
+      .filter((c) => c.matchCount > 0 || (authorHint && c.row.text.length > 30))
+      .sort((a, b) => b.matchCount - a.matchCount || b.row.ts - a.row.ts)
+      .slice(0, limit);
+
+    for (const match of bestMatches) {
+      const mainMsg = match.row;
+      const mainTs = Number(mainMsg.ts);
+      const targetThread = mainMsg.thread_id || threadId;
+
+      const prevMsgs = db
+        .prepare(
+          `SELECT display_name, text, ts
+           FROM group_messages
+           WHERE (thread_id = ? OR thread_id = '')
+             AND ts < ?
+             AND deleted_at IS NULL
+             AND text != ''
+             AND text NOT LIKE '/%'
+             AND text NOT LIKE '!%'
+             AND text NOT LIKE '🤖%'
+           ORDER BY ts DESC
+           LIMIT 2`,
+        )
+        .all(targetThread, mainTs) as any[];
+      prevMsgs.reverse();
+
+      const nextMsgs = db
+        .prepare(
+          `SELECT display_name, text, ts
+           FROM group_messages
+           WHERE (thread_id = ? OR thread_id = '')
+             AND ts > ?
+             AND deleted_at IS NULL
+             AND text != ''
+             AND text NOT LIKE '/%'
+             AND text NOT LIKE '!%'
+             AND text NOT LIKE '🤖%'
+           ORDER BY ts ASC
+           LIMIT 4`,
+        )
+        .all(targetThread, mainTs) as any[];
+
+      const combined: DiscussionMessageSnippet[] = [];
+
+      for (const p of prevMsgs) {
+        const d = new Date(Number(p.ts) + 7 * 3600 * 1000);
+        combined.push({
+          displayName: p.display_name || "Thành viên",
+          text: p.text,
+          timeStr: `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`,
+          isMain: false,
+        });
+      }
+
+      const mainDate = new Date(mainTs + 7 * 3600 * 1000);
+      combined.push({
+        displayName: mainMsg.display_name || "Thành viên",
+        text: mainMsg.text,
+        timeStr: `${String(mainDate.getUTCHours()).padStart(2, "0")}:${String(mainDate.getUTCMinutes()).padStart(2, "0")}`,
+        isMain: true,
+      });
+
+      for (const n of nextMsgs) {
+        const d = new Date(Number(n.ts) + 7 * 3600 * 1000);
+        combined.push({
+          displayName: n.display_name || "Thành viên",
+          text: n.text,
+          timeStr: `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`,
+          isMain: false,
+        });
+      }
+
+      const dateStr = `${String(mainDate.getUTCDate()).padStart(2, "0")}/${String(mainDate.getUTCMonth() + 1).padStart(2, "0")}/${mainDate.getUTCFullYear()}`;
+
+      results.push({
+        topic: keywords.join(" "),
+        mainAuthor: mainMsg.display_name,
+        dateStr,
+        messages: combined,
+      });
+    }
+  } catch (err) {
+    console.warn("[searchRelevantDiscussions] Lỗi tra cứu tin nhắn thảo luận:", err);
+  }
+
+  return results;
+}
+
+/**
+ * Tra cứu sâu các mục tóm tắt chuyên môn / kinh nghiệm trong toàn bộ lịch sử daily_summaries.
+ */
+export function searchRelevantDailySummaries(
+  _threadId: string,
+  question: string,
+  limit = 4,
+): { dayLabel: string; relevantBulletPoints: string[] }[] {
+  const db = getDb();
+  const results: { dayLabel: string; relevantBulletPoints: string[] }[] = [];
+
+  const stopWords = new Set([
+    "sen", "chúa", "chua", "bot", "tìm", "lại", "cho", "mình", "em", "với", "nhé",
+    "như", "thế", "nào", "gì", "ai", "ở", "đâu"
+  ]);
+
+  const rawWords = question
+    .toLowerCase()
+    .replace(/[.,;!?/\\@#$%^&*()_+={}\[\]|~`"':<>]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 2 && !stopWords.has(w));
+
+  const keywords = Array.from(new Set(rawWords));
+  if (keywords.length === 0) return [];
+
+  try {
+    const rows = db
+      .prepare(
+        `SELECT day_label, summary_text
+         FROM daily_summaries
+         ORDER BY day_date DESC`,
+      )
+      .all() as any[];
+
+    for (const r of rows) {
+      const text = r.summary_text || "";
+      const lines = text.split("\n");
+      const matchedLines: string[] = [];
+
+      for (const line of lines) {
+        const cleanLine = line.trim();
+        if (!cleanLine || cleanLine.startsWith("(") || cleanLine.startsWith("#") || cleanLine.startsWith("=")) continue;
+        const lowerLine = cleanLine.toLowerCase();
+
+        let hasKw = false;
+        for (const kw of keywords) {
+          if (lowerLine.includes(kw)) {
+            hasKw = true;
+            break;
+          }
+        }
+        if (hasKw) {
+          matchedLines.push(cleanLine.replace(/^[-*•\s\d.:]+/, "").trim());
+        }
+      }
+
+      if (matchedLines.length > 0) {
+        results.push({
+          dayLabel: r.day_label || "Gần đây",
+          relevantBulletPoints: matchedLines.slice(0, 5),
+        });
+        if (results.length >= limit) break;
+      }
+    }
+  } catch (err) {
+    console.warn("[searchRelevantDailySummaries] Lỗi quét daily_summaries:", err);
+  }
+
+  return results;
+}
+
 /**
  * Thống kê thành viên nằm vùng / chưa từng gửi tin nhắn trong nhóm.
  */
@@ -521,18 +775,47 @@ async function handleHistoryQA(
     memorizedDocs = searchGroupKnowledge(threadId, question, 5);
   } catch {}
 
-  // 2.5. Tra cứu toàn diện kho link / repo / tài nguyên nếu câu hỏi có ý định tìm kiếm
-  const isResourceQuery = /link|repo|github|tài liệu|tai lieu|chia sẻ|chia se|dự án|du an|mã nguồn|ma nguon|source/i.test(question);
+  // 2.1. Phân loại ý định câu hỏi: hỏi quy trình/kinh nghiệm/thảo luận hay chỉ xin link tải
+  const isDiscussionOrProcessQuery =
+    /quy trình|quy trinh|cách làm|cach lam|hướng dẫn|huong dan|kinh nghiệm|kinh nghiem|thảo luận|thao luan|bàn về|chia sẻ|chia se|bước|buoc|làm sao|lam sao|tổng hợp|nói gì|bảo gì/i.test(
+      question,
+    );
+
+  const isOnlyLinkQuery =
+    /(?:cho xin|gửi|xin|danh sách)\s*(?:link|đường dẫn|repo|mã nguồn|source)/i.test(question) &&
+    !isDiscussionOrProcessQuery;
+
+  const isResourceQuery =
+    isOnlyLinkQuery ||
+    /link|repo|github|tài liệu|tai lieu|dự án|du an|mã nguồn|source/i.test(question);
+
+  // 2.2. Tra cứu sâu các đoạn thảo luận & hội thoại theo ngữ cảnh (Context Window 2 tin trước + 4 tin sau)
+  let discussionThreads: DiscussionThreadSnippet[] = [];
+  try {
+    discussionThreads = searchRelevantDiscussions(threadId, question, 3);
+  } catch (e) {
+    console.warn("[handleHistoryQA] Lỗi searchRelevantDiscussions:", e);
+  }
+
+  // 2.3. Tra cứu sâu các đúc kết chuyên môn từ toàn bộ lịch sử daily_summaries (Hub)
+  let relevantSummaries: { dayLabel: string; relevantBulletPoints: string[] }[] = [];
+  try {
+    relevantSummaries = searchRelevantDailySummaries(threadId, question, 4);
+  } catch (e) {
+    console.warn("[handleHistoryQA] Lỗi searchRelevantDailySummaries:", e);
+  }
+
+  // 2.4. Tra cứu kho link / repo / tài nguyên
   let relevantLinks: FoundResource[] = [];
-  if (isResourceQuery) {
+  if (isResourceQuery || isDiscussionOrProcessQuery) {
     try {
-      relevantLinks = searchRelevantLinksAndResources(threadId, question, 20);
+      relevantLinks = searchRelevantLinksAndResources(threadId, question, 15);
     } catch (e) {
-      console.warn("[handleGeminiGroupQA] Lỗi searchRelevantLinksAndResources:", e);
+      console.warn("[handleHistoryQA] Lỗi searchRelevantLinksAndResources:", e);
     }
   }
 
-  // 3. Lấy danh sách tin nhắn gần nhất trong nhóm để tạo ngữ cảnh
+  // 3. Lấy danh sách tin nhắn gần nhất trong nhóm để tạo ngữ cảnh hiện tại
   let relevantMessages: { display_name: string; text: string; ts: number; is_self: number }[] = [];
   try {
     relevantMessages = db
@@ -548,7 +831,7 @@ async function handleHistoryQA(
            AND text NOT LIKE '/%'
            AND text NOT LIKE '!%'
          ORDER BY ts DESC
-         LIMIT 80`,
+         LIMIT 60`,
       )
       .all(threadId) as any[];
     relevantMessages.reverse();
@@ -625,6 +908,27 @@ async function handleHistoryQA(
   // Dựng ngữ cảnh dữ liệu lịch sử
   const contextLines: string[] = [];
 
+  // A. Đoạn thảo luận hội thoại thực tế (Context Window)
+  if (discussionThreads && discussionThreads.length > 0) {
+    contextLines.push("=== CÁC ĐOẠN HỘI THOẠI & THẢO LUẬN THỰC TẾ TRONG LỊCH SỬ CHAT CỦA NHÓM ===");
+    discussionThreads.forEach((thread, tIdx) => {
+      contextLines.push(
+        `[Cuộc thảo luận #${tIdx + 1} - Ngày ${thread.dateStr} - Người chia sẻ chính: ${thread.mainAuthor}]:\n` +
+        thread.messages
+          .map((m) => `  ${m.timeStr} | ${m.displayName}${m.isMain ? " (Chia sẻ cốt lõi)" : ""}: ${m.text}`)
+          .join("\n")
+      );
+    });
+  }
+
+  // B. Đúc kết kinh nghiệm & quy trình từ daily_summaries (Hub)
+  if (relevantSummaries && relevantSummaries.length > 0) {
+    contextLines.push("=== ĐÚC KẾT KINH NGHIỆM & QUY TRÌNH TỪ KHO TRI THỨC NHÓM (HUB) ===");
+    for (const s of relevantSummaries) {
+      contextLines.push(`[Ngày ${s.dayLabel}]:\n` + s.relevantBulletPoints.map((bp) => `• ${bp}`).join("\n"));
+    }
+  }
+
   if (memorizedDocs && memorizedDocs.length > 0) {
     contextLines.push("=== KHO TRI THỨC & BỘ NHỚ TÀI LIỆU ĐÃ LƯU TRONG NHÓM ===");
     for (const doc of memorizedDocs) {
@@ -666,17 +970,23 @@ async function handleHistoryQA(
       const timeStr = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
       contextLines.push(`${idx + 1}. URL: ${l.url}\n   Người chia sẻ: ${l.sender} (${timeStr})\n   Ngữ cảnh/lời bình đi kèm: ${l.context}`);
     });
-    contextLines.push(
-      "CHỈ DẪN QUAN TRỌNG: Thành viên đang yêu cầu tìm kiếm/liệt kê đường link hoặc repo. Bạn HÃY SỬ DỤNG TRỰC TIẾP danh sách link ở trên để tổng hợp, trình bày đẹp mắt từng link (kèm ai là người chia sẻ, ngày nào, tóm tắt nội dung/lời bình). Giữ nguyên link URL đầy đủ, tuyệt đối không bịa link ảo!"
-    );
-  } else if (isResourceQuery) {
+    if (isOnlyLinkQuery) {
+      contextLines.push(
+        "CHỈ DẪN QUAN TRỌNG: Thành viên đang yêu cầu tìm kiếm/liệt kê đường link. Bạn HÃY SỬ DỤNG TRỰC TIẾP danh sách link ở trên để tổng hợp, trình bày đẹp mắt từng link (kèm ai là người chia sẻ, ngày nào, tóm tắt nội dung/lời bình). Giữ nguyên link URL đầy đủ, tuyệt đối không bịa link ảo!"
+      );
+    } else {
+      contextLines.push(
+        "CHỈ DẪN QUAN TRỌNG: Nếu thành viên hỏi về QUY TRÌNH, CÁCH LÀM, KINH NGHIỆM hoặc NỘI DUNG THẢO LUẬN: Hãy ưu tiên TRÍCH XUẤT VÀ GIẢI THÍCH CHI TIẾT CÁC BƯỚC THỰC HIỆN từ các đoạn thảo luận/đúc kết ở trên. Sau đó đính kèm các đường link ở trên ở cuối câu trả lời làm tài liệu tham khảo/tải về bổ trợ."
+      );
+    }
+  } else if (isResourceQuery && !isDiscussionOrProcessQuery) {
     contextLines.push(
       "=== KẾT QUẢ TÌM KIẾM LINK TRONG LỊCH SỬ NHÓM ===\nHiện tại hệ thống đã quét toàn bộ lịch sử tin nhắn và kho tri thức nhưng chưa tìm thấy link nào khớp với từ khóa của thành viên. Hãy thông báo lịch sự rằng nhóm chưa từng chia sẻ link phù hợp."
     );
   }
 
   if (pastSummaries && pastSummaries.length > 0) {
-    contextLines.push("=== TÓM TẮT CÁC NGÀY TRƯỚC ===");
+    contextLines.push("=== TÓM TẮT CÁC NGÀY GẦN ĐÂY ===");
     for (const s of pastSummaries) {
       contextLines.push(`[Ngày ${s.day_label}]:\n${s.summary_text}`);
     }
@@ -753,7 +1063,8 @@ async function handleHistoryQA(
     `3. Nếu câu hỏi yêu cầu tìm kiếm link/repo/tài nguyên: Dựa vào 'KHO TÀI LIỆU & LINK LIÊN QUAN' được cung cấp để liệt kê đầy đủ link và lời bình thực tế, tuyệt đối không tự bịa link.\n` +
     `4. Nếu có NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): Hiểu rằng người dùng đang hỏi hoặc bình luận về chính nội dung được trích dẫn đó.\n` +
     `5. Luôn trả lời chuẩn theo phong cách cá tính được quy định ở trên.\n` +
-    `6. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (hãy dùng dấu gạch đầu dòng, viết hoa hoặc icon để làm nổi bật).`;
+    `6. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (hãy dùng dấu gạch đầu dòng, viết hoa hoặc icon để làm nổi bật).\n` +
+    `7. ĐẶC BIỆT KHI THÀNH VIÊN HỎI VỀ QUY TRÌNH, HƯỚNG DẪN, CÁCH LÀM HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Bạn BẮT BUỘC phải TRÍCH DẪN VÀ DIỄN GIẢI CHI TIẾT TỪNG BƯỚC (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến mà các thành viên (như bác Huy, anh Nam, Vũ Trọng...) đã từng chia sẻ trong lịch sử chat. TUYỆT ĐỐI KHÔNG ĐƯỢC chỉ đưa mỗi link tải tài liệu; phải giải thích cặn kẽ nội dung quy trình để người hỏi áp dụng được ngay, link tài liệu chỉ là phần đính kèm ở cuối để tham khảo thêm.`;
 
   const userPrompt =
     `${quotePromptSection}\n${fileContentSection}\n` +
