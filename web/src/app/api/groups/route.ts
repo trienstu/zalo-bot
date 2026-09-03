@@ -18,12 +18,29 @@ function getBotDbPath(reqUrl?: string, hostHeader?: string): string {
   const isBot2 = isPort3002 || process.env.BOT_ID === "bot-2" || process.env.WEB_DB_PATH?.includes("bot-2");
 
   if (isBot2) {
-    const p = path.resolve(home, "zalo-bot", "data", "bots", "bot-2", "bot.db");
-    if (fs.existsSync(p)) return p;
+    const candidates = [
+      path.resolve(home, "zalo-bot-2", "bot", "data", "bot.db"),
+      path.resolve(home, "zalo-bot-2", "data", "bot.db"),
+      path.resolve(process.cwd(), "..", "bot", "data", "bot.db"),
+      path.resolve(home, "zalo-bot", "data", "bots", "bot-2", "bot.db"),
+      path.resolve(home, "zalo-bot", "bot", "data", "bots", "bot-2", "bot.db"),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c) && fs.statSync(c).size > 0) return c;
+    }
   }
 
   if (process.env.WEB_DB_PATH?.trim() && fs.existsSync(process.env.WEB_DB_PATH.trim())) {
     return process.env.WEB_DB_PATH.trim();
+  }
+
+  const bot1Candidates = [
+    path.resolve(home, "zalo-bot", "bot", "data", "bot.db"),
+    path.resolve(home, "zalo-bot", "data", "bot.db"),
+    path.resolve(process.cwd(), "..", "bot", "data", "bot.db"),
+  ];
+  for (const c of bot1Candidates) {
+    if (fs.existsSync(c) && fs.statSync(c).size > 0) return c;
   }
 
   return path.resolve(home, "zalo-bot", "bot", "data", "bot.db");
@@ -44,8 +61,16 @@ async function getActiveBotDbPath(overrideBotId?: string, reqUrl?: string, hostH
     overrideBotId === "bot-2";
 
   if (isBot2) {
-    const p = path.resolve(home, "zalo-bot", "data", "bots", "bot-2", "bot.db");
-    if (fs.existsSync(p)) return p;
+    const candidates = [
+      path.resolve(home, "zalo-bot-2", "bot", "data", "bot.db"),
+      path.resolve(home, "zalo-bot-2", "data", "bot.db"),
+      path.resolve(process.cwd(), "..", "bot", "data", "bot.db"),
+      path.resolve(home, "zalo-bot", "data", "bots", "bot-2", "bot.db"),
+      path.resolve(home, "zalo-bot", "bot", "data", "bots", "bot-2", "bot.db"),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c) && fs.statSync(c).size > 0) return c;
+    }
   }
 
   if (process.env.WEB_DB_PATH?.trim() && fs.existsSync(process.env.WEB_DB_PATH.trim())) {

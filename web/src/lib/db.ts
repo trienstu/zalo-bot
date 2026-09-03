@@ -259,16 +259,26 @@ export function getDb(botId = "bot-1"): Database.Database {
   const isBot2 = port === "3002" || port === "3001" || process.env.BOT_ID === "bot-2" || process.env.WEB_DB_PATH?.includes("bot-2") || botId === "bot-2";
 
   if (isBot2) {
-    const p = path.resolve(home, "zalo-bot", "data", "bots", "bot-2", "bot.db");
-    if (fs.existsSync(p)) {
-      const existing = dbConnections.get(p);
-      if (existing && existing.open) return existing;
-      const newDb = new Database(p);
-      newDb.pragma("busy_timeout = 5000");
-      newDb.pragma("foreign_keys = ON");
-      ensureWebSchema(newDb);
-      dbConnections.set(p, newDb);
-      return newDb;
+    const bot2Candidates = [
+      path.resolve(home, "zalo-bot-2", "bot", "data", "bot.db"),
+      path.resolve(home, "zalo-bot-2", "data", "bot.db"),
+      path.resolve(process.cwd(), "..", "bot", "data", "bot.db"),
+      path.resolve(process.cwd(), "bot", "data", "bot.db"),
+      path.resolve(home, "zalo-bot", "data", "bots", "bot-2", "bot.db"),
+      path.resolve(home, "zalo-bot", "bot", "data", "bots", "bot-2", "bot.db"),
+    ];
+
+    for (const p of bot2Candidates) {
+      if (fs.existsSync(p) && fs.statSync(p).size > 0) {
+        const existing = dbConnections.get(p);
+        if (existing && existing.open) return existing;
+        const newDb = new Database(p);
+        newDb.pragma("busy_timeout = 5000");
+        newDb.pragma("foreign_keys = ON");
+        ensureWebSchema(newDb);
+        dbConnections.set(p, newDb);
+        return newDb;
+      }
     }
   }
 
@@ -302,6 +312,9 @@ export function getDb(botId = "bot-1"): Database.Database {
           DB_PATH,
         ]
       : [
+          path.resolve(home, "zalo-bot-2", "bot", "data", "bot.db"),
+          path.resolve(home, "zalo-bot-2", "data", "bot.db"),
+          path.resolve(process.cwd(), "..", "bot", "data", "bot.db"),
           path.resolve(home, "zalo-bot", "data", "bots", targetBotId, "bot.db"),
           path.resolve(home, "zalo-bot", "bot", "data", "bots", targetBotId, "bot.db"),
           path.resolve(process.cwd(), "..", "data", "bots", targetBotId, "bot.db"),
@@ -316,7 +329,9 @@ export function getDb(botId = "bot-1"): Database.Database {
   }
 
   if (!targetPath) {
-    targetPath = targetBotId === "bot-1" ? DB_PATH : path.resolve(home, "zalo-bot", "data", "bots", targetBotId, "bot.db");
+    targetPath = targetBotId === "bot-1"
+      ? DB_PATH
+      : path.resolve(home, "zalo-bot-2", "bot", "data", "bot.db");
   }
 
   if (!fs.existsSync(targetPath)) {

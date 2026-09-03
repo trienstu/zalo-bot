@@ -17,6 +17,30 @@ const QR_DIR =
 import { getBotInfo } from "./bot-registry";
 
 export function getBotDataDir(botId = "bot-1"): string {
+  const home = process.env.HOME || "/home/congtrien125";
+  const port = String(process.env.PORT || process.env.WEB_PORT || "");
+  const isBot2 = port === "3002" || port === "3001" || process.env.BOT_ID === "bot-2" || botId === "bot-2";
+
+  if (isBot2) {
+    const candidates = [
+      path.resolve(home, "zalo-bot-2", "bot", "session"),
+      path.resolve(home, "zalo-bot-2", "session"),
+      path.resolve(home, "zalo-bot-2", "bot", "data"),
+      path.resolve(process.cwd(), "..", "bot", "session"),
+      path.resolve(process.cwd(), "..", "bot", "data"),
+      path.resolve(home, "zalo-bot", "data", "bots", "bot-2", "session"),
+      path.resolve(home, "zalo-bot", "data", "bots", "bot-2"),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(path.join(c, "login-status.json")) || fs.existsSync(path.join(c, "session.json"))) {
+        return c;
+      }
+    }
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return c;
+    }
+  }
+
   const info = getBotInfo(botId);
   if (info && info.sessionDir && fs.existsSync(info.sessionDir)) {
     return info.sessionDir;
