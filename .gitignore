@@ -20,6 +20,7 @@ zalo-session*.json
 
 # Build output
 *.tar.gz
+!web/next-build.tar.gz
 dist/
 build/
 .next/
