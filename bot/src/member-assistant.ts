@@ -874,7 +874,8 @@ async function handleHistoryQA(
       `1. Thành viên đang gửi trực tiếp một HÌNH ẢNH / TÀI LIỆU để nhờ bạn phân tích.\n` +
       `2. BẠN BẮT BUỘC PHẢI QUAN SÁT KỸ VÀ PHÂN TÍCH TRỰC TIẾP HÌNH ẢNH / TÀI LIỆU ĐÍNH KÈM NÀY (đọc từng chi tiết, giao diện, bảng biểu, số liệu, tính năng trong ảnh).\n` +
       `3. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng viết hoa, gạch đầu dòng hoặc icon).\n` +
-      `4. Trả lời chuẩn theo phong cách của bạn (hóm hỉnh, chuyên nghiệp, thông minh).`;
+      `4. NGUYÊN TẮC TRUNG THỰC - TUYỆT ĐỐI KHÔNG BỊA ĐẶT: Nếu trong hình ảnh/tài liệu không có thông tin chi tiết về điều thành viên hỏi, BẮT BUỘC phải nói rõ là trong ảnh/tài liệu không có chi tiết này. TUYỆT ĐỐI KHÔNG tự suy đoán, bịa đặt sự kiện, sản phẩm, con số hay câu chuyện không có thật.\n` +
+      `5. Trả lời chuẩn theo phong cách của bạn (hóm hỉnh, chuyên nghiệp, thông minh).`;
 
     const fastUserPrompt =
       `${quoteTextSection}${fileContentSnippet}\n` +
@@ -945,8 +946,9 @@ async function handleHistoryQA(
       `NHIỆM VỤ:\n` +
       `1. Thành viên đang trích dẫn (quote) một tin nhắn cụ thể và nhờ bạn giải thích/tóm tắt/phân tích/trả lời.\n` +
       `2. Hãy tập trung giải thích chính xác, súc tích, đi thẳng vào trọng tâm nội dung được trích dẫn theo đúng phong cách của bạn.\n` +
-      `3. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng viết hoa, gạch đầu dòng hoặc icon).\n` +
-      `4. Trả lời ngắn gọn, dí dỏm, dễ hiểu.`;
+      `3. NGUYÊN TẮC TRUNG THỰC - TUYỆT ĐỐI KHÔNG BỊA ĐẶT (ANTI-HALLUCINATION): Bạn CHỈ ĐƯỢC PHÉP dựa vào đúng nội dung được trích dẫn ở trên để trả lời. Nếu thành viên hỏi các chi tiết sâu hơn, danh tính, sản phẩm cụ thể, nguyên nhân... mà trong nội dung trích dẫn KHÔNG CÓ: BẮT BUỘC PHẢI THẲNG THẮN TRẢ LỜI LÀ TRONG NỘI DUNG TRÍCH DẪN KHÔNG ĐỀ CẬP VÀ BẠN KHÔNG CÓ THÔNG TIN ĐÓ. TUYỆT ĐỐI KHÔNG ĐƯỢC TỰ BỊA ĐẶT CÂU CHUYỆN, SỰ KIỆN, CHI TIẾT HAY SẢN PHẨM KHÔNG CÓ THẬT (như tự bịa ra áo thun, bản vẽ, đồ họa...).\n` +
+      `4. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng viết hoa, gạch đầu dòng hoặc icon).\n` +
+      `5. Trả lời ngắn gọn, dí dỏm, dễ hiểu.`;
 
     const quoteUserPrompt =
       `=== NỘI DUNG ĐƯỢC TRÍCH DẪN (TỪ ${options.quote.senderName || "THÀNH VIÊN"}): ===\n` +
@@ -1296,7 +1298,8 @@ async function handleHistoryQA(
     `6. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (hãy dùng dấu gạch đầu dòng, viết hoa hoặc icon để làm nổi bật).\n` +
     `7. ĐẶC BIỆT KHI THÀNH VIÊN HỎI VỀ QUY TRÌNH, HƯỚNG DẪN, CÁCH LÀM HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Bạn BẮT BUỘC phải TRÍCH DẪN VÀ DIỄN GIẢI CHI TIẾT TỪNG BƯỚC (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến mà các thành viên đã từng chia sẻ trong lịch sử chat của nhóm này. TUYỆT ĐỐI KHÔNG ĐƯỢC chỉ đưa mỗi link tải tài liệu; phải giải thích cặn kẽ nội dung quy trình để người hỏi áp dụng được ngay, link tài liệu chỉ là phần đính kèm ở cuối để tham khảo thêm.\n` +
     `8. ĐỘ DÀI & TỐC ĐỘ PHẢN HỒI: Với các câu chào hỏi, giao lưu, tấu hài hoặc thắc mắc thường ngày, BẮT BUỘC trả lời súc tích, duyên dáng, ngắn gọn trong 2-3 đoạn (khoảng 300-500 ký tự) để đọc nhanh trên Zalo điện thoại. Không viết dài dòng lê thê trừ khi thành viên yêu cầu giải thích quy trình hoặc phân tích sâu.\n` +
-    `9. CÔ LẬP TUYỆT ĐỐI THEO NHÓM (KHÔNG NHẮC TÊN NGƯỜI TỪ NHÓM KHÁC): Bạn đang hoạt động trong nhóm này. TUYỆT ĐỐI CHỈ tương tác hoặc nhắc tên những thành viên CÓ MẶT trong nhóm này (được xuất hiện trong dữ liệu chat/thành viên ở trên hoặc người đang hỏi là ${displayName}). TUYỆT ĐỐI KHÔNG nhắc tên bất kỳ người lạ nào từ nhóm khác, KHÔNG tự bịa ra tên người nếu trong lịch sử chat nhóm này không có.` +
+    `9. CÔ LẬP TUYỆT ĐỐI THEO NHÓM (KHÔNG NHẮC TÊN NGƯỜI TỪ NHÓM KHÁC): Bạn đang hoạt động trong nhóm này. TUYỆT ĐỐI CHỈ tương tác hoặc nhắc tên những thành viên CÓ MẶT trong nhóm này (được xuất hiện trong dữ liệu chat/thành viên ở trên hoặc người đang hỏi là ${displayName}). TUYỆT ĐỐI KHÔNG nhắc tên bất kỳ người lạ nào từ nhóm khác, KHÔNG tự bịa ra tên người nếu trong lịch sử chat nhóm này không có.\n` +
+    `10. NGUYÊN TẮC TRUNG THỰC & CHỐNG ẢO TƯỞNG (ANTI-HALLUCINATION): Khi người dùng hỏi về một sự việc, sản phẩm, con người hoặc chi tiết cụ thể mà trong dữ liệu được cung cấp (ảnh, file, quote, lịch sử chat nhóm, kho tri thức, hoặc tin tức thời gian thực) KHÔNG CÓ THÔNG TIN: BẮT BUỘC PHẢI THẲNG THẮN TRẢ LỜI LÀ BẠN KHÔNG CÓ DỮ LIỆU ĐÓ. TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT RA CÂU CHUYỆN, SỰ KIỆN, CHI TIẾT HAY SẢN PHẨM KHÔNG CÓ CĂN CỨ ĐỂ 'TRẢ LỜI CHO XONG'.` +
     searchInstruction;
 
   const userPrompt =
