@@ -5,6 +5,7 @@ import type { MemberMessageEvent } from "./member-assistant.js";
 import { getWeatherReport } from "./weather.js";
 import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam } from "./reminder.js";
 import { getDailyAiNewsBriefing } from "./ai-news.js";
+import { searchRealtimeNews } from "./realtime-search.js";
 
 // Lưu lịch sử trò chuyện nhiều lượt (Multi-turn Chat) giữa Admin và Bot (Lưu tối đa 12 lượt gần nhất)
 const adminChatSessions = new Map<string, { role: "user" | "model"; text: string }[]>();
@@ -516,29 +517,39 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     quoteSection = `\n=== NỘI DUNG TRÍCH DẪN: ===\n"${event.quote.text}"\n`;
   }
 
-  // 2.0. Nhận diện câu hỏi cần tra cứu thông tin thời gian thực (Google Search / X / Tin tức cập nhật)
+  // 2.0. Nhận diện câu hỏi cần tra cứu thông tin thời gian thực (Google News / Sự kiện / Tin tức mới)
   const isRealTimeSearchQuery =
-    /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì|sự kiện mới|giá vàng|chứng khoán|thị trường)/i.test(
+    /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì|sự kiện mới|giá vàng|chứng khoán|thị trường|lũ quét|bão số|thiên tai|thế nào rồi)/i.test(
       rawText
     );
 
+  let liveNews = "";
+  if (isRealTimeSearchQuery) {
+    try {
+      liveNews = await searchRealtimeNews(rawText);
+    } catch (e) {
+      console.warn("[admin-assistant] searchRealtimeNews lỗi:", e);
+    }
+  }
+
+  const liveNewsSection = liveNews
+    ? `\n=== CÁC BẢN TIN THỜI GIAN THỰC MỚI NHẤT VỪA TRA CỨU TỪ GOOGLE NEWS: ===\n${liveNews}\n`
+    : "";
+
   const searchInstruction = isRealTimeSearchQuery
-    ? `\n8. TÌM KIẾM THỜI GIAN THỰC (GOOGLE SEARCH & X): Câu hỏi này liên quan đến tin tức hoặc thông tin thời gian thực. Bạn ĐÃ ĐƯỢC TÍCH HỢP công cụ Google Search kết nối Internet thời gian thực. Hãy ưu tiên tra cứu và tổng hợp các tin tức, bài đăng trên X/Twitter, trang công nghệ và thông cáo báo chí 24-48 giờ qua để trả lời chính xác, sắc bén và có nguồn tham khảo rõ ràng.\n`
+    ? `\n8. TỔNG HỢP TIN TỨC THỜI GIAN THỰC: Câu hỏi này liên quan đến tin tức hoặc sự kiện thực tế. Dựa vào các bản tin mới nhất vừa tra cứu bên dưới kết hợp với tri thức của bạn, hãy trả lời chính xác, súc tích, cập nhật thời sự, nêu rõ thông tin quan trọng nhất.\n`
     : "";
 
   const userPrompt =
     (historyText ? `LỊCH SỬ TRÒ CHUYỆN TRƯỚC ĐÓ:\n${historyText}\n\n` : "") +
-    `${quoteSection}${fileSection}\n` +
+    `${quoteSection}${fileSection}${liveNewsSection}\n` +
     `YÊU CẦU MỚI TỪ ${isAdmin ? `ADMIN (${displayName})` : `BẠN (${displayName})`}: ${rawText || "Hãy phân tích tài liệu/hình ảnh này giúp tôi."}\n\n` +
-    (isRealTimeSearchQuery
-      ? `LƯU Ý: Đây là câu hỏi về tin tức/thời gian thực. Hãy sử dụng công cụ tìm kiếm Google để cập nhật tin mới nhất trên Internet và X/Twitter.\n\n`
-      : "") +
     (isAdmin ? `HÃY TRẢ LỜI SẾP THẬT CHUẨN XÁC, THÔNG MINH VÀ HỮU ÍCH:` : `HÃY TRẢ LỜI THẬT THÂN THIỆN, CHUẨN XÁC VÀ HỮU ÍCH:`);
 
   try {
     const answer = await callGemini(systemPrompt + searchInstruction, userPrompt, {
       mediaParts: mediaPart ? [mediaPart] : undefined,
-      enableSearch: isRealTimeSearchQuery,
+      enableSearch: false, // Dùng kết quả Google News RSS đã nhúng trực tiếp, tránh lỗi 429 quota search grounding của Gemini Free
     });
 
     // Kiểm tra và thực thi thẻ hành động [ACTION:SEND_GROUP target="..."]...[/ACTION] CHỈ DÀNH CHO ADMIN

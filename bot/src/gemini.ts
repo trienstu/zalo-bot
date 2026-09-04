@@ -241,7 +241,7 @@ export async function callGemini(
     try {
       const resp = await fetch(endpoint, {
         method: "POST",
-        signal: AbortSignal.timeout(12_000), // 12s timeout
+        signal: AbortSignal.timeout(25_000), // 25s timeout
         headers: {
           "Content-Type": "application/json",
         },
@@ -252,6 +252,34 @@ export async function callGemini(
         const errText = await resp.text().catch(() => "");
         console.warn(`[gemini] Key #${keyIdx + 1} (${model}) gặp HTTP ${resp.status}.`);
         lastError = new Error(`Gemini API HTTP ${resp.status}: ${errText.slice(0, 300)}`);
+
+        // Nếu bật search mà bị 429 hoặc 400 (do Google Search tool hết quota gói free), thử ngay không kèm tool
+        if (options?.enableSearch && (resp.status === 429 || resp.status === 400)) {
+          try {
+            const noToolsBody = { ...requestBody };
+            delete (noToolsBody as any).tools;
+            const noToolsResp = await fetch(endpoint, {
+              method: "POST",
+              signal: AbortSignal.timeout(10_000),
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(noToolsBody),
+            });
+            console.warn(`[gemini] noToolsResp status: ${noToolsResp.status}`);
+            if (noToolsResp.ok) {
+              const ntData = (await noToolsResp.json()) as any;
+              const ntText = ntData.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (typeof ntText === "string") {
+                botKeyOffset = (keyIdx + 1) % numKeys;
+                return ntText.trim();
+              }
+            } else {
+              const ntErr = await noToolsResp.text().catch(() => "");
+              console.warn(`[gemini] noToolsResp err: ${ntErr.slice(0, 200)}`);
+            }
+          } catch (e) {
+            console.warn(`[gemini] noToolsResp catch error: ${String(e)}`);
+          }
+        }
 
         // Nếu model bị 503 (quá tải) hoặc 404, thử ngay fallbackModel (gemini-3.5-flash-lite) siêu tốc với cùng key
         if (resp.status === 503 || resp.status === 404) {

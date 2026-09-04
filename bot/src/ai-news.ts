@@ -1,7 +1,8 @@
 import { callGemini } from "./gemini.js";
+import { searchRealtimeNews } from "./realtime-search.js";
 
 /**
- * Tạo bản tin điểm tin công nghệ & AI sáng tự động bằng Gemini kèm Google Search Grounding thời gian thực.
+ * Tạo bản tin điểm tin công nghệ & AI sáng tự động bằng Gemini kèm dữ liệu Google News RSS thời gian thực.
  */
 export async function getDailyAiNewsBriefing(
   topic = "AI & Công nghệ trên X",
@@ -16,15 +17,25 @@ export async function getDailyAiNewsBriefing(
     timeZone: "Asia/Bangkok",
   });
 
+  let liveNews = "";
+  try {
+    liveNews = await searchRealtimeNews(topic || "AI công nghệ mô hình mới");
+  } catch (e) {
+    console.warn("[ai-news] searchRealtimeNews error:", e);
+  }
+
+  const liveNewsSection = liveNews
+    ? `\n\n=== CÁC BẢN TIN THỜI GIAN THỰC MỚI NHẤT TỪ GOOGLE NEWS: ===\n${liveNews}\n`
+    : "";
+
   const systemPrompt =
     `Bạn là '${botName}' - chuyên gia công nghệ & người dẫn bản tin AI hàng đầu của cộng đồng Zalo.\n` +
     `Phong cách: Thông thái, sắc sảo, hóm hỉnh, bắt trend, thực chiến và tràn đầy năng lượng buổi sáng.\n` +
     `QUY TẮC ĐỊNH DẠNG: TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (hãy dùng emoji, viết hoa tiêu đề hoặc gạch đầu dòng để làm nổi bật).`;
 
   const userPrompt =
-    `Hôm nay là ${dateStr}.\n` +
-    `Hãy tìm kiếm trên Google & X (Twitter) các tin tức, mô hình AI mới, công bố công nghệ và bài thảo luận hot nhất trong 24 giờ qua (về chủ đề: ${topic}).\n\n` +
-    `Hãy biên tập thành một BẢN TIN SÁNG theo định dạng sau:\n\n` +
+    `Hôm nay là ${dateStr}.${liveNewsSection}\n` +
+    `Dựa vào các tin tức mới nhất ở trên kết hợp với tri thức của bạn về chủ đề '${topic}', hãy biên tập thành một BẢN TIN SÁNG theo định dạng sau:\n\n` +
     `🌅 BẢN TIN SÁNG ${botName.toUpperCase()}: ĐIỂM TIN AI NÓNG NHẤT 24H QUA\n` +
     `📅 ${dateStr} | Tiêu điểm: ${topic}\n\n` +
     `🔥 TOP TIÊU ĐIỂM ĐỘT PHÁ:\n` +
@@ -35,7 +46,7 @@ export async function getDailyAiNewsBriefing(
 
   try {
     const answer = await callGemini(systemPrompt, userPrompt, {
-      enableSearch: true,
+      enableSearch: false,
       temperature: 0.4,
     });
     return answer;
