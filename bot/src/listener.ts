@@ -863,17 +863,21 @@ export async function runListener(): Promise<void> {
         const fileAttachment = extractFileAttachment(payload);
 
         // Trợ lý tương tác thành viên (/rank, /top, /summary, /help, /hoi, đọc tài liệu/file/ảnh & bộ nhớ dài hạn)
-        // CHỈ PHẢN HỒI KHI NHÓM Ở CHẾ ĐỘ 🟢 'interactive' (Toàn quyền tương tác)
-        // Khi ở chế độ 🟡 'silent' (Tàu ngầm ẩn), bot tuyệt đối im lặng không trả lời lệnh
+        // CHỈ PHẢN HỒI KHI:
+        // 1. Nhóm ở chế độ 🟢 'interactive' (Toàn quyền tương tác)
+        // 2. TUYỆT ĐỐI KHÔNG PHẢN HỒI tin nhắn của chính Bot (!isMsgSelf)
         const currentGroupMode = getGroupMode(threadId);
-        if (currentGroupMode === "interactive") {
+        const ownId = typeof api?.getOwnId === "function" ? String(api.getOwnId()) : "";
+        const isMsgSelf = Boolean(payload?.isSelf) || Boolean(ownId && sender === ownId);
+
+        if (currentGroupMode === "interactive" && !isMsgSelf) {
           const mentions = Array.isArray(payload?.data?.mentions) ? payload.data.mentions : [];
           void handleMemberInteraction(api, {
             threadId,
             sender,
             displayName,
             text,
-            isSelf: Boolean(payload?.isSelf),
+            isSelf: false,
             mediaUrl,
             mediaType: media?.type,
             fileAttachment,

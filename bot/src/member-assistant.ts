@@ -1319,6 +1319,13 @@ function findMemberInGroup(threadId: string, query: string): { zalo_user_id: str
  * Xử lý tin nhắn đến từ thành viên: kiểm tra lệnh hoặc câu hỏi.
  */
 export async function handleMemberInteraction(api: any, event: MemberMessageEvent): Promise<void> {
+  const ownId = typeof api?.getOwnId === "function" ? String(api.getOwnId()) : "";
+
+  // 1. TUYỆT ĐỐI BỎ QUA tin nhắn của chính tài khoản Bot (chống Self-Reply & Loop)
+  if (event.isSelf || Boolean(ownId && event.sender === ownId)) {
+    return;
+  }
+
   const rawText = (event.text || "").trim();
   const hasImage = Boolean(event.mediaUrl || event.quote?.mediaUrl);
   const hasFile = Boolean(event.fileAttachment);
@@ -1326,7 +1333,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
 
   if (!rawText && !hasImage && !hasFile) return;
 
-  // 1. TUYỆT ĐỐI BỎ QUA các tin nhắn do chính Bot sinh ra (Chống Bot-to-Bot Loop & Self-Reply):
+  // 2. TUYỆT ĐỐI BỎ QUA các tin nhắn do chính Bot sinh ra:
   // Tất cả tin nhắn do bot gửi ra đều có icon 🤖 hoặc các tiền tố/mẫu định dạng bên dưới.
   if (
     rawText.startsWith("🤖") ||
@@ -1352,43 +1359,39 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
-  // 2. Nếu là tin nhắn từ chính tài khoản bot (isSelf):
-  // Chỉ bỏ qua nếu là tin nhắn chat vu vơ không có ý định gọi bot.
-  // Nếu chủ bot gõ lệnh (/, !) HOẶC gọi đích danh bot ("sen chúa", "mộc miên", "bot", tag, quote, file, ảnh):
-  // Cho phép bot xử lý và phản hồi bình thường!
-  if (event.isSelf) {
-    const lowerSelf = rawText.toLowerCase();
-    const isExplicitIntent =
-      rawText.startsWith("/") ||
-      rawText.startsWith("!") ||
-      rawText.startsWith("@") ||
-      hasImage ||
-      hasFile ||
-      hasQuote ||
-      lowerSelf.includes("sen chúa") ||
-      lowerSelf.includes("sen chua") ||
-      lowerSelf.includes("mộc miên") ||
-      lowerSelf.includes("moc mien") ||
-      lowerSelf.startsWith("sen") ||
-      lowerSelf.startsWith("bot");
-    if (!isExplicitIntent) return;
-  }
-
   const sender = event.sender;
-  const displayName = event.displayName || "Bạn";
+  const displayName = (event.displayName || "Bạn").trim();
   const threadId = event.threadId;
 
-  // ⛔ KIỂM TRA THÀNH VIÊN BỊ CHẶN BOT TRẢ LỜI:
+  // 3. TUYỆT ĐỐI BỎ QUA tin nhắn từ tài khoản có tên trùng tên Bot hoặc Bot khác (Sen Chúa, Mộc Miên, Bot):
+  const groupSettings = getGroupSettings(threadId);
+  const botName = (groupSettings.botName || "Sen Chúa").trim();
+  const lowerName = displayName.toLowerCase();
+
+  if (
+    lowerName === botName.toLowerCase() ||
+    lowerName === "sen chúa" ||
+    lowerName === "sen chua" ||
+    lowerName === "mộc miên" ||
+    lowerName === "moc mien" ||
+    lowerName.startsWith("bot ") ||
+    lowerName === "bot"
+  ) {
+    console.log(`[member-assistant] ⛔ Bỏ qua tin nhắn từ tài khoản trùng tên Bot (${displayName})`);
+    return;
+  }
+
+  // 4. KIỂM TRA THÀNH VIÊN BỊ CHẶN BOT TRẢ LỜI:
   // Nếu thành viên này nằm trong danh sách đen bị chặn -> Bot TUYỆT ĐỐI IM LẶNG 100%, không tương tác (kể cả tag bot hay lệnh /hoi).
   if (isMemberBlocked(sender, threadId)) {
     console.log(`[member-assistant] ⛔ Thành viên ${displayName} (${sender}) đang bị chặn bot trả lời trong nhóm [${threadId}]. Bỏ qua.`);
     return;
   }
 
-  // Kiểm tra cooldown (bỏ qua cooldown đối với chính tài khoản chủ bot để tiện test lệnh)
+  // Kiểm tra cooldown
   const now = Date.now();
   const lastTime = userCooldowns.get(sender) || 0;
-  if (!event.isSelf && now - lastTime < COOLDOWN_MS) {
+  if (now - lastTime < COOLDOWN_MS) {
     return; // Đang trong thời gian chờ, bỏ qua để chống spam
   }
 
@@ -1964,8 +1967,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     lower.startsWith("!docanh") ||
     lower.startsWith("/docfile") ||
     lower.startsWith("/file") ||
-    lower.startsWith("/anh") ||
-    (event.isSelf && lower.startsWith("@"));
+    lower.startsWith("/anh");
 
   const isTagBot = isCommand || mentionsBot;
 
@@ -2207,17 +2209,40 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         quote: event.quote,
       });
       const groupSettings = getGroupSettings(threadId);
-      const botName = groupSettings.botName || "Sen Chúa";
+      const botName = (groupSettings.botName || "Sen Chúa").trim();
+
+      // Chốt chặn an toàn cuối cùng: Không bao giờ gửi phản hồi cho chính tên Bot
+      const lowerDisplay = displayName.toLowerCase();
+      if (
+        lowerDisplay === botName.toLowerCase() ||
+        lowerDisplay === "sen chúa" ||
+        lowerDisplay === "sen chua" ||
+        lowerDisplay === "mộc miên" ||
+        lowerDisplay === "moc mien" ||
+        lowerDisplay.startsWith("bot ") ||
+        lowerDisplay === "bot"
+      ) {
+        console.warn(`[member-assistant] ⛔ Chặn gửi phản hồi vì tên người nhận (${displayName}) trùng tên Bot (${botName})`);
+        return;
+      }
+
       const reply = `🤖 ${botName} trả lời @${displayName}:\n\n${answer}`;
       await sendGroupText(api, threadId, reply);
       console.log(`[member-assistant] ✅ Đã gửi câu trả lời thành công vào nhóm`);
     } catch (err) {
       console.error(`[member-assistant] ❌ Lỗi xử lý câu hỏi:`, err);
-      await sendGroupText(
-        api,
-        threadId,
-        `🤖 Dạ câu hỏi của @${displayName} hóc búa quá làm em Sen Chúa xém khét CPU 😄! Bác cho em xin vài giây thở oxy rồi hỏi lại thử xem nè!`,
-      );
+      const lowerDisplay = displayName.toLowerCase();
+      if (
+        !lowerDisplay.includes("sen chúa") &&
+        !lowerDisplay.includes("mộc miên") &&
+        lowerDisplay !== "bot"
+      ) {
+        await sendGroupText(
+          api,
+          threadId,
+          `🤖 Dạ câu hỏi của @${displayName} hóc búa quá làm em Sen Chúa xém khét CPU 😄! Bác cho em xin vài giây thở oxy rồi hỏi lại thử xem nè!`,
+        );
+      }
     }
     return;
   }
