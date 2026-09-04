@@ -122,6 +122,8 @@ export async function searchRealtimeNews(query: string): Promise<string> {
 
     // 2. Làm sạch từ khóa tìm kiếm
     let cleanQ = query
+      .replace(/(?:sen chúa|sen chua|bot ơi|bot oi|bot|admin|ad ơi|ad oi|ad|trợ lý|tro ly)/gi, " ")
+      .replace(/(?:là gì thế|là gì vậy|là gì nè|là gì|là cái gì|là con gì|là ai|thế nào|như thế nào|ra sao|nghĩa là gì|là sao)/gi, " ")
       .replace(
         /(?:cập nhật|tình hình|mới nhất|tin tức|tin mới|hôm nay|24h qua|24h|24 giờ|cho tôi|giúp tôi|với|nha|nhé|ạ|ơi|hỏi về|xem|tin nóng|vừa ra mắt|thời sự|bản tin|vừa công bố|thế nào rồi|có gì mới|cho biết|đi|về|nào|coi|nói về|hãy|tìm kiếm thêm thông tin về|tìm kiếm thêm thông tin|tìm kiếm thêm|tra cứu|xem có nội dung cụ thể|nội dung cụ thể|cái gì bị)/gi,
         " "

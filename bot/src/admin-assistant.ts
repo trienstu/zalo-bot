@@ -523,7 +523,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
   // 2.0. Nhận diện câu hỏi cần tra cứu thông tin thời gian thực / lịch sử (Google News 3 tầng)
   const isRealTimeSearchQuery =
-    /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|24h|24 giờ|có gì mới|mới có gì|vừa xong|gần đây|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì|sự kiện|giá vàng|chứng khoán|thị trường|lũ quét|bão số|thiên tai|thế nào rồi|thảm họa|dự án|tổng quan dự án|thông tin về|cho tôi thông tin|tìm hiểu về|ở đâu|giá bao nhiêu|ai là\b|vụ việc\b|vụ án\b|scandal\b|lùm xùm\b|bê bối\b|tiểu sử\b|sự cố\b|nguyên nhân\b|đạo nhái\b|bản quyền\b|phốt\b|drama\b|tìm kiếm thêm|tra cứu)/i.test(
+    /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|24h|24 giờ|có gì mới|mới có gì|vừa xong|gần đây|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì|sự kiện|giá vàng|chứng khoán|thị trường|lũ quét|bão số|thiên tai|thế nào rồi|thảm họa|dự án|tổng quan dự án|thông tin về|cho tôi thông tin|tìm hiểu về|ở đâu|giá bao nhiêu|ai là\b|vụ việc\b|vụ án\b|scandal\b|lùm xùm\b|bê bối\b|tiểu sử\b|sự cố\b|nguyên nhân\b|đạo nhái\b|bản quyền\b|phốt\b|drama\b|tìm kiếm thêm|tra cứu|là gì\b|là cái gì\b|là con gì\b|thế nào\b|như thế nào\b|ra sao\b|nghĩa là gì\b|gpt\b|claude\b|deepseek\b|grok\b|openai\b|anthropic\b|astra\b)/i.test(
       rawText
     );
 
