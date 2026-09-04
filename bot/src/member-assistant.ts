@@ -1229,7 +1229,7 @@ async function handleHistoryQA(
   let searchInstruction = "";
   if (isRealTimeSearchQuery) {
     searchInstruction =
-      `\n8. TỔNG HỢP TIN TỨC THỜI GIAN THỰC: Câu hỏi này liên quan đến tin tức, sự kiện hoặc thông tin thời gian thực. Dựa vào các bản tin mới nhất vừa tra cứu bên dưới kết hợp với tri thức của bạn, hãy trả lời chính xác, súc tích, cập nhật thời sự, nêu rõ thông tin quan trọng nhất.\n`;
+      `\n8. TỔNG HỢP TIN TỨC THỜI GIAN THỰC: Câu hỏi này liên quan đến tin tức, sự kiện hoặc thông tin thời gian thực. BẮT BUỘC ĐỌC KỸ và TRÍCH XUẤT CHÍNH XÁC các con số thống kê mới nhất (số người chết, mất tích, thiệt hại, ngày tháng, tên nguồn báo chí) từ danh sách các bản tin Google News bên dưới. TUYỆT ĐỐI KHÔNG tự phỏng đoán hoặc đưa các số liệu cũ từ quá khứ nếu đã có số liệu trong danh sách bản tin.\n`;
   }
 
   const systemPrompt =
