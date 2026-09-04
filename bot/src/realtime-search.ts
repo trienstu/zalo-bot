@@ -1,7 +1,8 @@
 /**
- * Tra cứu tin tức & sự kiện thời gian thực từ Google News RSS.
- * Hoạt động 100% miễn phí, tốc độ cao (~200-300ms), không bị giới hạn quota hay lỗi 429 của Google AI Studio.
- * Hỗ trợ ép lọc chuẩn xác trong 24h qua (when:1d), lọc theo timestamp thực tế, và đa nguồn Việt Nam - Quốc tế.
+ * Tra cứu tin tức & sự kiện thời gian thực từ Google News RSS với kiến trúc 3 tầng thời gian:
+ * - Tầng 1: Tin nóng trong ngày (24 giờ qua - when:1d)
+ * - Tầng 2: Diễn biến gần đây (7 ngày qua - when:7d)
+ * - Tầng 3: Toàn bộ kho lưu trữ lịch sử (Không giới hạn thời gian - All-time Relevance)
  */
 
 function decodeXml(str: string): string {
@@ -65,8 +66,10 @@ async function fetchGoogleNewsRss(keyword: string, lang: "vi" | "en" = "vi"): Pr
             timeLabel = `Vừa xong (< 1 giờ trước - ${tStr} ngày ${dStr})`;
           } else if (ageHours < 24) {
             timeLabel = `${Math.round(ageHours)} giờ trước - ${tStr} ngày ${dStr}`;
-          } else {
+          } else if (ageHours < 24 * 7) {
             timeLabel = `${Math.round(ageHours / 24)} ngày trước - ngày ${dStr}`;
+          } else {
+            timeLabel = `Bài báo ngày ${dStr}`;
           }
         } else {
           timeLabel = rawDate;
@@ -80,17 +83,47 @@ async function fetchGoogleNewsRss(keyword: string, lang: "vi" | "en" = "vi"): Pr
   }
 }
 
+/**
+ * Thực hiện tìm kiếm Google News theo từ khóa và bộ lọc thời gian chỉ định (hoặc không giới hạn thời gian).
+ */
+async function queryNewsPipeline(
+  cleanQ: string,
+  timeFilter: string,
+  isTechAI: boolean,
+  secondaryQ = ""
+): Promise<ParsedNewsItem[]> {
+  const queryStr = timeFilter ? `${cleanQ} ${timeFilter}` : cleanQ;
+  const fetchPromises: Promise<ParsedNewsItem[]>[] = [
+    fetchGoogleNewsRss(queryStr, "vi"),
+  ];
+
+  if (secondaryQ) {
+    const secStr = timeFilter ? `${secondaryQ} ${timeFilter}` : secondaryQ;
+    fetchPromises.push(fetchGoogleNewsRss(secStr, "vi"));
+  }
+
+  if (isTechAI) {
+    fetchPromises.push(fetchGoogleNewsRss(queryStr, "en"));
+  }
+
+  const allResults = (await Promise.all(fetchPromises)).flat();
+  return allResults;
+}
+
 export async function searchRealtimeNews(query: string): Promise<string> {
   try {
-    // Nhận biết yêu cầu khắt khe về tin tức trong ngày / 24h qua
-    const is24hStrict = /(?:hôm nay|24h|24 giờ|vừa xong|mới nhất|tin nóng|vừa ra mắt|vừa công bố|gần đây|ngay lúc này|hiện tại|trong ngày)/i.test(
+    // 1. Phân loại nhu cầu thời gian từ câu hỏi
+    const is24hStrict = /(?:hôm nay|24h|24 giờ|vừa xong|vừa ra mắt|vừa công bố|tin nóng|ngay lúc này|trong ngày|sáng nay|trưa nay|chiều nay|tối nay)/i.test(
+      query
+    );
+    const is7dRecent = /(?:gần đây|mới nhất|tuần qua|tuần này|mới đây|dạo này|tiến độ|diễn biến|hiện tại|thế nào rồi)/i.test(
       query
     );
 
-    // 1. Làm sạch từ khóa tìm kiếm (loại bỏ từ nối, kính ngữ nhưng không làm méo nghĩa)
+    // 2. Làm sạch từ khóa tìm kiếm
     let cleanQ = query
       .replace(
-        /(?:cập nhật|tình hình|mới nhất|tin tức|tin mới|hôm nay|24h qua|24h|24 giờ|cho tôi|giúp tôi|với|nha|nhé|ạ|ơi|hỏi về|xem|tin nóng|vừa ra mắt|thời sự|bản tin|vừa công bố|thế nào rồi|có gì mới|cho biết|đi|về|nào|coi|nói về|hãy)/gi,
+        /(?:cập nhật|tình hình|mới nhất|tin tức|tin mới|hôm nay|24h qua|24h|24 giờ|cho tôi|giúp tôi|với|nha|nhé|ạ|ơi|hỏi về|xem|tin nóng|vừa ra mắt|thời sự|bản tin|vừa công bố|thế nào rồi|có gì mới|cho biết|đi|về|nào|coi|nói về|hãy|tìm kiếm thêm thông tin về|tìm kiếm thêm thông tin|tìm kiếm thêm|tra cứu|xem có nội dung cụ thể|nội dung cụ thể|cái gì bị)/gi,
         " "
       )
       .replace(/[?!,.:;"'()\[\]{}–—\-]/g, " ")
@@ -99,7 +132,7 @@ export async function searchRealtimeNews(query: string): Promise<string> {
 
     if (!cleanQ || cleanQ.length < 2) return "";
 
-    // 2. Nhận diện các nền tảng mạng xã hội hoặc nhân vật công nghệ
+    // 3. Nhận diện nền tảng mạng xã hội hoặc nhân vật công nghệ
     const isSocialX =
       /\b(?:trên x|mạng xã hội x|trên twitter|x\.com|twitter)\b/i.test(query) ||
       /\bx\b/i.test(cleanQ);
@@ -113,10 +146,7 @@ export async function searchRealtimeNews(query: string): Promise<string> {
       cleanQ
     );
 
-    // Sử dụng toán tử thời gian của Google: when:1d (trong 24h) hoặc when:2d
-    const timeFilter = is24hStrict ? "when:1d" : "when:2d";
-
-    // 3. Tạo truy vấn góc nhìn số 2 (hướng đích tìm số liệu, biến động)
+    // 4. Tạo truy vấn góc nhìn số 2 (hướng đích tìm số liệu, biến động)
     let secondaryQ = "";
     if (/(?:lũ|bão|sạt lở|thiên tai|tai nạn|cháy|nổ|động đất|thảm họa|dịch bệnh)/i.test(cleanQ)) {
       secondaryQ = `${cleanQ} người chết mất tích thiệt hại`;
@@ -124,42 +154,48 @@ export async function searchRealtimeNews(query: string): Promise<string> {
       secondaryQ = `${cleanQ} giá biến động`;
     }
 
-    // 4. Chạy truy vấn song song (Việt Nam + Quốc tế nếu là chủ đề Tech/AI)
-    const fetchPromises: Promise<ParsedNewsItem[]>[] = [
-      fetchGoogleNewsRss(`${cleanQ} ${timeFilter}`, "vi"),
-    ];
+    // 5. KIẾN TRÚC PHÂN TẦNG THỜI GIAN (CASCADING 3-TIER SEARCH):
+    let candidates: ParsedNewsItem[] = [];
 
-    if (secondaryQ) {
-      fetchPromises.push(fetchGoogleNewsRss(`${secondaryQ} ${timeFilter}`, "vi"));
+    if (is24hStrict) {
+      // TẦNG 1: Ép cứng 24h qua (when:1d)
+      const res24h = await queryNewsPipeline(cleanQ, "when:1d", isTechAI, secondaryQ);
+      candidates = res24h.filter((r) => r.ageHours <= 26);
+
+      // Nếu tầng 24h không có tin nào, tự động thác đổ xuống Tầng 2 (7 ngày)
+      if (candidates.length === 0) {
+        const res7d = await queryNewsPipeline(cleanQ, "when:7d", isTechAI, secondaryQ);
+        candidates = res7d.filter((r) => r.ageHours <= 7 * 24 + 6);
+      }
+    } else if (is7dRecent) {
+      // TẦNG 2: Trong 7 ngày qua (when:7d)
+      const res7d = await queryNewsPipeline(cleanQ, "when:7d", isTechAI, secondaryQ);
+      candidates = res7d.filter((r) => r.ageHours <= 7 * 24 + 6);
+
+      // Nếu tầng 7 ngày không có tin nào, thác đổ xuống Tầng 3 (Không giới hạn)
+      if (candidates.length === 0) {
+        candidates = await queryNewsPipeline(cleanQ, "", isTechAI, secondaryQ);
+      }
+    } else {
+      // TẦNG 3: KHÔNG GIỚI HẠN THỜI GIAN (Mặc định cho các câu hỏi tra cứu thông tin/hồ sơ/sự việc)
+      // Bỏ hoàn toàn tham số when: để Google News tìm trên toàn bộ kho lưu trữ lịch sử
+      candidates = await queryNewsPipeline(cleanQ, "", isTechAI, secondaryQ);
     }
 
-    if (isTechAI) {
-      fetchPromises.push(fetchGoogleNewsRss(`${cleanQ} ${timeFilter}`, "en"));
+    if (candidates.length === 0) return "";
+
+    // 6. Sắp xếp kết quả:
+    // Nếu là câu hỏi thời sự 24h hoặc 7d: ưu tiên xếp bài mới nhất lên đầu
+    // Nếu là Tầng 3 (Không giới hạn): giữ nguyên thứ tự Relevance của Google kết hợp độ mới
+    if (is24hStrict || is7dRecent) {
+      candidates.sort((a, b) => b.timestamp - a.timestamp);
     }
-
-    const allResults = (await Promise.all(fetchPromises)).flat();
-
-    // 5. Lọc chuẩn xác theo thời gian thực (pubDate timestamp)
-    // Nếu yêu cầu 24h, chỉ giữ bài có ageHours <= 26 giờ (cho phép sai số lệch múi giờ 2h)
-    let filtered = is24hStrict
-      ? allResults.filter((r) => r.ageHours <= 26)
-      : allResults.filter((r) => r.ageHours <= 72);
-
-    // Nếu bộ lọc 24h bị rỗng vì từ khóa quá ngách, nới lỏng an toàn sang 48h
-    if (filtered.length === 0) {
-      filtered = allResults.filter((r) => r.ageHours <= 48);
-    }
-
-    if (filtered.length === 0) return "";
-
-    // 6. Sắp xếp bài mới nhất lên đầu (timestamp giảm dần)
-    filtered.sort((a, b) => b.timestamp - a.timestamp);
 
     // 7. Khử trùng lặp tiêu đề
     const seenTitles = new Set<string>();
     const mergedItems: ParsedNewsItem[] = [];
 
-    for (const item of filtered) {
+    for (const item of candidates) {
       const coreTitle = (item.title.split(/\s*-\s*[^-]+$/)[0] || item.title).trim().toLowerCase();
       if (!seenTitles.has(coreTitle)) {
         seenTitles.add(coreTitle);
@@ -167,7 +203,7 @@ export async function searchRealtimeNews(query: string): Promise<string> {
       }
     }
 
-    // 8. Trả về tối đa 25 bản tin phong phú và mới nhất
+    // 8. Trả về tối đa 25 bản tin kèm mốc thời gian xuất bản chi tiết
     return mergedItems
       .slice(0, 25)
       .map((item, idx) => `${idx + 1}. [${item.timeLabel}] ${item.title}`)

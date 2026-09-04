@@ -950,9 +950,28 @@ async function handleHistoryQA(
       `4. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng viết hoa, gạch đầu dòng hoặc icon).\n` +
       `5. Trả lời ngắn gọn, dí dỏm, dễ hiểu.`;
 
+    let quoteLiveNews = "";
+    const needsExternalSearch =
+      /(?:tìm kiếm|tra cứu|tin tức|tin mới|thông tin thêm|xem có|là ai\b|vụ gì\b|sự việc gì\b|bản quyền|đạo nhái|phốt|drama|tiểu sử|vụ việc)/i.test(
+        question
+      );
+    if (needsExternalSearch) {
+      try {
+        const combinedQ = `${options.quote.text.slice(0, 100)} ${question}`;
+        quoteLiveNews = await searchRealtimeNews(combinedQ);
+      } catch (e) {
+        console.warn("[member-assistant] Quote QA searchRealtimeNews error:", e);
+      }
+    }
+
+    const quoteLiveNewsSection = quoteLiveNews
+      ? `\n=== THÔNG TIN BÁO CHÍ TRA CỨU ĐƯỢC TỪ GOOGLE NEWS: ===\n${quoteLiveNews}\n`
+      : "";
+
     const quoteUserPrompt =
       `=== NỘI DUNG ĐƯỢC TRÍCH DẪN (TỪ ${options.quote.senderName || "THÀNH VIÊN"}): ===\n` +
-      `"${options.quote.text}"\n\n` +
+      `"${options.quote.text}"\n` +
+      `${quoteLiveNewsSection}\n` +
       `YÊU CẦU / CÂU HỎI TỪ ${displayName}: ${question || "Hãy giải thích ngắn gọn nội dung này giúp tôi."}\n\n` +
       `HÃY TRẢ LỜI NGAY:`;
 
@@ -1262,9 +1281,9 @@ async function handleHistoryQA(
     customPromptSection = `\n=== CHỈ THỊ & NỘI QUY RIÊNG CỦA ADMIN CHO NHÓM NÀY (BẮT BUỘC TUÂN THỦ 100%): ===\n${groupSettings.customPrompt.trim()}\n`;
   }
 
-  // 2.0. Nhận diện câu hỏi cần tra cứu thông tin thời gian thực (Google News / Sự kiện / Tin tức mới / Dự án)
+  // 2.0. Nhận diện câu hỏi cần tra cứu thông tin thời gian thực / lịch sử (Google News 3 tầng)
   const isRealTimeSearchQuery =
-    /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì|sự kiện|giá vàng|chứng khoán|thị trường|lũ quét|bão số|thiên tai|thế nào rồi|thảm họa|dự án|tổng quan dự án|thông tin về|cho tôi thông tin|tìm hiểu về|ở đâu|giá bao nhiêu)/i.test(
+    /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|24h|24 giờ|có gì mới|mới có gì|vừa xong|gần đây|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì|sự kiện|giá vàng|chứng khoán|thị trường|lũ quét|bão số|thiên tai|thế nào rồi|thảm họa|dự án|tổng quan dự án|thông tin về|cho tôi thông tin|tìm hiểu về|ở đâu|giá bao nhiêu|ai là\b|vụ việc\b|vụ án\b|scandal\b|lùm xùm\b|bê bối\b|tiểu sử\b|sự cố\b|nguyên nhân\b|đạo nhái\b|bản quyền\b|phốt\b|drama\b|tìm kiếm thêm|tra cứu)/i.test(
       question
     );
 
