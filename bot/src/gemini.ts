@@ -236,10 +236,12 @@ export async function callGemini(
       },
     };
 
+    const fallbackModel = model === "gemini-3.5-flash-lite" ? "gemini-3.5-flash" : "gemini-3.5-flash-lite";
+
     try {
       const resp = await fetch(endpoint, {
         method: "POST",
-        signal: AbortSignal.timeout(20_000), // 20s timeout
+        signal: AbortSignal.timeout(12_000), // 12s timeout
         headers: {
           "Content-Type": "application/json",
         },
@@ -248,17 +250,16 @@ export async function callGemini(
 
       if (!resp.ok) {
         const errText = await resp.text().catch(() => "");
-        const err = new Error(`Gemini API HTTP ${resp.status}: ${errText.slice(0, 500)}`);
-        console.warn(`[gemini] Key #${keyIdx + 1} (${model}) gặp HTTP ${resp.status}. Đang tự động thử tiếp...`);
-        lastError = err;
+        console.warn(`[gemini] Key #${keyIdx + 1} (${model}) gặp HTTP ${resp.status}.`);
+        lastError = new Error(`Gemini API HTTP ${resp.status}: ${errText.slice(0, 300)}`);
 
-        // Nếu model hiện tại bị 404/503, thử model gemini-3.5-flash ngay với cùng key
-        if ((resp.status === 404 || resp.status === 503) && model !== "gemini-3.5-flash") {
+        // Nếu model bị 503 (quá tải) hoặc 404, thử ngay fallbackModel (gemini-3.5-flash-lite) siêu tốc với cùng key
+        if (resp.status === 503 || resp.status === 404) {
           try {
-            const fallbackEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
+            const fallbackEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${fallbackModel}:generateContent?key=${apiKey}`;
             const fallbackResp = await fetch(fallbackEndpoint, {
               method: "POST",
-              signal: AbortSignal.timeout(20_000),
+              signal: AbortSignal.timeout(10_000),
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(requestBody),
             });
