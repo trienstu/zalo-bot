@@ -153,3 +153,9 @@ export function groupScanRequestPath(botId = "bot-1"): string {
   return path.join(dir, "group-scan-request.json");
 }
 
+/** Đường dẫn marker để dashboard yêu cầu bot sync danh sách bạn bè Zalo. */
+export function friendSyncRequestPath(botId = "bot-1"): string {
+  const dir = getBotDataDir(botId);
+  return path.join(dir, "friend-sync-request.json");
+}
+

@@ -3,7 +3,7 @@ import path from "node:path";
 import { Zalo, LoginQRCallbackEventType, ThreadType } from "zca-js";
 import qrcodeTerminal from "qrcode-terminal";
 import { config } from "../config.js";
-import { setBotState } from "../db/index.js";
+import { setBotState, upsertBotFriend } from "../db/index.js";
 import { LOGIN_STATE_KEY } from "../health-state.js";
 
 /**
@@ -65,6 +65,7 @@ type LoginState = "ready" | "waiting_scan" | "scanned" | "logged_in" | "expired"
 const LOGIN_RUNTIME_FILES = ["session.json", "qr.png", "login-status.json"] as const;
 const RELOGIN_REQUEST_FILE = "relogin-request.json";
 const MEMBER_SYNC_REQUEST_FILE = "member-sync-request.json";
+const FRIEND_SYNC_REQUEST_FILE = "friend-sync-request.json";
 const PERMISSION_CHECK_REQUEST_FILE = "permission-check-request.json";
 const KICK_NOW_REQUEST_FILE = "kick-now-request.json";
 const SUMMARY_SEND_REQUEST_FILE = "summary-send-request.json";
@@ -164,6 +165,30 @@ export function consumeMemberSyncRequest(): MemberSyncRequest | null {
   const requestedBy = typeof obj.requestedBy === "string" && obj.requestedBy.trim() ? obj.requestedBy.trim() : "dashboard";
   const groupId = typeof obj.groupId === "string" && obj.groupId.trim() ? obj.groupId.trim() : undefined;
   return { requestedAt, requestedBy, groupId };
+}
+
+export interface FriendSyncRequest {
+  requestedAt: number;
+  requestedBy: string;
+}
+
+export function consumeFriendSyncRequest(): FriendSyncRequest | null {
+  const requestPath = findRequestFile(FRIEND_SYNC_REQUEST_FILE);
+  if (!requestPath) return null;
+
+  let data: unknown;
+  try {
+    data = JSON.parse(fs.readFileSync(requestPath, "utf8"));
+  } catch {
+    data = null;
+  } finally {
+    fs.rmSync(requestPath, { force: true });
+  }
+
+  const obj = (data ?? {}) as { requestedAt?: unknown; requestedBy?: unknown };
+  const requestedAt = typeof obj.requestedAt === "number" ? obj.requestedAt : Date.now();
+  const requestedBy = typeof obj.requestedBy === "string" && obj.requestedBy.trim() ? obj.requestedBy.trim() : "dashboard";
+  return { requestedAt, requestedBy };
 }
 
 export interface PermissionCheckRequest {
@@ -562,6 +587,64 @@ export async function listGroups(api: ZaloApi, throttleMs: number): Promise<Grou
     if (i + BATCH < ids.length) await sleep(throttleMs);
   }
   return out;
+}
+
+/**
+ * Lấy toàn bộ danh sách bạn bè của tài khoản Bot từ Zalo và lưu vào SQLite.
+ */
+export async function syncFriends(
+  api: ZaloApi,
+): Promise<{ total: number; upserted: number }> {
+  if (typeof (api as any).getAllFriends !== "function") {
+    throw new Error("API getAllFriends không tồn tại trong runtime zca-js.");
+  }
+
+  const rawFriends: any = await (api as any).getAllFriends();
+  let friendList: any[] = [];
+
+  if (Array.isArray(rawFriends)) {
+    friendList = rawFriends;
+  } else if (rawFriends && Array.isArray(rawFriends.data)) {
+    friendList = rawFriends.data;
+  } else if (rawFriends && Array.isArray(rawFriends.friends)) {
+    friendList = rawFriends.friends;
+  } else if (rawFriends && typeof rawFriends === "object") {
+    friendList = Object.values(rawFriends).filter((item) => item && typeof item === "object");
+  }
+
+  const now = Date.now();
+  let upserted = 0;
+
+  for (const item of friendList) {
+    const userId = String(item.userId || item.uid || item.id || "").trim();
+    if (!userId) continue;
+    const displayName = String(item.displayName || item.zaloName || item.dName || item.name || `User ${userId.slice(-4)}`).trim();
+    const avatar = String(item.avatar || item.avatarUrl || "").trim();
+
+    upsertBotFriend({
+      userId,
+      displayName,
+      avatar,
+      now,
+    });
+    upserted++;
+  }
+
+  try {
+    setBotState(
+      "friend_sync",
+      JSON.stringify({
+        total: friendList.length,
+        upserted,
+        updatedAt: now,
+      }),
+      now,
+    );
+  } catch (e) {
+    console.warn(`[syncFriends] setBotState error: ${String(e)}`);
+  }
+
+  return { total: friendList.length, upserted };
 }
 
 // Ghi chú: KHÔNG có hàm kéo lịch sử CHAT/REACTION quá khứ — getGroupChatHistory trả 404

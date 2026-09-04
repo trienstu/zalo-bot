@@ -5,12 +5,14 @@ import {
   normalizeTs,
   fetchGroupPollVotes,
   consumeMemberSyncRequest,
+  consumeFriendSyncRequest,
   consumeGroupScanRequest,
   consumePermissionCheckRequest,
   consumeReloginRequest,
   consumeKickNowRequest,
   consumeSummarySendRequest,
   listGroups,
+  syncFriends,
   sendGroupText,
   sendDirectText,
   sleep,
@@ -511,6 +513,20 @@ export async function runListener(): Promise<void> {
     const request = consumeMemberSyncRequest();
     if (!request) return;
     void runMemberSync(request.requestedBy, request.groupId).catch((e) => console.warn(`[listener] sync member theo yêu cầu lỗi: ${String(e)}`));
+  }, 1_000);
+
+  setInterval(() => {
+    const request = consumeFriendSyncRequest();
+    if (!request) return;
+    void (async () => {
+      try {
+        console.log(`[listener] Đang đồng bộ danh sách bạn bè Zalo theo yêu cầu (${request.requestedBy})...`);
+        const result = await syncFriends(api);
+        console.log(`[listener] Đồng bộ bạn bè thành công: tổng ${result.total}, đã lưu ${result.upserted}.`);
+      } catch (e) {
+        console.warn(`[listener] sync friend lỗi: ${String(e)}`);
+      }
+    })();
   }, 1_000);
 
   setInterval(() => {

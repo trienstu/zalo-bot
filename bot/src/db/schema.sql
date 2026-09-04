@@ -534,4 +534,15 @@ CREATE TABLE IF NOT EXISTS leaderboard_exclusions (
 
 CREATE INDEX IF NOT EXISTS idx_leaderboard_exclusions_user ON leaderboard_exclusions(zalo_user_id, group_id);
 
+-- Danh sách bạn bè Zalo của tài khoản Bot và phân quyền tương tác 1:1
+CREATE TABLE IF NOT EXISTS bot_friends (
+  user_id        TEXT PRIMARY KEY,
+  display_name   TEXT NOT NULL DEFAULT '',
+  avatar         TEXT NOT NULL DEFAULT '',
+  allow_direct   INTEGER NOT NULL DEFAULT 0,
+  updated_at     INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_bot_friends_allow ON bot_friends(allow_direct);
+
 

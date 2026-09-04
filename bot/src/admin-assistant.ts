@@ -1,9 +1,10 @@
-import { getDb, isUserAdmin, addAdminUser, setGroupMode } from "./db/index.js";
+import { getDb, isUserAdmin, addAdminUser, setGroupMode, isUserAllowedDirectChat } from "./db/index.js";
 import { sendDirectText, sendGroupText } from "./zalo/client.js";
 import { callGemini, downloadFileContent, type GeminiMediaPart } from "./gemini.js";
 import type { MemberMessageEvent } from "./member-assistant.js";
 import { getWeatherReport } from "./weather.js";
 import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam } from "./reminder.js";
+import { getDailyAiNewsBriefing } from "./ai-news.js";
 
 // Lưu lịch sử trò chuyện nhiều lượt (Multi-turn Chat) giữa Admin và Bot (Lưu tối đa 12 lượt gần nhất)
 const adminChatSessions = new Map<string, { role: "user" | "model"; text: string }[]>();
@@ -171,41 +172,69 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     }
   }
 
-  // Nếu người nhắn tin không phải là Admin (và không phải lệnh đăng nhập Admin):
-  // Hoàn toàn IM LẶNG - để tài khoản hoạt động như một Zalo cá nhân bình thường.
-  if (!isAdmin) {
+  // Kiểm tra quyền tương tác 1:1: Admin hoặc Bạn bè được cấp quyền qua Dashboard
+  const isAllowedFriend = isUserAllowedDirectChat(sender);
+
+  // Nếu người nhắn tin không phải là Admin và không thuộc danh sách được cấp quyền:
+  // Hoàn toàn IM LẶNG - để tài khoản hoạt động như một Zalo cá nhân bình thường, chống spam.
+  if (!isAdmin && !isAllowedFriend) {
     return;
   }
 
   // =========================================================================
-  // 2. TRỢ LÝ ĐIỀU KHIỂN & RA LỆNH 1:1 DÀNH RIÊNG CHO ADMIN
+  // 2. TRỢ LÝ ĐIỀU KHIỂN & RA LỆNH 1:1
   // =========================================================================
 
   // 2.1. Lệnh /help hoặc /menu
   if (lower === "/help" || lower === "help" || lower === "!help" || lower === "/menu" || lower === "menu") {
-    const helpMsg =
-      `👑 BẢNG LỆNH QUẢN TRỊ & ĐIỀU KHIỂN BOT (1:1 VỚI ADMIN):\n\n` +
-      `⏰ ĐẶT HẸN & NHẮC VIỆC CÁ NHÂN:\n` +
-      `🔹 /nhacnho [thời gian] [nội dung] : Đặt hẹn nhắc việc (VD: /nhacnho 20p Uống nước, /hengio 17:30 Đi đón con)\n` +
-      `🔹 /dsnhac : Xem danh sách các lịch hẹn đang chờ của bạn\n` +
-      `🔹 /huynhac [mã_số] : Hủy lịch hẹn theo mã\n` +
-      `🔹 Hoặc chat tự nhiên: "Nhắc tôi 30 phút nữa gọi cho anh Nam", "8h tối mai nhắc tôi xem bóng đá"\n\n` +
-      `☀️ TRA CỨU THỜI TIẾT & CHẤT LƯỢNG KHÔNG KHÍ (AQI):\n` +
-      `🔹 /thoitiet : Xem thời tiết & bụi mịn PM2.5 khu vực hiện tại\n` +
-      `🔹 /thoitiet [tên_thành_phố] : Xem thời tiết TP.HCM, Hà Nội, Đà Lạt, Đà Nẵng...\n\n` +
-      `📋 QUẢN LÝ NHÓM ZALO:\n` +
-      `🔹 /groups : Xem danh sách & ID tất cả các nhóm Zalo Bot đang tham gia\n` +
-      `🔹 /send [tên_nhóm/id] [nội dung] : Gửi tin nhắn/thông báo vào nhóm chỉ định\n` +
-      `🔹 /broadcast [nội dung] : Bắn thông báo cùng lúc đến TẤT CẢ các nhóm\n` +
-      `🔹 /mode [tên_nhóm] [interactive/silent] : Đổi chế độ nhóm (Tương tác / Tàu ngầm)\n\n` +
-      `💬 TRỢ LÝ AI RIÊNG TƯ & RA LỆNH TỰ NHIÊN:\n` +
-      `🔹 Soạn bài rồi bảo: "Gửi bài này vào nhóm VIP" hoặc "Bắn vào nhóm AI"\n` +
-      `🔹 Phân tích file tài liệu (PDF, Word, Excel, Code) hoặc ảnh bằng AI.`;
-    await sendDirectText(api, sender, helpMsg);
+    if (isAdmin) {
+      const helpMsg =
+        `👑 BẢNG LỆNH QUẢN TRỊ & ĐIỀU KHIỂN BOT (1:1 VỚI ADMIN):\n\n` +
+        `⏰ ĐẶT HẸN & NHẮC VIỆC CÁ NHÂN:\n` +
+        `🔹 /nhacnho [thời gian] [nội dung] : Đặt hẹn nhắc việc (VD: /nhacnho 20p Uống nước, /hengio 17:30 Đi đón con)\n` +
+        `🔹 /dsnhac : Xem danh sách các lịch hẹn đang chờ của bạn\n` +
+        `🔹 /huynhac [mã_số] : Hủy lịch hẹn theo mã\n` +
+        `🔹 Hoặc chat tự nhiên: "Nhắc tôi 30 phút nữa gọi cho anh Nam", "8h tối mai nhắc tôi xem bóng đá"\n\n` +
+        `☀️ TRA CỨU THỜI TIẾT & BẢN TIN AI:\n` +
+        `🔹 /thoitiet [địa điểm] : Xem thời tiết & bụi mịn PM2.5 (TP.HCM, Hà Nội, Đà Lạt...)\n` +
+        `🔹 /bantin : Xem ngay điểm tin AI & Công nghệ nóng nhất 24h qua trên X/Twitter\n\n` +
+        `📋 QUẢN LÝ NHÓM ZALO:\n` +
+        `🔹 /groups : Xem danh sách & ID tất cả các nhóm Zalo Bot đang tham gia\n` +
+        `🔹 /send [tên_nhóm/id] [nội dung] : Gửi tin nhắn/thông báo vào nhóm chỉ định\n` +
+        `🔹 /broadcast [nội dung] : Bắn thông báo cùng lúc đến TẤT CẢ các nhóm\n` +
+        `🔹 /mode [tên_nhóm] [interactive/silent] : Đổi chế độ nhóm (Tương tác / Tàu ngầm)\n\n` +
+        `💬 TRỢ LÝ AI RIÊNG TƯ & GOOGLE SEARCH:\n` +
+        `🔹 Tìm kiếm thông tin thời gian thực, trend AI, tin tức hôm nay bằng Google Search tích hợp sẵn.\n` +
+        `🔹 Soạn bài rồi bảo: "Gửi bài này vào nhóm VIP" hoặc "Bắn vào nhóm AI"\n` +
+        `🔹 Phân tích file tài liệu (PDF, Word, Excel, Code) hoặc ảnh bằng AI.`;
+      await sendDirectText(api, sender, helpMsg);
+    } else {
+      const memberHelpMsg =
+        `👋 CHÀO BẠN ${displayName.toUpperCase()}!\n\n` +
+        `🤖 Em là Sen Chúa - Trợ lý AI đồng hành cùng bạn trên Zalo. Bạn có thể:\n\n` +
+        `💬 HỎI ĐÁP & TRÒ CHUYỆN TỰ NHIÊN:\n` +
+        `🔹 Trò chuyện, giải đáp thắc mắc, tư vấn công việc, học tập, dịch thuật.\n` +
+        `🔹 Tra cứu tin tức thời gian thực, trend AI, sự kiện hôm nay với Google Search thời gian thực.\n` +
+        `🔹 Gửi hình ảnh hoặc file tài liệu (PDF, Word, Excel, Code) để em phân tích nhanh.\n\n` +
+        `☀️ THỜI TIẾT & BẢN TIN AI:\n` +
+        `🔹 /thoitiet [địa điểm] : Xem thời tiết & chỉ số không khí AQI\n` +
+        `🔹 /bantin : Xem ngay điểm tin AI & Công nghệ nóng nhất 24h qua\n\n` +
+        `⏰ ĐẶT HẸN & NHẮC VIỆC CÁ NHÂN:\n` +
+        `🔹 /nhacnho [thời gian] [nội dung] : Đặt hẹn nhắc việc\n` +
+        `🔹 Hoặc nhắn tự nhiên: "30 phút nữa nhắc tôi uống nước", "8h tối nay nhắc tôi gọi điện..."`;
+      await sendDirectText(api, sender, memberHelpMsg);
+    }
     return;
   }
 
-  // 2.2. Lệnh /thoitiet [Địa điểm]
+  // 2.2. Lệnh /bantin (Bản tin AI & Công nghệ 24h qua)
+  if (lower === "/bantin" || lower === "!bantin" || lower === "bantin" || /bản tin (?:ai|sáng|công nghệ|hôm nay)/i.test(rawText)) {
+    const briefing = await getDailyAiNewsBriefing("AI & Công nghệ trên X", "Sen Chúa");
+    await sendDirectText(api, sender, briefing);
+    return;
+  }
+
+  // 2.3. Lệnh /thoitiet [Địa điểm]
   if (lower.startsWith("/thoitiet") || lower.startsWith("!thoitiet")) {
     const cityInput = rawText.replace(/^\/(?:thoitiet|!thoitiet)\s*/i, "").trim() || "Hồ Chí Minh";
     const weatherMsg = await getWeatherReport(cityInput);
@@ -487,34 +516,52 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     quoteSection = `\n=== NỘI DUNG TRÍCH DẪN: ===\n"${event.quote.text}"\n`;
   }
 
+  // 2.0. Nhận diện câu hỏi cần tra cứu thông tin thời gian thực (Google Search / X / Tin tức cập nhật)
+  const isRealTimeSearchQuery =
+    /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì|sự kiện mới|giá vàng|chứng khoán|thị trường)/i.test(
+      rawText
+    );
+
+  const searchInstruction = isRealTimeSearchQuery
+    ? `\n8. TÌM KIẾM THỜI GIAN THỰC (GOOGLE SEARCH & X): Câu hỏi này liên quan đến tin tức hoặc thông tin thời gian thực. Bạn ĐÃ ĐƯỢC TÍCH HỢP công cụ Google Search kết nối Internet thời gian thực. Hãy ưu tiên tra cứu và tổng hợp các tin tức, bài đăng trên X/Twitter, trang công nghệ và thông cáo báo chí 24-48 giờ qua để trả lời chính xác, sắc bén và có nguồn tham khảo rõ ràng.\n`
+    : "";
+
   const userPrompt =
-    (historyText ? `LỊCH SỬ TRÒ CHUYỆN TRƯỚC ĐÓ VỚI ADMIN:\n${historyText}\n\n` : "") +
+    (historyText ? `LỊCH SỬ TRÒ CHUYỆN TRƯỚC ĐÓ:\n${historyText}\n\n` : "") +
     `${quoteSection}${fileSection}\n` +
-    `YÊU CẦU MỚI TỪ ADMIN (${displayName}): ${rawText || "Hãy phân tích tài liệu/hình ảnh này giúp tôi."}\n\n` +
-    `HÃY TRẢ LỜI SẾP THẬT CHUẨN XÁC, THÔNG MINH VÀ HỮU ÍCH:`;
+    `YÊU CẦU MỚI TỪ ${isAdmin ? `ADMIN (${displayName})` : `BẠN (${displayName})`}: ${rawText || "Hãy phân tích tài liệu/hình ảnh này giúp tôi."}\n\n` +
+    (isRealTimeSearchQuery
+      ? `LƯU Ý: Đây là câu hỏi về tin tức/thời gian thực. Hãy sử dụng công cụ tìm kiếm Google để cập nhật tin mới nhất trên Internet và X/Twitter.\n\n`
+      : "") +
+    (isAdmin ? `HÃY TRẢ LỜI SẾP THẬT CHUẨN XÁC, THÔNG MINH VÀ HỮU ÍCH:` : `HÃY TRẢ LỜI THẬT THÂN THIỆN, CHUẨN XÁC VÀ HỮU ÍCH:`);
 
   try {
-    const answer = await callGemini(systemPrompt, userPrompt, {
+    const answer = await callGemini(systemPrompt + searchInstruction, userPrompt, {
       mediaParts: mediaPart ? [mediaPart] : undefined,
+      enableSearch: isRealTimeSearchQuery,
     });
 
-    // Kiểm tra và thực thi thẻ hành động [ACTION:SEND_GROUP target="..."]...[/ACTION]
+    // Kiểm tra và thực thi thẻ hành động [ACTION:SEND_GROUP target="..."]...[/ACTION] CHỈ DÀNH CHO ADMIN
     let finalAnswer = answer;
-    const actionMatch = answer.match(/\[ACTION:SEND_GROUP\s+target=["']([^"']+)["']\]([\s\S]*?)\[\/ACTION\]/i);
-    if (actionMatch && actionMatch[1] && actionMatch[2]) {
-      const targetGroupQuery = actionMatch[1].trim();
-      const contentToSend = actionMatch[2].trim();
-      finalAnswer = answer.replace(/\[ACTION:SEND_GROUP[\s\S]*?\[\/ACTION\]/gi, "").trim();
+    if (isAdmin) {
+      const actionMatch = answer.match(/\[ACTION:SEND_GROUP\s+target=["']([^"']+)["']\]([\s\S]*?)\[\/ACTION\]/i);
+      if (actionMatch && actionMatch[1] && actionMatch[2]) {
+        const targetGroupQuery = actionMatch[1].trim();
+        const contentToSend = actionMatch[2].trim();
+        finalAnswer = answer.replace(/\[ACTION:SEND_GROUP[\s\S]*?\[\/ACTION\]/gi, "").trim();
 
-      const target = findGroup(targetGroupQuery);
-      if (target && contentToSend) {
-        try {
-          await sendGroupText(api, target.groupId, contentToSend);
-          finalAnswer += `\n\n🚀 [HỆ THỐNG]: Em đã tự động gửi nội dung trên vào nhóm [${target.name}] thành công 100%! 🎉`;
-        } catch (e) {
-          finalAnswer += `\n\n⚠️ [HỆ THỐNG]: Tự động gửi vào nhóm [${target.name}] bị lỗi: ${String(e)}`;
+        const target = findGroup(targetGroupQuery);
+        if (target && contentToSend) {
+          try {
+            await sendGroupText(api, target.groupId, contentToSend);
+            finalAnswer += `\n\n🚀 [HỆ THỐNG]: Em đã tự động gửi nội dung trên vào nhóm [${target.name}] thành công 100%! 🎉`;
+          } catch (e) {
+            finalAnswer += `\n\n⚠️ [HỆ THỐNG]: Tự động gửi vào nhóm [${target.name}] bị lỗi: ${String(e)}`;
+          }
         }
       }
+    } else {
+      finalAnswer = answer.replace(/\[ACTION:SEND_GROUP[\s\S]*?\[\/ACTION\]/gi, "").trim();
     }
 
     // Lưu vào lịch sử hội thoại nhiều lượt
@@ -522,13 +569,15 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     appendAdminHistory(sender, "model", finalAnswer);
 
     await sendDirectText(api, sender, finalAnswer);
-    console.log(`[admin-assistant] ✅ Đã phản hồi 1:1 cho Admin ${displayName}`);
+    console.log(`[admin-assistant] ✅ Đã phản hồi 1:1 cho ${isAdmin ? "Admin" : "User"} ${displayName}`);
   } catch (err) {
     console.error(`[admin-assistant] ❌ Lỗi xử lý AI 1:1:`, err);
     await sendDirectText(
       api,
       sender,
-      `🤖 Dạ câu hỏi của Sếp ${displayName} làm em Sen Chúa xém khét CPU 😄! Sếp cho em vài giây thở oxy rồi hỏi lại thử nhé!`,
+      isAdmin
+        ? `🤖 Dạ câu hỏi của Sếp ${displayName} làm em Sen Chúa xém khét CPU 😄! Sếp cho em vài giây thở oxy rồi hỏi lại thử nhé!`
+        : `🤖 Dạ câu hỏi của bạn ${displayName} làm em xém khét CPU 😄! Bạn chờ vài giây rồi nhắn lại giúp em nhé!`,
     );
   }
 }

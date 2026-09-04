@@ -246,6 +246,15 @@ function ensureWebSchema(database: Database.Database): void {
       sender_name  TEXT NOT NULL DEFAULT '',
       created_at   INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS bot_friends (
+      user_id        TEXT PRIMARY KEY,
+      display_name   TEXT NOT NULL DEFAULT '',
+      avatar         TEXT NOT NULL DEFAULT '',
+      allow_direct   INTEGER NOT NULL DEFAULT 0,
+      updated_at     INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_bot_friends_allow ON bot_friends(allow_direct);
   `);
 }
 
@@ -1637,4 +1646,73 @@ export function setState(key: string, value: string): void {
        ON CONFLICT(key) DO UPDATE SET value = @value, updated_at = @now`,
     )
     .run({ key, value, now });
+}
+
+// ---- bot_friends (Bạn bè Zalo & Quyền Chat 1:1) ----
+
+export interface BotFriendRow {
+  userId: string;
+  displayName: string;
+  avatar: string;
+  allowDirect: boolean;
+  updatedAt: number;
+}
+
+export function listBotFriends(botId = "bot-1"): BotFriendRow[] {
+  try {
+    if (!tableExists("bot_friends")) return [];
+    const rows = getDb(botId)
+      .prepare(
+        `SELECT user_id as userId, display_name as displayName, avatar,
+                allow_direct as allowDirect, updated_at as updatedAt
+         FROM bot_friends
+         ORDER BY allow_direct DESC, display_name COLLATE NOCASE ASC`
+      )
+      .all() as any[];
+    return rows.map((r) => ({
+      userId: r.userId,
+      displayName: r.displayName,
+      avatar: r.avatar,
+      allowDirect: Boolean(r.allowDirect),
+      updatedAt: r.updatedAt,
+    }));
+  } catch (e) {
+    console.error("[web/db] listBotFriends error:", e);
+    return [];
+  }
+}
+
+export function setFriendAllowDirect(userId: string, allow: boolean, botId = "bot-1"): boolean {
+  try {
+    if (!tableExists("bot_friends")) return false;
+    const res = getDb(botId)
+      .prepare(`UPDATE bot_friends SET allow_direct = ?, updated_at = ? WHERE user_id = ?`)
+      .run(allow ? 1 : 0, Date.now(), userId);
+    return res.changes > 0;
+  } catch (e) {
+    console.error("[web/db] setFriendAllowDirect error:", e);
+    return false;
+  }
+}
+
+export function getFriendSyncStatus(botId = "bot-1"): {
+  lastSync?: { total: number; upserted: number; updatedAt: number };
+} {
+  try {
+    if (!tableExists("bot_state")) return {};
+    const row = getDb(botId)
+      .prepare(`SELECT value, updated_at FROM bot_state WHERE key = 'friend_sync'`)
+      .get() as { value: string; updated_at: number } | undefined;
+    if (!row) return {};
+    const parsed = JSON.parse(row.value);
+    return {
+      lastSync: {
+        total: Number(parsed.total ?? 0),
+        upserted: Number(parsed.upserted ?? 0),
+        updatedAt: Number(parsed.updatedAt ?? row.updated_at),
+      },
+    };
+  } catch {
+    return {};
+  }
 }

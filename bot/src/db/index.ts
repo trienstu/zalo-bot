@@ -127,6 +127,15 @@ function runColumnMigrations(database: Database.Database): void {
       PRIMARY KEY (zalo_user_id, group_id)
     );
     CREATE INDEX IF NOT EXISTS idx_leaderboard_exclusions_user ON leaderboard_exclusions(zalo_user_id, group_id);
+
+    CREATE TABLE IF NOT EXISTS bot_friends (
+      user_id        TEXT PRIMARY KEY,
+      display_name   TEXT NOT NULL DEFAULT '',
+      avatar         TEXT NOT NULL DEFAULT '',
+      allow_direct   INTEGER NOT NULL DEFAULT 0,
+      updated_at     INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_bot_friends_allow ON bot_friends(allow_direct);
   `);
 }
 
@@ -2615,6 +2624,100 @@ export function listLeaderboardExclusions(groupId?: string): LeaderboardExclusio
   } catch (e) {
     console.error("[db] listLeaderboardExclusions error:", e);
     return [];
+  }
+}
+
+// ---- Bot Friends & 1:1 Direct Interaction Permissions ----
+
+export interface BotFriend {
+  userId: string;
+  displayName: string;
+  avatar: string;
+  allowDirect: boolean;
+  updatedAt: number;
+}
+
+/**
+ * Cập nhật hoặc thêm mới bạn bè vào database. Giữ nguyên giá trị allow_direct nếu đã có.
+ */
+export function upsertBotFriend(params: {
+  userId: string;
+  displayName: string;
+  avatar?: string;
+  now?: number;
+}): void {
+  try {
+    const db = getDb();
+    const now = params.now ?? Date.now();
+    db.prepare(
+      `INSERT INTO bot_friends (user_id, display_name, avatar, allow_direct, updated_at)
+       VALUES (?, ?, ?, 0, ?)
+       ON CONFLICT(user_id) DO UPDATE SET
+         display_name = excluded.display_name,
+         avatar = CASE WHEN excluded.avatar != '' THEN excluded.avatar ELSE bot_friends.avatar END,
+         updated_at = excluded.updated_at`
+    ).run(params.userId, params.displayName, params.avatar || "", now);
+  } catch (e) {
+    console.error("[db] upsertBotFriend error:", e);
+  }
+}
+
+/**
+ * Kiểm tra xem user có được phép chat 1:1 với Bot không.
+ */
+export function isUserAllowedDirectChat(userId: string): boolean {
+  try {
+    const db = getDb();
+    const row = db
+      .prepare("SELECT allow_direct FROM bot_friends WHERE user_id = ?")
+      .get(userId) as { allow_direct: number } | undefined;
+    return Boolean(row && row.allow_direct === 1);
+  } catch (e) {
+    console.error("[db] isUserAllowedDirectChat error:", e);
+    return false;
+  }
+}
+
+/**
+ * Lấy danh sách bạn bè của bot.
+ */
+export function listBotFriends(): BotFriend[] {
+  try {
+    const db = getDb();
+    const rows = db
+      .prepare(
+        `SELECT user_id as userId, display_name as displayName, avatar,
+                allow_direct as allowDirect, updated_at as updatedAt
+         FROM bot_friends
+         ORDER BY allow_direct DESC, display_name ASC`
+      )
+      .all() as any[];
+    return rows.map((r) => ({
+      userId: r.userId,
+      displayName: r.displayName,
+      avatar: r.avatar,
+      allowDirect: Boolean(r.allowDirect),
+      updatedAt: r.updatedAt,
+    }));
+  } catch (e) {
+    console.error("[db] listBotFriends error:", e);
+    return [];
+  }
+}
+
+/**
+ * Bật/tắt quyền tương tác 1:1 cho một bạn bè.
+ */
+export function setFriendAllowDirect(userId: string, allow: boolean): boolean {
+  try {
+    const db = getDb();
+    const res = db
+      .prepare("UPDATE bot_friends SET allow_direct = ?, updated_at = ? WHERE user_id = ?")
+      .run(allow ? 1 : 0, Date.now(), userId);
+    return res.changes > 0;
+  } catch (e) {
+    console.error("[db] setFriendAllowDirect error:", e);
+    return false;
   }
 }
 
