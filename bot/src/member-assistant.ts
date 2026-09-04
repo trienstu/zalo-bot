@@ -1003,59 +1003,66 @@ async function handleHistoryQA(
 
   // 4. Lấy tóm tắt 3 ngày gần nhất (CHỈ lấy khi câu hỏi thực sự hỏi về diễn biến các ngày qua)
   let pastSummaries: { day_label: string; summary_text: string }[] = [];
-  // 5. Lấy top 5 thành viên năng nổ nhất
+  const isRankQuery = /(?:bảng xếp hạng|bxh|top|ai chăm nhất|ai nhắn nhiều|điểm tương tác|tương tác nhất)/i.test(question);
+  const isInactiveQuery = /(?:tàu ngầm|tau ngam|nằm vùng|nam vung|ai chưa nhắn|ai lặn|chưa từng chat|chưa từng nhắn)/i.test(question);
+
+  // 5. Lấy top 5 thành viên năng nổ nhất (chỉ lấy khi câu hỏi hỏi về bảng xếp hạng)
   let topMembers: { display_name: string; msg_count: number; points: number }[] = [];
-  try {
-    topMembers = db
-      .prepare(
-        `SELECT m.display_name,
-                COUNT(i.id) AS msg_count,
-                COALESCE(SUM(CASE i.type WHEN 'message' THEN 10 WHEN 'image' THEN 10 WHEN 'video' THEN 10 WHEN 'vote' THEN 3 WHEN 'reaction' THEN 1 ELSE 1 END), 0) AS points
-         FROM members m
-         JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
-         WHERE (i.thread_id = @threadId OR i.thread_id = '')
-            AND m.is_active = 1
-            AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
-            AND LOWER(m.display_name) NOT LIKE '%sen chua%'
-            AND LOWER(m.display_name) NOT LIKE '%mộc miên%'
-            AND LOWER(m.display_name) NOT LIKE '%moc mien%'
-            AND m.zalo_user_id NOT IN (
-              SELECT zalo_user_id FROM leaderboard_exclusions WHERE group_id = '' OR group_id = @threadId
-            )
-          GROUP BY m.zalo_user_id, m.display_name
-          ORDER BY points DESC
-          LIMIT 5`,
-      )
-      .all({ threadId }) as any[];
-  } catch {}
+  if (isRankQuery) {
+    try {
+      topMembers = db
+        .prepare(
+          `SELECT m.display_name,
+                  COUNT(i.id) AS msg_count,
+                  COALESCE(SUM(CASE i.type WHEN 'message' THEN 10 WHEN 'image' THEN 10 WHEN 'video' THEN 10 WHEN 'vote' THEN 3 WHEN 'reaction' THEN 1 ELSE 1 END), 0) AS points
+           FROM members m
+           JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
+           WHERE (i.thread_id = @threadId OR i.thread_id = '')
+              AND m.is_active = 1
+              AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
+              AND LOWER(m.display_name) NOT LIKE '%sen chua%'
+              AND LOWER(m.display_name) NOT LIKE '%mộc miên%'
+              AND LOWER(m.display_name) NOT LIKE '%moc mien%'
+              AND m.zalo_user_id NOT IN (
+                SELECT zalo_user_id FROM leaderboard_exclusions WHERE group_id = '' OR group_id = @threadId
+              )
+            GROUP BY m.zalo_user_id, m.display_name
+            ORDER BY points DESC
+            LIMIT 5`,
+        )
+        .all({ threadId }) as any[];
+    } catch {}
+  }
 
-  // 6. Thống kê thành viên chưa từng nhắn tin
+  // 6. Thống kê thành viên chưa từng nhắn tin (chỉ lấy khi câu hỏi hỏi về tàu ngầm / nằm vùng)
   let inactiveMembers: { display_name: string; msg_count: number }[] = [];
-  try {
-    inactiveMembers = db
-      .prepare(
-        `SELECT m.display_name,
-                COUNT(i.id) AS msg_count
-         FROM members m
-         LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND (i.thread_id = @threadId OR i.thread_id = '') AND i.type = 'message'
-         WHERE (m.group_id = @threadId OR m.group_id = '' OR m.group_id IS NULL)
-           AND m.is_active = 1
-           AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
-           AND LOWER(m.display_name) NOT LIKE '%sen chua%'
-         GROUP BY m.zalo_user_id, m.display_name
-         HAVING msg_count = 0`,
-      )
-      .all({ threadId }) as any[];
-  } catch {}
-
   let totalMembersInGroup: { total: number } | undefined;
-  try {
-    totalMembersInGroup = db
-      .prepare(
-        `SELECT COUNT(*) AS total FROM members WHERE (group_id = ? OR group_id = '' OR group_id IS NULL) AND is_active = 1 AND LOWER(display_name) NOT LIKE '%sen chúa%'`,
-      )
-      .get(threadId) as { total: number } | undefined;
-  } catch {}
+  if (isInactiveQuery) {
+    try {
+      inactiveMembers = db
+        .prepare(
+          `SELECT m.display_name,
+                  COUNT(i.id) AS msg_count
+           FROM members m
+           LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND (i.thread_id = @threadId OR i.thread_id = '') AND i.type = 'message'
+           WHERE (m.group_id = @threadId OR m.group_id = '' OR m.group_id IS NULL)
+             AND m.is_active = 1
+             AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
+             AND LOWER(m.display_name) NOT LIKE '%sen chua%'
+           GROUP BY m.zalo_user_id, m.display_name
+           HAVING msg_count = 0`,
+        )
+        .all({ threadId }) as any[];
+    } catch {}
+
+    try {
+      totalMembersInGroup = db
+        .prepare(
+          `SELECT COUNT(*) AS total FROM members WHERE (group_id = ? OR group_id = '' OR group_id IS NULL) AND is_active = 1 AND LOWER(display_name) NOT LIKE '%sen chúa%'`,
+        )
+        .get(threadId) as { total: number } | undefined;
+    } catch {}
+  }
 
   // Dựng ngữ cảnh dữ liệu lịch sử
   const contextLines: string[] = [];
@@ -1241,7 +1248,8 @@ async function handleHistoryQA(
     `4. Nếu có NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): Hiểu rằng người dùng đang hỏi hoặc bình luận về chính nội dung được trích dẫn đó.\n` +
     `5. Luôn trả lời chuẩn theo phong cách cá tính được quy định ở trên.\n` +
     `6. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (hãy dùng dấu gạch đầu dòng, viết hoa hoặc icon để làm nổi bật).\n` +
-    `7. ĐẶC BIỆT KHI THÀNH VIÊN HỎI VỀ QUY TRÌNH, HƯỚNG DẪN, CÁCH LÀM HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Bạn BẮT BUỘC phải TRÍCH DẪN VÀ DIỄN GIẢI CHI TIẾT TỪNG BƯỚC (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến mà các thành viên (như bác Huy, anh Nam, Vũ Trọng...) đã từng chia sẻ trong lịch sử chat. TUYỆT ĐỐI KHÔNG ĐƯỢC chỉ đưa mỗi link tải tài liệu; phải giải thích cặn kẽ nội dung quy trình để người hỏi áp dụng được ngay, link tài liệu chỉ là phần đính kèm ở cuối để tham khảo thêm.` +
+    `7. ĐẶC BIỆT KHI THÀNH VIÊN HỎI VỀ QUY TRÌNH, HƯỚNG DẪN, CÁCH LÀM HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Bạn BẮT BUỘC phải TRÍCH DẪN VÀ DIỄN GIẢI CHI TIẾT TỪNG BƯỚC (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến mà các thành viên (như bác Huy, anh Nam, Vũ Trọng...) đã từng chia sẻ trong lịch sử chat. TUYỆT ĐỐI KHÔNG ĐƯỢC chỉ đưa mỗi link tải tài liệu; phải giải thích cặn kẽ nội dung quy trình để người hỏi áp dụng được ngay, link tài liệu chỉ là phần đính kèm ở cuối để tham khảo thêm.\n` +
+    `8. ĐỘ DÀI & TỐC ĐỘ PHẢN HỒI: Với các câu chào hỏi, giao lưu, tấu hài hoặc thắc mắc thường ngày, BẮT BUỘC trả lời súc tích, duyên dáng, ngắn gọn trong 2-3 đoạn (khoảng 300-500 ký tự) để đọc nhanh trên Zalo điện thoại. Không viết dài dòng lê thê trừ khi thành viên yêu cầu giải thích quy trình hoặc phân tích sâu.` +
     searchInstruction;
 
   const userPrompt =
