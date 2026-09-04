@@ -228,7 +228,7 @@ export async function callGemini(
           parts: userParts,
         },
       ],
-      ...(options?.enableSearch ? { tools: [{ googleSearch: {} }] } : {}),
+      // Không gửi googleSearch tool lên Gemini API vì các key gói Free sẽ lập tức bị HTTP 429 Quota Exceeded. Tin tức thời gian thực đã được cào trực tiếp qua Google News RSS.
       generationConfig: {
         temperature,
         ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
