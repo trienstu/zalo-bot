@@ -12,6 +12,8 @@ import {
   unhideMemberFromLeaderboard,
   listLeaderboardExclusions,
   isUserAdmin,
+  getRecentGroupImage,
+  getMediaByMessageId,
 } from "./db/index.js";
 import { sendGroupText } from "./zalo/client.js";
 import {
@@ -43,6 +45,9 @@ export interface MemberMessageEvent {
     senderId?: string;
     mediaUrl?: string;
     mediaType?: "image" | "video";
+    msgId?: string;
+    cliMsgId?: string;
+    globalMsgId?: string;
   } | null;
 }
 
@@ -769,6 +774,87 @@ async function handleHistoryQA(
     }
   }
 
+  // 🚀 FAST-PATH MULTIMODAL: Nếu đang phân tích ảnh hoặc tài liệu đính kèm,
+  // CẮT BỎ TOÀN BỘ truy vấn DB nặng (Top members, Inactive members, 60 tin nhắn chat, tóm tắt cũ)
+  // để Gemini phản hồi tức thì trong 2-3 giây và không bị ảo giác bởi tài liệu cũ!
+  if (mediaPart || fileTextContent) {
+    const groupSettings = getGroupSettings(threadId);
+    const botName = groupSettings.botName || "Sen Chúa";
+
+    let personaIntro = "";
+    switch (groupSettings.persona) {
+      case "professional":
+        personaIntro = `Bạn là '${botName}' - chuyên gia cố vấn AI cấp cao của cộng đồng Zalo. Trả lời đi thẳng vào trọng tâm, phân tích chuyên môn sâu sắc, logic, súc tích và chuẩn xác.`;
+        break;
+      case "friendly":
+        personaIntro = `Bạn là '${botName}' - trợ lý AI tận tâm, chu đáo và lịch sự của cộng đồng Zalo.`;
+        break;
+      case "strict":
+        personaIntro = `Bạn là '${botName}' - người điều hành & giám sát AI chuẩn mực, nghiêm túc của cộng đồng Zalo.`;
+        break;
+      case "custom":
+        personaIntro = `Bạn là '${botName}' - trợ lý AI của cộng đồng Zalo.`;
+        break;
+      case "humorous":
+      default:
+        personaIntro = `Bạn là '${botName}' - trợ lý AI cực kỳ hóm hỉnh, thông minh, mặn mà và bắt trend của cộng đồng Zalo. Trả lời duyên dáng, dí dỏm, tạo không khí sôi nổi.`;
+        break;
+    }
+
+    let customPromptSection = "";
+    if (groupSettings.customPrompt?.trim()) {
+      customPromptSection = `\n=== CHỈ THỊ RIÊNG CỦA ADMIN: ===\n${groupSettings.customPrompt.trim()}\n`;
+    }
+
+    let quoteTextSection = "";
+    if (options?.quote?.text) {
+      quoteTextSection = `\n=== NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): ===\n"${options.quote.text}"\n`;
+    }
+
+    let fileContentSnippet = "";
+    if (fileTextContent) {
+      fileContentSnippet = `\n=== NỘI DUNG TÀI LIỆU (${fileName || "File"}): ===\n${fileTextContent.slice(0, 40000)}\n`;
+    }
+
+    const fastSystemPrompt =
+      `${personaIntro}\n${customPromptSection}\n` +
+      `NHIỆM VỤ QUAN TRỌNG NHẤT:\n` +
+      `1. Thành viên đang gửi trực tiếp một HÌNH ẢNH / TÀI LIỆU để nhờ bạn phân tích.\n` +
+      `2. BẠN BẮT BUỘC PHẢI QUAN SÁT KỸ VÀ PHÂN TÍCH TRỰC TIẾP HÌNH ẢNH / TÀI LIỆU ĐÍNH KÈM NÀY (đọc từng chi tiết, giao diện, bảng biểu, số liệu, tính năng trong ảnh).\n` +
+      `3. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng viết hoa, gạch đầu dòng hoặc icon).\n` +
+      `4. Trả lời chuẩn theo phong cách của bạn (hóm hỉnh, chuyên nghiệp, thông minh).`;
+
+    const fastUserPrompt =
+      `${quoteTextSection}${fileContentSnippet}\n` +
+      `YÊU CẦU / CÂU HỎI TỪ THÀNH VIÊN (${displayName}): ${question || "Hãy phân tích chi tiết hình ảnh/tài liệu này giúp tôi."}\n\n` +
+      `HÃY TRẢ LỜI NGAY:`;
+
+    try {
+      const answer = await callGemini(fastSystemPrompt, fastUserPrompt, {
+        mediaParts: mediaPart ? [mediaPart] : undefined,
+      });
+
+      // Ghi nhớ vào tri thức nếu cần
+      if (targetUrl) {
+        saveGroupKnowledge({
+          threadId,
+          title: fileName || question.slice(0, 50) || "Tài liệu",
+          fileName: fileName || "image_analysis",
+          fileType: mediaPart?.mimeType || "image/jpeg",
+          fileUrl: targetUrl,
+          contentText: fileTextContent ? fileTextContent.slice(0, 5000) : question,
+          summary: answer.slice(0, 2000),
+          senderName: displayName,
+          createdAt: Date.now(),
+        });
+      }
+      return answer;
+    } catch (e) {
+      console.warn("[member-assistant] Fast-path Gemini QA error:", e);
+      return `Dạ em Sen Chúa có nhận được ảnh/file của bác ${displayName} rồi nè, nhưng vừa phân tích nửa chừng thì bị nghẽn mạng một nhịp 😄! Bác gõ lại câu hỏi hoặc gửi lại để em soi kỹ lại lần nữa nhé!`;
+    }
+  }
+
   // 2. Tra cứu Kho tri thức & Bộ nhớ dài hạn (Long-term Knowledge Memory)
   let memorizedDocs: any[] = [];
   try {
@@ -1078,15 +1164,15 @@ async function handleHistoryQA(
       mediaParts: mediaPart ? [mediaPart] : undefined,
     });
 
-    // 🧠 TỰ ĐỘNG GHI NHỚ VÀO BỘ NHỚ DÀI HẠN NẾU ĐÂY LÀ TÀI LIỆU/FILE/ẢNH PHÂN TÍCH
-    if (targetUrl && (fileName || mediaPart || fileTextContent)) {
+    // 🧠 TỰ ĐỘNG GHI NHỚ VÀO BỘ NHỚ DÀI HẠN NẾU ĐÂY LÀ TÀI LIỆU/FILE PHÂN TÍCH
+    if (targetUrl && fileName) {
       saveGroupKnowledge({
         threadId,
         title: fileName || question.slice(0, 50) || "Tài liệu",
         fileName: fileName || "file_attachment",
-        fileType: mediaPart?.mimeType || "document",
+        fileType: "document",
         fileUrl: targetUrl,
-        contentText: fileTextContent ? fileTextContent.slice(0, 5000) : question,
+        contentText: question,
         summary: answer.slice(0, 2000),
         senderName: displayName,
         createdAt: Date.now(),
@@ -1965,7 +2051,34 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     console.log(`[member-assistant] 🔍 Đang xử lý câu hỏi từ ${displayName} (${sender}): "${question}" (HasFile=${hasFile}, HasImage=${hasImage}, HasQuote=${hasQuote})...`);
 
     try {
-      const targetImageUrl = event.mediaUrl || event.quote?.mediaUrl || undefined;
+      let targetImageUrl = event.mediaUrl || event.quote?.mediaUrl || undefined;
+
+      // 1. Nếu có quote mà chưa có targetImageUrl: thử tra cứu theo msgId / cliMsgId của quote
+      if (!targetImageUrl && event.quote) {
+        const quoteId = event.quote.msgId || event.quote.cliMsgId || event.quote.globalMsgId;
+        if (quoteId) {
+          const media = getMediaByMessageId(threadId, quoteId);
+          if (media) {
+            targetImageUrl = media.local_path || media.media_url || undefined;
+            console.log(`[member-assistant] 📸 Đã tìm thấy ảnh từ tin nhắn được trích dẫn (${quoteId})`);
+          }
+        }
+      }
+
+      // 2. Nếu vẫn chưa có targetImageUrl và câu hỏi có ý định xem/phân tích ảnh
+      const isImageAnalysisIntent =
+        event.quote?.mediaType === "image" ||
+        /(?:phân tích|xem|đọc|giải thích|soi|kiểm tra|review)\s+(?:cái\s+|bức\s+|tấm\s+|tệp\s+|file\s+)?(?:ảnh|hình|tool|giao diện|screenshot)/i.test(question) ||
+        /(?:ảnh này|hình này|bức ảnh|tấm ảnh|tool này|giao diện này)/i.test(question);
+
+      if (!targetImageUrl && isImageAnalysisIntent) {
+        const recentImg = getRecentGroupImage(threadId, 10 * 60 * 1000);
+        if (recentImg) {
+          targetImageUrl = recentImg.local_path || recentImg.media_url || undefined;
+          console.log(`[member-assistant] 📸 Đã tự động bắt ảnh gần nhất trong nhóm (${recentImg.message_id}) để phân tích`);
+        }
+      }
+
       const answer = await handleHistoryQA(question, displayName, threadId, {
         imageUrl: targetImageUrl,
         fileAttachment: event.fileAttachment,

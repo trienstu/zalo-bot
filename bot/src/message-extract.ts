@@ -53,26 +53,85 @@ export function extractMediaSummary(payload: any): { type: "image" | "video"; co
   return null;
 }
 
+/**
+ * Quét sâu gom tất cả các candidate URL hợp lệ từ các object, array hoặc chuỗi JSON.
+ */
+export function collectCandidateUrls(sources: unknown[]): string[] {
+  const urls: string[] = [];
+  const visited = new Set<unknown>();
+
+  function walk(node: unknown): void {
+    if (!node || visited.has(node)) return;
+    if (typeof node === "string") {
+      const trimmed = node.trim();
+      if (/^https?:\/\//i.test(trimmed)) {
+        urls.push(trimmed);
+        return;
+      }
+      if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          walk(parsed);
+        } catch {}
+      }
+      return;
+    }
+    if (Array.isArray(node)) {
+      visited.add(node);
+      for (const item of node) {
+        walk(item);
+      }
+      return;
+    }
+    if (typeof node === "object") {
+      visited.add(node);
+      const record = node as Record<string, unknown>;
+      const priorityKeys = [
+        "hdUrl",
+        "href",
+        "url",
+        "normalUrl",
+        "originUrl",
+        "origUrl",
+        "sourceUrl",
+        "imgUrl",
+        "photoUrl",
+        "fileUrl",
+        "previewUrl",
+        "thumb",
+        "thumbUrl",
+      ];
+      for (const key of priorityKeys) {
+        const val = record[key];
+        if (typeof val === "string" && /^https?:\/\//i.test(val.trim())) {
+          urls.push(val.trim());
+        }
+      }
+      for (const [k, v] of Object.entries(record)) {
+        if (["attach", "params", "propertyExt", "content", "data"].includes(k) || Array.isArray(v)) {
+          walk(v);
+        }
+      }
+    }
+  }
+
+  for (const s of sources) {
+    walk(s);
+  }
+  return [...new Set(urls)];
+}
+
 /** URL media tạm do Zalo trả về; Telegram có thể dùng URL này để tải ảnh/video. */
 export function extractMediaUrl(payload: any): string | null {
   if (extractMediaSummary(payload) === null) return null;
-  const content = parseObjectMaybe(payload?.data?.content);
-  const params = parseObjectMaybe(content?.params);
-  const candidates = [
-    content?.href,
-    content?.hdUrl,
-    content?.url,
-    params?.href,
-    params?.hdUrl,
-    params?.url,
-    content?.thumb,
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate !== "string") continue;
-    const value = candidate.trim();
-    if (/^https?:\/\//i.test(value)) return value;
-  }
-  return null;
+  const data = payload?.data ?? {};
+  const content = parseObjectMaybe(data?.content);
+  const params = parseObjectMaybe(content?.params || data?.params);
+  const attach = parseObjectMaybe(data?.attach || content?.attach);
+  const propertyExt = parseObjectMaybe(data?.propertyExt || content?.propertyExt);
+
+  const urls = collectCandidateUrls([content, params, attach, propertyExt, data, payload]);
+  return urls.length > 0 && urls[0] ? urls[0] : null;
 }
 
 /**
@@ -159,6 +218,9 @@ export interface QuotedMessage {
   senderId?: string;
   mediaUrl?: string;
   mediaType?: "image" | "video";
+  msgId?: string;
+  cliMsgId?: string;
+  globalMsgId?: string;
 }
 
 /**
@@ -194,53 +256,45 @@ export function extractQuote(payload: any): QuotedMessage | null {
   const senderName = typeof quote.dName === "string" ? quote.dName : typeof quote.displayName === "string" ? quote.displayName : "";
   const senderId = typeof quote.ownerId === "string" ? String(quote.ownerId) : typeof quote.from === "string" ? String(quote.from) : "";
 
+  const msgId = String(quote.msgId || quote.messageId || quote.id || "").trim();
+  const cliMsgId = String(quote.cliMsgId || "").trim();
+  const globalMsgId = String(quote.globalMsgId || "").trim();
+
   let mediaUrl: string | undefined;
   let mediaType: "image" | "video" | undefined;
 
-  const attach = parseObjectMaybe(quote.attach);
-  const params = parseObjectMaybe(quote.params);
-  const propertyExt = parseObjectMaybe(quote.propertyExt);
-  const contentObj = parseObjectMaybe(quote.content);
+  const urls = collectCandidateUrls([
+    quote,
+    quote.attach,
+    quote.params,
+    quote.propertyExt,
+    quote.content,
+  ]);
 
-  const candidateUrls = [
-    quote.href,
-    quote.hdUrl,
-    quote.url,
-    quote.thumb,
-    quote.thumbUrl,
-    attach?.href,
-    attach?.hdUrl,
-    attach?.url,
-    attach?.thumb,
-    attach?.thumbUrl,
-    params?.href,
-    params?.hdUrl,
-    params?.url,
-    params?.thumb,
-    params?.thumbUrl,
-    propertyExt?.href,
-    propertyExt?.hdUrl,
-    propertyExt?.url,
-    propertyExt?.thumb,
-    contentObj?.href,
-    contentObj?.hdUrl,
-    contentObj?.url,
-    contentObj?.thumb,
-  ];
-
-  for (const c of candidateUrls) {
-    if (typeof c === "string" && /^https?:\/\//i.test(c.trim())) {
-      mediaUrl = c.trim();
-      break;
-    }
+  if (urls.length > 0) {
+    mediaUrl = urls[0];
   }
 
-  if (mediaUrl) {
-    const msgType = String(quote.msgType || quote.type || attach?.type || params?.type || "").toLowerCase();
-    mediaType = msgType.includes("video") ? "video" : "image";
+  const rawType = String(quote.msgType || quote.type || "").toLowerCase();
+  const isPhotoOrImage =
+    rawType.includes("photo") ||
+    rawType.includes("image") ||
+    text.includes("[Hình ảnh]") ||
+    text.includes("[Ảnh]") ||
+    Boolean(mediaUrl && /\.(?:jpg|jpeg|png|webp|gif|bmp)(?:\?|$)/i.test(mediaUrl));
+
+  const isVideo =
+    rawType.includes("video") ||
+    text.includes("[Video]") ||
+    Boolean(mediaUrl && /\.(?:mp4|mov|avi|mkv|webm)(?:\?|$)/i.test(mediaUrl));
+
+  if (isVideo) {
+    mediaType = "video";
+  } else if (isPhotoOrImage || mediaUrl) {
+    mediaType = "image";
   }
 
-  if (!text && !mediaUrl) return null;
+  if (!text && !mediaUrl && !msgId && !cliMsgId) return null;
 
   return {
     text,
@@ -248,6 +302,9 @@ export function extractQuote(payload: any): QuotedMessage | null {
     senderId: senderId || undefined,
     mediaUrl,
     mediaType,
+    msgId: msgId || undefined,
+    cliMsgId: cliMsgId || undefined,
+    globalMsgId: globalMsgId || undefined,
   };
 }
 
@@ -263,30 +320,19 @@ export interface FileAttachment {
  */
 export function extractFileAttachment(payload: any): FileAttachment | null {
   const data = payload?.data ?? {};
+  const msgType = String(data?.msgType ?? "").toLowerCase();
+
+  // BỎ QUA NẾU LÀ ẢNH HOẶC VIDEO THUẦN TÚY ĐỂ TRÁNH NHẬN DIỆN NHẦM ẢNH THÀNH FILE TÀI LIỆU
+  if (msgType.includes("photo") || msgType.includes("image") || msgType.includes("video")) {
+    return null;
+  }
+
   const content = parseObjectMaybe(data?.content);
   const params = parseObjectMaybe(content?.params);
   const attach = parseObjectMaybe(data?.attach || content?.attach);
 
-  const candidateUrls = [
-    content?.href,
-    content?.url,
-    content?.fileUrl,
-    content?.hdUrl,
-    params?.href,
-    params?.url,
-    params?.fileUrl,
-    attach?.href,
-    attach?.url,
-    attach?.fileUrl,
-  ];
-
-  let url: string | undefined;
-  for (const c of candidateUrls) {
-    if (typeof c === "string" && /^https?:\/\//i.test(c.trim())) {
-      url = c.trim();
-      break;
-    }
-  }
+  const urls = collectCandidateUrls([content, params, attach, data]);
+  const url = urls.length > 0 ? urls[0] : undefined;
 
   const name = String(
     content?.title ||

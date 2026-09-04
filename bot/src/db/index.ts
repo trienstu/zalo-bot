@@ -712,6 +712,78 @@ export function clearGroupMediaLocalPath(id: number): void {
   getDb().prepare(`UPDATE group_media_events SET local_path = '' WHERE id = @id`).run({ id });
 }
 
+/**
+ * Tìm bức ảnh mới nhất được gửi trong nhóm (trong khoảng thời gian maxAgeMs gần đây).
+ * Ưu tiên ảnh có local_path để đọc ngay từ ổ cứng không cần tải lại qua mạng.
+ */
+export function getRecentGroupImage(
+  threadId: string,
+  maxAgeMs = 10 * 60 * 1000,
+): {
+  media_url: string;
+  local_path: string;
+  message_id: string;
+  ts: number;
+  display_name: string;
+} | null {
+  try {
+    const minTs = Date.now() - maxAgeMs;
+    const row = getDb()
+      .prepare(
+        `SELECT media_url, local_path, message_id, ts, display_name
+         FROM group_media_events
+         WHERE (thread_id = ? OR thread_id = '')
+           AND media_type = 'image'
+           AND deleted_at IS NULL
+           AND ts >= ?
+         ORDER BY (CASE WHEN local_path <> '' THEN 0 ELSE 1 END) ASC, ts DESC
+         LIMIT 1`,
+      )
+      .get(threadId, minTs) as any;
+    if (row && (row.media_url || row.local_path)) {
+      return row;
+    }
+  } catch (e) {
+    console.warn(`[db] getRecentGroupImage lỗi: ${String(e)}`);
+  }
+  return null;
+}
+
+/**
+ * Tìm media trong nhóm khớp với messageId (hỗ trợ cả msgId, cliMsgId của Quote).
+ */
+export function getMediaByMessageId(
+  threadId: string,
+  messageId: string,
+): {
+  media_url: string;
+  local_path: string;
+  message_id: string;
+  media_type: string;
+} | null {
+  if (!messageId) return null;
+  try {
+    const cleanId = messageId.trim();
+    const row = getDb()
+      .prepare(
+        `SELECT media_url, local_path, message_id, media_type
+         FROM group_media_events
+         WHERE (thread_id = ? OR thread_id = '')
+           AND (message_id = ? OR message_id LIKE ?)
+           AND deleted_at IS NULL
+         ORDER BY (CASE WHEN local_path <> '' THEN 0 ELSE 1 END) ASC, ts DESC
+         LIMIT 1`,
+      )
+      .get(threadId, cleanId, `%${cleanId}%`) as any;
+    if (row && (row.media_url || row.local_path)) {
+      return row;
+    }
+  } catch (e) {
+    console.warn(`[db] getMediaByMessageId lỗi: ${String(e)}`);
+  }
+  return null;
+}
+
 export type DeletedSource = "undo" | "moderation";
 
 /**
@@ -2049,11 +2121,17 @@ export function searchGroupKnowledge(threadId: string, query?: string, limit = 1
   try {
     if (!tableExists("group_knowledge")) return [];
     if (query && query.trim() !== "") {
+      const stopWords = new Set([
+        "hỏi", "về", "gì", "cho", "xin", "file", "tài", "liệu", "ảnh", "hình", "photo", "image",
+        "phân", "tích", "này", "nè", "kia", "đó", "của", "với", "các", "những", "cái", "con",
+        "sen", "chúa", "mộc", "miên", "bot", "tool", "giúp", "xem", "đọc", "video", "thầy",
+        "anh", "chị", "bạn", "em", "ơi", "nhé", "nha", "đi", "nào", "đâu"
+      ]);
       const words = query
         .toLowerCase()
         .replace(/[?,.!/\\:;]/g, " ")
         .split(/\s+/)
-        .filter((w) => w.length >= 2 && !["hỏi", "về", "gì", "cho", "xin", "file", "tài", "liệu"].includes(w));
+        .filter((w) => w.length >= 2 && !stopWords.has(w));
       if (words.length > 0) {
         const conditions = words.map(() => `(LOWER(title) LIKE ? OR LOWER(file_name) LIKE ? OR LOWER(summary) LIKE ? OR LOWER(content_text) LIKE ?)`).join(" OR ");
         const params: string[] = [];

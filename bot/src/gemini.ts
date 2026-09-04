@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { config } from "./config.js";
 
 /**
@@ -13,8 +14,59 @@ export interface GeminiImagePart {
 
 export type GeminiMediaPart = GeminiImagePart;
 
+/**
+ * Phát hiện chuẩn xác MIME Type từ Magic Bytes nhị phân của Buffer,
+ * khắc phục hoàn toàn trường hợp Zalo CDN trả về header chung chung application/octet-stream.
+ */
+function detectMimeType(buffer: Buffer, fileName = "", headerContentType = ""): string {
+  if (buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+    return "image/png";
+  }
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (buffer.length >= 12 && buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP") {
+    return "image/webp";
+  }
+  if (buffer.length >= 6 && buffer.toString("ascii", 0, 3) === "GIF") {
+    return "image/gif";
+  }
+  if (buffer.length >= 4 && buffer.toString("ascii", 0, 4) === "%PDF") {
+    return "application/pdf";
+  }
+  if (buffer.length >= 2 && buffer[0] === 0x42 && buffer[1] === 0x4d) {
+    return "image/bmp";
+  }
+
+  const cleanHeader = (headerContentType.split(";")[0] || "").trim().toLowerCase();
+  if (cleanHeader && cleanHeader !== "application/octet-stream" && cleanHeader !== "binary/octet-stream") {
+    return cleanHeader;
+  }
+
+  const ext = (fileName.split(".").pop() || "").toLowerCase();
+  if (ext === "png") return "image/png";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  if (ext === "webp") return "image/webp";
+  if (ext === "gif") return "image/gif";
+  if (ext === "pdf") return "application/pdf";
+  if (ext === "mp3") return "audio/mp3";
+  if (ext === "wav") return "audio/wav";
+  if (ext === "m4a") return "audio/mp4";
+
+  return cleanHeader || "application/octet-stream";
+}
+
 export async function downloadImageBase64(url: string): Promise<GeminiImagePart | null> {
   try {
+    if (fs.existsSync(url)) {
+      const buffer = fs.readFileSync(url);
+      const mime = detectMimeType(buffer, url, "");
+      return {
+        data: buffer.toString("base64"),
+        mimeType: mime.startsWith("image/") ? mime : "image/jpeg",
+      };
+    }
+
     const res = await fetch(url, {
       signal: AbortSignal.timeout(20_000),
       headers: {
@@ -24,83 +76,80 @@ export async function downloadImageBase64(url: string): Promise<GeminiImagePart 
     if (!res.ok) return null;
     const arrayBuffer = await res.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
-    const contentType = res.headers.get("content-type") || "image/jpeg";
-    const mimeType = (contentType.split(";")[0] || "image/jpeg").trim();
+    const contentType = res.headers.get("content-type") || "";
+    const mime = detectMimeType(buffer, url, contentType);
     return {
       data: buffer.toString("base64"),
-      mimeType,
+      mimeType: mime.startsWith("image/") ? mime : "image/jpeg",
     };
   } catch (e) {
-    console.warn(`[gemini] Không tải được ảnh ${url.slice(0, 80)}: ${String(e)}`);
+    console.warn(`[gemini] Lỗi tải ảnh ${url.slice(0, 80)}: ${String(e)}`);
     return null;
   }
 }
 
 /**
  * Tải và giải mã nội dung tài liệu (PDF, Text, Code, CSV, JSON, Audio, Image).
+ * Hỗ trợ cả file cục bộ trong ổ cứng lẫn URL tải qua mạng.
  */
 export async function downloadFileContent(
   url: string,
   fileName = "",
 ): Promise<{ textContent?: string; mediaPart?: GeminiMediaPart } | null> {
   try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(30_000),
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
-      },
-    });
-    if (!res.ok) return null;
+    let buffer: Buffer;
+    let contentType = "";
 
-    const arrayBuffer = await res.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const contentType = (res.headers.get("content-type") || "").toLowerCase();
-    const ext = (fileName.split(".").pop() || "").toLowerCase();
+    if (fs.existsSync(url)) {
+      buffer = fs.readFileSync(url);
+    } else {
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(30_000),
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        },
+      });
+      if (!res.ok) return null;
+      const arrayBuffer = await res.arrayBuffer();
+      buffer = Buffer.from(arrayBuffer);
+      contentType = (res.headers.get("content-type") || "").toLowerCase();
+    }
 
-    // 1. File PDF (Gemini đọc native PDF)
-    if (ext === "pdf" || contentType.includes("pdf")) {
+    const detectedMime = detectMimeType(buffer, fileName || url, contentType);
+    const ext = (fileName.split(".").pop() || url.split(".").pop() || "").toLowerCase();
+
+    // 1. File Hình ảnh hoặc PDF (Gemini đọc Multimodal native)
+    if (detectedMime.startsWith("image/") || detectedMime === "application/pdf") {
       return {
         mediaPart: {
           data: buffer.toString("base64"),
-          mimeType: "application/pdf",
+          mimeType: detectedMime,
         },
       };
     }
 
-    // 2. File Hình ảnh
-    if (["jpg", "jpeg", "png", "webp", "gif", "bmp"].includes(ext) || contentType.startsWith("image/")) {
-      const mime = contentType.split(";")[0]?.trim() || (ext === "png" ? "image/png" : "image/jpeg");
+    // 2. File Âm thanh / Voice
+    if (detectedMime.startsWith("audio/") || ["mp3", "wav", "m4a", "ogg", "aac"].includes(ext)) {
       return {
         mediaPart: {
           data: buffer.toString("base64"),
-          mimeType: mime,
+          mimeType: detectedMime.startsWith("audio/") ? detectedMime : "audio/mp3",
         },
       };
     }
 
-    // 3. File Âm thanh / Voice
-    if (["mp3", "wav", "m4a", "ogg", "aac"].includes(ext) || contentType.startsWith("audio/")) {
-      const mime = contentType.split(";")[0]?.trim() || (ext === "wav" ? "audio/wav" : "audio/mp3");
-      return {
-        mediaPart: {
-          data: buffer.toString("base64"),
-          mimeType: mime,
-        },
-      };
-    }
-
-    // 4. File Text / Code / CSV / JSON / Markdown / Log
+    // 3. File Text / Code / CSV / JSON / Markdown / Log
     if (
       ["txt", "csv", "json", "md", "log", "js", "ts", "py", "html", "css", "sql", "sh", "xml", "yaml", "yml"].includes(ext) ||
-      contentType.startsWith("text/") ||
-      contentType.includes("json") ||
-      contentType.includes("javascript")
+      detectedMime.startsWith("text/") ||
+      detectedMime.includes("json") ||
+      detectedMime.includes("javascript")
     ) {
       const text = buffer.toString("utf-8");
       return { textContent: text };
     }
 
-    // Fallback file văn bản khác
+    // Fallback file văn bản khác nếu không chứa byte nhị phân đặc biệt
     if (buffer.length < 5 * 1024 * 1024) {
       const text = buffer.toString("utf-8");
       if (!/[\x00-\x08\x0E-\x1F]/.test(text.slice(0, 1000))) {
@@ -108,9 +157,19 @@ export async function downloadFileContent(
       }
     }
 
+    // Nếu vẫn là ảnh (ví dụ định dạng chưa phổ biến) thì trả về mediaPart
+    if (detectedMime && !detectedMime.includes("octet-stream")) {
+      return {
+        mediaPart: {
+          data: buffer.toString("base64"),
+          mimeType: detectedMime,
+        },
+      };
+    }
+
     return null;
   } catch (e) {
-    console.warn(`[gemini] Lỗi tải file ${url.slice(0, 80)}: ${String(e)}`);
+    console.warn(`[gemini] Lỗi đọc file/ảnh ${url.slice(0, 80)}: ${String(e)}`);
     return null;
   }
 }

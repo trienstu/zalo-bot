@@ -55,15 +55,21 @@ export function parseNaturalTimeVietnam(text: string): { remindAt: number; conte
 
   const lower = raw.toLowerCase();
 
-  // 0. BẢO VỆ NGỮ CẢNH: Loại trừ tuyệt đối các câu nhờ vả / xin thời gian / hỏi đáp tư vấn (False Positives)
-  // Ví dụ: "cho anh 5 phút tư vấn...", "cho em 5phút...", "xin 5 phút...", "dành 10 phút...", "mất 5 phút..."
+  // 0. BẢO VỆ NGỮ CẢNH: Loại trừ tuyệt đối các câu nhờ vả / xin thời gian / hỏi đáp tư vấn / tính toán (False Positives)
+  // Ví dụ: "Google tăng từ 1.479 lên 1.989 là tăng bao nhiêu % nhỉ?", "cho anh 5 phút tư vấn...", "xin 5 phút...", "dành 10 phút..."
+  const isQuestionOrMath =
+    /(?:bao nhiêu|mấy\s*%|%\s*(?:nhỉ|nhi|ạ|a|được|duoc)|tăng|giảm|tính|tại sao|tai sao|là gì|la gi|thế nào|the nao|như thế nào|nhu the nao|ai là|ai la|\?)/i.test(
+      raw,
+    );
+
   const isConversationalRequest =
     /(?:cho|xin|dành|danh|mất|mat|tốn|ton|đợi|doi|chờ|cho)\s+(?:anh|em|tôi|tao|mình|minh|bác|bac|chú|chu)?\s*\d+\s*(?:phút|phut|p|tiếng|tieng|h|giờ|gio)/i.test(
       raw,
     ) ||
     /(?:tư vấn|tu van|hỏi|hoi|giải thích|giai thich|phân tích|phan tich|hướng dẫn|huong dan|tóm tắt|tom tat|xem hộ|xem ho|review)/i.test(
       raw,
-    );
+    ) ||
+    isQuestionOrMath;
 
   const hasExplicitReminderWord =
     /(?:nhắc|nhac|báo thức|bao thuc|hẹn giờ|hen gio|đặt lịch|dat lich|nhớ nhắc|nho nhac|remind|alarm)/i.test(
@@ -145,30 +151,39 @@ export function parseNaturalTimeVietnam(text: string): { remindAt: number; conte
     }
   }
 
-  // 5. Mẫu: "HH:mm hôm nay", "HHh hôm nay", "HHh", "HH:mm" (ví dụ: "16h45 đi lấy nước", "17h đi họp", "17:30 đón con")
+  // 5. Mẫu: "HH:mm hôm nay", "HHh hôm nay", "HHh", "HH:mm" (ví dụ: "16h45 đi lấy nước", "17h đi họp", "17:30 đón con", "lúc 20h...")
+  // BẮT BUỘC phải có chỉ báo thời gian rõ ràng (dấu :, chữ h/giờ, từ "lúc", hoặc từ "nhắc"/"hôm nay"). Tuyệt đối không bắt số vu vơ (như 20 TB, 50 GB)
   if (!remindAt) {
-    const todayMatch = raw.match(/(?:nhắc\s+(?:tôi|tao|mình|em|anh|cả nhóm|mọi người)\s+)?(?:lúc\s*)?(\d{1,2})(?:[:h](\d{2}))?\s*(?:h|giờ)?\s*(sáng|trưa|chiều|tối|đêm)?\s*(?:hôm nay)?\s*[:,-]?\s*(.*)/i);
-    if (todayMatch && todayMatch[1]) {
-      let h = parseInt(todayMatch[1], 10);
-      const m = todayMatch[2] ? parseInt(todayMatch[2], 10) : 0;
-      const period = todayMatch[3]?.toLowerCase();
+    const hasTimeIndicator =
+      /[:h]\d{2}/.test(raw) ||
+      /\b\d{1,2}\s*(?:h|giờ)\b/i.test(raw) ||
+      /\blúc\s+\d{1,2}/i.test(raw) ||
+      hasExplicitReminderWord;
 
-      if (period === "tối" || period === "chiều") {
-        if (h < 12) h += 12;
-      } else if (period === "sáng" && h === 12) {
-        h = 0;
-      }
+    if (hasTimeIndicator) {
+      const todayMatch = raw.match(/(?:nhắc\s+(?:tôi|tao|mình|em|anh|cả nhóm|mọi người)\s+)?(?:lúc\s*)?(\d{1,2})(?:[:h](\d{2}))?\s*(h|giờ)?\s*(sáng|trưa|chiều|tối|đêm)?\s*(?:hôm nay)?\s*[:,-]?\s*(.*)/i);
+      if (todayMatch && todayMatch[1] && (todayMatch[2] || todayMatch[3] || hasExplicitReminderWord || /\blúc\s+\d{1,2}/i.test(raw))) {
+        let h = parseInt(todayMatch[1], 10);
+        const m = todayMatch[2] ? parseInt(todayMatch[2], 10) : 0;
+        const period = todayMatch[4]?.toLowerCase();
 
-      if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
-        let targetTs = makeVietnamTimestamp(vn.year, vn.month, vn.day, h, m);
-
-        // Nếu giờ đó trong ngày hôm nay ở VN đã qua rồi (quá 2 phút), tự động chuyển sang ngày mai
-        if (targetTs <= Date.now() - 2 * 60 * 1000) {
-          targetTs = makeVietnamTimestamp(vn.year, vn.month, vn.day + 1, h, m);
+        if (period === "tối" || period === "chiều") {
+          if (h < 12) h += 12;
+        } else if (period === "sáng" && h === 12) {
+          h = 0;
         }
 
-        remindAt = targetTs;
-        cleanContent = todayMatch[4]?.trim() || "Có việc cần làm";
+        if (h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+          let targetTs = makeVietnamTimestamp(vn.year, vn.month, vn.day, h, m);
+
+          // Nếu giờ đó trong ngày hôm nay ở VN đã qua rồi (quá 2 phút), tự động chuyển sang ngày mai
+          if (targetTs <= Date.now() - 2 * 60 * 1000) {
+            targetTs = makeVietnamTimestamp(vn.year, vn.month, vn.day + 1, h, m);
+          }
+
+          remindAt = targetTs;
+          cleanContent = todayMatch[5]?.trim() || "Có việc cần làm";
+        }
       }
     }
   }

@@ -244,7 +244,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     lower.includes("hen") ||
     lower.includes("báo thức") ||
     lower.includes("bao thuc") ||
-    /(?:phút|phut|tiếng|tieng|h|giờ|gio|mai|hôm nay)/i.test(rawText);
+    /(?:phút|phut|tiếng|tieng|\b\d+\s*h\b|\b\d+h\d*\b|giờ|gio|mai|hôm nay)/i.test(rawText);
 
   if (isReminderIntent) {
     const parsed = parseNaturalTimeVietnam(rawText);
