@@ -517,9 +517,9 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     quoteSection = `\n=== NỘI DUNG TRÍCH DẪN: ===\n"${event.quote.text}"\n`;
   }
 
-  // 2.0. Nhận diện câu hỏi cần tra cứu thông tin thời gian thực (Google News / Sự kiện / Tin tức mới)
+  // 2.0. Nhận diện câu hỏi cần tra cứu thông tin thời gian thực (Google News / Sự kiện / Tin tức mới / Dự án)
   const isRealTimeSearchQuery =
-    /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì|sự kiện mới|giá vàng|chứng khoán|thị trường|lũ quét|bão số|thiên tai|thế nào rồi)/i.test(
+    /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì|sự kiện|giá vàng|chứng khoán|thị trường|lũ quét|bão số|thiên tai|thế nào rồi|thảm họa|dự án|tổng quan dự án|thông tin về|cho tôi thông tin|tìm hiểu về|ở đâu|giá bao nhiêu)/i.test(
       rawText
     );
 

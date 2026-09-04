@@ -236,12 +236,12 @@ export async function callGemini(
       },
     };
 
-    const fallbackModel = model === "gemini-3.5-flash-lite" ? "gemini-3.5-flash" : "gemini-3.5-flash-lite";
+    const fallbackModel = model === "gemini-3.7-flash" ? "gemini-3.6-flash" : "gemini-3.7-flash";
 
     try {
       const resp = await fetch(endpoint, {
         method: "POST",
-        signal: AbortSignal.timeout(25_000), // 25s timeout
+        signal: AbortSignal.timeout(45_000), // 45s timeout cho câu trả lời dài
         headers: {
           "Content-Type": "application/json",
         },

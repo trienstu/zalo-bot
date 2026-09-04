@@ -295,7 +295,7 @@ export const config = {
   geminiApiKey: process.env.GEMINI_API_KEY?.trim() || "",
 
   /** Model Gemini dùng để tóm tắt và xử lý thông tin (vd: gemini-3.5-flash, gemini-3.6-flash). */
-  geminiModel: process.env.GEMINI_MODEL?.trim() || "gemini-3.5-flash",
+  geminiModel: process.env.GEMINI_MODEL?.trim() || "gemini-3.6-flash",
 
   /** API key DeepSeek cho tóm tắt hằng ngày (https://platform.deepseek.com). Rỗng = tắt. */
   deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() || "",
