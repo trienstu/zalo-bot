@@ -30,6 +30,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   ChevronDown,
+  Terminal,
 } from "lucide-react";
 import { BotSwitcher } from "@/components/bot-switcher";
 
@@ -54,7 +55,7 @@ const NAV = [
   { href: "/messages", label: "Tin nhắn", shortLabel: "Tin nhắn", icon: MessageSquare },
   { href: "/summaries", label: "Tóm tắt ngày", shortLabel: "Tóm tắt", icon: NotebookText },
   { href: "/history", label: "Lịch sử dọn", shortLabel: "Lịch sử", icon: History },
-  { href: "/errors", label: "Lỗi", shortLabel: "Lỗi", icon: AlertTriangle },
+  { href: "/errors", label: "Nhật ký & Lỗi", shortLabel: "Logs", icon: Terminal },
   { href: "/settings", label: "Cấu hình", shortLabel: "Cấu hình", icon: Settings },
   { href: "/login", label: "Đăng nhập Zalo", shortLabel: "Zalo QR", icon: LogIn },
 ];

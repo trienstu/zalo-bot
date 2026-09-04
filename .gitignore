@@ -29,7 +29,7 @@ next-env.d.ts
 
 # Logs
 *.log
-logs/
+/logs/
 npm-debug.log*
 screenlog.*
 

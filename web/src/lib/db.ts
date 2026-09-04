@@ -1128,9 +1128,9 @@ export function isBotHealthFresh(health: BotHealth | null, maxAgeMs = 2 * 60 * 1
   return Boolean(health?.heartbeatAt && Date.now() - health.heartbeatAt <= maxAgeMs);
 }
 
-export function listBotErrors(limit = 100): BotErrorRow[] {
-  if (!tableExists("bot_errors")) return [];
-  return getDb()
+export function listBotErrors(limit = 100, botId?: string): BotErrorRow[] {
+  if (!tableExists("bot_errors", botId)) return [];
+  return getDb(botId)
     .prepare(
       `SELECT *
        FROM bot_errors
@@ -1140,9 +1140,9 @@ export function listBotErrors(limit = 100): BotErrorRow[] {
     .all({ limit: Math.min(Math.max(limit, 1), 500) }) as BotErrorRow[];
 }
 
-export function listSchemaMigrations(limit = 20): SchemaMigrationRow[] {
-  if (!tableExists("schema_migrations")) return [];
-  return getDb()
+export function listSchemaMigrations(limit = 20, botId?: string): SchemaMigrationRow[] {
+  if (!tableExists("schema_migrations", botId)) return [];
+  return getDb(botId)
     .prepare(
       `SELECT *
        FROM schema_migrations
