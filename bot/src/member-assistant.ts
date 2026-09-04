@@ -86,9 +86,13 @@ function handleRankCommand(sender: string, displayName: string, threadId: string
 
   // Tự động phân nhánh: nếu đã có bảng group_members thì tính theo nhóm, chưa có thì fallback về members
   let fromTable = "members";
+  let groupFilter = "m.group_id = @threadId";
   try {
-    const hasGroupMembers = db.prepare(`SELECT 1 FROM group_members WHERE group_id = ? LIMIT 1`).get(threadId);
-    if (hasGroupMembers) fromTable = "group_members";
+    const hasGroupMembers = db.prepare(`SELECT 1 FROM group_members WHERE group_id = ? AND is_active = 1 LIMIT 1`).get(threadId);
+    if (hasGroupMembers) {
+      fromTable = "group_members";
+      groupFilter = "m.group_id = @threadId";
+    }
   } catch {}
 
   // Lấy danh sách thành viên active và xếp hạng theo đúng thread_id nhóm
@@ -107,8 +111,9 @@ function handleRankCommand(sender: string, displayName: string, threadId: string
               COALESCE(SUM(CASE WHEN i.type = 'vote' THEN 1 ELSE 0 END), 0) AS vote_count,
               MAX(i.ts) AS last_interaction
        FROM ${fromTable} m
-       LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND (i.thread_id = @threadId OR i.thread_id = '')
-       WHERE m.is_active = 1
+       LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND i.thread_id = @threadId
+       WHERE ${groupFilter}
+         AND m.is_active = 1
          AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
          AND LOWER(m.display_name) NOT LIKE '%sen chua%'
          AND LOWER(m.display_name) NOT LIKE '%mộc miên%'
@@ -162,9 +167,13 @@ function handleRankCommand(sender: string, displayName: string, threadId: string
 function handleTopCommand(threadId: string): string {
   const db = getDb();
   let fromTable = "members";
+  let groupFilter = "m.group_id = @threadId";
   try {
-    const hasGroupMembers = db.prepare(`SELECT 1 FROM group_members WHERE group_id = ? LIMIT 1`).get(threadId);
-    if (hasGroupMembers) fromTable = "group_members";
+    const hasGroupMembers = db.prepare(`SELECT 1 FROM group_members WHERE group_id = ? AND is_active = 1 LIMIT 1`).get(threadId);
+    if (hasGroupMembers) {
+      fromTable = "group_members";
+      groupFilter = "m.group_id = @threadId";
+    }
   } catch {}
 
   const topRows = db
@@ -179,8 +188,8 @@ function handleTopCommand(threadId: string): string {
                 ELSE 1 END), 0) AS total_points,
               COALESCE(SUM(CASE WHEN i.type = 'message' THEN 1 ELSE 0 END), 0) AS message_count
        FROM ${fromTable} m
-       JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
-       WHERE (i.thread_id = @threadId OR i.thread_id = '')
+       JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND i.thread_id = @threadId
+       WHERE ${groupFilter}
          AND m.is_active = 1
          AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
          AND LOWER(m.display_name) NOT LIKE '%sen chua%'
@@ -225,26 +234,28 @@ export interface FoundResource {
  * Hỗ trợ lọc đa từ khóa thông minh (ví dụ: "github", "zalo", "bot").
  */
 export function searchRelevantLinksAndResources(
-  _threadId?: string,
+  threadId?: string,
   query: string = "",
   limit = 20,
 ): FoundResource[] {
+  if (!threadId) return [];
   const db = getDb();
   const allLinks: FoundResource[] = [];
   const urlRegex = /(https?:\/\/[^\s]+)/gi;
 
-  // 1. Quét lịch sử tin nhắn chứa link (tối đa 500 tin nhắn gần nhất có chứa link)
+  // 1. Quét lịch sử tin nhắn chứa link của riêng nhóm này
   try {
     const rows = db
       .prepare(
         `SELECT display_name, text, ts
          FROM group_messages
          WHERE deleted_at IS NULL
+           AND thread_id = ?
            AND (text LIKE '%http://%' OR text LIKE '%https://%')
          ORDER BY ts DESC
-         LIMIT 1000`,
+         LIMIT 500`,
       )
-      .all() as { display_name: string; text: string; ts: number }[];
+      .all(threadId) as { display_name: string; text: string; ts: number }[];
 
     for (const r of rows) {
       const matches = r.text.match(urlRegex);
@@ -265,16 +276,17 @@ export function searchRelevantLinksAndResources(
     console.warn("[searchRelevantLinks] Lỗi quét group_messages:", err);
   }
 
-  // 2. Quét thêm từ Kho tri thức nhóm (group_knowledge) nếu có
+  // 2. Quét thêm từ Kho tri thức nhóm (group_knowledge) của riêng nhóm này
   try {
     const knowledges = db
       .prepare(
         `SELECT title, summary, content_text, file_url, sender_name, created_at
          FROM group_knowledge
+         WHERE thread_id = ?
          ORDER BY created_at DESC
          LIMIT 100`,
       )
-      .all() as any[];
+      .all(threadId) as any[];
 
     for (const k of knowledges) {
       const rawText = `${k.title || ""} ${k.summary || ""} ${k.content_text || ""} ${k.file_url || ""}`;
@@ -296,15 +308,16 @@ export function searchRelevantLinksAndResources(
     console.warn("[searchRelevantLinks] Lỗi quét group_knowledge:", err);
   }
 
-  // 3. Quét toàn bộ Kho Kiến Thức & Tóm tắt lịch sử (/hub - daily_summaries) của tất cả các ngày trước
+  // 3. Quét toàn bộ Kho Kiến Thức & Tóm tắt lịch sử (/hub - daily_summaries) của riêng nhóm này
   try {
     const summaries = db
       .prepare(
         `SELECT day_label, summary_text, created_at
          FROM daily_summaries
+         WHERE thread_id = ?
          ORDER BY day_date DESC`,
       )
-      .all() as any[];
+      .all(threadId) as any[];
 
     for (const s of summaries) {
       const summaryText = s.summary_text || "";
@@ -485,7 +498,7 @@ export function searchRelevantDiscussions(
                  AND LOWER(display_name) NOT LIKE '%sen chua%'`;
 
     if (threadId) {
-      sql += ` AND (thread_id = ? OR thread_id = '')`;
+      sql += ` AND thread_id = ?`;
       params.push(threadId);
     }
 
@@ -521,7 +534,7 @@ export function searchRelevantDiscussions(
         .prepare(
           `SELECT display_name, text, ts
            FROM group_messages
-           WHERE (thread_id = ? OR thread_id = '')
+           WHERE thread_id = ?
              AND ts < ?
              AND deleted_at IS NULL
              AND text != ''
@@ -538,7 +551,7 @@ export function searchRelevantDiscussions(
         .prepare(
           `SELECT display_name, text, ts
            FROM group_messages
-           WHERE (thread_id = ? OR thread_id = '')
+           WHERE thread_id = ?
              AND ts > ?
              AND deleted_at IS NULL
              AND text != ''
@@ -600,7 +613,7 @@ export function searchRelevantDiscussions(
  * Tra cứu sâu các mục tóm tắt chuyên môn / kinh nghiệm trong toàn bộ lịch sử daily_summaries.
  */
 export function searchRelevantDailySummaries(
-  _threadId: string,
+  threadId: string,
   question: string,
   limit = 4,
 ): { dayLabel: string; relevantBulletPoints: string[] }[] {
@@ -621,14 +634,17 @@ export function searchRelevantDailySummaries(
   const keywords = Array.from(new Set(rawWords));
   if (keywords.length === 0) return [];
 
+  if (!threadId) return [];
+
   try {
     const rows = db
       .prepare(
         `SELECT day_label, summary_text
          FROM daily_summaries
+         WHERE thread_id = ?
          ORDER BY day_date DESC`,
       )
-      .all() as any[];
+      .all(threadId) as any[];
 
     for (const r of rows) {
       const text = r.summary_text || "";
@@ -672,13 +688,25 @@ export function searchRelevantDailySummaries(
  */
 function handleInactiveCommand(threadId: string): string {
   const db = getDb();
+  let fromTable = "members";
+  let groupFilter = "m.group_id = @threadId";
+  let totalFilter = "group_id = ?";
+  try {
+    const hasGroupMembers = db.prepare(`SELECT 1 FROM group_members WHERE group_id = ? AND is_active = 1 LIMIT 1`).get(threadId);
+    if (hasGroupMembers) {
+      fromTable = "group_members";
+      groupFilter = "m.group_id = @threadId";
+      totalFilter = "group_id = ?";
+    }
+  } catch {}
+
   const inactiveMembers = db
     .prepare(
       `SELECT m.display_name,
               COUNT(CASE WHEN i.type = 'message' THEN 1 END) AS msg_count
-       FROM members m
-       LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND (i.thread_id = @threadId OR i.thread_id = '')
-       WHERE (m.group_id = @threadId OR m.group_id = '' OR m.group_id IS NULL)
+       FROM ${fromTable} m
+       LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND i.thread_id = @threadId
+       WHERE ${groupFilter}
          AND m.is_active = 1
          AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
          AND LOWER(m.display_name) NOT LIKE '%sen chua%'
@@ -690,12 +718,16 @@ function handleInactiveCommand(threadId: string): string {
 
   const totalMembersInGroup = db
     .prepare(
-      `SELECT COUNT(*) AS total FROM members WHERE (group_id = ? OR group_id = '' OR group_id IS NULL) AND is_active = 1 AND LOWER(display_name) NOT LIKE '%sen chúa%'`,
+      `SELECT COUNT(*) AS total FROM ${fromTable} WHERE ${totalFilter} AND is_active = 1 AND LOWER(display_name) NOT LIKE '%sen chúa%'`,
     )
     .get(threadId) as { total: number } | undefined;
 
   const total = totalMembersInGroup?.total ?? 0;
   const count = inactiveMembers.length;
+
+  if (total === 0) {
+    return `🚢 THỐNG KÊ THÀNH VIÊN TÀU NGẦM\n\nChưa có danh sách thành viên được đồng bộ trong nhóm này. Khi có thành viên tương tác hoặc sau khi đồng bộ nhóm, bot sẽ thống kê chính xác nhé!`;
+  }
 
   if (count === 0) {
     return `🚢 THỐNG KÊ THÀNH VIÊN TÀU NGẦM\n\nTuyệt vời! Toàn bộ ${total} thành viên trong nhóm đều đã từng gửi tin nhắn tương tác!`;
@@ -986,7 +1018,7 @@ async function handleHistoryQA(
       .prepare(
         `SELECT display_name, text, ts, is_self
          FROM group_messages
-         WHERE (thread_id = ? OR thread_id = '')
+         WHERE thread_id = ?
            AND text IS NOT NULL
            AND text != ''
            AND deleted_at IS NULL
@@ -1010,14 +1042,21 @@ async function handleHistoryQA(
   let topMembers: { display_name: string; msg_count: number; points: number }[] = [];
   if (isRankQuery) {
     try {
+      let fromTable = "members";
+      let groupFilter = "m.group_id = @threadId";
+      const hasGroupMembers = db.prepare(`SELECT 1 FROM group_members WHERE group_id = ? AND is_active = 1 LIMIT 1`).get(threadId);
+      if (hasGroupMembers) {
+        fromTable = "group_members";
+        groupFilter = "m.group_id = @threadId";
+      }
       topMembers = db
         .prepare(
           `SELECT m.display_name,
                   COUNT(i.id) AS msg_count,
                   COALESCE(SUM(CASE i.type WHEN 'message' THEN 10 WHEN 'image' THEN 10 WHEN 'video' THEN 10 WHEN 'vote' THEN 3 WHEN 'reaction' THEN 1 ELSE 1 END), 0) AS points
-           FROM members m
-           JOIN interactions i ON i.zalo_user_id = m.zalo_user_id
-           WHERE (i.thread_id = @threadId OR i.thread_id = '')
+           FROM ${fromTable} m
+           JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND i.thread_id = @threadId
+           WHERE ${groupFilter}
               AND m.is_active = 1
               AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
               AND LOWER(m.display_name) NOT LIKE '%sen chua%'
@@ -1039,13 +1078,22 @@ async function handleHistoryQA(
   let totalMembersInGroup: { total: number } | undefined;
   if (isInactiveQuery) {
     try {
+      let fromTable = "members";
+      let groupFilter = "m.group_id = @threadId";
+      let totalFilter = "group_id = ?";
+      const hasGroupMembers = db.prepare(`SELECT 1 FROM group_members WHERE group_id = ? AND is_active = 1 LIMIT 1`).get(threadId);
+      if (hasGroupMembers) {
+        fromTable = "group_members";
+        groupFilter = "m.group_id = @threadId";
+        totalFilter = "group_id = ?";
+      }
       inactiveMembers = db
         .prepare(
           `SELECT m.display_name,
-                  COUNT(i.id) AS msg_count
-           FROM members m
-           LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND (i.thread_id = @threadId OR i.thread_id = '') AND i.type = 'message'
-           WHERE (m.group_id = @threadId OR m.group_id = '' OR m.group_id IS NULL)
+                  COUNT(CASE WHEN i.type = 'message' THEN 1 END) AS msg_count
+           FROM ${fromTable} m
+           LEFT JOIN interactions i ON i.zalo_user_id = m.zalo_user_id AND i.thread_id = @threadId
+           WHERE ${groupFilter}
              AND m.is_active = 1
              AND LOWER(m.display_name) NOT LIKE '%sen chúa%'
              AND LOWER(m.display_name) NOT LIKE '%sen chua%'
@@ -1053,12 +1101,10 @@ async function handleHistoryQA(
            HAVING msg_count = 0`,
         )
         .all({ threadId }) as any[];
-    } catch {}
 
-    try {
       totalMembersInGroup = db
         .prepare(
-          `SELECT COUNT(*) AS total FROM members WHERE (group_id = ? OR group_id = '' OR group_id IS NULL) AND is_active = 1 AND LOWER(display_name) NOT LIKE '%sen chúa%'`,
+          `SELECT COUNT(*) AS total FROM ${fromTable} WHERE ${totalFilter} AND is_active = 1 AND LOWER(display_name) NOT LIKE '%sen chúa%'`,
         )
         .get(threadId) as { total: number } | undefined;
     } catch {}
@@ -1248,8 +1294,9 @@ async function handleHistoryQA(
     `4. Nếu có NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): Hiểu rằng người dùng đang hỏi hoặc bình luận về chính nội dung được trích dẫn đó.\n` +
     `5. Luôn trả lời chuẩn theo phong cách cá tính được quy định ở trên.\n` +
     `6. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (hãy dùng dấu gạch đầu dòng, viết hoa hoặc icon để làm nổi bật).\n` +
-    `7. ĐẶC BIỆT KHI THÀNH VIÊN HỎI VỀ QUY TRÌNH, HƯỚNG DẪN, CÁCH LÀM HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Bạn BẮT BUỘC phải TRÍCH DẪN VÀ DIỄN GIẢI CHI TIẾT TỪNG BƯỚC (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến mà các thành viên (như bác Huy, anh Nam, Vũ Trọng...) đã từng chia sẻ trong lịch sử chat. TUYỆT ĐỐI KHÔNG ĐƯỢC chỉ đưa mỗi link tải tài liệu; phải giải thích cặn kẽ nội dung quy trình để người hỏi áp dụng được ngay, link tài liệu chỉ là phần đính kèm ở cuối để tham khảo thêm.\n` +
-    `8. ĐỘ DÀI & TỐC ĐỘ PHẢN HỒI: Với các câu chào hỏi, giao lưu, tấu hài hoặc thắc mắc thường ngày, BẮT BUỘC trả lời súc tích, duyên dáng, ngắn gọn trong 2-3 đoạn (khoảng 300-500 ký tự) để đọc nhanh trên Zalo điện thoại. Không viết dài dòng lê thê trừ khi thành viên yêu cầu giải thích quy trình hoặc phân tích sâu.` +
+    `7. ĐẶC BIỆT KHI THÀNH VIÊN HỎI VỀ QUY TRÌNH, HƯỚNG DẪN, CÁCH LÀM HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Bạn BẮT BUỘC phải TRÍCH DẪN VÀ DIỄN GIẢI CHI TIẾT TỪNG BƯỚC (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến mà các thành viên đã từng chia sẻ trong lịch sử chat của nhóm này. TUYỆT ĐỐI KHÔNG ĐƯỢC chỉ đưa mỗi link tải tài liệu; phải giải thích cặn kẽ nội dung quy trình để người hỏi áp dụng được ngay, link tài liệu chỉ là phần đính kèm ở cuối để tham khảo thêm.\n` +
+    `8. ĐỘ DÀI & TỐC ĐỘ PHẢN HỒI: Với các câu chào hỏi, giao lưu, tấu hài hoặc thắc mắc thường ngày, BẮT BUỘC trả lời súc tích, duyên dáng, ngắn gọn trong 2-3 đoạn (khoảng 300-500 ký tự) để đọc nhanh trên Zalo điện thoại. Không viết dài dòng lê thê trừ khi thành viên yêu cầu giải thích quy trình hoặc phân tích sâu.\n` +
+    `9. CÔ LẬP TUYỆT ĐỐI THEO NHÓM (KHÔNG NHẮC TÊN NGƯỜI TỪ NHÓM KHÁC): Bạn đang hoạt động trong nhóm này. TUYỆT ĐỐI CHỈ tương tác hoặc nhắc tên những thành viên CÓ MẶT trong nhóm này (được xuất hiện trong dữ liệu chat/thành viên ở trên hoặc người đang hỏi là ${displayName}). TUYỆT ĐỐI KHÔNG nhắc tên bất kỳ người lạ nào từ nhóm khác, KHÔNG tự bịa ra tên người nếu trong lịch sử chat nhóm này không có.` +
     searchInstruction;
 
   const userPrompt =
@@ -1317,8 +1364,8 @@ function findMemberInGroup(threadId: string, query: string): { zalo_user_id: str
     if (byName) return byName;
 
     const byGeneral = db
-      .prepare(`SELECT zalo_user_id, display_name FROM members WHERE LOWER(display_name) LIKE ? LIMIT 1`)
-      .get(`%${q}%`) as any;
+      .prepare(`SELECT zalo_user_id, display_name FROM members WHERE group_id = ? AND LOWER(display_name) LIKE ? LIMIT 1`)
+      .get(threadId, `%${q}%`) as any;
     if (byGeneral) return byGeneral;
   } catch {}
   return null;
@@ -2110,7 +2157,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       await sendGroupText(
         api,
         threadId,
-        `🤖 Sen Chúa trả lời @${displayName}:\n\nDạ bí kíp đạt 1 triệu view trong 1 đêm nhanh nhất là: Tối nay bác cứ đăng video lên rồi đi ngủ sớm... mơ một giấc thật đẹp là sáng mai có ngay 1 triệu view ạ 😄!\n\nHoặc bác có thể hỏi các cao thủ trong nhóm như bác Vũ Trọng, Tu, Huy để xin tút chạy ads và làm content viral chuẩn chỉnh nhé!`,
+        `🤖 Sen Chúa trả lời @${displayName}:\n\nDạ bí kíp đạt 1 triệu view trong 1 đêm nhanh nhất là: Tối nay bác cứ đăng video lên rồi đi ngủ sớm... mơ một giấc thật đẹp là sáng mai có ngay 1 triệu view ạ 😄!\n\nHoặc bác có thể trao đổi với các anh em cao thủ trong nhóm để xin tút chạy ads và làm content viral chuẩn chỉnh nhé!`,
       );
       return;
     }

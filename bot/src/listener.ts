@@ -905,7 +905,7 @@ export async function runListener(): Promise<void> {
       const mediaUrl = media ? extractMediaUrl(payload) : null;
       if (media) {
         const mediaMessageId = extractMessageId(payload, sender, ts, `${media.type}:${media.count}`);
-        upsertMember({ zaloUserId: sender, displayName, now: Date.now() });
+        upsertMember({ zaloUserId: sender, displayName, groupId: threadId, now: Date.now() });
         saveGroupMediaEvent({
           threadId,
           messageId: mediaMessageId,
@@ -946,7 +946,7 @@ export async function runListener(): Promise<void> {
     }
     if (payload?.isSelf) selfEvents += 1;
     if (type === "message") {
-      upsertMember({ zaloUserId: sender, displayName: String(payload?.data?.dName ?? ""), now: Date.now() });
+      upsertMember({ zaloUserId: sender, displayName: String(payload?.data?.dName ?? ""), groupId: threadId || undefined, now: Date.now() });
     }
     // KHÔNG tính điểm tương tác cho chính tài khoản bot (Sen Chúa)
     if (!payload?.isSelf) {
@@ -1070,7 +1070,7 @@ export async function runListener(): Promise<void> {
       // Thành viên mới join → ghi nhận (first_seen_at = giờ; luật miễn người mới ở M2).
       if (isJoinGroupEvent(type)) {
         for (const m of normalizeEventMembers(ev)) {
-          upsertMember({ zaloUserId: m.id, displayName: m.name, joinedAt: now2, now: now2 });
+          upsertMember({ zaloUserId: m.id, displayName: m.name, joinedAt: now2, groupId: threadId, now: now2 });
           recordMemberEvent({
             zaloUserId: m.id,
             displayName: m.name,
@@ -1085,7 +1085,7 @@ export async function runListener(): Promise<void> {
       // Rời / bị xoá / bị block → đánh dấu inactive (không còn trong group).
       if (isLeaveGroupEvent(type)) {
         for (const m of normalizeEventMembers(ev)) {
-          markMemberLeft(m.id, now2);
+          markMemberLeft(m.id, now2, threadId);
           recordMemberEvent({
             zaloUserId: m.id,
             displayName: m.name,

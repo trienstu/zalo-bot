@@ -745,7 +745,7 @@ export function getRecentGroupImage(
       .prepare(
         `SELECT media_url, local_path, message_id, ts, display_name
          FROM group_media_events
-         WHERE (thread_id = ? OR thread_id = '')
+         WHERE thread_id = ?
            AND media_type = 'image'
            AND deleted_at IS NULL
            AND ts >= ?
@@ -781,7 +781,7 @@ export function getMediaByMessageId(
       .prepare(
         `SELECT media_url, local_path, message_id, media_type
          FROM group_media_events
-         WHERE (thread_id = ? OR thread_id = '')
+         WHERE thread_id = ?
            AND (message_id = ? OR message_id LIKE ?)
            AND deleted_at IS NULL
          ORDER BY (CASE WHEN local_path <> '' THEN 0 ELSE 1 END) ASC, ts DESC
@@ -2175,7 +2175,7 @@ export function searchGroupKnowledge(threadId: string, query?: string, limit = 1
         return getDb()
           .prepare(
             `SELECT * FROM group_knowledge
-             WHERE (thread_id = ? OR thread_id = '') AND (${conditions})
+             WHERE thread_id = ? AND (${conditions})
              ORDER BY created_at DESC
              LIMIT ?`,
           )
@@ -2185,7 +2185,7 @@ export function searchGroupKnowledge(threadId: string, query?: string, limit = 1
     return getDb()
       .prepare(
         `SELECT * FROM group_knowledge
-         WHERE (thread_id = ? OR thread_id = '')
+         WHERE thread_id = ?
          ORDER BY created_at DESC
          LIMIT ?`,
       )
