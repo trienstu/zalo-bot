@@ -21,24 +21,7 @@ import {
   Filter,
 } from "lucide-react";
 import { fmtDateTime } from "@/lib/utils";
-
-interface LogLine {
-  id: number;
-  timestamp?: string;
-  level: "ERROR" | "WARN" | "INFO" | "SUCCESS";
-  stream: "out" | "error";
-  raw: string;
-}
-
-interface LogStreamInfo {
-  id: string;
-  label: string;
-  fileName: string;
-  filePath: string;
-  sizeBytes: number;
-  updatedAt: number;
-  exists: boolean;
-}
+import type { LogLine, LogStreamInfo } from "@/lib/logs";
 
 interface DbErrorItem {
   id: number;
@@ -55,6 +38,12 @@ interface MigrationItem {
   note: string | null;
 }
 
+interface GroupItem {
+  id: string;
+  name: string;
+  memberCount?: number;
+}
+
 interface LogViewerProps {
   initialDbErrors: DbErrorItem[];
   initialMigrations: MigrationItem[];
@@ -65,6 +54,8 @@ export function LogViewer({ initialDbErrors, initialMigrations }: LogViewerProps
 
   // Terminal state
   const [stream, setStream] = useState("bot-all");
+  const [selectedGroupId, setSelectedGroupId] = useState("");
+  const [groups, setGroups] = useState<GroupItem[]>([]);
   const [linesLimit, setLinesLimit] = useState(150);
   const [autoRefreshSec, setAutoRefreshSec] = useState<number>(5); // default 5s
   const [keyword, setKeyword] = useState("");
@@ -95,6 +86,7 @@ export function LogViewer({ initialDbErrors, initialMigrations }: LogViewerProps
       const params = new URLSearchParams();
       params.set("stream", stream);
       params.set("lines", String(linesLimit));
+      if (selectedGroupId.trim()) params.set("groupId", selectedGroupId.trim());
       if (keyword.trim()) params.set("keyword", keyword.trim());
 
       const res = await fetch(`/api/logs?${params.toString()}`);
@@ -102,6 +94,7 @@ export function LogViewer({ initialDbErrors, initialMigrations }: LogViewerProps
         const data = await res.json();
         setLogs(data.lines || []);
         if (data.streams) setStreams(data.streams);
+        if (data.groups) setGroups(data.groups);
         if (data.sourceName) setSourceName(data.sourceName);
         setSourceFound(!!data.sourceFound);
         setTotalSize(data.totalSize || 0);
@@ -116,12 +109,12 @@ export function LogViewer({ initialDbErrors, initialMigrations }: LogViewerProps
     }
   };
 
-  // Trigger load on tab switch, stream change, lines change
+  // Trigger load on tab switch, stream change, lines change, group change
   useEffect(() => {
     if (activeTab === "terminal") {
       loadLogs();
     }
-  }, [activeTab, stream, linesLimit]);
+  }, [activeTab, stream, linesLimit, selectedGroupId]);
 
   // Debounced search
   useEffect(() => {
@@ -140,7 +133,7 @@ export function LogViewer({ initialDbErrors, initialMigrations }: LogViewerProps
       loadLogs(true);
     }, autoRefreshSec * 1000);
     return () => clearInterval(interval);
-  }, [activeTab, autoRefreshSec, stream, linesLimit, keyword]);
+  }, [activeTab, autoRefreshSec, stream, linesLimit, keyword, selectedGroupId]);
 
   // Auto-scroll to bottom on first load
   const scrollToBottom = () => {
@@ -317,6 +310,25 @@ export function LogViewer({ initialDbErrors, initialMigrations }: LogViewerProps
                     ))}
                 </select>
               </div>
+
+              {/* Group filter selector */}
+              {groups.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Nhóm:</span>
+                  <select
+                    value={selectedGroupId}
+                    onChange={(e) => setSelectedGroupId(e.target.value)}
+                    className="max-w-[200px] truncate rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs font-medium text-slate-200 focus:border-cyan-500 focus:outline-none"
+                  >
+                    <option value="">🌐 Tất cả nhóm ({groups.length})</option>
+                    {groups.map((g) => (
+                      <option key={g.id} value={g.id}>
+                        👥 {g.name || g.id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               {/* Level filter tabs */}
               <div className="flex items-center rounded-lg bg-slate-950 p-0.5 border border-slate-800">
@@ -513,6 +525,7 @@ export function LogViewer({ initialDbErrors, initialMigrations }: LogViewerProps
                     const isError = line.level === "ERROR" || line.stream === "error";
                     const isWarn = line.level === "WARN";
                     const isSuccess = line.level === "SUCCESS";
+                    const isChat = line.level === "CHAT";
 
                     return (
                       <div
@@ -543,28 +556,31 @@ export function LogViewer({ initialDbErrors, initialMigrations }: LogViewerProps
                           {line.stream === "error" ? "ERR" : "OUT"}
                         </span>
 
-                        {/* Timestamp */}
+                        {/* Timestamp in Vietnam Time (+7) */}
                         {line.timestamp && (
-                          <span className="shrink-0 text-[11px] text-cyan-400/70 select-none">
+                          <span className="shrink-0 text-[11px] text-cyan-400/80 select-none font-medium">
                             {line.timestamp}
                           </span>
                         )}
 
-                        {/* Level tag if not standard */}
-                        {isError && (
-                          <span className="shrink-0 rounded bg-rose-500 px-1 py-0.2 text-[10px] font-bold text-slate-950">
+                        {/* Level tag */}
+                        {isError ? (
+                          <span className="shrink-0 rounded bg-rose-500 px-1.5 py-0.2 text-[10px] font-bold text-slate-950">
                             ERROR
                           </span>
-                        )}
-                        {isWarn && (
-                          <span className="shrink-0 rounded bg-amber-500 px-1 py-0.2 text-[10px] font-bold text-slate-950">
+                        ) : isWarn ? (
+                          <span className="shrink-0 rounded bg-amber-500 px-1.5 py-0.2 text-[10px] font-bold text-slate-950">
                             WARN
                           </span>
-                        )}
+                        ) : isChat ? (
+                          <span className="shrink-0 rounded bg-cyan-500/15 border border-cyan-500/30 px-1.5 py-0.2 text-[10px] font-semibold text-cyan-300">
+                            MSG
+                          </span>
+                        ) : null}
 
                         {/* Log message content */}
                         <span className="break-all whitespace-pre-wrap flex-1">
-                          {line.raw.replace(line.timestamp || "", "").trim() || line.raw}
+                          {line.message || line.raw}
                         </span>
                       </div>
                     );

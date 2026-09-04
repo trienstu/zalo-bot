@@ -4,9 +4,47 @@ import path from "node:path";
 export interface LogLine {
   id: number;
   timestamp?: string;
-  level: "ERROR" | "WARN" | "INFO" | "SUCCESS";
+  rawTimestamp?: string;
+  level: "ERROR" | "WARN" | "INFO" | "SUCCESS" | "CHAT";
   stream: "out" | "error";
+  message: string;
   raw: string;
+}
+
+/**
+ * Chuyển timestamp UTC của PM2 (VD: 2026-09-04T02:39:56) sang giờ Việt Nam (+7)
+ */
+export function formatToVnTime(rawTimeStr?: string): string {
+  if (!rawTimeStr) return "";
+  try {
+    let clean = rawTimeStr.trim();
+    // Nếu chưa có timezone offset (+07, +00, Z), mặc định PM2 lưu UTC trên VPS Linux
+    if (!clean.includes("+") && !clean.endsWith("Z") && !clean.includes("-0")) {
+      clean = clean.replace(" ", "T") + "Z";
+    }
+    const d = new Date(clean);
+    if (isNaN(d.getTime())) return rawTimeStr;
+
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).formatToParts(d);
+
+    const map: Record<string, string> = {};
+    for (const p of parts) {
+      map[p.type] = p.value;
+    }
+
+    return `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}:${map.second}`;
+  } catch {
+    return rawTimeStr;
+  }
 }
 
 export interface LogStreamInfo {
@@ -195,67 +233,81 @@ export function readLastLinesFromFile(filePath: string, maxLines = 150): string[
  */
 export function parseLogLine(raw: string, defaultStream: "out" | "error" = "out", id = 0): LogLine {
   const line = raw.trim();
-  let timestamp: string | undefined;
+  let rawTimestamp: string | undefined;
   let cleanText = line;
 
-  // Pattern thời gian của PM2 (time: true): "2026-09-04 02:15:30 +07:00: message" hoặc "2026-09-04T02:15:30: message"
+  // Pattern thời gian của PM2: "2026-09-04 02:15:30 +07:00: message" hoặc "2026-09-04T02:15:30: message"
   const pm2TimeMatch = line.match(/^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[+-]\d{2}:?\d{2}|Z)?):?\s*(.*)$/);
   if (pm2TimeMatch) {
-    timestamp = pm2TimeMatch[1];
-    cleanText = pm2TimeMatch[2] || "";
+    rawTimestamp = pm2TimeMatch[1];
+    cleanText = (pm2TimeMatch[2] || "").replace(/^[:\-\s]+/, "").trim();
+  } else {
+    cleanText = cleanText.replace(/^[:\-\s]+/, "").trim();
   }
 
-  // Xác định cấp độ lỗi (Level)
-  const lower = cleanText.toLowerCase();
-  let level: "ERROR" | "WARN" | "INFO" | "SUCCESS" = defaultStream === "error" ? "ERROR" : "INFO";
+  const formattedTime = formatToVnTime(rawTimestamp);
 
-  if (
-    lower.includes("error") ||
-    lower.includes("exception") ||
-    lower.includes("fatal") ||
-    lower.includes("crashed") ||
-    lower.includes("fail") ||
-    lower.includes("unhandledrejection") ||
-    lower.includes("uncaughtexception") ||
-    defaultStream === "error"
-  ) {
+  // Nhận diện tin nhắn chat: luôn là CHAT / INFO, không bao giờ đánh dấu là WARN/ERROR chỉ vì người dùng gõ từ "retry" hay "error"
+  const isChat = cleanText.includes("Tin nhắn từ") || cleanText.includes("[listener] 📩") || cleanText.includes("Tin nhắn thu hồi");
+  let level: "ERROR" | "WARN" | "INFO" | "SUCCESS" | "CHAT" = "INFO";
+
+  if (isChat) {
+    level = "CHAT";
+  } else if (defaultStream === "error") {
     level = "ERROR";
-  } else if (
-    lower.includes("warn") ||
-    lower.includes("timeout") ||
-    lower.includes("retry") ||
-    lower.includes("rate limit") ||
-    lower.includes("throttl")
-  ) {
-    level = "WARN";
-  } else if (
-    lower.includes("success") ||
-    lower.includes("connected") ||
-    lower.includes("ready") ||
-    lower.includes("started") ||
-    lower.includes("hoàn tất") ||
-    lower.includes("đã gửi")
-  ) {
-    level = "SUCCESS";
+  } else {
+    const lower = cleanText.toLowerCase();
+    if (
+      lower.startsWith("error:") ||
+      lower.includes(" uncaughtexception") ||
+      lower.includes("unhandledrejection") ||
+      lower.includes(" [error] ") ||
+      lower.includes("typeerror:") ||
+      lower.includes("syntaxerror:") ||
+      lower.includes("referenceerror:") ||
+      lower.includes("failed:")
+    ) {
+      level = "ERROR";
+    } else if (
+      lower.includes(" [warn] ") ||
+      lower.startsWith("warn:") ||
+      lower.includes("rate limit") ||
+      lower.includes("throttl")
+    ) {
+      level = "WARN";
+    } else if (
+      lower.includes("connected") ||
+      lower.includes("login successful") ||
+      lower.includes("sẵn sàng") ||
+      lower.includes("hoàn tất") ||
+      lower.includes("đã gửi")
+    ) {
+      level = "SUCCESS";
+    } else {
+      level = "INFO";
+    }
   }
 
   return {
     id,
-    timestamp,
+    timestamp: formattedTime,
+    rawTimestamp,
     level,
     stream: defaultStream,
+    message: cleanText,
     raw,
   };
 }
 
 /**
- * Đọc log theo streamId chỉ định
+ * Đọc log theo streamId chỉ định và hỗ trợ lọc theo nhóm
  */
 export function fetchLogs(
   botId: "bot-1" | "bot-2",
   streamId = "bot-all",
   maxLines = 150,
-  keyword = ""
+  keyword = "",
+  groupId = ""
 ): {
   lines: LogLine[];
   sourceName: string;
@@ -330,6 +382,12 @@ export function fetchLogs(
       const lines = readLastLinesFromFile(targetPath, maxLines);
       rawLinesWithStream = lines.map((raw) => ({ raw, stream: streamType }));
     }
+  }
+
+  // Lọc theo nhóm nếu có (threadId)
+  if (groupId.trim()) {
+    const g = groupId.trim();
+    rawLinesWithStream = rawLinesWithStream.filter((item) => item.raw.includes(g));
   }
 
   // Lọc theo từ khóa nếu có

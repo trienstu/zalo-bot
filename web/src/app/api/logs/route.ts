@@ -7,7 +7,7 @@ import {
   getPm2LogsDir,
   listAvailableLogStreams,
 } from "@/lib/logs";
-import { dbExists, listBotErrors } from "@/lib/db";
+import { dbExists, listBotErrors, listManagedGroups, type ManagedGroup } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -30,15 +30,27 @@ export async function GET(req: NextRequest) {
     const linesParam = parseInt(url.searchParams.get("lines") || "150", 10);
     const maxLines = Math.min(Math.max(linesParam || 150, 20), 1000);
     const keyword = url.searchParams.get("keyword") || "";
+    const groupId = url.searchParams.get("groupId") || "";
 
     const { lines, sourceName, sourceFound, totalSize } = fetchLogs(
       botId,
       stream,
       maxLines,
-      keyword
+      keyword,
+      groupId
     );
 
     const availableStreams = listAvailableLogStreams(botId);
+
+    // Lấy danh sách nhóm của bot này để người dùng có thể lọc theo từng nhóm
+    let groups: ManagedGroup[] = [];
+    if (dbExists(botId)) {
+      try {
+        groups = listManagedGroups(botId);
+      } catch {
+        // Ignore
+      }
+    }
 
     // Lấy thêm số lượng lỗi trong SQLite nếu có
     let dbErrorsCount = 0;
@@ -63,6 +75,7 @@ export async function GET(req: NextRequest) {
       totalSize,
       lines,
       streams: availableStreams,
+      groups,
       dbErrorsCount,
       serverTime: new Date().toISOString(),
     });
