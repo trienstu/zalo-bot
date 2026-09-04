@@ -748,6 +748,20 @@ function handleHelpCommand(): string {
   );
 }
 
+function isMediaOrDocUrl(url?: string | null): boolean {
+  if (!url) return false;
+  const clean = (url.split("?")[0] || "").toLowerCase();
+  const mediaExts = [
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp",
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv",
+    ".mp3", ".wav", ".m4a", ".mp4",
+    ".txt", ".json", ".zip"
+  ];
+  if (mediaExts.some((ext) => clean.endsWith(ext))) return true;
+  if (url.includes("zdn.vn") || url.includes("chat-photo") || url.includes("res-zalo") || url.includes("zaloapp")) return true;
+  return false;
+}
+
 async function handleHistoryQA(
   question: string,
   displayName: string,
@@ -760,10 +774,11 @@ async function handleHistoryQA(
 ): Promise<string> {
   const db = getDb();
 
-  // 1. Tải và giải mã file đính kèm / ảnh / audio
+  // 1. Tải và giải mã file đính kèm / ảnh / audio (CHỈ tải nếu thực sự là media/file, tuyệt đối không tải web link URL)
   let mediaPart: GeminiMediaPart | null = null;
   let fileTextContent: string | null = null;
-  const targetUrl = options?.fileAttachment?.url || options?.imageUrl || options?.quote?.mediaUrl;
+  const rawTargetUrl = options?.fileAttachment?.url || options?.imageUrl || (options?.quote?.mediaType === "image" || options?.quote?.mediaType === "video" || isMediaOrDocUrl(options?.quote?.mediaUrl) ? options?.quote?.mediaUrl : undefined);
+  const targetUrl = (rawTargetUrl && (isMediaOrDocUrl(rawTargetUrl) || options?.fileAttachment?.url)) ? rawTargetUrl : undefined;
   const fileName = options?.fileAttachment?.name || "";
 
   if (targetUrl) {
@@ -865,6 +880,68 @@ async function handleHistoryQA(
     }
   }
 
+  // 🚀 FAST-PATH QUOTE QA: Nếu thành viên Quote một tin nhắn và nhờ giải thích/tóm tắt/trả lời,
+  // CẮT BỎ TOÀN BỘ truy vấn DB nặng (Top members, Inactive members, tin nhắn cũ, tóm tắt cũ)
+  // để Gemini phản hồi tức thì trong 2-3 giây!
+  if (options?.quote?.text && !options?.fileAttachment) {
+    const groupSettings = getGroupSettings(threadId);
+    const botName = groupSettings.botName || "Sen Chúa";
+
+    let personaIntro = "";
+    switch (groupSettings.persona) {
+      case "professional":
+        personaIntro = `Bạn là '${botName}' - chuyên gia cố vấn AI cấp cao của cộng đồng Zalo. Trả lời đi thẳng vào trọng tâm, phân tích chuyên môn sâu sắc, logic, súc tích và chuẩn xác.`;
+        break;
+      case "friendly":
+        personaIntro = `Bạn là '${botName}' - trợ lý AI tận tâm, chu đáo và lịch sự của cộng đồng Zalo.`;
+        break;
+      case "strict":
+        personaIntro = `Bạn là '${botName}' - người điều hành & giám sát AI chuẩn mực, nghiêm túc của cộng đồng Zalo.`;
+        break;
+      case "custom":
+        personaIntro = `Bạn là '${botName}' - trợ lý AI của cộng đồng Zalo.`;
+        break;
+      case "humorous":
+      default:
+        personaIntro = `Bạn là '${botName}' - trợ lý AI cực kỳ hóm hỉnh, thông minh, mặn mà và bắt trend của cộng đồng Zalo. Trả lời duyên dáng, dí dỏm, tạo không khí sôi nổi.`;
+        break;
+    }
+
+    let customPromptSection = "";
+    if (groupSettings.customPrompt?.trim()) {
+      customPromptSection = `\n=== CHỈ THỊ RIÊNG CỦA ADMIN: ===\n${groupSettings.customPrompt.trim()}\n`;
+    }
+
+    const quoteSystemPrompt =
+      `${personaIntro}\n${customPromptSection}\n` +
+      `NHIỆM VỤ:\n` +
+      `1. Thành viên đang trích dẫn (quote) một tin nhắn cụ thể và nhờ bạn giải thích/tóm tắt/phân tích/trả lời.\n` +
+      `2. Hãy tập trung giải thích chính xác, súc tích, đi thẳng vào trọng tâm nội dung được trích dẫn theo đúng phong cách của bạn.\n` +
+      `3. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng viết hoa, gạch đầu dòng hoặc icon).\n` +
+      `4. Trả lời ngắn gọn, dí dỏm, dễ hiểu.`;
+
+    const quoteUserPrompt =
+      `=== NỘI DUNG ĐƯỢC TRÍCH DẪN (TỪ ${options.quote.senderName || "THÀNH VIÊN"}): ===\n` +
+      `"${options.quote.text}"\n\n` +
+      `YÊU CẦU / CÂU HỎI TỪ ${displayName}: ${question || "Hãy giải thích ngắn gọn nội dung này giúp tôi."}\n\n` +
+      `HÃY TRẢ LỜI NGAY:`;
+
+    const isFastRealTimeSearch =
+      /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì)/i.test(
+        question
+      );
+
+    try {
+      const answer = await callGemini(quoteSystemPrompt, quoteUserPrompt, {
+        mediaParts: mediaPart ? [mediaPart] : undefined,
+        enableSearch: isFastRealTimeSearch,
+      });
+      return answer;
+    } catch (e) {
+      console.warn("[member-assistant] Fast-path Quote QA error:", e);
+    }
+  }
+
   // 2. Tra cứu Kho tri thức & Bộ nhớ dài hạn (Long-term Knowledge Memory)
   let memorizedDocs: any[] = [];
   try {
@@ -911,7 +988,7 @@ async function handleHistoryQA(
     }
   }
 
-  // 3. Lấy danh sách tin nhắn gần nhất trong nhóm để tạo ngữ cảnh hiện tại
+  // 3. Lấy danh sách tin nhắn gần nhất trong nhóm (chỉ lấy 15 tin gần nhất để giữ context gọn gàng, trả lời siêu tốc)
   let relevantMessages: { display_name: string; text: string; ts: number; is_self: number }[] = [];
   try {
     relevantMessages = db
@@ -927,26 +1004,14 @@ async function handleHistoryQA(
            AND text NOT LIKE '/%'
            AND text NOT LIKE '!%'
          ORDER BY ts DESC
-         LIMIT 60`,
+         LIMIT 15`,
       )
       .all(threadId) as any[];
     relevantMessages.reverse();
   } catch {}
 
-  // 4. Lấy tóm tắt 3 ngày gần nhất (nếu có)
+  // 4. Lấy tóm tắt 3 ngày gần nhất (CHỈ lấy khi câu hỏi thực sự hỏi về diễn biến các ngày qua)
   let pastSummaries: { day_label: string; summary_text: string }[] = [];
-  try {
-    pastSummaries = db
-      .prepare(
-        `SELECT day_label, summary_text
-         FROM daily_summaries
-         WHERE (thread_id = ? OR thread_id = '')
-         ORDER BY day_date DESC
-         LIMIT 3`,
-      )
-      .all(threadId) as any[];
-  } catch {}
-
   // 5. Lấy top 5 thành viên năng nổ nhất
   let topMembers: { display_name: string; msg_count: number; points: number }[] = [];
   try {

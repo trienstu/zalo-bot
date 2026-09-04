@@ -104,7 +104,7 @@ export async function downloadFileContent(
       buffer = fs.readFileSync(url);
     } else {
       const res = await fetch(url, {
-        signal: AbortSignal.timeout(30_000),
+        signal: AbortSignal.timeout(10_000), // 10s timeout
         headers: {
           "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
         },
@@ -239,7 +239,7 @@ export async function callGemini(
     try {
       const resp = await fetch(endpoint, {
         method: "POST",
-        signal: AbortSignal.timeout(60_000), // 60s timeout
+        signal: AbortSignal.timeout(20_000), // 20s timeout
         headers: {
           "Content-Type": "application/json",
         },
@@ -258,7 +258,7 @@ export async function callGemini(
             const fallbackEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=${apiKey}`;
             const fallbackResp = await fetch(fallbackEndpoint, {
               method: "POST",
-              signal: AbortSignal.timeout(60_000),
+              signal: AbortSignal.timeout(20_000),
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(requestBody),
             });
