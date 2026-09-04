@@ -54,7 +54,11 @@ function getEnvConfig() {
   }
   return {
     geminiApiKey: process.env.GEMINI_API_KEY || env.GEMINI_API_KEY || "",
-    geminiModel: process.env.GEMINI_MODEL || env.GEMINI_MODEL || "gemini-3.6-flash",
+    geminiModel: (process.env.GEMINI_MODEL && !process.env.GEMINI_MODEL.includes("3.5"))
+      ? process.env.GEMINI_MODEL
+      : (env.GEMINI_MODEL && !env.GEMINI_MODEL.includes("3.5"))
+      ? env.GEMINI_MODEL
+      : "gemini-3.6-flash",
     groupId: process.env.GROUP_ID || env.GROUP_ID || "",
     summaryGroupId: process.env.SUMMARY_GROUP_ID || env.SUMMARY_GROUP_ID || env.GROUP_ID || "",
   };
@@ -107,11 +111,13 @@ export async function callGeminiDirect(
   let lastError: unknown;
   const numKeys = apiKeys.length;
 
+  const activeModel = (!model || model.includes("3.5")) ? "gemini-3.6-flash" : model;
+
   // Xoay vòng luân phiên qua các Key để chia đều tải và tránh Rate Limit/Timeout
   for (let attempt = 0; attempt < numKeys; attempt += 1) {
     const keyIdx = (currentKeyOffset + attempt) % numKeys;
     const apiKey = apiKeys[keyIdx];
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${apiKey}`;
 
     const requestBody: Record<string, unknown> = {
       system_instruction: systemPrompt ? { parts: [{ text: systemPrompt }] } : undefined,

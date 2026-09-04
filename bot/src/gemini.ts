@@ -193,7 +193,11 @@ export async function callGemini(
     throw new Error("Thiếu GEMINI_API_KEY trong .env");
   }
 
-  const model = process.env.GEMINI_MODEL?.trim() || config.geminiModel || "gemini-3.6-flash";
+  let model = process.env.GEMINI_MODEL?.trim() || config.geminiModel || "gemini-3.6-flash";
+  // Tự động nâng cấp nếu .env cũ còn gemini-3.5-flash (vốn đang bị lỗi 503 Spikes in demand từ Google)
+  if (!model || model === "gemini-3.5-flash" || model.includes("3.5") || model.includes("1.5")) {
+    model = "gemini-3.6-flash";
+  }
   const temperature = options?.temperature ?? 0.3;
   const maxTokens = options?.maxTokens;
 
