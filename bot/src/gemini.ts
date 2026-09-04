@@ -183,6 +183,7 @@ export async function callGemini(
     json?: boolean;
     images?: GeminiImagePart[];
     mediaParts?: GeminiMediaPart[];
+    enableSearch?: boolean;
   },
 ): Promise<string> {
   const rawKey = (process.env.GEMINI_API_KEY || config.geminiApiKey || "").trim();
@@ -227,6 +228,7 @@ export async function callGemini(
           parts: userParts,
         },
       ],
+      ...(options?.enableSearch ? { tools: [{ googleSearch: {} }] } : {}),
       generationConfig: {
         temperature,
         ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),

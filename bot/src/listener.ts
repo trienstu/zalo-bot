@@ -45,6 +45,7 @@ import {
   markScheduledReminderCompleted,
 } from "./db/index.js";
 import { getMorningWeatherBriefing } from "./weather.js";
+import { getDailyAiNewsBriefing } from "./ai-news.js";
 import { syncGroupMembers } from "./member-sync.js";
 import { saveZaloImage } from "./zalo-media.js";
 import { KICK_LOCK_KEY, KICK_LOCK_STALE_MS } from "./commands/monthly-cleanup.js";
@@ -1283,6 +1284,42 @@ export async function runListener(): Promise<void> {
     }
   }
   setInterval(() => void checkMorningWeatherBriefingLoop(), 30000);
+
+  // =========================================================================
+  // VÒNG LẶP GỬI BẢN TIN AI & CÔNG NGHỆ SÁNG TỰ ĐỘNG (MỖI 30 GIÂY)
+  // =========================================================================
+  const newsSentLog = new Map<string, string>(); // groupId -> 'YYYY-MM-DD'
+  async function checkDailyAiNewsBriefingLoop(): Promise<void> {
+    try {
+      const now = new Date();
+      const todayStr = now.toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" }); // YYYY-MM-DD
+      const currentHM = now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Bangkok" }); // HH:mm
+
+      const db = getDb();
+      const groupsWithNews = db.prepare(
+        `SELECT group_id as groupId, name, news_auto as newsAuto,
+                COALESCE(news_time, '08:30') as newsTime,
+                COALESCE(news_topic, 'AI & Công nghệ trên X') as newsTopic,
+                COALESCE(bot_name, 'Sen Chúa') as botName
+         FROM bot_groups
+         WHERE news_auto = 1`
+      ).all() as any[];
+
+      for (const g of groupsWithNews) {
+        const targetTime = (g.newsTime || "08:30").trim();
+        if (currentHM === targetTime && newsSentLog.get(g.groupId) !== todayStr) {
+          newsSentLog.set(g.groupId, todayStr);
+          console.log(`[listener] 📰 Đang gửi Bản tin AI sáng ${todayStr} (${targetTime}) cho nhóm [${g.name}] (Chủ đề: ${g.newsTopic})...`);
+          const briefing = await getDailyAiNewsBriefing(g.newsTopic, g.botName);
+          await sendGroupText(api, g.groupId, briefing);
+          await sleep(1000);
+        }
+      }
+    } catch (e) {
+      console.warn(`[listener] checkDailyAiNewsBriefingLoop error: ${String(e)}`);
+    }
+  }
+  setInterval(() => void checkDailyAiNewsBriefingLoop(), 30000);
 }
 
 function normalizeGroupEventType(ev: any): string {

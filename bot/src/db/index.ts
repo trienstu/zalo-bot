@@ -84,6 +84,10 @@ function runColumnMigrations(database: Database.Database): void {
     ["bot_groups", "weather_auto", "INTEGER NOT NULL DEFAULT 0"],
     ["bot_groups", "weather_time", "TEXT NOT NULL DEFAULT '07:00'"],
     ["bot_groups", "weather_city", "TEXT NOT NULL DEFAULT 'Hồ Chí Minh'"],
+    // Bản tin công nghệ & AI sáng tự động theo nhóm
+    ["bot_groups", "news_auto", "INTEGER NOT NULL DEFAULT 0"],
+    ["bot_groups", "news_time", "TEXT NOT NULL DEFAULT '08:30'"],
+    ["bot_groups", "news_topic", "TEXT NOT NULL DEFAULT 'AI & Công nghệ trên X'"],
   ];
 
   for (const [table, column, definition] of additions) {
@@ -1939,6 +1943,9 @@ export interface GroupSettings {
   weatherAuto: boolean;
   weatherTime: string;
   weatherCity: string;
+  newsAuto: boolean;
+  newsTime: string;
+  newsTopic: string;
   isActive: boolean;
   updatedAt: number;
 }
@@ -1956,6 +1963,9 @@ export function getGroupSettings(groupId: string): GroupSettings {
                 COALESCE(weather_auto, 0) as weatherAuto,
                 COALESCE(weather_time, '07:00') as weatherTime,
                 COALESCE(weather_city, 'Hồ Chí Minh') as weatherCity,
+                COALESCE(news_auto, 0) as newsAuto,
+                COALESCE(news_time, '08:30') as newsTime,
+                COALESCE(news_topic, 'AI & Công nghệ trên X') as newsTopic,
                 is_active as isActive, updated_at as updatedAt
          FROM bot_groups WHERE group_id = ?`,
       )
@@ -1973,6 +1983,9 @@ export function getGroupSettings(groupId: string): GroupSettings {
         weatherAuto: Boolean(row.weatherAuto),
         weatherTime: row.weatherTime || "07:00",
         weatherCity: row.weatherCity || "Hồ Chí Minh",
+        newsAuto: Boolean(row.newsAuto),
+        newsTime: row.newsTime || "08:30",
+        newsTopic: row.newsTopic || "AI & Công nghệ trên X",
         isActive: Boolean(row.isActive),
         updatedAt: row.updatedAt || Date.now(),
       };
@@ -1991,6 +2004,9 @@ export function getGroupSettings(groupId: string): GroupSettings {
     weatherAuto: false,
     weatherTime: "07:00",
     weatherCity: "Hồ Chí Minh",
+    newsAuto: false,
+    newsTime: "08:30",
+    newsTopic: "AI & Công nghệ trên X",
     isActive: true,
     updatedAt: Date.now(),
   };
@@ -2009,13 +2025,16 @@ export function updateGroupSettings(
     weatherAuto: boolean;
     weatherTime: string;
     weatherCity: string;
+    newsAuto: boolean;
+    newsTime: string;
+    newsTopic: string;
   }>,
 ): void {
   const current = getGroupSettings(groupId);
   getDb()
     .prepare(
-      `INSERT INTO bot_groups (group_id, name, total_members, mode, persona, custom_prompt, bot_name, welcome_msg, weather_auto, weather_time, weather_city, is_active, updated_at)
-       VALUES (@groupId, @name, @totalMembers, @mode, @persona, @customPrompt, @botName, @welcomeMsg, @weatherAuto, @weatherTime, @weatherCity, @isActive, @now)
+      `INSERT INTO bot_groups (group_id, name, total_members, mode, persona, custom_prompt, bot_name, welcome_msg, weather_auto, weather_time, weather_city, news_auto, news_time, news_topic, is_active, updated_at)
+       VALUES (@groupId, @name, @totalMembers, @mode, @persona, @customPrompt, @botName, @welcomeMsg, @weatherAuto, @weatherTime, @weatherCity, @newsAuto, @newsTime, @newsTopic, @isActive, @now)
        ON CONFLICT(group_id) DO UPDATE SET
          name = COALESCE(@name, name),
          mode = COALESCE(@mode, mode),
@@ -2026,6 +2045,9 @@ export function updateGroupSettings(
          weather_auto = COALESCE(@weatherAuto, weather_auto),
          weather_time = COALESCE(@weatherTime, weather_time),
          weather_city = COALESCE(@weatherCity, weather_city),
+         news_auto = COALESCE(@newsAuto, news_auto),
+         news_time = COALESCE(@newsTime, news_time),
+         news_topic = COALESCE(@newsTopic, news_topic),
          updated_at = @now`,
     )
     .run({
@@ -2040,6 +2062,9 @@ export function updateGroupSettings(
       weatherAuto: settings.weatherAuto !== undefined ? (settings.weatherAuto ? 1 : 0) : (current.weatherAuto ? 1 : 0),
       weatherTime: settings.weatherTime ?? current.weatherTime,
       weatherCity: settings.weatherCity ?? current.weatherCity,
+      newsAuto: settings.newsAuto !== undefined ? (settings.newsAuto ? 1 : 0) : (current.newsAuto ? 1 : 0),
+      newsTime: settings.newsTime ?? current.newsTime,
+      newsTopic: settings.newsTopic ?? current.newsTopic,
       isActive: current.isActive ? 1 : 0,
       now: Date.now(),
     });

@@ -22,6 +22,7 @@ import {
   type GeminiMediaPart,
 } from "./gemini.js";
 import { getWeatherReport } from "./weather.js";
+import { getDailyAiNewsBriefing } from "./ai-news.js";
 import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam } from "./reminder.js";
 
 export interface MemberMessageEvent {
@@ -727,6 +728,9 @@ function handleHelpCommand(): string {
     `☀️ THỜI TIẾT & BỤI MỊN (AQI):\n` +
     `🔹 /thoitiet: Xem thời tiết & bụi mịn PM2.5 hôm nay\n` +
     `🔹 /thoitiet [địa điểm]: Xem thời tiết TP.HCM, Hà Nội, Đà Lạt, Đà Nẵng...\n\n` +
+    `📰 BẢN TIN AI & CÔNG NGHỆ (REAL-TIME):\n` +
+    `🔹 /tintuc hoặc /bantin: Điểm tin tức AI và công nghệ mới nhất 24h qua trên Google & X\n` +
+    `🔹 /tintuc [chủ đề]: Điểm tin tức theo chủ đề (VD: /tintuc Claude 3.7, /tintuc Grok 3, /tintuc OpenAI)\n\n` +
     `📊 TƯƠNG TÁC & TRI THỨC:\n` +
     `🔹 /rank hoặc /diem: Tra cứu thứ hạng & điểm tương tác của bạn\n` +
     `🔹 /top: Xem Top 5 thành viên tích cực nhất nhóm\n` +
@@ -829,9 +833,15 @@ async function handleHistoryQA(
       `YÊU CẦU / CÂU HỎI TỪ THÀNH VIÊN (${displayName}): ${question || "Hãy phân tích chi tiết hình ảnh/tài liệu này giúp tôi."}\n\n` +
       `HÃY TRẢ LỜI NGAY:`;
 
+    const isFastRealTimeSearch =
+      /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì)/i.test(
+        question
+      );
+
     try {
       const answer = await callGemini(fastSystemPrompt, fastUserPrompt, {
         mediaParts: mediaPart ? [mediaPart] : undefined,
+        enableSearch: isFastRealTimeSearch,
       });
 
       // Ghi nhớ vào tri thức nếu cần
@@ -1141,6 +1151,18 @@ async function handleHistoryQA(
     customPromptSection = `\n=== CHỈ THỊ & NỘI QUY RIÊNG CỦA ADMIN CHO NHÓM NÀY (BẮT BUỘC TUÂN THỦ 100%): ===\n${groupSettings.customPrompt.trim()}\n`;
   }
 
+  // 2.0. Nhận diện câu hỏi cần tra cứu thông tin thời gian thực (Google Search / X / Tin tức cập nhật)
+  const isRealTimeSearchQuery =
+    /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì|sự kiện mới)/i.test(
+      question
+    );
+
+  let searchInstruction = "";
+  if (isRealTimeSearchQuery) {
+    searchInstruction =
+      `\n8. TÌM KIẾM THỜI GIAN THỰC (GOOGLE SEARCH & X): Câu hỏi này liên quan đến tin tức, sự kiện hoặc thông tin thời gian thực. Bạn ĐÃ ĐƯỢC TÍCH HỢP công cụ Google Search kết nối Internet thời gian thực. Hãy ưu tiên tra cứu và tổng hợp các tin tức, bài đăng trên X/Twitter, trang công nghệ và thông cáo báo chí 24-48 giờ qua để trả lời chính xác, sắc bén và có nguồn tham khảo rõ ràng.\n`;
+  }
+
   const systemPrompt =
     `${personaIntro}\n${customPromptSection}\n` +
     `NHIỆM VỤ CHUNG:\n` +
@@ -1150,18 +1172,23 @@ async function handleHistoryQA(
     `4. Nếu có NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): Hiểu rằng người dùng đang hỏi hoặc bình luận về chính nội dung được trích dẫn đó.\n` +
     `5. Luôn trả lời chuẩn theo phong cách cá tính được quy định ở trên.\n` +
     `6. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (hãy dùng dấu gạch đầu dòng, viết hoa hoặc icon để làm nổi bật).\n` +
-    `7. ĐẶC BIỆT KHI THÀNH VIÊN HỎI VỀ QUY TRÌNH, HƯỚNG DẪN, CÁCH LÀM HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Bạn BẮT BUỘC phải TRÍCH DẪN VÀ DIỄN GIẢI CHI TIẾT TỪNG BƯỚC (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến mà các thành viên (như bác Huy, anh Nam, Vũ Trọng...) đã từng chia sẻ trong lịch sử chat. TUYỆT ĐỐI KHÔNG ĐƯỢC chỉ đưa mỗi link tải tài liệu; phải giải thích cặn kẽ nội dung quy trình để người hỏi áp dụng được ngay, link tài liệu chỉ là phần đính kèm ở cuối để tham khảo thêm.`;
+    `7. ĐẶC BIỆT KHI THÀNH VIÊN HỎI VỀ QUY TRÌNH, HƯỚNG DẪN, CÁCH LÀM HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Bạn BẮT BUỘC phải TRÍCH DẪN VÀ DIỄN GIẢI CHI TIẾT TỪNG BƯỚC (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến mà các thành viên (như bác Huy, anh Nam, Vũ Trọng...) đã từng chia sẻ trong lịch sử chat. TUYỆT ĐỐI KHÔNG ĐƯỢC chỉ đưa mỗi link tải tài liệu; phải giải thích cặn kẽ nội dung quy trình để người hỏi áp dụng được ngay, link tài liệu chỉ là phần đính kèm ở cuối để tham khảo thêm.` +
+    searchInstruction;
 
   const userPrompt =
     `${quotePromptSection}\n${fileContentSection}\n` +
     `DƯỚI ĐÂY LÀ DỮ LIỆU LỊCH SỬ CHAT CỦA NHÓM ĐỂ THAM KHẢO:\n` +
     `<chat_history>\n${contextData}\n</chat_history>\n\n` +
     `YÊU CẦU / CÂU HỎI TỪ THÀNH VIÊN (${displayName}): ${question || "Hãy phân tích tài liệu/hình ảnh/nội dung trên giúp tôi."}\n\n` +
+    (isRealTimeSearchQuery
+      ? `LƯU Ý: Đây là câu hỏi về tin tức/thời gian thực. Hãy sử dụng công cụ tìm kiếm Google để cập nhật tin mới nhất trên Internet và X/Twitter.\n\n`
+      : "") +
     `HÃY TRẢ LỜI THẬT DUYÊN DÁNG, CHUẨN XÁC VÀ HÓM HỈNH:`;
 
   try {
     const answer = await callGemini(systemPrompt, userPrompt, {
       mediaParts: mediaPart ? [mediaPart] : undefined,
+      enableSearch: isRealTimeSearchQuery,
     });
 
     // 🧠 TỰ ĐỘNG GHI NHỚ VÀO BỘ NHỚ DÀI HẠN NẾU ĐÂY LÀ TÀI LIỆU/FILE PHÂN TÍCH
@@ -1411,6 +1438,36 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     const weatherMsg = await getWeatherReport(cityInput);
     await sendGroupText(api, threadId, weatherMsg);
     console.log(`[member-assistant] ✅ Đã phản hồi /thoitiet (${cityInput}) cho ${displayName}`);
+    return;
+  }
+
+  // 6.1. Lệnh /tintuc, /bantin (Điểm tin tức AI và công nghệ mới nhất trên Google & X)
+  if (
+    lower === "/tintuc" ||
+    lower === "!tintuc" ||
+    lower === "/bantin" ||
+    lower === "!bantin" ||
+    lower.startsWith("/tintuc ") ||
+    lower.startsWith("!tintuc ") ||
+    lower.startsWith("/bantin ") ||
+    lower.startsWith("!bantin ")
+  ) {
+    userCooldowns.set(sender, now);
+    const groupSettings = getGroupSettings(threadId);
+    const botName = groupSettings.botName || "Sen Chúa";
+    const customTopic = rawText.replace(/^\/(?:tintuc|!tintuc|bantin|!bantin)\s*/i, "").trim();
+    const topic = customTopic || groupSettings.newsTopic || "Trí tuệ nhân tạo (AI), công nghệ mới, mô hình AI mới trên X/Twitter";
+
+    await sendGroupText(api, threadId, `🔍 Đang tra cứu và tổng hợp bản tin về "${topic}" trên Google & X... Bác chờ em xíu nhé!`);
+
+    try {
+      const newsBriefing = await getDailyAiNewsBriefing(topic, botName);
+      await sendGroupText(api, threadId, newsBriefing);
+      console.log(`[member-assistant] ✅ Đã phản hồi /tintuc (${topic}) cho ${displayName}`);
+    } catch (err: any) {
+      console.error(`[member-assistant] ❌ Lỗi tra cứu bản tin:`, err);
+      await sendGroupText(api, threadId, `⚠️ Không thể lấy bản tin lúc này. Vui lòng thử lại sau ít phút.`);
+    }
     return;
   }
 
@@ -2084,7 +2141,9 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         fileAttachment: event.fileAttachment,
         quote: event.quote,
       });
-      const reply = `🤖 Sen Chúa trả lời @${displayName}:\n\n${answer}`;
+      const groupSettings = getGroupSettings(threadId);
+      const botName = groupSettings.botName || "Sen Chúa";
+      const reply = `🤖 ${botName} trả lời @${displayName}:\n\n${answer}`;
       await sendGroupText(api, threadId, reply);
       console.log(`[member-assistant] ✅ Đã gửi câu trả lời thành công vào nhóm`);
     } catch (err) {

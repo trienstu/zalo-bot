@@ -173,6 +173,15 @@ export async function GET(request: Request) {
       if (!cols.some((c) => c.name === "weather_city")) {
         db.exec(`ALTER TABLE bot_groups ADD COLUMN weather_city TEXT NOT NULL DEFAULT 'Hồ Chí Minh'`);
       }
+      if (!cols.some((c) => c.name === "news_auto")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN news_auto INTEGER NOT NULL DEFAULT 0`);
+      }
+      if (!cols.some((c) => c.name === "news_time")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN news_time TEXT NOT NULL DEFAULT '08:30'`);
+      }
+      if (!cols.some((c) => c.name === "news_topic")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN news_topic TEXT NOT NULL DEFAULT 'AI & Công nghệ trên X'`);
+      }
     } catch {}
 
     // 1. Đọc danh sách group đã lưu trong bot_groups
@@ -188,6 +197,9 @@ export async function GET(request: Request) {
       weather_auto?: number;
       weather_time?: string;
       weather_city?: string;
+      news_auto?: number;
+      news_time?: string;
+      news_topic?: string;
       is_active: number;
     }[];
 
@@ -249,6 +261,9 @@ export async function GET(request: Request) {
       weatherAuto: Boolean(g.weather_auto),
       weatherTime: g.weather_time || "07:00",
       weatherCity: g.weather_city || "Hồ Chí Minh",
+      newsAuto: Boolean(g.news_auto),
+      newsTime: g.news_time || "08:30",
+      newsTopic: g.news_topic || "AI & Công nghệ trên X",
       isActive: g.is_active === 1,
     }));
 
@@ -274,6 +289,9 @@ export async function POST(request: Request) {
       weatherAuto?: boolean;
       weatherTime?: string;
       weatherCity?: string;
+      newsAuto?: boolean;
+      newsTime?: string;
+      newsTopic?: string;
     };
 
     let botId = body.botId;
@@ -340,6 +358,15 @@ export async function POST(request: Request) {
       if (!cols.some((c) => c.name === "weather_city")) {
         db.exec(`ALTER TABLE bot_groups ADD COLUMN weather_city TEXT NOT NULL DEFAULT 'Hồ Chí Minh'`);
       }
+      if (!cols.some((c) => c.name === "news_auto")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN news_auto INTEGER NOT NULL DEFAULT 0`);
+      }
+      if (!cols.some((c) => c.name === "news_time")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN news_time TEXT NOT NULL DEFAULT '08:30'`);
+      }
+      if (!cols.some((c) => c.name === "news_topic")) {
+        db.exec(`ALTER TABLE bot_groups ADD COLUMN news_topic TEXT NOT NULL DEFAULT 'AI & Công nghệ trên X'`);
+      }
     } catch {}
 
     if (body.action === "update_persona" && body.groupId) {
@@ -352,6 +379,9 @@ export async function POST(request: Request) {
              weather_auto = COALESCE(?, weather_auto),
              weather_time = COALESCE(?, weather_time),
              weather_city = COALESCE(?, weather_city),
+             news_auto = COALESCE(?, news_auto),
+             news_time = COALESCE(?, news_time),
+             news_topic = COALESCE(?, news_topic),
              mode = COALESCE(?, mode),
              updated_at = ?
          WHERE group_id = ?`,
@@ -363,6 +393,9 @@ export async function POST(request: Request) {
         body.weatherAuto !== undefined ? (body.weatherAuto ? 1 : 0) : null,
         body.weatherTime ?? null,
         body.weatherCity ?? null,
+        body.newsAuto !== undefined ? (body.newsAuto ? 1 : 0) : null,
+        body.newsTime ?? null,
+        body.newsTopic ?? null,
         body.mode ?? null,
         Date.now(),
         body.groupId,
@@ -370,7 +403,7 @@ export async function POST(request: Request) {
       db.close();
       return NextResponse.json({
         ok: true,
-        message: `Đã lưu cài đặt cá tính AI & bản tin thời tiết cho nhóm thành công!`,
+        message: `Đã lưu cài đặt cá tính AI, bản tin thời tiết & bản tin AI cho nhóm thành công!`,
       });
     }
 

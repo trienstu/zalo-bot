@@ -17,8 +17,19 @@ export interface GroupItem {
   weatherAuto?: boolean;
   weatherTime?: string;
   weatherCity?: string;
+  newsAuto?: boolean;
+  newsTime?: string;
+  newsTopic?: string;
   isActive: boolean;
 }
+
+const POPULAR_AI_TOPICS = [
+  "AI & Công nghệ trên X",
+  "Mô hình AI & Tool mới",
+  "Marketing & Automation AI",
+  "AI & Lập trình / Coding",
+  "Tổng quan công nghệ thế giới 24h",
+];
 
 const POPULAR_CITIES = [
   "TP. Hồ Chí Minh",
@@ -108,6 +119,11 @@ function GroupPersonaFormInner() {
   const [weatherCity, setWeatherCity] = useState<string>("Hồ Chí Minh");
   const [testingWeather, setTestingWeather] = useState<boolean>(false);
 
+  // Cài đặt bản tin AI tự động
+  const [newsAuto, setNewsAuto] = useState<boolean>(false);
+  const [newsTime, setNewsTime] = useState<string>("08:30");
+  const [newsTopic, setNewsTopic] = useState<string>("AI & Công nghệ trên X");
+
   useEffect(() => {
     fetchGroups();
   }, []);
@@ -151,6 +167,9 @@ function GroupPersonaFormInner() {
     setWeatherAuto(Boolean(g.weatherAuto));
     setWeatherTime(g.weatherTime || "07:00");
     setWeatherCity(g.weatherCity || "Hồ Chí Minh");
+    setNewsAuto(Boolean(g.newsAuto));
+    setNewsTime(g.newsTime || "08:30");
+    setNewsTopic(g.newsTopic || "AI & Công nghệ trên X");
   }
 
   async function handleSave() {
@@ -172,6 +191,9 @@ function GroupPersonaFormInner() {
           weatherAuto,
           weatherTime,
           weatherCity,
+          newsAuto,
+          newsTime,
+          newsTopic,
         }),
       });
       const data = (await res.json()) as { ok: boolean; message?: string; error?: string };
@@ -181,7 +203,7 @@ function GroupPersonaFormInner() {
         setGroups((prev) =>
           prev.map((g) =>
             g.id === selectedId
-              ? { ...g, persona, customPrompt, botName, welcomeMsg, mode, weatherAuto, weatherTime, weatherCity }
+              ? { ...g, persona, customPrompt, botName, welcomeMsg, mode, weatherAuto, weatherTime, weatherCity, newsAuto, newsTime, newsTopic }
               : g,
           ),
         );
@@ -522,6 +544,95 @@ function GroupPersonaFormInner() {
                         }`}
                       >
                         {isSelected ? `✓ ${c}` : `+ ${c}`}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 3.2. Bản tin công nghệ & AI sáng tự động */}
+          <div className="p-4 rounded-xl border border-violet-500/20 bg-gradient-to-br from-slate-900/80 via-slate-900/60 to-violet-950/20 backdrop-blur-md flex flex-col gap-3 transition-all hover:border-violet-500/35">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="text-xl">📰</span>
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-100 flex items-center gap-1.5">
+                    Bản Tin AI Sáng Tự Động (Google Search & X)
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-violet-500/20 text-violet-300 border border-violet-500/30">
+                      Real-Time AI
+                    </span>
+                  </h4>
+                  <p className="text-xs text-slate-400">
+                    Tự động tìm kiếm các tin tức AI, mô hình mới & bài đăng hot trên X trong 24h qua gửi vào nhóm.
+                  </p>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={newsAuto}
+                  onChange={(e) => setNewsAuto(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-500"></div>
+              </label>
+            </div>
+
+            {newsAuto && (
+              <div className="flex flex-col gap-4 pt-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                      🎯 Chủ đề tiêu điểm bản tin:
+                    </label>
+                    <input
+                      type="text"
+                      value={newsTopic}
+                      onChange={(e) => setNewsTopic(e.target.value)}
+                      placeholder="Ví dụ: AI & Công nghệ trên X"
+                      className="w-full bg-slate-800/90 border border-violet-500/30 rounded-xl px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-400 transition-all"
+                    />
+                    <span className="text-[11px] text-slate-400 mt-1 block">
+                      💡 Mẹo: Nhập chủ đề hoặc bấm các nút gợi ý bên dưới.
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-semibold text-slate-300 block mb-1.5">
+                      ⏰ Khung giờ tự động gửi mỗi sáng (HH:mm):
+                    </label>
+                    <input
+                      type="time"
+                      value={newsTime}
+                      onChange={(e) => setNewsTime(e.target.value)}
+                      className="w-full bg-slate-800/90 border border-violet-500/30 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-violet-400 transition-all"
+                    />
+                    <span className="text-[11px] text-slate-400 mt-1 block">
+                      Đúng giờ này mỗi sáng, Bot sẽ tự động biên tập và gửi bản tin vào nhóm.
+                    </span>
+                  </div>
+                </div>
+
+                {/* Danh sách nút chọn nhanh chủ đề */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[11px] text-slate-400 mr-1">Chủ đề gợi ý:</span>
+                  {POPULAR_AI_TOPICS.map((topic) => {
+                    const isSelected = newsTopic.toLowerCase() === topic.toLowerCase();
+                    return (
+                      <button
+                        key={topic}
+                        type="button"
+                        onClick={() => setNewsTopic(topic)}
+                        className={`text-xs px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                          isSelected
+                            ? "bg-violet-500/25 border-violet-400 text-violet-200 font-semibold shadow-sm shadow-violet-500/20"
+                            : "bg-slate-800/60 border-slate-700 hover:border-slate-500 text-slate-300"
+                        }`}
+                      >
+                        {isSelected ? `✓ ${topic}` : topic}
                       </button>
                     );
                   })}
