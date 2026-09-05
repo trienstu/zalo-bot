@@ -2,6 +2,8 @@ import {
   getDb,
   saveGroupKnowledge,
   searchGroupKnowledge,
+  searchPermanentKnowledge,
+  type PermanentKnowledgeItem,
   getGroupSettings,
   isMemberBlocked,
   blockMember,
@@ -1172,6 +1174,28 @@ async function handleHistoryQA(
     }
   }
 
+  // C2. Tài liệu & chính sách chính thức từ Kho tri thức vĩnh viễn (do Admin nạp)
+  let permanentKnowledgeItems: PermanentKnowledgeItem[] = [];
+  try {
+    permanentKnowledgeItems = searchPermanentKnowledge(question, threadId, 2);
+  } catch (e) {
+    console.warn("[handleHistoryQA] Lỗi searchPermanentKnowledge:", e);
+  }
+
+  if (permanentKnowledgeItems && permanentKnowledgeItems.length > 0) {
+    contextLines.push("=== TÀI LIỆU & CHÍNH SÁCH CHÍNH THỨC TỪ KHO TRI THỨC VĨNH VIỄN (DO ADMIN NẠP) ===");
+    for (const pk of permanentKnowledgeItems) {
+      contextLines.push(
+        `[Chủ đề / Dự án: ${pk.topic.toUpperCase()} - Nguồn: ${pk.title}]:\n` +
+          (pk.summary ? `Tóm tắt cốt lõi:\n${pk.summary}\n` : "") +
+          (pk.contentText ? `Nội dung chi tiết tài liệu:\n${pk.contentText.slice(0, 6000)}\n` : ""),
+      );
+    }
+    contextLines.push(
+      "CHỈ DẪN QUAN TRỌNG VỀ TÀI LIỆU KHO TRI THỨC: Câu hỏi của thành viên liên quan đến tài liệu/chính sách chính thức do Admin nạp ở trên. Bạn BẮT BUỘC phải ưu tiên trích dẫn chính xác số liệu, chính sách chiết khấu, giá cả, quy trình từ tài liệu này để giải đáp cho thành viên!",
+    );
+  }
+
   if (topMembers && topMembers.length > 0) {
     contextLines.push("=== BẢNG XẾP HẠNG & THÀNH VIÊN TÍCH CỰC NHẤT NHÓM ===");
     topMembers.forEach((m, idx) => {
@@ -1318,7 +1342,8 @@ async function handleHistoryQA(
     `7. ĐẶC BIỆT KHI THÀNH VIÊN HỎI VỀ QUY TRÌNH, HƯỚNG DẪN, CÁCH LÀM HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Bạn BẮT BUỘC phải TRÍCH DẪN VÀ DIỄN GIẢI CHI TIẾT TỪNG BƯỚC (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến mà các thành viên đã từng chia sẻ trong lịch sử chat của nhóm này. TUYỆT ĐỐI KHÔNG ĐƯỢC chỉ đưa mỗi link tải tài liệu; phải giải thích cặn kẽ nội dung quy trình để người hỏi áp dụng được ngay, link tài liệu chỉ là phần đính kèm ở cuối để tham khảo thêm.\n` +
     `8. ĐỘ DÀI & TỐC ĐỘ PHẢN HỒI: Với các câu chào hỏi, giao lưu, tấu hài hoặc thắc mắc thường ngày, BẮT BUỘC trả lời súc tích, duyên dáng, ngắn gọn trong 2-3 đoạn (khoảng 300-500 ký tự) để đọc nhanh trên Zalo điện thoại. Không viết dài dòng lê thê trừ khi thành viên yêu cầu giải thích quy trình hoặc phân tích sâu.\n` +
     `9. CÔ LẬP TUYỆT ĐỐI THEO NHÓM (KHÔNG NHẮC TÊN NGƯỜI TỪ NHÓM KHÁC): Bạn đang hoạt động trong nhóm này. TUYỆT ĐỐI CHỈ tương tác hoặc nhắc tên những thành viên CÓ MẶT trong nhóm này (được xuất hiện trong dữ liệu chat/thành viên ở trên hoặc người đang hỏi là ${displayName}). TUYỆT ĐỐI KHÔNG nhắc tên bất kỳ người lạ nào từ nhóm khác, KHÔNG tự bịa ra tên người nếu trong lịch sử chat nhóm này không có.\n` +
-    `10. NGUYÊN TẮC TRUNG THỰC & CHỐNG ẢO TƯỞNG (ANTI-HALLUCINATION): Khi người dùng hỏi về một sự việc, sản phẩm, con người hoặc chi tiết cụ thể mà trong dữ liệu được cung cấp (ảnh, file, quote, lịch sử chat nhóm, kho tri thức, hoặc tin tức thời gian thực) KHÔNG CÓ THÔNG TIN: BẮT BUỘC PHẢI THẲNG THẮN TRẢ LỜI LÀ BẠN KHÔNG CÓ DỮ LIỆU ĐÓ. TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT RA CÂU CHUYỆN, SỰ KIỆN, CHI TIẾT HAY SẢN PHẨM KHÔNG CÓ CĂN CỨ ĐỂ 'TRẢ LỜI CHO XONG'.` +
+    `10. NGUYÊN TẮC TRUNG THỰC & CHỐNG ẢO TƯỞNG (ANTI-HALLUCINATION): Khi người dùng hỏi về một sự việc, sản phẩm, con người hoặc chi tiết cụ thể mà trong dữ liệu được cung cấp (ảnh, file, quote, lịch sử chat nhóm, kho tri thức, hoặc tin tức thời gian thực) KHÔNG CÓ THÔNG TIN: BẮT BUỘC PHẢI THẲNG THẮN TRẢ LỜI LÀ BẠN KHÔNG CÓ DỮ LIỆU ĐÓ. TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT RA CÂU CHUYỆN, SỰ KIỆN, CHI TIẾT HAY SẢN PHẨM KHÔNG CÓ CĂN CỨ ĐỂ 'TRẢ LỜI CHO XONG'.\n` +
+    `11. TÀI LIỆU CHÍNH THỨC TỪ KHO TRI THỨC VĨNH VIỄN (DO ADMIN NẠP): Nếu trong dữ liệu có mục [TÀI LIỆU & CHÍNH SÁCH CHÍNH THỨC TỪ KHO TRI THỨC VĨNH VIỄN], bạn BẮT BUỘC phải ưu tiên trích dẫn chính xác các số liệu, chính sách, chiết khấu, quy định từ tài liệu này để giải đáp cho thành viên!` +
     searchInstruction;
 
   const userPrompt =

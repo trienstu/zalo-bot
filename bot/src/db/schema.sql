@@ -545,4 +545,19 @@ CREATE TABLE IF NOT EXISTS bot_friends (
 
 CREATE INDEX IF NOT EXISTS idx_bot_friends_allow ON bot_friends(allow_direct);
 
+-- Kho tri thức vĩnh viễn (Permanent Knowledge Base) cho các dự án, tài liệu, chính sách, quy trình
+CREATE TABLE IF NOT EXISTS permanent_knowledge (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  topic          TEXT NOT NULL,               -- Tên chủ đề / Tên dự án (VD: "Dự án The Privé", "Chính sách bán hàng")
+  title          TEXT NOT NULL DEFAULT '',    -- Tên tài liệu / tên file gốc
+  content_text   TEXT NOT NULL,               -- Nội dung văn bản trích xuất (tối đa 50,000 ký tự)
+  summary        TEXT NOT NULL DEFAULT '',    -- Bản tóm tắt các điểm cốt lõi, số liệu then chốt
+  keywords       TEXT NOT NULL DEFAULT '',    -- Các từ khóa tra cứu, từ đồng nghĩa (phân cách bằng dấu phẩy)
+  scope          TEXT NOT NULL DEFAULT 'all', -- 'all' (dùng chung cho mọi nhóm) hoặc thread_id cụ thể
+  created_by     TEXT NOT NULL DEFAULT 'Admin',
+  created_at     INTEGER NOT NULL,
+  updated_at     INTEGER NOT NULL
+);
 
+CREATE INDEX IF NOT EXISTS idx_perm_knowledge_topic ON permanent_knowledge(topic);
+CREATE INDEX IF NOT EXISTS idx_perm_knowledge_scope ON permanent_knowledge(scope, updated_at);

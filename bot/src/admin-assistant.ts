@@ -1,4 +1,14 @@
-import { getDb, isUserAdmin, addAdminUser, setGroupMode, isUserAllowedDirectChat } from "./db/index.js";
+import {
+  getDb,
+  isUserAdmin,
+  addAdminUser,
+  setGroupMode,
+  isUserAllowedDirectChat,
+  savePermanentKnowledge,
+  searchPermanentKnowledge,
+  listPermanentKnowledge,
+  deletePermanentKnowledge,
+} from "./db/index.js";
 import { sendDirectText, sendGroupText } from "./zalo/client.js";
 import { callGemini, downloadFileContent, type GeminiMediaPart } from "./gemini.js";
 import type { MemberMessageEvent } from "./member-assistant.js";
@@ -295,6 +305,11 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         `🔹 /send [tên_nhóm/id] [nội dung] : Gửi tin nhắn/thông báo vào nhóm chỉ định\n` +
         `🔹 /broadcast [nội dung] : Bắn thông báo cùng lúc đến TẤT CẢ các nhóm\n` +
         `🔹 /mode [tên_nhóm] [interactive/silent] : Đổi chế độ nhóm (Tương tác / Tàu ngầm)\n\n` +
+        `📚 KHO TRI THỨC VĨNH VIỄN (HỌC TÀI LIỆU DỰ ÁN):\n` +
+        `🔹 Gửi file kèm lệnh: /hoc [tên_dự_án] (VD: /hoc The Privé, /hoc Chính sách hoa hồng)\n` +
+        `🔹 Hoặc dán văn bản: "Lưu vào kho tài liệu dự án The Privé: [nội dung...]"\n` +
+        `🔹 /kienthuc : Xem danh sách các tài liệu bot đã học và ghi nhớ vĩnh viễn\n` +
+        `🔹 /xoakienthuc [mã_id/tên] : Xóa tài liệu cũ khỏi kho tri thức\n\n` +
         `💬 TRỢ LÝ AI RIÊNG TƯ & GOOGLE SEARCH:\n` +
         `🔹 Tìm kiếm thông tin thời gian thực, trend AI, tin tức hôm nay bằng Google Search tích hợp sẵn.\n` +
         `🔹 Soạn bài rồi bảo: "Gửi bài này vào nhóm VIP" hoặc "Bắn vào nhóm AI"\n` +
@@ -382,6 +397,187 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     const candidateCity = cityMatch?.[1]?.trim() || "Hồ Chí Minh";
     const weatherMsg = await getWeatherReport(candidateCity);
     await sendDirectText(api, sender, weatherMsg);
+    return;
+  }
+
+  // 2.8. Lệnh xem danh sách Kho Tri Thức Vĩnh Viễn: /kienthuc hoặc /dskienthuc
+  if (lower === "/kienthuc" || lower === "/dskienthuc" || lower === "!kienthuc" || lower === "!dskienthuc" || lower === "kienthuc") {
+    if (!isAdmin) {
+      await sendDirectText(api, sender, "⚠️ Quản lý kho tri thức vĩnh viễn chỉ dành cho Admin của Bot.");
+      return;
+    }
+    const items = listPermanentKnowledge(50);
+    if (items.length === 0) {
+      await sendDirectText(
+        api,
+        sender,
+        "📚 KHO TRI THỨC VĨNH VIỄN HIỆN ĐANG TRỐNG.\n\n" +
+          "👉 Để nạp tài liệu cho Bot học, Sếp chỉ cần:\n" +
+          "1. Đính kèm file (PDF, Word, Excel, Ảnh) rồi gõ: /hoc [tên_dự_án]\n" +
+          "2. Hoặc dán trực tiếp đoạn văn bản: /hoc [tên_dự_án]\n[nội dung tài liệu...]",
+      );
+      return;
+    }
+    const lines = ["📚 DANH SÁCH TÀI LIỆU TRONG KHO TRI THỨC VĨNH VIỄN:\n"];
+    items.forEach((it, idx) => {
+      const dateStr = it.updatedAt ? new Date(it.updatedAt).toLocaleDateString("vi-VN") : "";
+      const summarySnippet = it.summary
+        ? it.summary.replace(/\n+/g, " ").slice(0, 120) + "..."
+        : "(Đã lưu toàn văn)";
+      lines.push(`${idx + 1}. [ID: ${it.id}] 📁 ${it.topic.toUpperCase()}\n   📄 Nguồn: ${it.title}\n   📅 Ngày học: ${dateStr}\n   📝 Cốt lõi: ${summarySnippet}\n`);
+    });
+    lines.push(`👉 Để xóa tài liệu cũ/hết hạn: /xoakienthuc [mã_id_hoặc_tên]`);
+    await sendDirectText(api, sender, lines.join("\n"));
+    return;
+  }
+
+  // 2.9. Lệnh xóa tài liệu khỏi Kho Tri Thức: /xoakienthuc [mã_id|tên]
+  if (lower.startsWith("/xoakienthuc ") || lower.startsWith("!xoakienthuc ")) {
+    if (!isAdmin) {
+      await sendDirectText(api, sender, "⚠️ Lệnh xóa tri thức chỉ dành cho Admin.");
+      return;
+    }
+    const target = rawText.replace(/^\/(?:xoakienthuc|!xoakienthuc)\s+/i, "").trim();
+    if (!target) {
+      await sendDirectText(api, sender, "⚠️ Cú pháp: /xoakienthuc <mã_id_hoặc_tên_chủ_đề>");
+      return;
+    }
+    const ok = deletePermanentKnowledge(target);
+    if (ok) {
+      await sendDirectText(api, sender, `✅ Đã xóa tài liệu "${target}" khỏi kho tri thức vĩnh viễn thành công!`);
+    } else {
+      await sendDirectText(api, sender, `❌ Không tìm thấy tài liệu nào khớp với "${target}". Gõ /kienthuc để kiểm tra danh sách nhé Sếp!`);
+    }
+    return;
+  }
+
+  // 2.10. Lệnh NẠP TRI THỨC VĨNH VIỄN: /hoc [tên_dự_án] hoặc gửi file kèm yêu cầu học
+  const isLearnCommand =
+    lower.startsWith("/hoc ") ||
+    lower.startsWith("!hoc ") ||
+    lower === "/hoc" ||
+    lower === "!hoc" ||
+    lower.startsWith("/learn ") ||
+    lower.startsWith("!learn ");
+
+  const isLearnNaturalIntent =
+    isAdmin &&
+    (/(?:học|nạp|lưu|ghi nhớ)\s+(?:tài liệu|dữ liệu|thông tin|kiến thức|dự án|chính sách|bảng giá|quy trình)/i.test(rawText) ||
+      /(?:lưu|nạp)\s+(?:vào|vô)\s+(?:kho|bộ nhớ|tri thức)/i.test(rawText));
+
+  if (isAdmin && (isLearnCommand || isLearnNaturalIntent)) {
+    let topicName = "";
+    if (isLearnCommand) {
+      topicName = rawText.replace(/^\/(?:hoc|!hoc|learn|!learn)\s*/i, "").trim();
+      if (topicName.includes("\n")) {
+        topicName = (topicName.split("\n")[0] ?? "").trim();
+      }
+    } else {
+      const match =
+        rawText.match(/(?:dự án|tài liệu|chính sách|quy trình|về)\s+([^,?.!\n]+)/i) ||
+        rawText.match(/(?:học|nạp|lưu)\s+([^,?.!\n]+)/i);
+      if (match && match[1]) {
+        topicName = match[1].trim();
+      }
+    }
+
+    const targetUrl = event.fileAttachment?.url || event.mediaUrl || event.quote?.mediaUrl;
+    const fileName = event.fileAttachment?.name || "";
+
+    if (!topicName) {
+      if (fileName) {
+        topicName = fileName.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ");
+      } else {
+        topicName = "Tài liệu mới";
+      }
+    }
+
+    await sendDirectText(
+      api,
+      sender,
+      `⏳ Dạ em Sen Chúa đang tải và nạp tài liệu "${topicName}" vào kho tri thức vĩnh viễn, Sếp đợi em vài giây nhé...`,
+    );
+
+    let fullExtractedText = "";
+    let mediaPart: GeminiMediaPart | null = null;
+
+    if (targetUrl) {
+      console.log(`[admin-assistant] 📥 Đang tải file nạp tri thức: ${targetUrl.slice(0, 80)} (${fileName})`);
+      const fileRes = await downloadFileContent(targetUrl, fileName);
+      if (fileRes?.mediaPart) {
+        mediaPart = fileRes.mediaPart;
+        try {
+          const ocrPrompt =
+            `Bạn là chuyên gia trích xuất dữ liệu tài liệu. Hãy đọc kỹ toàn bộ nội dung trong hình ảnh/file PDF này, trích xuất đầy đủ chi tiết mọi thông tin văn bản, số liệu, bảng giá, chính sách chiết khấu, mốc thời gian, điều khoản, ưu đãi.\n` +
+            `Trình bày chi tiết, mạch lạc, tuyệt đối không tóm tắt sơ sài để lưu trữ làm cơ sở dữ liệu vĩnh viễn.`;
+          fullExtractedText = await callGemini(ocrPrompt, "Trích xuất toàn bộ chi tiết nội dung văn bản trong tài liệu này:", {
+            mediaParts: [mediaPart],
+            enableSearch: false,
+          });
+        } catch (err) {
+          console.warn(`[admin-assistant] Lỗi Gemini OCR:`, err);
+        }
+      } else if (fileRes?.textContent) {
+        fullExtractedText = fileRes.textContent;
+      }
+    }
+
+    if (!fullExtractedText) {
+      const remainingText = rawText.replace(/^\/(?:hoc|!hoc|learn|!learn)\s+[^\n]*\n?/i, "").trim();
+      if (remainingText && remainingText !== topicName) {
+        fullExtractedText = remainingText;
+      }
+    }
+
+    if (!fullExtractedText) {
+      await sendDirectText(
+        api,
+        sender,
+        `⚠️ Em chưa nhận được nội dung tài liệu để nạp!\n\n👉 Sếp vui lòng:\n1. Đính kèm File (PDF, Word, Excel, Ảnh) rồi gõ: /hoc ${topicName || "Tên dự án"}\n2. Hoặc dán trực tiếp đoạn văn bản bên dưới câu lệnh:\n/hoc ${topicName || "Tên dự án"}\n[Nội dung tài liệu...]`,
+      );
+      return;
+    }
+
+    let summaryText = "";
+    let keywordsText = "";
+    try {
+      const summaryPrompt =
+        `Bạn là trợ lý dữ liệu thông minh. Dưới đây là tài liệu về chủ đề "${topicName}".\n` +
+        `Nhiệm vụ của bạn:\n` +
+        `1. Tóm tắt 3 đến 5 điểm then chốt quan trọng nhất (chính sách, chiết khấu, giá, thời hạn, điều kiện cốt lõi) theo dạng gạch đầu dòng.\n` +
+        `2. Liệt kê 5 đến 8 từ khóa tra cứu quan trọng (bao gồm tên viết tắt, từ đồng nghĩa, thuật ngữ liên quan) cách nhau bởi dấu phẩy.\n` +
+        `3. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown.\n` +
+        `Định dạng trả về chính xác:\n` +
+        `TÓM TẮT:\n- ý 1\n- ý 2\nTỪ KHÓA: từ 1, từ 2, từ 3`;
+
+      const aiRes = await callGemini(summaryPrompt, fullExtractedText.slice(0, 15000), { enableSearch: false });
+      const parts = aiRes.split(/TỪ KHÓA:/i);
+      summaryText = (parts[0] || "").replace(/TÓM TẮT:/i, "").trim();
+      keywordsText = (parts[1] || "").trim();
+    } catch (err) {
+      console.warn(`[admin-assistant] Lỗi Gemini tóm tắt tri thức:`, err);
+      summaryText = fullExtractedText.slice(0, 500);
+    }
+
+    const savedId = savePermanentKnowledge({
+      topic: topicName,
+      title: fileName || topicName,
+      contentText: fullExtractedText.slice(0, 50000),
+      summary: summaryText,
+      keywords: keywordsText,
+      scope: "all",
+      createdBy: displayName,
+    });
+
+    const confirmMsg =
+      `🎓 ĐÃ NẠP THÀNH CÔNG VÀO KHO TRI THỨC VĨNH VIỄN! 🎉\n\n` +
+      `📁 Chủ đề / Dự án: ${topicName.toUpperCase()} (Mã ID: ${savedId})\n` +
+      `📄 Nguồn tài liệu: ${fileName || "Văn bản gửi trực tiếp"}\n` +
+      `📊 Dung lượng chữ: ${fullExtractedText.length.toLocaleString("vi-VN")} ký tự (File gốc đã được giải phóng khỏi VPS)\n\n` +
+      `📝 CÁC ĐIỂM CỐT LÕI ĐÃ GHI NHỚ:\n${summaryText}\n\n` +
+      `👉 Từ bây giờ, khi Sếp (chat 1:1) hoặc các thành viên (trong các nhóm Zalo) hỏi về "${topicName}", em sẽ tự động tra cứu kho này để trả lời chuẩn xác 100% không bao giờ bị quên ạ!`;
+
+    await sendDirectText(api, sender, confirmMsg);
     return;
   }
 
@@ -664,14 +860,35 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     ? `\n9. BÁO CÁO HOẠT ĐỘNG CÁC NHÓM: BẮT BUỘC ĐỌC KỸ dữ liệu trích xuất từ database của các nhóm bên dưới. Chỉ tóm tắt những tin nhắn CÓ THẬT. Nếu nhóm nào không có tin nhắn mới, hãy báo trung thực là nhóm đó hiện chưa có tin nhắn thảo luận mới. TUYỆT ĐỐI KHÔNG TỰ BỊA ĐẶT!\n`
     : "";
 
+  // 2.2. Tra cứu từ Kho tri thức vĩnh viễn (nếu có tài liệu liên quan đến câu hỏi của Admin)
+  const matchedKnowledge = searchPermanentKnowledge(rawText, "all", 2);
+  let permanentKnowledgeSection = "";
+  if (matchedKnowledge.length > 0) {
+    permanentKnowledgeSection =
+      `\n=== TÀI LIỆU CHÍNH THỨC TỪ KHO TRI THỨC VĨNH VIỄN (DO ADMIN NẠP): ===\n` +
+      matchedKnowledge
+        .map(
+          (k) =>
+            `[CHỦ ĐỀ: ${k.topic.toUpperCase()}]\n${k.summary ? `Tóm tắt cốt lõi:\n${k.summary}\n` : ""}${
+              k.contentText ? `Chi tiết tài liệu:\n${k.contentText.slice(0, 8000)}\n` : ""
+            }`,
+        )
+        .join("\n--------------------\n") +
+      "\n";
+  }
+
+  const knowledgeInstruction = matchedKnowledge.length > 0
+    ? `\n10. TÀI LIỆU KHO TRI THỨC CHÍNH THỨC: Câu hỏi của Sếp liên quan đến tài liệu/chính sách trong [KHO TRI THỨC VĨNH VIỄN]. BẮT BUỘC ưu tiên trích dẫn chính xác các số liệu, chính sách, quy định, điều khoản từ tài liệu này để giải đáp cho Sếp. Tuyệt đối không tự suy diễn ngoài tài liệu.\n`
+    : "";
+
   const userPrompt =
     (historyText ? `LỊCH SỬ TRÒ CHUYỆN TRƯỚC ĐÓ:\n${historyText}\n\n` : "") +
-    `${quoteSection}${fileSection}${liveNewsSection}${groupActivitiesSection}\n` +
+    `${quoteSection}${fileSection}${liveNewsSection}${groupActivitiesSection}${permanentKnowledgeSection}\n` +
     `YÊU CẦU MỚI TỪ ${isAdmin ? `ADMIN (${displayName})` : `BẠN (${displayName})`}: ${rawText || "Hãy phân tích tài liệu/hình ảnh này giúp tôi."}\n\n` +
     (isAdmin ? `HÃY TRẢ LỜI SẾP THẬT CHUẨN XÁC, THÔNG MINH VÀ HỮU ÍCH:` : `HÃY TRẢ LỜI THẬT THÂN THIỆN, CHUẨN XÁC VÀ HỮU ÍCH:`);
 
   try {
-    const answer = await callGemini(systemPrompt + searchInstruction + groupInstruction, userPrompt, {
+    const answer = await callGemini(systemPrompt + searchInstruction + groupInstruction + knowledgeInstruction, userPrompt, {
       mediaParts: mediaPart ? [mediaPart] : undefined,
       enableSearch: false, // Dùng kết quả Google News RSS đã nhúng trực tiếp, tránh lỗi 429 quota search grounding của Gemini Free
     });

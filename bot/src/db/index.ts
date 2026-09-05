@@ -2195,6 +2195,197 @@ export function searchGroupKnowledge(threadId: string, query?: string, limit = 1
   }
 }
 
+export interface PermanentKnowledgeItem {
+  id?: number;
+  topic: string;
+  title: string;
+  contentText?: string;
+  summary: string;
+  keywords?: string;
+  scope?: string;
+  createdBy?: string;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+function ensurePermanentKnowledgeTable(database: Database.Database): void {
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS permanent_knowledge (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        topic          TEXT NOT NULL,
+        title          TEXT NOT NULL DEFAULT '',
+        content_text   TEXT NOT NULL,
+        summary        TEXT NOT NULL DEFAULT '',
+        keywords       TEXT NOT NULL DEFAULT '',
+        scope          TEXT NOT NULL DEFAULT 'all',
+        created_by     TEXT NOT NULL DEFAULT 'Admin',
+        created_at     INTEGER NOT NULL,
+        updated_at     INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_perm_knowledge_topic ON permanent_knowledge(topic);
+      CREATE INDEX IF NOT EXISTS idx_perm_knowledge_scope ON permanent_knowledge(scope, updated_at);
+    `);
+  } catch {}
+}
+
+/**
+ * Lưu hoặc cập nhật tài liệu tri thức vĩnh viễn vào SQLite.
+ */
+export function savePermanentKnowledge(item: PermanentKnowledgeItem): number {
+  try {
+    const db = getDb();
+    ensurePermanentKnowledgeTable(db);
+
+    const now = Date.now();
+    const existing = db
+      .prepare(`SELECT id FROM permanent_knowledge WHERE LOWER(topic) = LOWER(?) LIMIT 1`)
+      .get(item.topic.trim()) as { id: number } | undefined;
+
+    if (existing) {
+      db.prepare(
+        `UPDATE permanent_knowledge
+         SET title = @title,
+             content_text = @contentText,
+             summary = @summary,
+             keywords = @keywords,
+             scope = @scope,
+             created_by = @createdBy,
+             updated_at = @now
+         WHERE id = @id`,
+      ).run({
+        id: existing.id,
+        title: item.title || item.topic,
+        contentText: item.contentText || "",
+        summary: item.summary || "",
+        keywords: item.keywords || "",
+        scope: item.scope || "all",
+        createdBy: item.createdBy || "Admin",
+        now,
+      });
+      console.log(`[db] 🧠 Đã cập nhật tri thức vĩnh viễn: "${item.topic}" (ID: ${existing.id})`);
+      return existing.id;
+    } else {
+      const info = db
+        .prepare(
+          `INSERT INTO permanent_knowledge (topic, title, content_text, summary, keywords, scope, created_by, created_at, updated_at)
+           VALUES (@topic, @title, @contentText, @summary, @keywords, @scope, @createdBy, @now, @now)`,
+        )
+        .run({
+          topic: item.topic.trim(),
+          title: item.title || item.topic,
+          contentText: item.contentText || "",
+          summary: item.summary || "",
+          keywords: item.keywords || "",
+          scope: item.scope || "all",
+          createdBy: item.createdBy || "Admin",
+          now,
+        });
+      console.log(`[db] 🧠 Đã tạo mới tri thức vĩnh viễn: "${item.topic}" (ID: ${info.lastInsertRowid})`);
+      return Number(info.lastInsertRowid);
+    }
+  } catch (e) {
+    console.error(`[db] savePermanentKnowledge error: ${String(e)}`);
+    return 0;
+  }
+}
+
+/**
+ * Tra cứu kho tri thức vĩnh viễn theo câu hỏi / từ khóa / chủ đề.
+ */
+export function searchPermanentKnowledge(query: string, scope = "all", limit = 3): PermanentKnowledgeItem[] {
+  try {
+    const db = getDb();
+    ensurePermanentKnowledgeTable(db);
+
+    const rawQ = (query || "").trim().toLowerCase();
+    if (!rawQ) return [];
+
+    const stopWords = new Set([
+      "hỏi", "về", "gì", "cho", "xin", "file", "tài", "liệu", "ảnh", "hình", "xem", "đọc",
+      "sen", "chúa", "bot", "giúp", "với", "các", "những", "cái", "anh", "em", "ơi", "nhé", "nha"
+    ]);
+
+    const words = rawQ
+      .replace(/[?,.!/\\:;]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length >= 2 && !stopWords.has(w));
+
+    if (words.length === 0) return [];
+
+    const conditions = words
+      .map(() => `(LOWER(topic) LIKE ? OR LOWER(title) LIKE ? OR LOWER(keywords) LIKE ? OR LOWER(summary) LIKE ? OR LOWER(content_text) LIKE ?)`)
+      .join(" OR ");
+
+    const params: string[] = [];
+    for (const w of words) {
+      params.push(`%${w}%`, `%${w}%`, `%${w}%`, `%${w}%`, `%${w}%`);
+    }
+
+    const scopeFilter = scope === "all" ? "1=1" : "(scope = 'all' OR scope = ?)";
+    const finalParams = scope === "all" ? params : [...params, scope];
+
+    const rows = db
+      .prepare(
+        `SELECT id, topic, title, content_text as contentText, summary, keywords, scope, created_by as createdBy, created_at as createdAt, updated_at as updatedAt
+         FROM permanent_knowledge
+         WHERE (${scopeFilter}) AND (${conditions})
+         ORDER BY updated_at DESC
+         LIMIT ?`,
+      )
+      .all(...finalParams, limit) as PermanentKnowledgeItem[];
+
+    return rows;
+  } catch (e) {
+    console.warn(`[db] searchPermanentKnowledge error: ${String(e)}`);
+    return [];
+  }
+}
+
+/**
+ * Liệt kê danh sách tất cả tri thức trong kho vĩnh viễn.
+ */
+export function listPermanentKnowledge(limit = 50): PermanentKnowledgeItem[] {
+  try {
+    const db = getDb();
+    ensurePermanentKnowledgeTable(db);
+    return db
+      .prepare(
+        `SELECT id, topic, title, summary, keywords, scope, created_by as createdBy, created_at as createdAt, updated_at as updatedAt
+         FROM permanent_knowledge
+         ORDER BY updated_at DESC
+         LIMIT ?`,
+      )
+      .all(limit) as PermanentKnowledgeItem[];
+  } catch (e) {
+    console.warn(`[db] listPermanentKnowledge error: ${String(e)}`);
+    return [];
+  }
+}
+
+/**
+ * Xóa một tài liệu tri thức vĩnh viễn theo ID hoặc theo tên chủ đề.
+ */
+export function deletePermanentKnowledge(idOrTopic: string | number): boolean {
+  try {
+    const db = getDb();
+    ensurePermanentKnowledgeTable(db);
+
+    let res;
+    if (typeof idOrTopic === "number" || /^\d+$/.test(String(idOrTopic).trim())) {
+      res = db.prepare(`DELETE FROM permanent_knowledge WHERE id = ?`).run(Number(idOrTopic));
+    } else {
+      res = db
+        .prepare(`DELETE FROM permanent_knowledge WHERE LOWER(topic) = LOWER(?) OR LOWER(title) = LOWER(?)`)
+        .run(String(idOrTopic).trim(), String(idOrTopic).trim());
+    }
+    return res.changes > 0;
+  } catch (e) {
+    console.warn(`[db] deletePermanentKnowledge error: ${String(e)}`);
+    return false;
+  }
+}
+
 export interface AdminUserInfo {
   zaloUserId: string;
   displayName: string;
