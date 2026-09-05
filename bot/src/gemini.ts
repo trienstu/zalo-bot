@@ -225,11 +225,19 @@ export async function callGemini(
     throw new Error("Thiếu GEMINI_API_KEY trong .env");
   }
 
-  let model = process.env.GEMINI_MODEL?.trim() || config.geminiModel || "gemini-3.1-flash-lite-preview";
-  // Tự động chuyển sang model hoạt động ổn định và siêu tốc (1-2s) nếu model cũ bị lỗi 503/Timeout trên Google API
-  if (!model || model.includes("3.5") || model.includes("3.6") || model.includes("3.7") || model.includes("3.8") || model.includes("1.5") || model.includes("2.5")) {
-    model = "gemini-3.1-flash-lite-preview";
+  let primaryModel = process.env.GEMINI_MODEL?.trim() || config.geminiModel || "gemini-3.7-flash";
+  // Nếu env cũ chứa 3.5 (đã bị khai tử) hoặc rỗng, mặc định gemini-3.7-flash
+  if (!primaryModel || primaryModel.includes("3.5")) {
+    primaryModel = "gemini-3.7-flash";
   }
+
+  // Danh sách model cascading dự phòng khi model chính nghẽn mạng / 503 / 429 / Timeout:
+  // 1. gemini-flash-lite-latest: Siêu tốc <1s, độ ổn định cực cao
+  // 2. gemini-3.1-flash-lite-preview: Bản lite 3.1
+  const candidateFallbacks = ["gemini-flash-lite-latest", "gemini-3.1-flash-lite-preview"].filter(
+    (m) => m !== primaryModel,
+  );
+
   const temperature = options?.temperature ?? 0.3;
   const maxTokens = options?.maxTokens;
 
@@ -254,7 +262,6 @@ export async function callGemini(
   for (let attempt = 0; attempt < numKeys; attempt += 1) {
     const keyIdx = (botKeyOffset + attempt) % numKeys;
     const apiKey = apiKeys[keyIdx];
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const requestBody: Record<string, unknown> = {
       system_instruction: system ? { parts: [{ text: system }] } : undefined,
@@ -264,7 +271,6 @@ export async function callGemini(
           parts: userParts,
         },
       ],
-      // Không gửi googleSearch tool lên Gemini API vì các key gói Free sẽ lập tức bị HTTP 429 Quota Exceeded. Tin tức thời gian thực đã được cào trực tiếp qua Google News RSS.
       generationConfig: {
         temperature,
         ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
@@ -272,12 +278,11 @@ export async function callGemini(
       },
     };
 
-    const fallbackModel = model === "gemini-3-flash-preview" ? "gemini-3.1-flash-lite-preview" : "gemini-3-flash-preview";
-
-    try {
+    const executeModel = async (targetModel: string, timeoutMs: number): Promise<string | null> => {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`;
       const resp = await fetch(endpoint, {
         method: "POST",
-        signal: AbortSignal.timeout(15_000), // 15s timeout nhanh chóng, không bắt người dùng chờ 45s
+        signal: AbortSignal.timeout(timeoutMs),
         headers: {
           "Content-Type": "application/json",
         },
@@ -286,63 +291,9 @@ export async function callGemini(
 
       if (!resp.ok) {
         const errText = await resp.text().catch(() => "");
-        console.warn(`[gemini] Key #${keyIdx + 1} (${model}) gặp HTTP ${resp.status}.`);
-        lastError = new Error(`Gemini API HTTP ${resp.status}: ${errText.slice(0, 300)}`);
-
-        // Nếu bật search mà bị 429 hoặc 400 (do Google Search tool hết quota gói free), thử ngay không kèm tool
-        if (options?.enableSearch && (resp.status === 429 || resp.status === 400)) {
-          try {
-            const noToolsBody = { ...requestBody };
-            delete (noToolsBody as any).tools;
-            const noToolsResp = await fetch(endpoint, {
-              method: "POST",
-              signal: AbortSignal.timeout(10_000),
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(noToolsBody),
-            });
-            console.warn(`[gemini] noToolsResp status: ${noToolsResp.status}`);
-            if (noToolsResp.ok) {
-              const ntData = (await noToolsResp.json()) as any;
-              const ntText = ntData.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (typeof ntText === "string") {
-                botKeyOffset = (keyIdx + 1) % numKeys;
-                return ntText.trim();
-              }
-            } else {
-              const ntErr = await noToolsResp.text().catch(() => "");
-              console.warn(`[gemini] noToolsResp err: ${ntErr.slice(0, 200)}`);
-            }
-          } catch (e) {
-            console.warn(`[gemini] noToolsResp catch error: ${String(e)}`);
-          }
-        }
-
-        // Nếu model bị 503 (quá tải) hoặc 404, thử ngay fallbackModel siêu tốc với cùng key
-        if (resp.status === 503 || resp.status === 404) {
-          try {
-            const fallbackEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${fallbackModel}:generateContent?key=${apiKey}`;
-            const fallbackResp = await fetch(fallbackEndpoint, {
-              method: "POST",
-              signal: AbortSignal.timeout(10_000),
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(requestBody),
-            });
-            if (fallbackResp.ok) {
-              const fbData = (await fallbackResp.json()) as {
-                candidates?: Array<{
-                  content?: { parts?: Array<{ text?: string }> };
-                  finishReason?: string;
-                }>;
-              };
-              const fbText = fbData.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (typeof fbText === "string") {
-                botKeyOffset = (keyIdx + 1) % numKeys;
-                return fbText.trim();
-              }
-            }
-          } catch {}
-        }
-        continue;
+        console.warn(`[gemini] Key #${keyIdx + 1} (${targetModel}) gặp HTTP ${resp.status}: ${errText.slice(0, 200)}`);
+        lastError = new Error(`Gemini API (${targetModel}) HTTP ${resp.status}: ${errText.slice(0, 300)}`);
+        return null;
       }
 
       const data = (await resp.json()) as {
@@ -351,36 +302,37 @@ export async function callGemini(
       const candidate = data.candidates?.[0];
       const content = candidate?.content?.parts?.map((p: { text?: string }) => p.text || "").join("").trim();
       if (!content) {
-        throw new Error("Response Gemini API không có nội dung (content rỗng)");
+        lastError = new Error(`Response Gemini API (${targetModel}) rỗng`);
+        return null;
       }
-      botKeyOffset = (keyIdx + 1) % numKeys;
       return content;
-    } catch (error) {
-      lastError = error;
-      console.warn(`[gemini] Lỗi với Key #${keyIdx + 1} (${model}): ${String(error)}`);
-      // Nếu bị timeout hoặc lỗi mạng, thử ngay fallbackModel với cùng key
+    };
+
+    // 1. Thử model chính (primaryModel, mặc định gemini-3.7-flash)
+    try {
+      const primaryRes = await executeModel(primaryModel, 15_000);
+      if (primaryRes) {
+        botKeyOffset = (keyIdx + 1) % numKeys;
+        return primaryRes;
+      }
+    } catch (err) {
+      lastError = err;
+      console.warn(`[gemini] Lỗi gọi model chính ${primaryModel} (Key #${keyIdx + 1}): ${String(err)}`);
+    }
+
+    // 2. Tự động cascading fallback nếu primaryModel nghẽn hoặc lỗi
+    for (const fbModel of candidateFallbacks) {
       try {
-        const fallbackEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${fallbackModel}:generateContent?key=${apiKey}`;
-        const fallbackResp = await fetch(fallbackEndpoint, {
-          method: "POST",
-          signal: AbortSignal.timeout(8_000),
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requestBody),
-        });
-        if (fallbackResp.ok) {
-          const fbData = (await fallbackResp.json()) as {
-            candidates?: Array<{
-              content?: { parts?: Array<{ text?: string }> };
-              finishReason?: string;
-            }>;
-          };
-          const fbText = fbData.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (typeof fbText === "string" && fbText.trim()) {
-            botKeyOffset = (keyIdx + 1) % numKeys;
-            return fbText.trim();
-          }
+        console.log(`[gemini] ⚡ Model chính gặp lỗi/nghẽn, tự động chuyển sang model dự phòng: ${fbModel}...`);
+        const fbRes = await executeModel(fbModel, 10_000);
+        if (fbRes) {
+          console.log(`[gemini] ✅ Đã phản hồi thành công qua fallback model ${fbModel}!`);
+          botKeyOffset = (keyIdx + 1) % numKeys;
+          return fbRes;
         }
-      } catch {}
+      } catch (fbErr) {
+        console.warn(`[gemini] Fallback ${fbModel} cũng gặp lỗi: ${String(fbErr)}`);
+      }
     }
   }
 

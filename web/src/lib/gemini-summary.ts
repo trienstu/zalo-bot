@@ -58,7 +58,7 @@ function getEnvConfig() {
       ? process.env.GEMINI_MODEL
       : (env.GEMINI_MODEL && !env.GEMINI_MODEL.includes("3.5"))
       ? env.GEMINI_MODEL
-      : "gemini-3.6-flash",
+      : "gemini-3.7-flash",
     groupId: process.env.GROUP_ID || env.GROUP_ID || "",
     summaryGroupId: process.env.SUMMARY_GROUP_ID || env.SUMMARY_GROUP_ID || env.GROUP_ID || "",
   };
@@ -97,7 +97,7 @@ export async function callGeminiDirect(
   systemPrompt: string,
   userPrompt: string,
   rawApiKey: string,
-  model = "gemini-3.6-flash",
+  model = "gemini-3.7-flash",
 ): Promise<string> {
   const apiKeys = (rawApiKey || process.env.GEMINI_API_KEY || "")
     .split(",")
@@ -111,7 +111,7 @@ export async function callGeminiDirect(
   let lastError: unknown;
   const numKeys = apiKeys.length;
 
-  const activeModel = (!model || model.includes("3.5")) ? "gemini-3.6-flash" : model;
+  const activeModel = (!model || model.includes("3.5")) ? "gemini-3.7-flash" : model;
 
   // Xoay vòng luân phiên qua các Key để chia đều tải và tránh Rate Limit/Timeout
   for (let attempt = 0; attempt < numKeys; attempt += 1) {
@@ -147,9 +147,27 @@ export async function callGeminiDirect(
         const errText = await resp.text().catch(() => "");
         const err = new Error(`Gemini API HTTP ${resp.status}: ${errText.slice(0, 500)}`);
         
-        // 429: Hết quota Free Tier -> Thử key tiếp theo ngay lập tức
-        if (resp.status === 429) {
-          console.warn(`[web-gemini] Key #${keyIdx + 1} hết quota (HTTP 429). Đang chuyển sang key tiếp theo...`);
+        // 503 / 429: Thử fallback sang gemini-flash-lite-latest
+        if (resp.status === 503 || resp.status === 429) {
+          console.warn(`[web-gemini] Key #${keyIdx + 1} (${activeModel}) gặp HTTP ${resp.status}. Đang thử fallback gemini-flash-lite-latest...`);
+          try {
+            const fbEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key=${apiKey}`;
+            const fbResp = await fetch(fbEndpoint, {
+              method: "POST",
+              signal: AbortSignal.timeout(30_000),
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(requestBody),
+            });
+            if (fbResp.ok) {
+              const fbData = (await fbResp.json()) as any;
+              const fbText = fbData.candidates?.[0]?.content?.parts?.map((p: any) => p.text || "").join("").trim();
+              if (fbText) {
+                console.log("[web-gemini] ✅ Đã tóm tắt thành công qua fallback gemini-flash-lite-latest!");
+                currentKeyOffset = (keyIdx + 1) % numKeys;
+                return fbText;
+              }
+            }
+          } catch {}
           lastError = err;
           continue;
         }
