@@ -104,7 +104,7 @@ export async function downloadFileContent(
       buffer = fs.readFileSync(url);
     } else {
       const res = await fetch(url, {
-        signal: AbortSignal.timeout(10_000), // 10s timeout
+        signal: AbortSignal.timeout(60_000), // 60s timeout cho file tài liệu nặng (20MB-50MB)
         headers: {
           "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
         },
@@ -118,8 +118,40 @@ export async function downloadFileContent(
     const detectedMime = detectMimeType(buffer, fileName || url, contentType);
     const ext = (fileName.split(".").pop() || url.split(".").pop() || "").toLowerCase();
 
-    // 1. File Hình ảnh hoặc PDF (Gemini đọc Multimodal native)
-    if (detectedMime.startsWith("image/") || detectedMime === "application/pdf") {
+    // 1. File PDF: Ưu tiên bóc tách toàn bộ Text bằng unpdf siêu tốc, nhẹ RAM & xử lý file nặng không giới hạn MB
+    if (detectedMime === "application/pdf" || ext === "pdf") {
+      try {
+        const { extractText } = await import("unpdf");
+        const uint8 = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+        const pdfResult = await extractText(uint8, { mergePages: true });
+        const extracted = (pdfResult?.text || "").trim();
+        if (extracted.length >= 50) {
+          console.log(`[gemini] 📄 Đã trích xuất ${extracted.length.toLocaleString("vi-VN")} ký tự văn bản từ PDF "${fileName || "tài liệu"}" (${pdfResult.totalPages} trang)`);
+          return { textContent: extracted };
+        }
+      } catch (pdfErr) {
+        console.warn(`[gemini] Không thể trích xuất text từ PDF bằng unpdf, thử multimodal:`, pdfErr);
+      }
+
+      // Nếu là PDF scan dạng ảnh thuần túy:
+      // Chỉ gửi Multimodal cho Gemini nếu file <= 15MB (để không vượt quá giới hạn 20MB payload API)
+      if (buffer.length <= 15 * 1024 * 1024) {
+        return {
+          mediaPart: {
+            data: buffer.toString("base64"),
+            mimeType: "application/pdf",
+          },
+        };
+      } else {
+        console.warn(`[gemini] File PDF scan không có text layer và quá nặng (${(buffer.length / 1024 / 1024).toFixed(1)}MB > 15MB)`);
+        return {
+          textContent: `[File PDF scan dạng ảnh "${fileName || "tài liệu"}" nặng ${(buffer.length / 1024 / 1024).toFixed(1)}MB, không chứa lớp văn bản và vượt quá giới hạn OCR 15MB của AI API. Vui lòng chuyển thành file PDF văn bản hoặc gửi ảnh từng trang để bot đọc.]`,
+        };
+      }
+    }
+
+    // 2. File Hình ảnh (Gemini đọc Multimodal native)
+    if (detectedMime.startsWith("image/")) {
       return {
         mediaPart: {
           data: buffer.toString("base64"),

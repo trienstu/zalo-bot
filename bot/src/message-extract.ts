@@ -221,6 +221,7 @@ export interface QuotedMessage {
   msgId?: string;
   cliMsgId?: string;
   globalMsgId?: string;
+  fileAttachment?: FileAttachment;
 }
 
 /**
@@ -288,13 +289,50 @@ export function extractQuote(payload: any): QuotedMessage | null {
     text.includes("[Video]") ||
     Boolean(mediaUrl && /\.(?:mp4|mov|avi|mkv|webm)(?:\?|$)/i.test(mediaUrl));
 
+  const isDocOrFile =
+    rawType.includes("file") ||
+    text.startsWith("[File]") ||
+    Boolean(mediaUrl && /\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|rar)(?:\?|$)/i.test(mediaUrl));
+
   if (isVideo) {
     mediaType = "video";
-  } else if (isPhotoOrImage || mediaUrl) {
+  } else if (!isDocOrFile && (isPhotoOrImage || (mediaUrl && !/\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|rar)(?:\?|$)/i.test(mediaUrl)))) {
     mediaType = "image";
   }
 
-  if (!text && !mediaUrl && !msgId && !cliMsgId) return null;
+  // Trích xuất file đính kèm nếu quote là file tài liệu (PDF, Word, Excel, ZIP, etc.)
+  let fileAttachment: FileAttachment | undefined;
+  let quoteFileName = String(
+    quote.title ||
+    quote.fileName ||
+    quote.name ||
+    quote.attach?.title ||
+    quote.attach?.name ||
+    quote.params?.title ||
+    quote.params?.fileName ||
+    ""
+  ).trim();
+
+  if (!quoteFileName && text.startsWith("[File]")) {
+    quoteFileName = text.replace(/^\[File\]\s*/i, "").trim();
+  }
+
+  const isFilePayload =
+    rawType.includes("file") ||
+    text.startsWith("[File]") ||
+    Boolean(quoteFileName && /\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|rar)(?:\?|$)/i.test(quoteFileName));
+
+  if (isFilePayload && mediaUrl) {
+    const ext = (quoteFileName.split(".").pop() || "").toLowerCase();
+    fileAttachment = {
+      name: quoteFileName || "Tài liệu",
+      url: mediaUrl,
+      size: Number(quote.fileSize || quote.size || quote.attach?.fileSize || quote.params?.fileSize) || undefined,
+      extension: ext || undefined,
+    };
+  }
+
+  if (!text && !mediaUrl && !msgId && !cliMsgId && !fileAttachment) return null;
 
   return {
     text,
@@ -305,6 +343,7 @@ export function extractQuote(payload: any): QuotedMessage | null {
     msgId: msgId || undefined,
     cliMsgId: cliMsgId || undefined,
     globalMsgId: globalMsgId || undefined,
+    fileAttachment,
   };
 }
 
@@ -317,6 +356,7 @@ export interface FileAttachment {
 
 /**
  * Trích xuất file đính kèm (PDF, Word, Excel, TXT, Code, Audio...) từ payload Zalo.
+ * Hỗ trợ cả file gửi trực tiếp và file trong tin nhắn được trích dẫn (quote/reply).
  */
 export function extractFileAttachment(payload: any): FileAttachment | null {
   const data = payload?.data ?? {};
@@ -331,10 +371,11 @@ export function extractFileAttachment(payload: any): FileAttachment | null {
   const params = parseObjectMaybe(content?.params);
   const attach = parseObjectMaybe(data?.attach || content?.attach);
 
+  // 1. Tìm file gửi trực tiếp trong tin nhắn
   const urls = collectCandidateUrls([content, params, attach, data]);
   const url = urls.length > 0 ? urls[0] : undefined;
 
-  const name = String(
+  let name = String(
     content?.title ||
     content?.fileName ||
     content?.name ||
@@ -345,14 +386,52 @@ export function extractFileAttachment(payload: any): FileAttachment | null {
     ""
   ).trim();
 
-  if (!url) return null;
+  if (url) {
+    const ext = (name.split(".").pop() || "").toLowerCase();
+    return {
+      name: name || "Tài liệu",
+      url,
+      size: Number(content?.fileSize || params?.fileSize || attach?.fileSize) || undefined,
+      extension: ext || undefined,
+    };
+  }
 
-  const ext = (name.split(".").pop() || "").toLowerCase();
-  return {
-    name: name || "Tài liệu",
-    url,
-    size: Number(content?.fileSize || params?.fileSize || attach?.fileSize) || undefined,
-    extension: ext || undefined,
-  };
+  // 2. Fallback: Nếu tin nhắn hiện tại là Reply / Quote đến một File tài liệu
+  let quoteObj = data?.quote || payload?.quote;
+  if (!quoteObj && content?.quote) quoteObj = content.quote;
+  if (quoteObj) {
+    const quote = (parseObjectMaybe(quoteObj) || (typeof quoteObj === "object" ? quoteObj : null)) as Record<string, any> | null;
+    if (quote) {
+      const quoteUrls = collectCandidateUrls([quote, quote.attach, quote.params, quote.propertyExt, quote.content]);
+      const quoteUrl = quoteUrls.length > 0 ? quoteUrls[0] : undefined;
+      let quoteFileName = String(
+        quote.title ||
+        quote.fileName ||
+        quote.name ||
+        quote.attach?.title ||
+        quote.attach?.name ||
+        quote.params?.title ||
+        quote.params?.fileName ||
+        ""
+      ).trim();
+
+      const quoteMsg = String(quote.msg || quote.text || "").trim();
+      if (!quoteFileName && quoteMsg.startsWith("[File]")) {
+        quoteFileName = quoteMsg.replace(/^\[File\]\s*/i, "").trim();
+      }
+
+      if (quoteUrl) {
+        const ext = (quoteFileName.split(".").pop() || "").toLowerCase();
+        return {
+          name: quoteFileName || "Tài liệu",
+          url: quoteUrl,
+          size: Number(quote.fileSize || quote.size || quote.attach?.fileSize || quote.params?.fileSize) || undefined,
+          extension: ext || undefined,
+        };
+      }
+    }
+  }
+
+  return null;
 }
 

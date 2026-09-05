@@ -52,6 +52,12 @@ export interface MemberMessageEvent {
     msgId?: string;
     cliMsgId?: string;
     globalMsgId?: string;
+    fileAttachment?: {
+      name: string;
+      url: string;
+      size?: number;
+      extension?: string;
+    } | null;
   } | null;
 }
 
@@ -1188,7 +1194,7 @@ async function handleHistoryQA(
       contextLines.push(
         `[Chủ đề / Dự án: ${pk.topic.toUpperCase()} - Nguồn: ${pk.title}]:\n` +
           (pk.summary ? `Tóm tắt cốt lõi:\n${pk.summary}\n` : "") +
-          (pk.contentText ? `Nội dung chi tiết tài liệu:\n${pk.contentText.slice(0, 6000)}\n` : ""),
+          (pk.contentText ? `Nội dung chi tiết tài liệu:\n${pk.contentText.slice(0, 30000)}\n` : ""),
       );
     }
     contextLines.push(

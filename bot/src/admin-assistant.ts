@@ -466,6 +466,16 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       /(?:lưu|nạp)\s+(?:vào|vô)\s+(?:kho|bộ nhớ|tri thức)/i.test(rawText));
 
   if (isAdmin && (isLearnCommand || isLearnNaturalIntent)) {
+    const targetUrl =
+      event.fileAttachment?.url ||
+      event.quote?.fileAttachment?.url ||
+      event.mediaUrl ||
+      event.quote?.mediaUrl;
+    const fileName =
+      event.fileAttachment?.name ||
+      event.quote?.fileAttachment?.name ||
+      "";
+
     let topicName = "";
     if (isLearnCommand) {
       topicName = rawText.replace(/^\/(?:hoc|!hoc|learn|!learn)\s*/i, "").trim();
@@ -481,13 +491,24 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       }
     }
 
-    const targetUrl = event.fileAttachment?.url || event.mediaUrl || event.quote?.mediaUrl;
-    const fileName = event.fileAttachment?.name || "";
+    // Xóa bỏ các từ đệm hội thoại ở cuối câu (ví dụ: "palm river này nha em" -> "palm river")
+    topicName = topicName
+      .replace(/\s+(?:này|nay|nhe|nhé|nha|đi|giúp|với|cho|em|bot|ạ)\b.*$/i, "")
+      .replace(/^[–—\-:]\s*/, "")
+      .trim();
 
-    if (!topicName) {
+    const genericTopics = new Set(["", "file", "tài liệu", "dữ liệu", "thông tin", "kiến thức", "dự án", "chính sách", "bảng giá", "quy trình"]);
+    if (genericTopics.has(topicName.toLowerCase()) || !topicName) {
       if (fileName) {
-        topicName = fileName.replace(/\.[^/.]+$/, "").replace(/[_-]/g, " ");
-      } else {
+        topicName = fileName
+          .replace(/\.[^/.]+$/, "")
+          .replace(/^\[File\]\s*/i, "")
+          .replace(/\(\d+\)/g, "")
+          .replace(/(?:training|tai\s*lieu|slide|du\s*an)[_-]?/gi, "")
+          .replace(/[_-]+/g, " ")
+          .trim();
+      }
+      if (!topicName) {
         topicName = "Tài liệu mới";
       }
     }
@@ -504,7 +525,9 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     if (targetUrl) {
       console.log(`[admin-assistant] 📥 Đang tải file nạp tri thức: ${targetUrl.slice(0, 80)} (${fileName})`);
       const fileRes = await downloadFileContent(targetUrl, fileName);
-      if (fileRes?.mediaPart) {
+      if (fileRes?.textContent) {
+        fullExtractedText = fileRes.textContent;
+      } else if (fileRes?.mediaPart) {
         mediaPart = fileRes.mediaPart;
         try {
           const ocrPrompt =
@@ -517,24 +540,33 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         } catch (err) {
           console.warn(`[admin-assistant] Lỗi Gemini OCR:`, err);
         }
-      } else if (fileRes?.textContent) {
-        fullExtractedText = fileRes.textContent;
       }
     }
 
     if (!fullExtractedText) {
+      // Chỉ lấy văn bản dán trực tiếp nếu người dùng gõ /hoc [chủ_đề] kèm nhiều dòng văn bản và không có file đính kèm
       const remainingText = rawText.replace(/^\/(?:hoc|!hoc|learn|!learn)\s+[^\n]*\n?/i, "").trim();
-      if (remainingText && remainingText !== topicName) {
+      if (!targetUrl && remainingText && remainingText.length > topicName.length + 10) {
         fullExtractedText = remainingText;
       }
     }
 
     if (!fullExtractedText) {
-      await sendDirectText(
-        api,
-        sender,
-        `⚠️ Em chưa nhận được nội dung tài liệu để nạp!\n\n👉 Sếp vui lòng:\n1. Đính kèm File (PDF, Word, Excel, Ảnh) rồi gõ: /hoc ${topicName || "Tên dự án"}\n2. Hoặc dán trực tiếp đoạn văn bản bên dưới câu lệnh:\n/hoc ${topicName || "Tên dự án"}\n[Nội dung tài liệu...]`,
-      );
+      if (targetUrl) {
+        await sendDirectText(
+          api,
+          sender,
+          `⚠️ Em không thể tải hoặc đọc được nội dung từ file "${fileName || topicName}"!\n\n` +
+          `👉 Nguyên nhân: Link tải file trên Zalo có thể đã hết hạn hoặc file PDF scan dạng ảnh không có lớp chữ.\n` +
+          `👉 Sếp vui lòng gửi lại file đính kèm trực tiếp rồi thử lại nhé!`,
+        );
+      } else {
+        await sendDirectText(
+          api,
+          sender,
+          `⚠️ Em chưa nhận được nội dung tài liệu để nạp!\n\n👉 Sếp vui lòng:\n1. Gửi File (PDF, Word, Excel, Ảnh) hoặc Reply vào File rồi gõ: /hoc ${topicName || "Tên dự án"}\n2. Hoặc dán trực tiếp đoạn văn bản bên dưới câu lệnh:\n/hoc ${topicName || "Tên dự án"}\n[Nội dung tài liệu...]`,
+        );
+      }
       return;
     }
 
@@ -870,7 +902,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         .map(
           (k) =>
             `[CHỦ ĐỀ: ${k.topic.toUpperCase()}]\n${k.summary ? `Tóm tắt cốt lõi:\n${k.summary}\n` : ""}${
-              k.contentText ? `Chi tiết tài liệu:\n${k.contentText.slice(0, 8000)}\n` : ""
+              k.contentText ? `Chi tiết tài liệu:\n${k.contentText.slice(0, 30000)}\n` : ""
             }`,
         )
         .join("\n--------------------\n") +

@@ -5,6 +5,8 @@ import {
   extractMediaSummary,
   extractMediaUrl,
   extractUndoTargetIds,
+  extractQuote,
+  extractFileAttachment,
 } from "./message-extract.js";
 
 /**
@@ -145,3 +147,38 @@ test("undo: bỏ id rỗng/'0', khử trùng lặp, content dạng chuỗi JSON 
   assert.deepEqual(extractUndoTargetIds(msg({ content: "thu hồi" })), []);
   assert.deepEqual(extractUndoTargetIds({}), []);
 });
+
+test("quote file: bóc tách chính xác file đính kèm trong tin nhắn reply/quote", () => {
+  const quotePayload = {
+    data: {
+      msgType: "chat.quote",
+      content: {
+        msg: "Học dự án palm river này nha em",
+        quote: {
+          msg: "[File] TRAINING_PALM_RIVER_(1).pdf",
+          title: "TRAINING_PALM_RIVER_(1).pdf",
+          href: "https://files-cdn.zalo.me/training_palm_river.pdf",
+          fileSize: 25000000,
+          ownerId: "123456",
+          dName: "Trien Nguyen",
+        },
+      },
+    },
+  };
+
+  const quote = extractQuote(quotePayload);
+  assert.ok(quote);
+  assert.equal(quote.fileAttachment?.name, "TRAINING_PALM_RIVER_(1).pdf");
+  assert.equal(quote.fileAttachment?.url, "https://files-cdn.zalo.me/training_palm_river.pdf");
+  assert.equal(quote.fileAttachment?.extension, "pdf");
+  assert.equal(quote.fileAttachment?.size, 25000000);
+  assert.equal(quote.mediaType, undefined); // Không bị gán nhầm thành "image"
+
+  const fileAtt = extractFileAttachment(quotePayload);
+  assert.ok(fileAtt);
+  assert.equal(fileAtt.name, "TRAINING_PALM_RIVER_(1).pdf");
+  assert.equal(fileAtt.url, "https://files-cdn.zalo.me/training_palm_river.pdf");
+  assert.equal(fileAtt.extension, "pdf");
+  assert.equal(fileAtt.size, 25000000);
+});
+
