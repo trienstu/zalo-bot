@@ -956,20 +956,31 @@ async function handleHistoryQA(
     const quoteSystemPrompt =
       `${personaIntro}\n${customPromptSection}\n` +
       `NHIỆM VỤ:\n` +
-      `1. Thành viên đang trích dẫn (quote) một tin nhắn cụ thể và nhờ bạn giải thích/tóm tắt/phân tích/trả lời.\n` +
-      `2. Hãy tập trung giải thích chính xác, súc tích, đi thẳng vào trọng tâm nội dung được trích dẫn theo đúng phong cách của bạn.\n` +
-      `3. NGUYÊN TẮC TRUNG THỰC - TUYỆT ĐỐI KHÔNG BỊA ĐẶT (ANTI-HALLUCINATION): Bạn CHỈ ĐƯỢC PHÉP dựa vào đúng nội dung được trích dẫn ở trên để trả lời. Nếu thành viên hỏi các chi tiết sâu hơn, danh tính, sản phẩm cụ thể, nguyên nhân... mà trong nội dung trích dẫn KHÔNG CÓ: BẮT BUỘC PHẢI THẲNG THẮN TRẢ LỜI LÀ TRONG NỘI DUNG TRÍCH DẪN KHÔNG ĐỀ CẬP VÀ BẠN KHÔNG CÓ THÔNG TIN ĐÓ. TUYỆT ĐỐI KHÔNG ĐƯỢC TỰ BỊA ĐẶT CÂU CHUYỆN, SỰ KIỆN, CHI TIẾT HAY SẢN PHẨM KHÔNG CÓ THẬT (như tự bịa ra áo thun, bản vẽ, đồ họa...).\n` +
-      `4. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng viết hoa, gạch đầu dòng hoặc icon).\n` +
-      `5. Trả lời ngắn gọn, dí dỏm, dễ hiểu.`;
+      `1. Thành viên đang trích dẫn (quote) một tin nhắn hoặc nội dung phân tích trước đó và đặt câu hỏi tiếp theo.\n` +
+      `2. Nhận diện CHỦ THỂ / SẢN PHẨM / THIẾT BỊ / VẤN ĐỀ được nhắc đến trong nội dung trích dẫn (ví dụ: tên thiết bị, đồng hồ, điện thoại, mô hình AI, công nghệ, con người, sự việc...).\n` +
+      `3. HỎI TIẾP & TƯ VẤN CHUYÊN SÂU: Nếu thành viên hỏi tiếp về sản phẩm hoặc chủ thể đó (như giá bán tham khảo, nơi mua sắm, cách sử dụng, đánh giá ưu nhược điểm, so sánh, thông số kỹ thuật, cách sửa chữa/kết nối...): Hãy VẬN DỤNG KIẾN THỨC CHUYÊN MÔN CỦA BẠN và thông tin tra cứu bổ trợ để tư vấn và giải đáp thật chi tiết, nhiệt tình, thực tế và hữu ích cho thành viên! TUYỆT ĐỐI KHÔNG trả lời máy móc rằng "trong trích dẫn không có nên em không biết".\n` +
+      `4. NGUYÊN TẮC TRUNG THỰC: Nếu câu hỏi yêu cầu một con số bí mật nội bộ, hoặc nội dung trích dẫn quá mơ hồ không có bất kỳ chủ thể nào để suy luận: Hãy thông báo khéo léo và hỏi thêm thông tin thay vì từ chối cụt ngủn.\n` +
+      `5. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng viết hoa, gạch đầu dòng hoặc icon).\n` +
+      `6. Trả lời súc tích, duyên dáng, chuẩn xác và hữu ích.`;
 
     let quoteLiveNews = "";
     const needsExternalSearch =
-      /(?:tìm kiếm|tra cứu|tin tức|tin mới|thông tin thêm|xem có|là ai\b|vụ gì\b|sự việc gì\b|bản quyền|đạo nhái|phốt|drama|tiểu sử|vụ việc)/i.test(
+      /(?:tìm kiếm|tra cứu|tin tức|tin mới|thông tin thêm|xem có|là ai\b|vụ gì\b|sự việc gì\b|bản quyền|đạo nhái|phốt|drama|tiểu sử|vụ việc|giá|bao nhiêu|ở đâu|mua ở đâu|bán ở đâu|chỗ nào|nơi nào|link|web|shop|mua)/i.test(
         question
       );
     if (needsExternalSearch) {
       try {
-        const combinedQ = `${options.quote.text.slice(0, 100)} ${question}`;
+        let subject = "";
+        const matchProduct = options.quote.text.match(/(?:tên sản phẩm|sản phẩm|thiết bị|mô hình|model|dự án|tên|tiêu đề)[:\s]+([^\n.,;]+)/i);
+        if (matchProduct && matchProduct[1]) {
+          subject = matchProduct[1].trim();
+        } else {
+          const cleanQuote = options.quote.text
+            .replace(/^[🤖\s]*[^\n]*?(?:trả lời|chào)[^\n]*\n+/gi, "")
+            .trim();
+          subject = cleanQuote.slice(0, 100);
+        }
+        const combinedQ = `${subject} ${question}`.trim();
         quoteLiveNews = await searchRealtimeNews(combinedQ);
       } catch (e) {
         console.warn("[member-assistant] Quote QA searchRealtimeNews error:", e);
@@ -1355,13 +1366,13 @@ async function handleHistoryQA(
     `1. Nếu có FILE TÀI LIỆU (PDF, Word, Excel, Code, TXT, Âm thanh, Hình ảnh) đính kèm: ĐỌC KỸ TOÀN BỘ NỘI DUNG, trích xuất dữ liệu, dịch thuật, phân tích chuyên sâu hoặc tóm tắt đầy đủ.\n` +
     `2. Nếu người dùng hỏi về kiến thức/tài liệu cũ đã từng gửi trong nhóm: Tra cứu từ 'KHO TRI THỨC & BỘ NHỚ TÀI LIỆU ĐÃ LƯU' để trả lời chính xác.\n` +
     `3. Nếu câu hỏi yêu cầu tìm kiếm link/repo/tài nguyên: Dựa vào 'KHO TÀI LIỆU & LINK LIÊN QUAN' được cung cấp để liệt kê đầy đủ link và lời bình thực tế, tuyệt đối không tự bịa link.\n` +
-    `4. Nếu có NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): Hiểu rằng người dùng đang hỏi hoặc bình luận về chính nội dung được trích dẫn đó.\n` +
+    `4. Nếu có NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): Hiểu rằng người dùng đang hỏi hoặc đào sâu tiếp về chủ thể, sản phẩm, vấn đề trong nội dung được trích dẫn. Hãy vận dụng kiến thức chuyên môn và thông tin tra cứu để tư vấn, giải đáp trọn vẹn (giá cả, địa chỉ mua, cách dùng, tính năng, đánh giá...), không trả lời máy móc từ chối.\n` +
     `5. Luôn trả lời chuẩn theo phong cách cá tính được quy định ở trên.\n` +
     `6. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (hãy dùng dấu gạch đầu dòng, viết hoa hoặc icon để làm nổi bật).\n` +
     `7. ĐẶC BIỆT KHI THÀNH VIÊN HỎI VỀ QUY TRÌNH, HƯỚNG DẪN, CÁCH LÀM HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Bạn BẮT BUỘC phải TRÍCH DẪN VÀ DIỄN GIẢI CHI TIẾT TỪNG BƯỚC (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến mà các thành viên đã từng chia sẻ trong lịch sử chat của nhóm này. TUYỆT ĐỐI KHÔNG ĐƯỢC chỉ đưa mỗi link tải tài liệu; phải giải thích cặn kẽ nội dung quy trình để người hỏi áp dụng được ngay, link tài liệu chỉ là phần đính kèm ở cuối để tham khảo thêm.\n` +
     `8. ĐỘ DÀI & TỐC ĐỘ PHẢN HỒI: Với các câu chào hỏi, giao lưu, tấu hài hoặc thắc mắc thường ngày, BẮT BUỘC trả lời súc tích, duyên dáng, ngắn gọn trong 2-3 đoạn (khoảng 300-500 ký tự) để đọc nhanh trên Zalo điện thoại. Không viết dài dòng lê thê trừ khi thành viên yêu cầu giải thích quy trình hoặc phân tích sâu.\n` +
     `9. CÔ LẬP TUYỆT ĐỐI THEO NHÓM (KHÔNG NHẮC TÊN NGƯỜI TỪ NHÓM KHÁC): Bạn đang hoạt động trong nhóm này. TUYỆT ĐỐI CHỈ tương tác hoặc nhắc tên những thành viên CÓ MẶT trong nhóm này (được xuất hiện trong dữ liệu chat/thành viên ở trên hoặc người đang hỏi là ${displayName}). TUYỆT ĐỐI KHÔNG nhắc tên bất kỳ người lạ nào từ nhóm khác, KHÔNG tự bịa ra tên người nếu trong lịch sử chat nhóm này không có.\n` +
-    `10. NGUYÊN TẮC TRUNG THỰC & CHỐNG ẢO TƯỞNG (ANTI-HALLUCINATION): Khi người dùng hỏi về một sự việc, sản phẩm, con người hoặc chi tiết cụ thể mà trong dữ liệu được cung cấp (ảnh, file, quote, lịch sử chat nhóm, kho tri thức, hoặc tin tức thời gian thực) KHÔNG CÓ THÔNG TIN: BẮT BUỘC PHẢI THẲNG THẮN TRẢ LỜI LÀ BẠN KHÔNG CÓ DỮ LIỆU ĐÓ. TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT RA CÂU CHUYỆN, SỰ KIỆN, CHI TIẾT HAY SẢN PHẨM KHÔNG CÓ CĂN CỨ ĐỂ 'TRẢ LỜI CHO XONG'.\n` +
+    `10. NGUYÊN TẮC TRUNG THỰC & CHỐNG ẢO TƯỞNG (ANTI-HALLUCINATION): Khi người dùng hỏi về một sự việc, sản phẩm, con người hoặc chi tiết cụ thể mà trong dữ liệu được cung cấp (ảnh, file, quote, lịch sử chat nhóm, kho tri thức, hoặc tin tức thời gian thực) KHÔNG CÓ THÔNG TIN VÀ CŨNG KHÔNG PHẢI TRI THỨC THỰC TẾ: BẮT BUỘC PHẢI THẲNG THẮN TRẢ LỜI LÀ BẠN KHÔNG CÓ DỮ LIỆU ĐÓ. Tuy nhiên, nếu câu hỏi hỏi về giá cả thị trường tham khảo, kiến thức công nghệ, hướng dẫn sử dụng hoặc thông tin phổ quát về sản phẩm/chủ thể được nhắc tới, bạn HÃY TẬN TỤY TƯ VẤN THỰC TẾ cho thành viên thay vì từ chối máy móc.\n` +
     `11. TÀI LIỆU CHÍNH THỨC TỪ KHO TRI THỨC VĨNH VIỄN (DO ADMIN NẠP): Nếu trong dữ liệu có mục [TÀI LIỆU & CHÍNH SÁCH CHÍNH THỨC TỪ KHO TRI THỨC VĨNH VIỄN], bạn BẮT BUỘC phải ưu tiên trích dẫn chính xác các số liệu, chính sách, chiết khấu, quy định từ tài liệu này để giải đáp cho thành viên!` +
     searchInstruction;
 
