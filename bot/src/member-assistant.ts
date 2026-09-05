@@ -2209,7 +2209,13 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       return;
     }
 
-    if (!hasImage && !hasFile && !hasQuote && (qLower.includes("mute") || qLower.includes("ban") || qLower.includes("kick"))) {
+    if (
+      !hasImage &&
+      !hasFile &&
+      !hasQuote &&
+      (/\b(mute|kick)\b/i.test(qLower) ||
+        /\b(ban\s+(nick|acc|thành viên|member|người|ai)|bị\s+ban|banned)\b/i.test(qLower))
+    ) {
       await sendGroupText(
         api,
         threadId,
@@ -2218,7 +2224,15 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       return;
     }
 
-    if (!hasImage && !hasFile && !hasQuote && (qLower.includes("1 triệu view") || qLower.includes("triệu view") || qLower.includes("1tr view") || qLower.includes("tăng view"))) {
+    if (
+      !hasImage &&
+      !hasFile &&
+      !hasQuote &&
+      (qLower === "1 triệu view" ||
+        qLower === "1tr view" ||
+        qLower.includes("triệu view trong 1 đêm") ||
+        qLower.includes("triệu view 1 đêm"))
+    ) {
       await sendGroupText(
         api,
         threadId,
