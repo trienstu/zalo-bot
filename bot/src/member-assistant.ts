@@ -499,11 +499,15 @@ export function searchRelevantDiscussions(
                FROM group_messages
                WHERE deleted_at IS NULL
                  AND text != ''
+                 AND is_self = 0
                  AND text NOT LIKE '/%'
                  AND text NOT LIKE '!%'
                  AND text NOT LIKE '🤖%'
                  AND LOWER(display_name) NOT LIKE '%sen chúa%'
-                 AND LOWER(display_name) NOT LIKE '%sen chua%'`;
+                 AND LOWER(display_name) NOT LIKE '%sen chua%'
+                 AND LOWER(display_name) NOT LIKE '%mộc miên%'
+                 AND LOWER(display_name) NOT LIKE '%moc mien%'
+                 AND LOWER(display_name) NOT LIKE '%kevin%'`;
 
     if (threadId) {
       sql += ` AND thread_id = ?`;
@@ -1051,8 +1055,17 @@ async function handleHistoryQA(
            AND text IS NOT NULL
            AND text != ''
            AND deleted_at IS NULL
+           AND is_self = 0
+           AND LOWER(display_name) NOT LIKE '%sen chúa%'
+           AND LOWER(display_name) NOT LIKE '%sen chua%'
+           AND LOWER(display_name) NOT LIKE '%mộc miên%'
+           AND LOWER(display_name) NOT LIKE '%moc mien%'
+           AND LOWER(display_name) NOT LIKE '%kevin%'
+           AND LOWER(display_name) NOT LIKE 'bot%'
            AND LOWER(text) NOT LIKE '%sen chúa%'
            AND LOWER(text) NOT LIKE '%sen chua%'
+           AND LOWER(text) NOT LIKE '%mộc miên%'
+           AND LOWER(text) NOT LIKE '%moc mien%'
            AND text NOT LIKE '/%'
            AND text NOT LIKE '!%'
          ORDER BY ts DESC
@@ -1333,7 +1346,7 @@ async function handleHistoryQA(
   let searchInstruction = "";
   if (isRealTimeSearchQuery) {
     searchInstruction =
-      `\n8. TỔNG HỢP TIN TỨC THỜI GIAN THỰC: Câu hỏi này liên quan đến tin tức, sự kiện hoặc thông tin thời gian thực. BẮT BUỘC ĐỌC KỸ và TRÍCH XUẤT CHÍNH XÁC các con số thống kê mới nhất (số người chết, mất tích, thiệt hại, ngày tháng, tên nguồn báo chí) từ danh sách các bản tin Google News bên dưới. TUYỆT ĐỐI KHÔNG tự phỏng đoán hoặc đưa các số liệu cũ từ quá khứ nếu đã có số liệu trong danh sách bản tin.\n`;
+      `\n8. TỔNG HỢP TIN TỨC THỜI GIAN THỰC: Câu hỏi này liên quan đến tin tức, sự kiện hoặc thông tin thời gian thực. BẮT BUỘC ĐỌC KỸ và TRÍCH XUẤT CHÍNH XÁC các thông tin và con số mới nhất từ danh sách các bản tin Google News bên dưới. NGUỒN BẢN TIN GOOGLE NEWS CÓ ĐỘ ƯU TIÊN CAO NHẤT, ĐÈ LÊN MỌI THÔNG TIN VÀ LẬP LUẬN CŨ TRONG LỊCH SỬ CHAT CỦA NHÓM. Nếu trong lịch sử chat trước đây có thành viên hoặc bot từng nói sản phẩm/sự kiện chưa ra mắt hoặc cung cấp số liệu cũ, bạn BẮT BUỘC phải đính chính ngay dựa trên bản tin thời gian thực mới nhất!\n`;
   }
 
   const systemPrompt =
@@ -2094,24 +2107,12 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       .replace(/^\/docfile\s*/i, "")
       .replace(/^\/file\s*/i, "")
       .replace(/^\/anh\s*/i, "")
-      .replace(/@sen chúa/gi, "")
-      .replace(/@sen chua/gi, "")
-      .replace(/@senchua/gi, "")
-      .replace(/sen chúa ơi,?\s*/gi, "")
-      .replace(/sen chua oi,?\s*/gi, "")
-      .replace(/sen chúa,?\s*/gi, "")
-      .replace(/sen chua,?\s*/gi, "")
-      .replace(/sen ơi,?\s*/gi, "")
-      .replace(/sen oi,?\s*/gi, "")
-      .replace(/@bot/gi, "")
-      .replace(/^bot ơi\s*,?/i, "")
-      .replace(/^bot oi\s*,?/i, "")
-      .replace(/^chào bot\s*,?/i, "")
-      .replace(/^chao bot\s*,?/i, "")
-      .replace(/^alo bot\s*,?/i, "")
-      .replace(/^hi bot\s*,?/i, "")
-      .replace(/^hello bot\s*,?/i, "")
-      .replace(/^@[^\s]+\s*/, "")
+      .replace(/@(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot)\b/gi, "")
+      .replace(/(?:sen chúa|sen chua|mộc miên|moc mien|kevin)\s*(?:ơi|oi)?,?\s*/gi, "")
+      .replace(/@bot\b/gi, "")
+      .replace(/@[^\s,!?]+/g, "")
+      .replace(/^(?:bot|sen|admin)\s*(?:ơi|oi)?,?\s*/i, "")
+      .replace(/^(?:chào|chao|alo|hi|hello)\s+(?:bot|sen|em)?,?\s*/i, "")
       .trim();
 
     const qLower = question.toLowerCase().trim();

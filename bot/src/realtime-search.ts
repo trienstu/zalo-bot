@@ -23,64 +23,71 @@ interface ParsedNewsItem {
 }
 
 async function fetchGoogleNewsRss(keyword: string, lang: "vi" | "en" = "vi"): Promise<ParsedNewsItem[]> {
-  try {
-    const isEn = lang === "en";
-    const hl = isEn ? "en-US" : "vi";
-    const gl = isEn ? "US" : "VN";
-    const ceid = isEn ? "US:en" : "VN:vi";
-    const url = `https://news.google.com/rss/search?q=${encodeURIComponent(keyword)}&hl=${hl}&gl=${gl}&ceid=${ceid}`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const isEn = lang === "en";
+      const hl = isEn ? "en-US" : "vi";
+      const gl = isEn ? "US" : "VN";
+      const ceid = isEn ? "US:en" : "VN:vi";
+      const url = `https://news.google.com/rss/search?q=${encodeURIComponent(keyword)}&hl=${hl}&gl=${gl}&ceid=${ceid}`;
 
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(5000),
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)",
-      },
-    });
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(10000),
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)",
+        },
+      });
 
-    if (!res.ok) return [];
-    const xml = await res.text();
-    const itemBlocks = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
-    const now = Date.now();
+      if (!res.ok) {
+        if (attempt === 0) continue;
+        return [];
+      }
+      const xml = await res.text();
+      const itemBlocks = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
+      const now = Date.now();
 
-    return itemBlocks
-      .map((block) => {
-        const content = block[1] || "";
-        const titleMatch = content.match(/<title>(.*?)<\/title>/i);
-        const pubDateMatch = content.match(/<pubDate>(.*?)<\/pubDate>/i);
-        const title = titleMatch && titleMatch[1] ? decodeXml(titleMatch[1].trim()) : "";
-        const rawDate = pubDateMatch && pubDateMatch[1] ? pubDateMatch[1].trim() : "";
-        const dateObj = new Date(rawDate);
-        const timestamp = !isNaN(dateObj.getTime()) ? dateObj.getTime() : 0;
-        const ageHours = timestamp > 0 ? (now - timestamp) / (1000 * 60 * 60) : 999;
+      return itemBlocks
+        .map((block) => {
+          const content = block[1] || "";
+          const titleMatch = content.match(/<title>(.*?)<\/title>/i);
+          const pubDateMatch = content.match(/<pubDate>(.*?)<\/pubDate>/i);
+          const title = titleMatch && titleMatch[1] ? decodeXml(titleMatch[1].trim()) : "";
+          const rawDate = pubDateMatch && pubDateMatch[1] ? pubDateMatch[1].trim() : "";
+          const dateObj = new Date(rawDate);
+          const timestamp = !isNaN(dateObj.getTime()) ? dateObj.getTime() : 0;
+          const ageHours = timestamp > 0 ? (now - timestamp) / (1000 * 60 * 60) : 999;
 
-        let timeLabel = "";
-        if (timestamp > 0) {
-          const dStr = dateObj.toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
-          const tStr = dateObj.toLocaleTimeString("vi-VN", {
-            timeZone: "Asia/Ho_Chi_Minh",
-            hour: "2-digit",
-            minute: "2-digit",
-          });
-          if (ageHours < 1) {
-            timeLabel = `Vừa xong (< 1 giờ trước - ${tStr} ngày ${dStr})`;
-          } else if (ageHours < 24) {
-            timeLabel = `${Math.round(ageHours)} giờ trước - ${tStr} ngày ${dStr}`;
-          } else if (ageHours < 24 * 7) {
-            timeLabel = `${Math.round(ageHours / 24)} ngày trước - ngày ${dStr}`;
+          let timeLabel = "";
+          if (timestamp > 0) {
+            const dStr = dateObj.toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+            const tStr = dateObj.toLocaleTimeString("vi-VN", {
+              timeZone: "Asia/Ho_Chi_Minh",
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+            if (ageHours < 1) {
+              timeLabel = `Vừa xong (< 1 giờ trước - ${tStr} ngày ${dStr})`;
+            } else if (ageHours < 24) {
+              timeLabel = `${Math.round(ageHours)} giờ trước - ${tStr} ngày ${dStr}`;
+            } else if (ageHours < 24 * 7) {
+              timeLabel = `${Math.round(ageHours / 24)} ngày trước - ngày ${dStr}`;
+            } else {
+              timeLabel = `Bài báo ngày ${dStr}`;
+            }
           } else {
-            timeLabel = `Bài báo ngày ${dStr}`;
+            timeLabel = rawDate;
           }
-        } else {
-          timeLabel = rawDate;
-        }
 
-        return { title, timeLabel, timestamp, ageHours };
-      })
-      .filter((it) => it.title.length > 0);
-  } catch {
-    return [];
+          return { title, timeLabel, timestamp, ageHours };
+        })
+        .filter((it) => it.title.length > 0);
+    } catch {
+      if (attempt === 0) continue;
+      return [];
+    }
   }
+  return [];
 }
 
 /**
@@ -122,7 +129,8 @@ export async function searchRealtimeNews(query: string): Promise<string> {
 
     // 2. Làm sạch từ khóa tìm kiếm
     let cleanQ = query
-      .replace(/(?:sen chúa|sen chua|bot ơi|bot oi|bot|admin|ad ơi|ad oi|ad|trợ lý|tro ly)/gi, " ")
+      .replace(/@[^\s,!?]+/g, " ")
+      .replace(/(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot ơi|bot oi|bot|admin|ad ơi|ad oi|ad|trợ lý|tro ly)/gi, " ")
       .replace(/(?:là gì thế|là gì vậy|là gì nè|là gì|là cái gì|là con gì|là ai|thế nào|như thế nào|ra sao|nghĩa là gì|là sao)/gi, " ")
       .replace(
         /(?:cập nhật|tình hình|mới nhất|tin tức|tin mới|hôm nay|24h qua|24h|24 giờ|cho tôi|giúp tôi|với|nha|nhé|ạ|ơi|hỏi về|xem|tin nóng|vừa ra mắt|thời sự|bản tin|vừa công bố|thế nào rồi|có gì mới|cho biết|đi|về|nào|coi|nói về|hãy|tìm kiếm thêm thông tin về|tìm kiếm thêm thông tin|tìm kiếm thêm|tra cứu|xem có nội dung cụ thể|nội dung cụ thể|cái gì bị)/gi,
