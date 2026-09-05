@@ -2151,16 +2151,8 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
 
     // Tự động nhận diện câu nhắc lịch tự nhiên (ví dụ: "@Sen Chúa 16h45 nhắc cả nhóm...", "@Sen Chúa nhắc tôi 20 phút nữa...")
     const hasExplicitReminderWord =
-      qLower.includes("nhắc") ||
-      qLower.includes("nhac") ||
-      qLower.includes("hẹn") ||
-      qLower.includes("hen") ||
-      qLower.includes("báo thức") ||
-      qLower.includes("bao thuc") ||
-      qLower.includes("đặt lịch") ||
-      qLower.includes("dat lich") ||
-      qLower.includes("remind") ||
-      qLower.includes("alarm");
+      /\b(nhắc|nhac|báo thức|bao thuc|đặt lịch|dat lich|remind|alarm)\b/i.test(qLower) ||
+      /\b(hẹn\s+(?:giờ|lịch|nhắc|gặp|nhau)|hẹn\s+\d+)/i.test(qLower);
 
     // Loại trừ các câu nhờ vả / xin thời gian / hỏi đáp tư vấn (ví dụ: "cho anh 5 phút tư vấn...")
     const isConsultationOrQuestion =
@@ -2188,8 +2180,15 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       }
     }
 
-    // Tự động nhận diện câu hỏi thời tiết tự nhiên (ví dụ: "@Sen Chúa thời tiết TP.HCM hôm nay thế nào")
-    if (/(?:thời tiết|thoi tiet|dự báo thời tiết|du bao thoi tiet)/i.test(question) && !hasFile && !hasImage) {
+    // Tự động nhận diện câu hỏi thời tiết tự nhiên (chỉ kích hoạt khi thực sự hỏi dự báo thời tiết, không chặn thơ ca/kinh tế)
+    const isWeatherReportIntent =
+      !hasFile &&
+      !hasImage &&
+      !/(?:thơ|bài thơ|thơ ca|truyện|văn|kinh tế|chính trị|đầu tư|tài chính)/i.test(question) &&
+      (/(?:dự báo thời tiết|du bao thoi tiet)/i.test(question) ||
+        /(?:thời tiết|thoi tiet)\s+(?:hôm nay|ngay mai|ngày mai|hiện tại|thế nào|sao rồi|ở|tại)\b/i.test(question));
+
+    if (isWeatherReportIntent) {
       const groupSettings = getGroupSettings(threadId);
       const cityMatch = question.match(/(?:tại|ở|khu vực|tỉnh|thành phố)\s+([A-ZÀ-Ỹa-zà-ỹ\s]+)/i);
       const candidateCity = cityMatch?.[1]?.trim() || groupSettings.weatherCity || "Hồ Chí Minh";
@@ -2199,8 +2198,14 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       return;
     }
 
-    // Các câu đối đáp hài hước, trêu chọc tức thì
-    if (!hasImage && !hasFile && !hasQuote && ["ngáo", "ngao", "ngu", "dở", "do", "ngốc", "ngoc", "lag", "chán", "chan"].some((w) => qLower === w || qLower.startsWith(w + " ") || qLower.endsWith(" " + w))) {
+    // Các câu đối đáp trêu chọc ngắn trực tiếp vào bot (loại bỏ chữ 'do' để tránh bắt nhầm 'Do đâu...', 'Do trời mưa...')
+    const isDirectTease =
+      !hasImage &&
+      !hasFile &&
+      !hasQuote &&
+      /(?:sao\s+)?(?:bot|sen|em)?\s*(?:ngáo|ngao|ngu|dở|ngốc|ngoc|lag|chán|chan)\s*(?:thế|quá|vậy|ghe|ghê)?$/i.test(qLower);
+
+    if (isDirectTease) {
       await sendGroupText(
         api,
         threadId,
@@ -2241,27 +2246,17 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       return;
     }
 
-    // Tự động nhận diện câu hỏi xin link, tổng hợp link, tài liệu
-    if (
+    // Tự động nhận diện câu hỏi xin link, tổng hợp link chia sẻ trong nhóm (tránh bắt nhầm câu hỏi kiến thức về link)
+    const isLinkSummaryIntent =
       !hasImage &&
       !hasFile &&
       !hasQuote &&
-      (qLower.includes("tổng hợp link") ||
-        qLower.includes("tong hop link") ||
-        qLower.includes("danh sách link") ||
-        qLower.includes("danh sach link") ||
-        qLower.includes("các link") ||
-        qLower.includes("cac link") ||
-        qLower.includes("tìm link") ||
-        qLower.includes("tim link") ||
-        qLower.includes("link chia sẻ") ||
-        qLower.includes("link chia se") ||
-        qLower.includes("link bài viết") ||
-        qLower.includes("link tài liệu") ||
-        qLower.includes("link fb") ||
-        qLower.includes("link tiktok") ||
-        qLower.includes("link youtube"))
-    ) {
+      (qLower.startsWith("/link") ||
+        qLower.startsWith("!link") ||
+        /(?:tổng hợp|tong hop|danh sách|danh sach|xin|cho xin|lấy|lay)\s+(?:các\s+|cac\s+)?link\b/i.test(qLower) ||
+        /(?:link\s+(?:chia sẻ|chia se|bài viết|bai viet|tài liệu|tai lieu|fb|facebook|tiktok|youtube|drive|canva))\s+(?:đã|từng|trong nhóm|nhóm mình)?/i.test(qLower));
+
+    if (isLinkSummaryIntent) {
       let filterWord = "";
       if (qLower.includes("ai")) filterWord = "ai";
       else if (qLower.includes("tiktok") || qLower.includes("tik tok")) filterWord = "tiktok";
@@ -2277,28 +2272,20 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       return;
     }
 
-    // Tự động nhận diện câu hỏi về thành viên chưa từng chat, nằm vùng, tàu ngầm
-    if (
+    // Tự động nhận diện câu hỏi về thành viên chưa từng chat, nằm vùng, tàu ngầm trong nhóm (tránh bắt nhầm từ 'tàu ngầm', 'chưa chat')
+    const isInactiveMemberIntent =
       !hasImage &&
       !hasFile &&
       !hasQuote &&
-      (qLower.includes("chưa từng chat") ||
-        qLower.includes("chua tung chat") ||
-        qLower.includes("chưa chat") ||
-        qLower.includes("chua chat") ||
-        qLower.includes("chưa từng nhắn") ||
-        qLower.includes("chua tung nhan") ||
-        qLower.includes("chưa nhắn tin") ||
-        qLower.includes("chua nhan tin") ||
-        qLower.includes("nằm vùng") ||
-        qLower.includes("nam vung") ||
-        qLower.includes("tàu ngầm") ||
-        qLower.includes("tau ngam") ||
-        qLower.includes("ai chưa tương tác") ||
-        qLower.includes("ai chua tuong tac") ||
-        qLower.includes("ít tương tác nhất") ||
-        qLower.includes("lười chat"))
-    ) {
+      (qLower.startsWith("/taungam") ||
+        qLower.startsWith("!taungam") ||
+        qLower === "tàu ngầm" ||
+        qLower === "tau ngam" ||
+        qLower === "nằm vùng" ||
+        qLower === "nam vung" ||
+        /(?:danh sách|thống kê|kiểm tra|xem|ai|những ai|ai là)\s+(?:thành viên\s+)?(?:tàu ngầm|nằm vùng|chưa từng chat|chưa từng nhắn|chưa nhắn tin|chưa chat|ít tương tác|lười chat)/i.test(qLower));
+
+    if (isInactiveMemberIntent) {
       const reply =
         `🤖 Sen Chúa trả lời @${displayName}:\n\n` +
         handleInactiveCommand(threadId);
