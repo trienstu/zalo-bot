@@ -2386,6 +2386,57 @@ export function deletePermanentKnowledge(idOrTopic: string | number): boolean {
   }
 }
 
+/**
+ * Lưu trữ nội dung tài liệu gần nhất vừa được phân tích trong đoạn chat 1:1 của mỗi người dùng (lưu vào SQLite).
+ */
+export function saveRecentDirectDocument(userId: string, fileName: string, text: string): void {
+  try {
+    const db = getDb();
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS recent_direct_docs (
+        user_id TEXT PRIMARY KEY,
+        file_name TEXT NOT NULL,
+        content_text TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `).run();
+    db.prepare(`
+      INSERT INTO recent_direct_docs (user_id, file_name, content_text, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        file_name = excluded.file_name,
+        content_text = excluded.content_text,
+        updated_at = excluded.updated_at
+    `).run(userId, fileName, text, Date.now());
+  } catch (e) {
+    console.warn(`[db] saveRecentDirectDocument error: ${String(e)}`);
+  }
+}
+
+/**
+ * Truy xuất tài liệu gần nhất của người dùng trong đoạn chat 1:1.
+ */
+export function getRecentDirectDocument(userId: string): { fileName: string; text: string; updatedAt: number } | null {
+  try {
+    const db = getDb();
+    db.prepare(`
+      CREATE TABLE IF NOT EXISTS recent_direct_docs (
+        user_id TEXT PRIMARY KEY,
+        file_name TEXT NOT NULL,
+        content_text TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `).run();
+    const row = db
+      .prepare(`SELECT file_name as fileName, content_text as text, updated_at as updatedAt FROM recent_direct_docs WHERE user_id = ?`)
+      .get(userId) as any;
+    return row || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+
 export interface AdminUserInfo {
   zaloUserId: string;
   displayName: string;

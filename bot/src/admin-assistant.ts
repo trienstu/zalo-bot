@@ -8,6 +8,8 @@ import {
   searchPermanentKnowledge,
   listPermanentKnowledge,
   deletePermanentKnowledge,
+  saveRecentDirectDocument,
+  getRecentDirectDocument,
 } from "./db/index.js";
 import { sendDirectText, sendGroupText } from "./zalo/client.js";
 import { callGemini, downloadFileContent, type GeminiMediaPart } from "./gemini.js";
@@ -535,6 +537,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
           text: fullExtractedText,
           timestamp: Date.now(),
         });
+        saveRecentDirectDocument(sender, fileName || topicName, fullExtractedText);
       } else if (fileRes?.mediaPart) {
         mediaPart = fileRes.mediaPart;
         try {
@@ -551,6 +554,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
               text: fullExtractedText,
               timestamp: Date.now(),
             });
+            saveRecentDirectDocument(sender, fileName || topicName, fullExtractedText);
           }
         } catch (err) {
           console.warn(`[admin-assistant] Lỗi Gemini OCR:`, err);
@@ -560,21 +564,35 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
     // 💡 TỰ ĐỘNG KẾ THỪA: Nếu tải qua quote thất bại hoặc link Zalo hết hạn, nhưng Sếp vừa gửi tài liệu ở tin nhắn trước
     if (!fullExtractedText) {
+      // 1. Kiểm tra RAM cache
       const lastDoc = lastAnalyzedDocuments.get(sender);
-      if (lastDoc && Date.now() - lastDoc.timestamp < 15 * 60 * 1000 && lastDoc.text.length >= 50) {
-        console.log(`[admin-assistant] 💡 Kế thừa nội dung tài liệu vừa phân tích gần nhất: "${lastDoc.name}" (${lastDoc.text.length} ký tự)`);
+      if (lastDoc && Date.now() - lastDoc.timestamp < 30 * 60 * 1000 && lastDoc.text.length >= 50) {
+        console.log(`[admin-assistant] 💡 Kế thừa tài liệu từ RAM cache vừa phân tích: "${lastDoc.name}" (${lastDoc.text.length} ký tự)`);
         fullExtractedText = lastDoc.text;
         if (!fileName || fileName === "Tài liệu") {
           fileName = lastDoc.name;
+        }
+      } else {
+        // 2. Kiểm tra SQLite DB (bền vững ngay cả khi PM2 restart)
+        const recentDbDoc = getRecentDirectDocument(sender);
+        if (recentDbDoc && Date.now() - recentDbDoc.updatedAt < 2 * 3600 * 1000 && recentDbDoc.text.length >= 50) {
+          console.log(`[admin-assistant] 💡 Kế thừa tài liệu từ SQLite DB vừa phân tích: "${recentDbDoc.fileName}" (${recentDbDoc.text.length} ký tự)`);
+          fullExtractedText = recentDbDoc.text;
+          if (!fileName || fileName === "Tài liệu") {
+            fileName = recentDbDoc.fileName;
+          }
         }
       }
     }
 
     if (!fullExtractedText) {
-      // Chỉ lấy văn bản dán trực tiếp nếu người dùng gõ /hoc [chủ_đề] kèm nhiều dòng văn bản và không có file đính kèm
-      const remainingText = rawText.replace(/^\/(?:hoc|!hoc|learn|!learn)\s+[^\n]*\n?/i, "").trim();
-      if (!targetUrl && remainingText && remainingText.length > topicName.length + 10) {
-        fullExtractedText = remainingText;
+      // Chỉ chấp nhận văn bản dán trực tiếp nếu người dùng dán cả đoạn văn bản nhiều dòng (ít nhất 2 dòng và >= 100 ký tự)
+      const lines = rawText.split("\n").map((l) => l.trim()).filter(Boolean);
+      if (lines.length >= 2) {
+        const bodyLines = lines.slice(1).join("\n").trim();
+        if (bodyLines.length >= 100) {
+          fullExtractedText = bodyLines;
+        }
       }
     }
 
@@ -828,6 +846,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         text: fileTextContent,
         timestamp: Date.now(),
       });
+      saveRecentDirectDocument(sender, fileName || "Tài liệu", fileTextContent);
     }
   }
 
