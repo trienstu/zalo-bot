@@ -110,6 +110,97 @@ function getAllGroupsList(): { groupId: string; name: string; totalMembers: numb
 }
 
 /**
+ * Lấy lịch sử hoạt động và tin nhắn thực tế gần đây nhất của các nhóm từ cơ sở dữ liệu.
+ * Dùng để trả lời chính xác các câu hỏi của Admin về tình hình các nhóm, chống bịa đặt (Anti-Hallucination).
+ */
+export function getRecentGroupActivities(targetGroupQuery?: string): string {
+  try {
+    const db = getDb();
+    let groups = getAllGroupsList();
+
+    if (groups.length === 0) {
+      return "Hiện tại Bot chưa ghi nhận nhóm nào trong cơ sở dữ liệu.";
+    }
+
+    // Nếu Admin chỉ định đích danh 1 nhóm (VD: "nhóm DXS", "nhóm VIP")
+    if (targetGroupQuery) {
+      const matched = findGroup(targetGroupQuery);
+      if (matched) {
+        groups = [matched];
+      }
+    }
+
+    const sections: string[] = [];
+
+    for (const g of groups) {
+      let groupHeader = `=== NHÓM: ${g.name} (ID: ${g.groupId}, Chế độ: ${g.mode}) ===\n`;
+
+      // 1. Kiểm tra bản tóm tắt gần nhất (Hub / daily_summaries)
+      let summaryText = "";
+      try {
+        const summary = db
+          .prepare(
+            `SELECT day_label, summary_text 
+             FROM daily_summaries 
+             WHERE thread_id = ? 
+             ORDER BY day_date DESC 
+             LIMIT 1`
+          )
+          .get(g.groupId) as { day_label: string; summary_text: string } | undefined;
+
+        if (summary && summary.summary_text) {
+          const cleanSum = summary.summary_text.slice(0, 350).replace(/\s+/g, " ").trim();
+          summaryText = `[Bản tóm tắt gần nhất ngày ${summary.day_label || "trước"}]:\n${cleanSum}...\n\n`;
+        }
+      } catch (err) {
+        console.warn(`[admin-assistant] Lỗi đọc daily_summaries nhóm ${g.name}:`, err);
+      }
+
+      // 2. Lấy tối đa 15 tin nhắn thảo luận thực tế gần nhất trong group_messages
+      let messagesText = "";
+      try {
+        const msgs = db
+          .prepare(
+            `SELECT display_name, text, ts 
+             FROM group_messages 
+             WHERE thread_id = ? AND deleted_at IS NULL AND length(trim(text)) > 0
+             ORDER BY ts DESC 
+             LIMIT 15`
+          )
+          .all(g.groupId) as { display_name: string; text: string; ts: number }[];
+
+        if (msgs && msgs.length > 0) {
+          messagesText = `[Tin nhắn thực tế gần đây nhất (${msgs.length} tin mới nhất)]:\n`;
+          // Xếp lại theo thứ tự thời gian tăng dần để AI đọc hiểu đúng mạch câu chuyện
+          for (const m of [...msgs].reverse()) {
+            const timeStr = new Date(m.ts).toLocaleString("vi-VN", {
+              timeZone: "Asia/Ho_Chi_Minh",
+              hour: "2-digit",
+              minute: "2-digit",
+              day: "2-digit",
+              month: "2-digit",
+            });
+            messagesText += `- [${timeStr}] ${m.display_name || "Thành viên"}: ${m.text.trim()}\n`;
+          }
+        } else {
+          messagesText = `(Nhóm này hiện chưa có tin nhắn thảo luận nào gần đây trong cơ sở dữ liệu)\n`;
+        }
+      } catch (err) {
+        console.warn(`[admin-assistant] Lỗi đọc group_messages nhóm ${g.name}:`, err);
+        messagesText = `(Không thể đọc tin nhắn: ${String(err)})\n`;
+      }
+
+      sections.push(groupHeader + summaryText + messagesText);
+    }
+
+    return sections.join("\n----------------------------------------\n\n");
+  } catch (e) {
+    console.error(`[admin-assistant] getRecentGroupActivities error:`, e);
+    return "Lỗi khi truy xuất dữ liệu hoạt động nhóm từ cơ sở dữ liệu.";
+  }
+}
+
+/**
  * Trích xuất nội dung bài viết cốt lõi được AI soạn thảo gần nhất (loại bỏ lời chào dạo đầu của bot).
  */
 function cleanDraftedPost(text: string): string {
@@ -501,7 +592,9 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       `6. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng icon, viết hoa hoặc dấu gạch đầu dòng để làm nổi bật).\n` +
       `7. Thái độ phục vụ: Lễ phép, thông minh, gọi Admin là 'Sếp' hoặc '${displayName}', xưng 'em' hoặc 'Sen Chúa'.\n` +
       `8. ĐỘ DÀI & TỐC ĐỘ: Trả lời gãy gọn, đúng trọng tâm, súc tích (khoảng 300-600 ký tự). Tránh viết dài dòng lan man trừ khi được yêu cầu phân tích sâu.\n` +
-      `9. NGUYÊN TẮC TRUNG THỰC & CHỐNG BỊA ĐẶT (ANTI-HALLUCINATION): Nếu trong tài liệu, hình ảnh, trích dẫn hoặc dữ liệu không có thông tin chi tiết về điều Sếp hỏi, hãy thành thật trả lời là không có thông tin đó. Tuyệt đối cấm tự suy diễn hoặc bịa ra sự kiện, sản phẩm không có căn cứ.`
+      `9. NGUYÊN TẮC TRUNG THỰC & CHỐNG BỊA ĐẶT (ANTI-HALLUCINATION):\n` +
+      `   - Nếu trong tài liệu, hình ảnh, trích dẫn hoặc dữ liệu không có thông tin chi tiết về điều Sếp hỏi, hãy thành thật trả lời là không có thông tin đó. Tuyệt đối cấm tự suy diễn hoặc bịa ra sự kiện, sản phẩm không có căn cứ.\n` +
+      `   - KHI ADMIN YÊU CẦU KIỂM TRA / RÀ SOÁT / TÓM TẮT TÌNH HÌNH CÁC NHÓM: BẮT BUỘC chỉ được tổng hợp từ danh sách tin nhắn và tóm tắt thực tế được cung cấp trong mục [DỮ LIỆU HOẠT ĐỘNG THỰC TẾ TỪ CÁC NHÓM]. Nêu rõ tên nhóm và những ý chính CÓ THẬT. Nếu nhóm nào không có tin nhắn thảo luận mới, hãy báo trung thực là nhóm đó chưa có hoạt động mới. TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT chính sách, tài liệu hay sự kiện của nhóm!`
     : `Bạn là 'Sen Chúa' - Trợ lý AI thông minh, thân thiện, duyên dáng và hóm hỉnh của Zalo đang trò chuyện 1:1 với bạn ${displayName}.\n` +
       `NHIỆM VỤ CỦA BẠN:\n` +
       `1. Trò chuyện tự nhiên, vui vẻ, giải đáp mọi câu hỏi, tư vấn học tập, công việc, tâm sự, dịch thuật, phân tích hình ảnh/tài liệu khi được gửi tới.\n` +
@@ -544,14 +637,41 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     ? `\n8. TỔNG HỢP TIN TỨC THỜI GIAN THỰC: Câu hỏi này liên quan đến tin tức hoặc sự kiện thực tế. BẮT BUỘC ĐỌC KỸ và TRÍCH XUẤT CHÍNH XÁC các con số thống kê mới nhất (số người chết, mất tích, thiệt hại, ngày tháng, tên nguồn báo chí) từ danh sách các bản tin Google News bên dưới. TUYỆT ĐỐI KHÔNG tự phỏng đoán hoặc đưa các số liệu cũ từ quá khứ nếu đã có số liệu trong danh sách bản tin.\n`
     : "";
 
+  // 2.1. Nhận diện câu hỏi kiểm tra / rà soát / tóm tắt tình hình các nhóm Zalo (Chỉ dành cho Admin)
+  const isGroupQuery =
+    isAdmin &&
+    (/(?:check|kiểm tra|xem|tổng hợp|tóm tắt|báo cáo|tình hình|cập nhật|soát|ra soát|rà soát|nhắn gì|nói gì)\b.*?\b(?:nhóm|group|toàn bộ|tất cả)/i.test(rawText) ||
+      /(?:nhóm|group|các nhóm|toàn bộ nhóm)\b.*?\b(?:có gì|thế nào|sao rồi|nhắn gì|nói gì|biến gì|tin gì|hot gì|thông tin|hoạt động|quan trọng)/i.test(rawText) ||
+      /(?:toàn bộ|tất cả)\s+(?:các\s+)?(?:nhóm|group)/i.test(rawText) ||
+      /(?:trong|ở)\s+(?:các|các\s+nhóm|toàn bộ)\s+nhóm/i.test(rawText) ||
+      /(?:nhắc|tag|gọi|kêu|hỏi)\b.*?\b(?:anh|sếp|trien)/i.test(rawText));
+
+  let groupActivitiesSection = "";
+  if (isGroupQuery) {
+    let targetGroup: string | undefined = undefined;
+    const isAllGroups = /(?:toàn bộ|tất cả|mọi nhóm|các nhóm)/i.test(rawText);
+    if (!isAllGroups) {
+      const matchGroup = rawText.match(/(?:nhóm|group)\s+([^,?.!]+)/i);
+      if (matchGroup && matchGroup[1]) {
+        targetGroup = matchGroup[1].trim();
+      }
+    }
+    const activities = getRecentGroupActivities(targetGroup);
+    groupActivitiesSection = `\n=== DỮ LIỆU HOẠT ĐỘNG THỰC TẾ TỪ CÁC NHÓM (TRÍCH XUẤT TỪ DATABASE): ===\n${activities}\n`;
+  }
+
+  const groupInstruction = isGroupQuery
+    ? `\n9. BÁO CÁO HOẠT ĐỘNG CÁC NHÓM: BẮT BUỘC ĐỌC KỸ dữ liệu trích xuất từ database của các nhóm bên dưới. Chỉ tóm tắt những tin nhắn CÓ THẬT. Nếu nhóm nào không có tin nhắn mới, hãy báo trung thực là nhóm đó hiện chưa có tin nhắn thảo luận mới. TUYỆT ĐỐI KHÔNG TỰ BỊA ĐẶT!\n`
+    : "";
+
   const userPrompt =
     (historyText ? `LỊCH SỬ TRÒ CHUYỆN TRƯỚC ĐÓ:\n${historyText}\n\n` : "") +
-    `${quoteSection}${fileSection}${liveNewsSection}\n` +
+    `${quoteSection}${fileSection}${liveNewsSection}${groupActivitiesSection}\n` +
     `YÊU CẦU MỚI TỪ ${isAdmin ? `ADMIN (${displayName})` : `BẠN (${displayName})`}: ${rawText || "Hãy phân tích tài liệu/hình ảnh này giúp tôi."}\n\n` +
     (isAdmin ? `HÃY TRẢ LỜI SẾP THẬT CHUẨN XÁC, THÔNG MINH VÀ HỮU ÍCH:` : `HÃY TRẢ LỜI THẬT THÂN THIỆN, CHUẨN XÁC VÀ HỮU ÍCH:`);
 
   try {
-    const answer = await callGemini(systemPrompt + searchInstruction, userPrompt, {
+    const answer = await callGemini(systemPrompt + searchInstruction + groupInstruction, userPrompt, {
       mediaParts: mediaPart ? [mediaPart] : undefined,
       enableSearch: false, // Dùng kết quả Google News RSS đã nhúng trực tiếp, tránh lỗi 429 quota search grounding của Gemini Free
     });
