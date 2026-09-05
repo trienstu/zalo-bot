@@ -182,3 +182,30 @@ test("quote file: bóc tách chính xác file đính kèm trong tin nhắn reply
   assert.equal(fileAtt.size, 25000000);
 });
 
+test("quote file dạng 'File · Ten_File.pdf': bóc tách đúng tên file", () => {
+  const quotePayload = {
+    data: {
+      msgType: "chat.quote",
+      content: {
+        msg: "Học dự án Palm River này nha em",
+        quote: {
+          msg: "File · The Emerald River Park - Lê Phong.pdf",
+          href: "https://files-cdn.zalo.me/emerald.pdf",
+          fileSize: 15000000,
+        },
+      },
+    },
+  };
+
+  const quote = extractQuote(quotePayload);
+  assert.ok(quote);
+  assert.equal(quote.fileAttachment?.name, "The Emerald River Park - Lê Phong.pdf");
+  assert.equal(quote.fileAttachment?.extension, "pdf");
+
+  const fileAtt = extractFileAttachment(quotePayload);
+  assert.ok(fileAtt);
+  assert.equal(fileAtt.name, "The Emerald River Park - Lê Phong.pdf");
+  assert.equal(fileAtt.extension, "pdf");
+});
+
+

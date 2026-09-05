@@ -313,13 +313,17 @@ export function extractQuote(payload: any): QuotedMessage | null {
     ""
   ).trim();
 
-  if (!quoteFileName && text.startsWith("[File]")) {
-    quoteFileName = text.replace(/^\[File\]\s*/i, "").trim();
+  if (!quoteFileName) {
+    const candidate = text || String(quote.msg || quote.text || "");
+    const fileMatch = candidate.match(/^(?:\[File\]|File\s*[·:\-–—]?)\s*(.+)$/i);
+    if (fileMatch && fileMatch[1]) {
+      quoteFileName = fileMatch[1].trim();
+    }
   }
 
   const isFilePayload =
     rawType.includes("file") ||
-    text.startsWith("[File]") ||
+    /^(?:\[File\]|File\s*[·:\-–—]?)/i.test(text) ||
     Boolean(quoteFileName && /\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|rar)(?:\?|$)/i.test(quoteFileName));
 
   if (isFilePayload && mediaUrl) {
@@ -415,9 +419,12 @@ export function extractFileAttachment(payload: any): FileAttachment | null {
         ""
       ).trim();
 
-      const quoteMsg = String(quote.msg || quote.text || "").trim();
-      if (!quoteFileName && quoteMsg.startsWith("[File]")) {
-        quoteFileName = quoteMsg.replace(/^\[File\]\s*/i, "").trim();
+      if (!quoteFileName) {
+        const quoteMsg = String(quote.msg || quote.text || "").trim();
+        const fileMatch = quoteMsg.match(/^(?:\[File\]|File\s*[·:\-–—]?)\s*(.+)$/i);
+        if (fileMatch && fileMatch[1]) {
+          quoteFileName = fileMatch[1].trim();
+        }
       }
 
       if (quoteUrl) {

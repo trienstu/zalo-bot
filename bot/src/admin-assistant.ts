@@ -21,6 +21,9 @@ import { searchRealtimeNews } from "./realtime-search.js";
 const adminChatSessions = new Map<string, { role: "user" | "model"; text: string }[]>();
 const MAX_HISTORY_TURNS = 12;
 
+// Lưu tài liệu/ảnh gần nhất vừa được phân tích trong đoạn chat 1:1 của mỗi người dùng (để kế thừa khi ra lệnh học)
+const lastAnalyzedDocuments = new Map<string, { name: string; text: string; timestamp: number }>();
+
 function getAdminHistory(userId: string) {
   if (!adminChatSessions.has(userId)) {
     adminChatSessions.set(userId, []);
@@ -471,7 +474,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       event.quote?.fileAttachment?.url ||
       event.mediaUrl ||
       event.quote?.mediaUrl;
-    const fileName =
+    let fileName =
       event.fileAttachment?.name ||
       event.quote?.fileAttachment?.name ||
       "";
@@ -527,6 +530,11 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       const fileRes = await downloadFileContent(targetUrl, fileName);
       if (fileRes?.textContent) {
         fullExtractedText = fileRes.textContent;
+        lastAnalyzedDocuments.set(sender, {
+          name: fileName || topicName,
+          text: fullExtractedText,
+          timestamp: Date.now(),
+        });
       } else if (fileRes?.mediaPart) {
         mediaPart = fileRes.mediaPart;
         try {
@@ -537,8 +545,27 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
             mediaParts: [mediaPart],
             enableSearch: false,
           });
+          if (fullExtractedText) {
+            lastAnalyzedDocuments.set(sender, {
+              name: fileName || topicName,
+              text: fullExtractedText,
+              timestamp: Date.now(),
+            });
+          }
         } catch (err) {
           console.warn(`[admin-assistant] Lỗi Gemini OCR:`, err);
+        }
+      }
+    }
+
+    // 💡 TỰ ĐỘNG KẾ THỪA: Nếu tải qua quote thất bại hoặc link Zalo hết hạn, nhưng Sếp vừa gửi tài liệu ở tin nhắn trước
+    if (!fullExtractedText) {
+      const lastDoc = lastAnalyzedDocuments.get(sender);
+      if (lastDoc && Date.now() - lastDoc.timestamp < 15 * 60 * 1000 && lastDoc.text.length >= 50) {
+        console.log(`[admin-assistant] 💡 Kế thừa nội dung tài liệu vừa phân tích gần nhất: "${lastDoc.name}" (${lastDoc.text.length} ký tự)`);
+        fullExtractedText = lastDoc.text;
+        if (!fileName || fileName === "Tài liệu") {
+          fileName = lastDoc.name;
         }
       }
     }
@@ -779,16 +806,28 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   // Tải file hoặc hình ảnh nếu có
   let mediaPart: GeminiMediaPart | null = null;
   let fileTextContent: string | null = null;
-  const targetUrl = event.fileAttachment?.url || event.mediaUrl || event.quote?.mediaUrl;
-  const fileName = event.fileAttachment?.name || "";
+  const targetUrl =
+    event.fileAttachment?.url ||
+    event.quote?.fileAttachment?.url ||
+    event.mediaUrl ||
+    event.quote?.mediaUrl;
+  const fileName =
+    event.fileAttachment?.name ||
+    event.quote?.fileAttachment?.name ||
+    "";
 
   if (targetUrl) {
-    console.log(`[admin-assistant] 📥 Đang tải tài liệu 1:1 từ: ${targetUrl.slice(0, 80)}...`);
+    console.log(`[admin-assistant] 📥 Đang tải tài liệu 1:1 từ: ${targetUrl.slice(0, 80)} (${fileName})...`);
     const fileRes = await downloadFileContent(targetUrl, fileName);
     if (fileRes?.mediaPart) {
       mediaPart = fileRes.mediaPart;
     } else if (fileRes?.textContent) {
       fileTextContent = fileRes.textContent;
+      lastAnalyzedDocuments.set(sender, {
+        name: fileName || "Tài liệu",
+        text: fileTextContent,
+        timestamp: Date.now(),
+      });
     }
   }
 
