@@ -2329,22 +2329,67 @@ export function updatePermanentKnowledgeContent(id: number, contentText: string,
 }
 
 /**
- * Tra cứu kho tri thức vĩnh viễn theo câu hỏi / từ khóa / chủ đề.
+ * Tra cứu kho tri thức vĩnh viễn theo câu hỏi / từ khóa / chủ đề, hỗ trợ thêm ngữ cảnh bổ trợ (như tin trích dẫn / quote).
  */
-export function searchPermanentKnowledge(query: string, scope = "all", limit = 3): PermanentKnowledgeItem[] {
+export function searchPermanentKnowledge(
+  query: string,
+  scope = "all",
+  limit = 3,
+  extraContext = "",
+): PermanentKnowledgeItem[] {
   try {
     const db = getDb();
     ensurePermanentKnowledgeTable(db);
 
-    const rawQ = (query || "").trim().toLowerCase();
-    if (!rawQ) return [];
+    const fullText = `${query || ""} ${extraContext || ""}`.trim().toLowerCase();
+    if (!fullText) return [];
+
+    // 1. Kiểm tra ưu tiên: Nếu trong query hoặc extraContext có nhắc trực tiếp đến tên topic cụ thể trong kho tri thức
+    const scopeTopicFilter = scope === "all" ? "1=1" : "(scope = 'all' OR scope = ?)";
+    const topicParams = scope === "all" ? [] : [scope];
+    const allTopics = db
+      .prepare(`SELECT DISTINCT topic FROM permanent_knowledge WHERE (${scopeTopicFilter})`)
+      .all(...topicParams) as { topic: string }[];
+
+    for (const t of allTopics) {
+      if (t.topic && t.topic.length >= 2 && fullText.includes(t.topic.toLowerCase())) {
+        // Tìm thấy topic đích danh (ví dụ "palm river" hay tên dự án cụ thể)
+        const matchedTopic = db
+          .prepare(
+            `SELECT id, topic, title, content_text as contentText, summary, keywords, scope,
+                    source_url as sourceUrl, source_type as sourceType, last_synced_at as lastSyncedAt,
+                    created_by as createdBy, created_at as createdAt, updated_at as updatedAt
+             FROM permanent_knowledge
+             WHERE LOWER(topic) = LOWER(?) AND (${scopeTopicFilter})
+             ORDER BY updated_at DESC
+             LIMIT 1`,
+          )
+          .get(...(scope === "all" ? [t.topic] : [t.topic, scope])) as PermanentKnowledgeItem | undefined;
+
+        if (matchedTopic) {
+          const otherItems = db
+            .prepare(
+              `SELECT id, topic, title, content_text as contentText, summary, keywords, scope,
+                      source_url as sourceUrl, source_type as sourceType, last_synced_at as lastSyncedAt,
+                      created_by as createdBy, created_at as createdAt, updated_at as updatedAt
+               FROM permanent_knowledge
+               WHERE id != ? AND (${scopeTopicFilter})
+               ORDER BY updated_at DESC
+               LIMIT ?`,
+            )
+            .all(...(scope === "all" ? [matchedTopic.id, limit - 1] : [matchedTopic.id, scope, limit - 1])) as PermanentKnowledgeItem[];
+
+          return [matchedTopic, ...otherItems];
+        }
+      }
+    }
 
     const stopWords = new Set([
       "hỏi", "về", "gì", "cho", "xin", "file", "tài", "liệu", "ảnh", "hình", "xem", "đọc",
       "sen", "chúa", "bot", "giúp", "với", "các", "những", "cái", "anh", "em", "ơi", "nhé", "nha"
     ]);
 
-    const words = rawQ
+    const words = fullText
       .replace(/[?,.!/\\:;]/g, " ")
       .split(/\s+/)
       .filter((w) => w.length >= 2 && !stopWords.has(w));

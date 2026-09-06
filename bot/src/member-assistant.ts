@@ -27,7 +27,7 @@ import { getWeatherReport } from "./weather.js";
 import { getDailyAiNewsBriefing } from "./ai-news.js";
 import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam } from "./reminder.js";
 import { searchRealtimeNews } from "./realtime-search.js";
-import { refreshDynamicKnowledgeIfExpired } from "./google-sync.js";
+import { refreshDynamicKnowledgeIfExpired, fetchGoogleContent, parseGoogleUrl } from "./google-sync.js";
 
 export interface MemberMessageEvent {
   threadId: string;
@@ -816,6 +816,9 @@ async function handleHistoryQA(
     imageUrl?: string;
     fileAttachment?: MemberMessageEvent["fileAttachment"];
     quote?: MemberMessageEvent["quote"];
+    strictDocMode?: boolean;
+    directDocTitle?: string;
+    directDocContent?: string;
   },
 ): Promise<string> {
   const db = getDb();
@@ -868,25 +871,25 @@ async function handleHistoryQA(
 
     let customPromptSection = "";
     if (groupSettings.customPrompt?.trim()) {
-      customPromptSection = `\n=== CHỈ THỊ RIÊNG CỦA ADMIN: ===\n${groupSettings.customPrompt.trim()}\n`;
-    }
-
-    let quoteTextSection = "";
-    if (options?.quote?.text) {
-      quoteTextSection = `\n=== NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): ===\n"${options.quote.text}"\n`;
+      customPromptSection = `\n=== CHỈ THỊ RIÊNG CỦA ADMIN (BẮT BUỘC TUÂN THỦ 100%): ===\n${groupSettings.customPrompt.trim()}\n`;
     }
 
     let fileContentSnippet = "";
     if (fileTextContent) {
-      fileContentSnippet = `\n=== NỘI DUNG TÀI LIỆU (${fileName || "File"}): ===\n${fileTextContent.slice(0, 40000)}\n`;
+      fileContentSnippet = `\n=== TOÀN BỘ NỘI DUNG TÀI LIỆU (${fileName || "File đính kèm"}): ===\n${fileTextContent.slice(0, 40000)}\n`;
+    }
+
+    let quoteTextSection = "";
+    if (options?.quote?.text) {
+      quoteTextSection = `\n=== NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE TỪ ${options.quote.senderName || "THÀNH VIÊN"}): ===\n"${options.quote.text}"\n`;
     }
 
     const fastSystemPrompt =
       `${personaIntro}\n${customPromptSection}\n` +
-      `NHIỆM VỤ QUAN TRỌNG NHẤT:\n` +
-      `1. Thành viên đang gửi trực tiếp một HÌNH ẢNH / TÀI LIỆU để nhờ bạn phân tích.\n` +
-      `2. BẠN BẮT BUỘC PHẢI QUAN SÁT KỸ VÀ PHÂN TÍCH TRỰC TIẾP HÌNH ẢNH / TÀI LIỆU ĐÍNH KÈM NÀY (đọc từng chi tiết, giao diện, bảng biểu, số liệu, tính năng trong ảnh).\n` +
-      `3. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng viết hoa, gạch đầu dòng hoặc icon).\n` +
+      `NHIỆM VỤ:\n` +
+      `1. Bạn vừa nhận được một hình ảnh hoặc tài liệu văn bản đính kèm từ thành viên.\n` +
+      `2. ĐỌC KỸ TOÀN BỘ NỘI DUNG trong hình ảnh / tài liệu đính kèm.\n` +
+      `3. Trả lời trực tiếp, đầy đủ, rõ ràng và chuẩn xác theo đúng câu hỏi/yêu cầu của thành viên.\n` +
       `4. NGUYÊN TẮC TRUNG THỰC - TUYỆT ĐỐI KHÔNG BỊA ĐẶT: Nếu trong hình ảnh/tài liệu không có thông tin chi tiết về điều thành viên hỏi, BẮT BUỘC phải nói rõ là trong ảnh/tài liệu không có chi tiết này. TUYỆT ĐỐI KHÔNG tự suy đoán, bịa đặt sự kiện, sản phẩm, con số hay câu chuyện không có thật.\n` +
       `5. Trả lời chuẩn theo phong cách của bạn (hóm hỉnh, chuyên nghiệp, thông minh).`;
 
@@ -929,6 +932,34 @@ async function handleHistoryQA(
     const groupSettings = getGroupSettings(threadId);
     const botName = groupSettings.botName || "Sen Chúa";
 
+    // 1. Tra cứu tri thức dự án / văn bản chính thức (kết hợp câu hỏi + nội dung quote để bắt đúng dự án/chủ đề)
+    let quotePermanentKnowledge: PermanentKnowledgeItem[] = [];
+    try {
+      quotePermanentKnowledge = searchPermanentKnowledge(question, threadId, 2, options.quote.text);
+      for (const pk of quotePermanentKnowledge) {
+        if (pk.sourceType === "google_sheet" || pk.sourceType === "google_doc") {
+          await refreshDynamicKnowledgeIfExpired(pk);
+        }
+      }
+    } catch (e) {
+      console.warn("[member-assistant] Quote QA searchPermanentKnowledge error:", e);
+    }
+
+    let quoteDocSection = "";
+    let docTopicName = "";
+    if (options?.directDocContent) {
+      docTopicName = options.directDocTitle || "Tài liệu Google Doc/Sheet";
+      quoteDocSection = `\n=== TÀI LIỆU CHÍNH THỨC (${docTopicName.toUpperCase()}): ===\n${options.directDocContent.slice(0, 35000)}\n\n`;
+    } else if (quotePermanentKnowledge.length > 0) {
+      docTopicName = quotePermanentKnowledge[0]?.topic || "Dự án";
+      quoteDocSection = "\n=== TÀI LIỆU & CHÍNH SÁCH CHÍNH THỨC CỦA DỰ ÁN (BẮT BUỘC TRÍCH DẪN TỪ ĐÂY): ===\n";
+      for (const pk of quotePermanentKnowledge) {
+        quoteDocSection += `[Chủ đề: ${pk.topic.toUpperCase()} - Nguồn: ${pk.title}]:\n${(pk.contentText || "").slice(0, 30000)}\n\n`;
+      }
+    } else if (options?.strictDocMode) {
+      return `⚠️ Em không tìm thấy tài liệu nào khớp với yêu cầu của bạn trong kho dữ liệu!\n\n👉 Để tra cứu chuẩn xác 100% không bịa đặt, bạn vui lòng:\n1. Gửi kèm link Google Doc/Sheet: /doc [link] [câu hỏi]\n2. Hoặc nhờ Admin nạp tài liệu vào kho bằng lệnh: /doc [tên_dự_án] [link] nhé!`;
+    }
+
     let personaIntro = "";
     switch (groupSettings.persona) {
       case "professional":
@@ -957,12 +988,17 @@ async function handleHistoryQA(
     const quoteSystemPrompt =
       `${personaIntro}\n${customPromptSection}\n` +
       `NHIỆM VỤ:\n` +
-      `1. Thành viên đang trích dẫn (quote) một tin nhắn hoặc nội dung phân tích trước đó và đặt câu hỏi tiếp theo.\n` +
-      `2. Nhận diện CHỦ THỂ / SẢN PHẨM / THIẾT BỊ / VẤN ĐỀ được nhắc đến trong nội dung trích dẫn (ví dụ: tên thiết bị, đồng hồ, điện thoại, mô hình AI, công nghệ, con người, sự việc...).\n` +
-      `3. HỎI TIẾP & TƯ VẤN CHUYÊN SÂU: Nếu thành viên hỏi tiếp về sản phẩm hoặc chủ thể đó (như giá bán tham khảo, nơi mua sắm, cách sử dụng, đánh giá ưu nhược điểm, so sánh, thông số kỹ thuật, cách sửa chữa/kết nối...): Hãy VẬN DỤNG KIẾN THỨC CHUYÊN MÔN CỦA BẠN và thông tin tra cứu bổ trợ để tư vấn và giải đáp thật chi tiết, nhiệt tình, thực tế và hữu ích cho thành viên! TUYỆT ĐỐI KHÔNG trả lời máy móc rằng "trong trích dẫn không có nên em không biết".\n` +
-      `4. NGUYÊN TẮC TRUNG THỰC: Nếu câu hỏi yêu cầu một con số bí mật nội bộ, hoặc nội dung trích dẫn quá mơ hồ không có bất kỳ chủ thể nào để suy luận: Hãy thông báo khéo léo và hỏi thêm thông tin thay vì từ chối cụt ngủn.\n` +
-      `5. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng viết hoa, gạch đầu dòng hoặc icon).\n` +
-      `6. Trả lời súc tích, duyên dáng, chuẩn xác và hữu ích.`;
+      `1. Thành viên đang trích dẫn (quote) một tin nhắn hoặc nội dung thảo luận trước đó và đặt câu hỏi tiếp theo.\n` +
+      `2. Nhận diện CHỦ THỂ / DỰ ÁN / VẤN ĐỀ được nhắc đến trong nội dung trích dẫn.\n` +
+      `3. NGUYÊN TẮC CHỐNG BỊA ĐẶT TUYỆT ĐỐI (ZERO-HALLUCINATION FACT GROUNDING):\n` +
+      `   - Khi câu hỏi liên quan đến DỰ ÁN, PHƯƠNG THỨC THANH TOÁN, TIẾN ĐỘ, CHÍNH SÁCH BÁN HÀNG, CHIẾT KHẤU, BẢNG GIÁ, SỐ LIỆU TÀI CHÍNH:\n` +
+      `     + BẮT BUỘC 100% các con số, tỷ lệ %, số đợt, số tháng, điều kiện ưu đãi PHẢI LẤY NGUYÊN BẢN từ tài liệu chính thức được cung cấp ở trên.\n` +
+      `     + TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT các chính sách không có trong tài liệu (như cam kết thuê lại 6-8%, quà tặng vàng/nội thất, miễn phí quản lý, tiến độ 1-1.5%/tháng nếu tài liệu không đề cập).\n` +
+      `     + NẾU TRONG TÀI LIỆU KHÔNG CÓ THÔNG TIN về điều thành viên hỏi (ví dụ tài liệu thiếu phương án, hoặc không có số liệu cụ thể): BẮT BUỘC PHẢI THẲNG THẮN TRẢ LỜI: "Trong tài liệu [Tên tài liệu] hiện tại không có thông tin về [nội dung hỏi]. Sen Chúa không tự suy diễn hoặc bịa số liệu." TUYỆT ĐỐI KHÔNG ĐƯỢC TỰ ĐOÁN MÒ!\n` +
+      `     + BẮT BUỘC LIỆT KÊ ĐỦ: Nếu tài liệu có nhiều phương án (ví dụ 4 phương án), phải trình bày đầy đủ, không được tự ý bỏ sót bất kỳ phương án nào.\n` +
+      `   - Đối với các câu hỏi kỹ thuật công nghệ phổ quát hoặc thao tác sử dụng chung ngoài dự án: Có thể giải thích chi tiết, hữu ích.\n` +
+      `4. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng viết hoa, gạch đầu dòng hoặc icon).\n` +
+      `5. Trả lời chuẩn xác, minh bạch, trung thực và súc tích.`;
 
     let quoteLiveNews = "";
     const needsExternalSearch =
@@ -995,15 +1031,20 @@ async function handleHistoryQA(
     const quoteUserPrompt =
       `=== NỘI DUNG ĐƯỢC TRÍCH DẪN (TỪ ${options.quote.senderName || "THÀNH VIÊN"}): ===\n` +
       `"${options.quote.text}"\n` +
-      `${quoteLiveNewsSection}\n` +
+      `${quoteDocSection}${quoteLiveNewsSection}\n` +
       `YÊU CẦU / CÂU HỎI TỪ ${displayName}: ${question || "Hãy giải thích ngắn gọn nội dung này giúp tôi."}\n\n` +
       `HÃY TRẢ LỜI NGAY:`;
 
     try {
-      const answer = await callGemini(quoteSystemPrompt, quoteUserPrompt, {
+      let answer = await callGemini(quoteSystemPrompt, quoteUserPrompt, {
         mediaParts: mediaPart ? [mediaPart] : undefined,
         enableSearch: false,
       });
+      if ((options?.strictDocMode || quotePermanentKnowledge.length > 0 || options?.directDocContent) && docTopicName) {
+        if (!answer.startsWith("📑")) {
+          answer = `📑 [TRA CỨU CHUẨN XÁC TỪ TÀI LIỆU: ${docTopicName.toUpperCase()}]\n\n${answer}`;
+        }
+      }
       return answer;
     } catch (e) {
       console.warn("[member-assistant] Fast-path Quote QA error:", e);
@@ -1205,10 +1246,10 @@ async function handleHistoryQA(
     }
   }
 
-  // C2. Tài liệu & chính sách chính thức từ Kho tri thức vĩnh viễn (do Admin nạp)
+  // C2. Tài liệu & chính sách chính thức từ Kho tri thức vĩnh viễn (do Admin nạp) hoặc nạp trực tiếp qua Google link
   let permanentKnowledgeItems: PermanentKnowledgeItem[] = [];
   try {
-    permanentKnowledgeItems = searchPermanentKnowledge(question, threadId, 2);
+    permanentKnowledgeItems = searchPermanentKnowledge(question, threadId, 2, options?.quote?.text || "");
     // Nếu có tài liệu động (Google Sheet / Google Doc), tự động làm mới thời gian thực nếu cache quá 60s
     for (const pk of permanentKnowledgeItems) {
       if (pk.sourceType === "google_sheet" || pk.sourceType === "google_doc") {
@@ -1219,7 +1260,15 @@ async function handleHistoryQA(
     console.warn("[handleHistoryQA] Lỗi searchPermanentKnowledge:", e);
   }
 
-  if (permanentKnowledgeItems && permanentKnowledgeItems.length > 0) {
+  let docTopicHeader = "";
+  if (options?.directDocContent) {
+    docTopicHeader = options.directDocTitle || "Tài liệu Google Doc/Sheet";
+    contextLines.push(
+      `=== TÀI LIỆU CHÍNH THỨC TRÍCH XUẤT TRỰC TIẾP TỪ LINK GOOGLE (${docTopicHeader.toUpperCase()}): ===\n${options.directDocContent.slice(0, 35000)}\n\n` +
+      `CHỈ DẪN BẮT BUỘC: Đây là tài liệu gốc được cung cấp trực tiếp. BẮT BUỘC TRÍCH XUẤT 100% TỪ TÀI LIỆU NÀY, TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT!`
+    );
+  } else if (permanentKnowledgeItems && permanentKnowledgeItems.length > 0) {
+    docTopicHeader = permanentKnowledgeItems[0]?.topic || "KHO TRI THỨC VĨNH VIỄN";
     contextLines.push("=== TÀI LIỆU & CHÍNH SÁCH CHÍNH THỨC TỪ KHO TRI THỨC VĨNH VIỄN (DO ADMIN NẠP) ===");
     for (const pk of permanentKnowledgeItems) {
       const typeLabel =
@@ -1235,8 +1284,10 @@ async function handleHistoryQA(
       );
     }
     contextLines.push(
-      "CHỈ DẪN QUAN TRỌNG VỀ TÀI LIỆU KHO TRI THỨC: Câu hỏi của thành viên liên quan đến tài liệu/chính sách chính thức do Admin nạp ở trên. Bạn BẮT BUỘC phải ưu tiên trích dẫn chính xác số liệu, chính sách chiết khấu, giá cả, quy trình từ tài liệu này để giải đáp cho thành viên!",
+      "CHỈ DẪN QUAN TRỌNG VỀ TÀI LIỆU KHO TRI THỨC: Câu hỏi của thành viên liên quan đến tài liệu/chính sách chính thức do Admin nạp ở trên. Bạn BẮT BUỘC phải trích dẫn chính xác 100% số liệu, chính sách chiết khấu, giá cả, các đợt thanh toán từ tài liệu này để giải đáp cho thành viên! TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT!",
     );
+  } else if (options?.strictDocMode) {
+    return `⚠️ Em không tìm thấy tài liệu nào khớp với yêu cầu của bạn trong kho tri thức!\n\n👉 Để tra cứu chuẩn xác 100% không bịa đặt, bạn vui lòng:\n1. Gửi kèm link Google Doc/Sheet: /doc [link] [câu hỏi]\n2. Hoặc nhờ Admin nạp tài liệu vào kho bằng lệnh: /doc [tên_dự_án] [link] nhé!`;
   }
 
   if (topMembers && topMembers.length > 0) {
@@ -1385,8 +1436,14 @@ async function handleHistoryQA(
     `7. ĐẶC BIỆT KHI THÀNH VIÊN HỎI VỀ QUY TRÌNH, HƯỚNG DẪN, CÁCH LÀM HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Bạn BẮT BUỘC phải TRÍCH DẪN VÀ DIỄN GIẢI CHI TIẾT TỪNG BƯỚC (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến mà các thành viên đã từng chia sẻ trong lịch sử chat của nhóm này. TUYỆT ĐỐI KHÔNG ĐƯỢC chỉ đưa mỗi link tải tài liệu; phải giải thích cặn kẽ nội dung quy trình để người hỏi áp dụng được ngay, link tài liệu chỉ là phần đính kèm ở cuối để tham khảo thêm.\n` +
     `8. ĐỘ DÀI & TỐC ĐỘ PHẢN HỒI: Với các câu chào hỏi, giao lưu, tấu hài hoặc thắc mắc thường ngày, BẮT BUỘC trả lời súc tích, duyên dáng, ngắn gọn trong 2-3 đoạn (khoảng 300-500 ký tự) để đọc nhanh trên Zalo điện thoại. Không viết dài dòng lê thê trừ khi thành viên yêu cầu giải thích quy trình hoặc phân tích sâu.\n` +
     `9. CÔ LẬP TUYỆT ĐỐI THEO NHÓM (KHÔNG NHẮC TÊN NGƯỜI TỪ NHÓM KHÁC): Bạn đang hoạt động trong nhóm này. TUYỆT ĐỐI CHỈ tương tác hoặc nhắc tên những thành viên CÓ MẶT trong nhóm này (được xuất hiện trong dữ liệu chat/thành viên ở trên hoặc người đang hỏi là ${displayName}). TUYỆT ĐỐI KHÔNG nhắc tên bất kỳ người lạ nào từ nhóm khác, KHÔNG tự bịa ra tên người nếu trong lịch sử chat nhóm này không có.\n` +
-    `10. NGUYÊN TẮC TRUNG THỰC & CHỐNG ẢO TƯỞNG (ANTI-HALLUCINATION): Khi người dùng hỏi về một sự việc, sản phẩm, con người hoặc chi tiết cụ thể mà trong dữ liệu được cung cấp (ảnh, file, quote, lịch sử chat nhóm, kho tri thức, hoặc tin tức thời gian thực) KHÔNG CÓ THÔNG TIN VÀ CŨNG KHÔNG PHẢI TRI THỨC THỰC TẾ: BẮT BUỘC PHẢI THẲNG THẮN TRẢ LỜI LÀ BẠN KHÔNG CÓ DỮ LIỆU ĐÓ. Tuy nhiên, nếu câu hỏi hỏi về giá cả thị trường tham khảo, kiến thức công nghệ, hướng dẫn sử dụng hoặc thông tin phổ quát về sản phẩm/chủ thể được nhắc tới, bạn HÃY TẬN TỤY TƯ VẤN THỰC TẾ cho thành viên thay vì từ chối máy móc.\n` +
-    `11. TÀI LIỆU CHÍNH THỨC TỪ KHO TRI THỨC VĨNH VIỄN (DO ADMIN NẠP): Nếu trong dữ liệu có mục [TÀI LIỆU & CHÍNH SÁCH CHÍNH THỨC TỪ KHO TRI THỨC VĨNH VIỄN], bạn BẮT BUỘC phải ưu tiên trích dẫn chính xác các số liệu, chính sách, chiết khấu, quy định từ tài liệu này để giải đáp cho thành viên!` +
+    `10. NGUYÊN TẮC TRUNG THỰC & CHỐNG BỊA ĐẶT TUYỆT ĐỐI (ZERO-HALLUCINATION FACT GROUNDING):\n` +
+    `    - Khi người dùng hỏi về DỰ ÁN, CHÍNH SÁCH BÁN HÀNG, PHƯƠNG THỨC THANH TOÁN, TIẾN ĐỘ, BẢNG GIÁ, CHIẾT KHẤU HOẶC TÀI LIỆU ĐƯỢC CUNG CẤP:\n` +
+    `      + BẮT BUỘC 100% thông tin, con số, tỷ lệ %, số đợt đóng tiền, số tháng, điều kiện ưu đãi PHẢI LẤY NGUYÊN BẢN từ tài liệu/dữ liệu được cung cấp.\n` +
+    `      + TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT các chính sách không có trong tài liệu (như cam kết thuê lại 6-8%, quà tặng vàng/nội thất, miễn phí quản lý, tiến độ 1-1.5%/tháng nếu tài liệu không đề cập).\n` +
+    `      + NẾU TRONG TÀI LIỆU KHÔNG CÓ THÔNG TIN về điều thành viên hỏi (ví dụ tài liệu thiếu phương án, hoặc không có số liệu cụ thể): BẮT BUỘC PHẢI TRẢ LỜI THẲNG THẮN: "Trong tài liệu chính thức hiện tại không có thông tin về [nội dung hỏi]. Sen Chúa không tự suy diễn hoặc bịa số liệu." TUYỆT ĐỐI KHÔNG ĐƯỢC TỰ ĐOÁN MÒ!\n` +
+    `      + BẮT BUỘC LIỆT KÊ ĐỦ: Nếu tài liệu có nhiều phương án (ví dụ có 4 phương thức thanh toán), BẮT BUỘC phải trình bày đầy đủ cả 4 phương án, tuyệt đối không được tự ý bỏ sót bất kỳ phương án nào.\n` +
+    `    - Chỉ đối với các câu hỏi về kiến thức công nghệ phổ quát hoặc kỹ năng chung ngoài dự án: Bạn mới giải thích theo kiến thức thực tế.\n` +
+    `11. TÀI LIỆU CHÍNH THỨC TỪ KHO TRI THỨC VĨNH VIỄN HOẶC LINK GOOGLE: Có độ ưu tiên cao nhất về tính chính xác. Bạn BẮT BUỘC phải trích xuất chính xác từng con số, từng đợt thanh toán từ tài liệu này để giải đáp cho thành viên!` +
     searchInstruction;
 
   const userPrompt =
@@ -1397,7 +1454,7 @@ async function handleHistoryQA(
     `HÃY TRẢ LỜI THẬT DUYÊN DÁNG, CHUẨN XÁC VÀ HÓM HỈNH:`;
 
   try {
-    const answer = await callGemini(systemPrompt, userPrompt, {
+    let answer = await callGemini(systemPrompt, userPrompt, {
       mediaParts: mediaPart ? [mediaPart] : undefined,
       enableSearch: false, // Dùng Google News RSS đã nhúng trực tiếp, tránh lỗi 429 quota search grounding của Gemini Free
     });
@@ -1415,6 +1472,12 @@ async function handleHistoryQA(
         senderName: displayName,
         createdAt: Date.now(),
       });
+    }
+
+    if ((options?.strictDocMode || permanentKnowledgeItems.length > 0 || options?.directDocContent) && docTopicHeader) {
+      if (!answer.startsWith("📑")) {
+        answer = `📑 [TRA CỨU CHUẨN XÁC TỪ TÀI LIỆU: ${docTopicHeader.toUpperCase()}]\n\n${answer}`;
+      }
     }
 
     return answer;
@@ -2104,7 +2167,21 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     lower.startsWith("bot ") ||
     lower.startsWith("sen ");
 
+  const isDocCommand =
+    lower.startsWith("/doc") ||
+    lower.startsWith("!doc") ||
+    lower.startsWith("/docs") ||
+    lower.startsWith("!docs") ||
+    lower.startsWith("/tailieu") ||
+    lower.startsWith("!tailieu") ||
+    lower.startsWith("/strict") ||
+    lower.startsWith("!strict") ||
+    lower.startsWith("/doc-strict");
+
+  const hasGoogleDocUrl = /https?:\/\/docs\.google\.com\/(?:spreadsheets|document)\/d\/[a-zA-Z0-9-_]+/i.test(rawText);
+
   const isCommand =
+    isDocCommand ||
     lower.startsWith("/hoi") ||
     lower.startsWith("!hoi") ||
     lower.startsWith("/dich") ||
@@ -2115,22 +2192,30 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     lower.startsWith("/file") ||
     lower.startsWith("/anh");
 
-  const isTagBot = isCommand || mentionsBot;
+  const isTagBot =
+    isCommand ||
+    mentionsBot ||
+    (hasGoogleDocUrl &&
+      (lower.includes("bot") ||
+        lower.includes("sen") ||
+        lower.includes("check") ||
+        lower.includes("hỏi") ||
+        lower.includes("xem") ||
+        lower.includes("đọc") ||
+        lower.includes("tính")));
 
   if (isTagBot) {
     userCooldowns.set(sender, now);
 
+    let isStrictDocQuery =
+      isDocCommand ||
+      hasGoogleDocUrl ||
+      /\b(?:theo doc|theo tài liệu|tra trong doc|tra trong tài liệu|tra cứu doc|trong doc có|trong tài liệu có|check doc|đối chiếu doc)\b/i.test(rawText);
+
     // Làm sạch câu hỏi
     let question = rawText
-      .replace(/^\/hoi\s*/i, "")
-      .replace(/^!hoi\s*/i, "")
-      .replace(/^\/dich\s*/i, "")
-      .replace(/^!dich\s*/i, "")
-      .replace(/^\/docanh\s*/i, "")
-      .replace(/^!docanh\s*/i, "")
-      .replace(/^\/docfile\s*/i, "")
-      .replace(/^\/file\s*/i, "")
-      .replace(/^\/anh\s*/i, "")
+      .replace(/^\/(?:doc-strict|doc|docs|tailieu|strict|hoi|dich|docanh|docfile|file|anh)\s*/i, "")
+      .replace(/^!(?:doc-strict|doc|docs|tailieu|strict|hoi|dich|docanh|docfile|file|anh)\s*/i, "")
       .replace(/@(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot)\b/gi, "")
       .replace(/(?:sen chúa|sen chua|mộc miên|moc mien|kevin)\s*(?:ơi|oi)?,?\s*/gi, "")
       .replace(/@bot\b/gi, "")
@@ -2138,6 +2223,56 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       .replace(/^(?:bot|sen|admin)\s*(?:ơi|oi)?,?\s*/i, "")
       .replace(/^(?:chào|chao|alo|hi|hello)\s+(?:bot|sen|em)?,?\s*/i, "")
       .trim();
+
+    // Loại bỏ tiền tố /doc hoặc doc: còn sót sau khi gọi bot (ví dụ: "sen chúa /doc phương án...")
+    question = question.replace(/^\/?(?:doc-strict|doc|docs|tailieu|strict)[:\s]*/i, "").trim();
+
+    // Hướng dẫn cú pháp nếu người dùng chỉ gõ /doc mà không có câu hỏi
+    if (isDocCommand && !question && !hasGoogleDocUrl && !hasImage && !hasFile && !hasQuote) {
+      await sendGroupText(
+        api,
+        threadId,
+        `🤖 Sen Chúa hướng dẫn tra cứu tài liệu cho @${displayName}:\n\n` +
+        `👉 CÚ PHÁP TRA CỨU TÀI LIỆU CHUẨN XÁC 100% (STRICT DOC):\n` +
+        `1. Tra cứu theo dự án đã có trong kho:\n` +
+        `   /doc [tên_dự_án] [câu hỏi]\n` +
+        `   VD: /doc Palm River: kiểm tra lại toàn bộ phương thức thanh toán\n\n` +
+        `2. Tra cứu trực tiếp theo link Google Doc / Google Sheet:\n` +
+        `   /doc [link] [câu hỏi]\n` +
+        `   VD: /doc https://docs.google.com/document/d/... phương án đặc biệt thế nào?\n\n` +
+        `💡 Khi dùng lệnh /doc, Sen Chúa BẮT BUỘC trích xuất 100% từ tài liệu, tuyệt đối không bao giờ tự bịa đặt hay suy diễn ngoài văn bản!`,
+      );
+      return;
+    }
+
+    // Tự động tải nội dung trực tiếp nếu có link Google Doc / Google Sheet
+    let directDocTitle = "";
+    let directDocContent = "";
+
+    const combinedDocText = `${rawText} ${event.quote?.text || ""}`;
+    const googleMatch = combinedDocText.match(/https?:\/\/docs\.google\.com\/(?:spreadsheets|document)\/d\/[a-zA-Z0-9-_]+[^\s]*/i);
+
+    if (googleMatch) {
+      isStrictDocQuery = true;
+      const googleUrl = googleMatch[0].trim();
+      const parsed = parseGoogleUrl(googleUrl);
+      if (parsed) {
+        console.log(`[member-assistant] 📑 Đang tải trực tiếp dữ liệu Google ${parsed.type === "google_sheet" ? "Sheet" : "Doc"} từ: ${googleUrl}...`);
+        const fetchRes = await fetchGoogleContent(googleUrl);
+        if (fetchRes.ok && fetchRes.text) {
+          directDocTitle = parsed.type === "google_sheet" ? "Bảng tính Google Sheet" : "Tài liệu Google Doc";
+          directDocContent = fetchRes.text;
+          console.log(`[member-assistant] ✅ Đã tải trực tiếp thành công ${fetchRes.text.length} ký tự từ Google Doc/Sheet`);
+        } else if (fetchRes.error === "PERMISSION_DENIED") {
+          await sendGroupText(
+            api,
+            threadId,
+            `🤖 Sen Chúa trả lời @${displayName}:\n\n⚠️ Em không thể đọc link Google Doc/Sheet này do chưa được mở quyền xem công khai (Viewer)!\n👉 Bác hãy mở file trên Google, bấm nút "Chia sẻ" (Share) -> chọn "Bất kỳ ai có đường liên kết" thành "Người xem" (Viewer) rồi gửi lại câu hỏi cho em nhé!`,
+          );
+          return;
+        }
+      }
+    }
 
     const qLower = question.toLowerCase().trim();
     const greetingWords = new Set([
@@ -2342,6 +2477,9 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         imageUrl: targetImageUrl,
         fileAttachment: event.fileAttachment,
         quote: event.quote,
+        strictDocMode: isStrictDocQuery,
+        directDocTitle,
+        directDocContent,
       });
       const groupSettings = getGroupSettings(threadId);
       const botName = (groupSettings.botName || "Sen Chúa").trim();

@@ -315,11 +315,14 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         `🔹 /send [tên_nhóm/id] [nội dung] : Gửi tin nhắn/thông báo vào nhóm chỉ định\n` +
         `🔹 /broadcast [nội dung] : Bắn thông báo cùng lúc đến TẤT CẢ các nhóm\n` +
         `🔹 /mode [tên_nhóm] [interactive/silent] : Đổi chế độ nhóm (Tương tác / Tàu ngầm)\n\n` +
-        `📚 KHO TRI THỨC VĨNH VIỄN (HỌC TÀI LIỆU DỰ ÁN):\n` +
-        `🔹 Gửi file kèm lệnh: /hoc [tên_dự_án] (VD: /hoc The Privé, /hoc Chính sách hoa hồng)\n` +
-        `🔹 Hoặc dán văn bản: "Lưu vào kho tài liệu dự án The Privé: [nội dung...]"\n` +
+        `📚 KHO TRI THỨC VĨNH VIỄN & TRA CỨU DOC (CHỐNG BỊA ĐẶT 100%):\n` +
+        `🔹 /sheet [tên] [link_google_sheet] : Nạp bảng tính Google Sheet động thời gian thực\n` +
+        `🔹 /doc [tên] [link_google_doc] : Nạp văn bản Google Doc động thời gian thực\n` +
+        `🔹 Gửi file kèm lệnh: /hoc [tên_dự_án] (VD: /hoc Palm River, /hoc The Privé)\n` +
+        `🔹 /dongbo [tên_dự_án] : Làm mới dữ liệu Google Sheet/Doc ngay lập tức\n` +
         `🔹 /kienthuc : Xem danh sách các tài liệu bot đã học và ghi nhớ vĩnh viễn\n` +
-        `🔹 /xoakienthuc [mã_id/tên] : Xóa tài liệu cũ khỏi kho tri thức\n\n` +
+        `🔹 /xoakienthuc [mã_id/tên] : Xóa tài liệu cũ khỏi kho tri thức\n` +
+        `🔹 CÚ PHÁP TRA CỨU STRICT TRONG NHÓM: /doc [tên_dự_án hoặc link] [câu hỏi]\n\n` +
         `💬 TRỢ LÝ AI RIÊNG TƯ & GOOGLE SEARCH:\n` +
         `🔹 Tìm kiếm thông tin thời gian thực, trend AI, tin tức hôm nay bằng Google Search tích hợp sẵn.\n` +
         `🔹 Soạn bài rồi bảo: "Gửi bài này vào nhóm VIP" hoặc "Bắn vào nhóm AI"\n` +
@@ -447,6 +450,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       lines.push(`${idx + 1}. [ID: ${it.id}] ${typeBadge} ${it.topic.toUpperCase()}\n${sourceLine}${syncLine}   📅 Ngày nạp: ${dateStr}\n   📝 Cốt lõi: ${summarySnippet}\n`);
     });
     lines.push(`👉 Đồng bộ lại Google Sheet/Doc: /dongbo [tên_dự_án]`);
+    lines.push(`👉 Tra cứu tài liệu chính xác 100% trong nhóm: /doc [tên_dự_án hoặc link] [câu hỏi]`);
     lines.push(`👉 Để xóa tài liệu cũ/hết hạn: /xoakienthuc [mã_id_hoặc_tên]`);
     await sendDirectText(api, sender, lines.join("\n"));
     return;
@@ -1228,7 +1232,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     : "";
 
   // 2.2. Tra cứu từ Kho tri thức vĩnh viễn (nếu có tài liệu liên quan đến câu hỏi của Admin)
-  const matchedKnowledge = searchPermanentKnowledge(rawText, "all", 2);
+  const matchedKnowledge = searchPermanentKnowledge(rawText, "all", 2, event.quote?.text || "");
   for (const it of matchedKnowledge) {
     if (it.sourceType === "google_sheet" || it.sourceType === "google_doc") {
       await refreshDynamicKnowledgeIfExpired(it);
@@ -1257,7 +1261,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   }
 
   const knowledgeInstruction = matchedKnowledge.length > 0
-    ? `\n10. TÀI LIỆU KHO TRI THỨC CHÍNH THỨC: Câu hỏi của Sếp liên quan đến tài liệu/chính sách trong [KHO TRI THỨC VĨNH VIỄN]. BẮT BUỘC ưu tiên trích dẫn chính xác các số liệu, chính sách, quy định, điều khoản từ tài liệu này để giải đáp cho Sếp. Tuyệt đối không tự suy diễn ngoài tài liệu.\n`
+    ? `\n10. NGUYÊN TẮC CHỐNG BỊA ĐẶT TUYỆT ĐỐI (ZERO HALLUCINATION): Câu hỏi của Sếp liên quan đến tài liệu/chính sách trong [KHO TRI THỨC VĨNH VIỄN]. BẮT BUỘC trích dẫn chính xác 100% số liệu, tỷ lệ %, đợt thanh toán, chính sách từ tài liệu này. TUYỆT ĐỐI CẤM tự ý bịa đặt thêm các chính sách cam kết thuê lại, quà tặng vàng/nội thất, hay tiến độ trả góp nếu tài liệu không đề cập. Nếu tài liệu thiếu hoặc không có thông tin, hãy báo thẳng thắn là tài liệu không đề cập!\n`
     : "";
 
   const userPrompt =
