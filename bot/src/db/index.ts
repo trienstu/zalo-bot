@@ -2427,9 +2427,16 @@ export function getRecentDirectDocument(userId: string): { fileName: string; tex
         updated_at INTEGER NOT NULL
       )
     `).run();
-    const row = db
+    let row = db
       .prepare(`SELECT file_name as fileName, content_text as text, updated_at as updatedAt FROM recent_direct_docs WHERE user_id = ?`)
       .get(userId) as any;
+    if (!row) {
+      // Fallback: nếu không tìm thấy theo userId (ví dụ lệnh quote chéo giữa các admin), lấy tài liệu mới nhất trong 2 giờ
+      const twoHoursAgo = Date.now() - 2 * 3600 * 1000;
+      row = db
+        .prepare(`SELECT file_name as fileName, content_text as text, updated_at as updatedAt FROM recent_direct_docs WHERE updated_at >= ? ORDER BY updated_at DESC LIMIT 1`)
+        .get(twoHoursAgo) as any;
+    }
     return row || null;
   } catch (e) {
     return null;

@@ -88,19 +88,31 @@ export async function downloadImageBase64(url: string): Promise<GeminiImagePart 
   }
 }
 
+export interface DownloadFileResult {
+  textContent?: string;
+  mediaPart?: GeminiMediaPart;
+  error?: "FILE_TOO_LARGE" | "DOWNLOAD_TIMEOUT" | "DOWNLOAD_FAILED";
+  fileSizeBytes?: number;
+}
+
 /**
  * Tải và giải mã nội dung tài liệu (PDF, Text, Code, CSV, JSON, Audio, Image).
  * Hỗ trợ cả file cục bộ trong ổ cứng lẫn URL tải qua mạng.
+ * Giới hạn an toàn 50MB để tránh tràn RAM VPS và timeout.
  */
 export async function downloadFileContent(
   url: string,
   fileName = "",
-): Promise<{ textContent?: string; mediaPart?: GeminiMediaPart } | null> {
+): Promise<DownloadFileResult | null> {
   try {
     let buffer: Buffer;
     let contentType = "";
 
     if (fs.existsSync(url)) {
+      const stats = fs.statSync(url);
+      if (stats.size > 50 * 1024 * 1024) {
+        return { error: "FILE_TOO_LARGE", fileSizeBytes: stats.size };
+      }
       buffer = fs.readFileSync(url);
     } else {
       const res = await fetch(url, {
@@ -109,9 +121,43 @@ export async function downloadFileContent(
           "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
         },
       });
-      if (!res.ok) return null;
-      const arrayBuffer = await res.arrayBuffer();
-      buffer = Buffer.from(arrayBuffer);
+      if (!res.ok) return { error: "DOWNLOAD_FAILED" };
+
+      const contentLengthStr = res.headers.get("content-length");
+      const contentLength = contentLengthStr ? parseInt(contentLengthStr, 10) : 0;
+      if (contentLength > 50 * 1024 * 1024) {
+        console.warn(`[gemini] File quá lớn: ${(contentLength / 1024 / 1024).toFixed(1)}MB > 50MB`);
+        return {
+          error: "FILE_TOO_LARGE",
+          fileSizeBytes: contentLength,
+        };
+      }
+
+      if (res.body) {
+        const chunks: Uint8Array[] = [];
+        let totalBytes = 0;
+        const reader = res.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value) {
+            totalBytes += value.length;
+            if (totalBytes > 50 * 1024 * 1024) {
+              await reader.cancel();
+              console.warn(`[gemini] File stream vượt quá 50MB (${(totalBytes / 1024 / 1024).toFixed(1)}MB)`);
+              return {
+                error: "FILE_TOO_LARGE",
+                fileSizeBytes: totalBytes,
+              };
+            }
+            chunks.push(value);
+          }
+        }
+        buffer = Buffer.concat(chunks);
+      } else {
+        const arrayBuffer = await res.arrayBuffer();
+        buffer = Buffer.from(arrayBuffer);
+      }
       contentType = (res.headers.get("content-type") || "").toLowerCase();
     }
 
@@ -200,9 +246,12 @@ export async function downloadFileContent(
     }
 
     return null;
-  } catch (e) {
+  } catch (e: any) {
     console.warn(`[gemini] Lỗi đọc file/ảnh ${url.slice(0, 80)}: ${String(e)}`);
-    return null;
+    if (e?.name === "TimeoutError" || e?.name === "AbortError") {
+      return { error: "DOWNLOAD_TIMEOUT" };
+    }
+    return { error: "DOWNLOAD_FAILED" };
   }
 }
 

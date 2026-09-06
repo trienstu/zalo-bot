@@ -496,13 +496,51 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       }
     }
 
-    // Xóa bỏ các từ đệm hội thoại ở cuối câu (ví dụ: "palm river này nha em" -> "palm river")
+    // Xóa bỏ các từ chỉ định / từ đệm hội thoại ở đầu hoặc cuối chuỗi
     topicName = topicName
+      .replace(/^(?:này|nay|đây|đó|cái\s+này|dự\s+án\s+này|tài\s+liệu\s+này)\b\s*/i, "")
       .replace(/\s+(?:này|nay|nhe|nhé|nha|đi|giúp|với|cho|em|bot|ạ)\b.*$/i, "")
+      .replace(/^(?:cho\s+anh|cho\s+em|giúp\s+anh|giúp\s+em|hộ\s+anh)\b\s*/i, "")
       .replace(/^[–—\-:]\s*/, "")
       .trim();
 
-    const genericTopics = new Set(["", "file", "tài liệu", "dữ liệu", "thông tin", "kiến thức", "dự án", "chính sách", "bảng giá", "quy trình"]);
+    const genericTopics = new Set([
+      "",
+      "file",
+      "tài liệu",
+      "dữ liệu",
+      "thông tin",
+      "kiến thức",
+      "dự án",
+      "chính sách",
+      "bảng giá",
+      "quy trình",
+      "này",
+      "nay",
+      "đây",
+      "đó",
+      "nè",
+      "cái này",
+      "dự án này",
+      "tài liệu này",
+      "tài liệu mới",
+    ]);
+
+    // Nếu tên đề tài chung chung, ưu tiên trích xuất từ nội dung tin nhắn trích dẫn (quote)
+    if (genericTopics.has(topicName.toLowerCase()) || !topicName) {
+      if (event.quote?.text) {
+        const projectMatch = event.quote.text.match(/(?:dự\s*án|dự\s*án\s*bất\s*động\s*sản)\s+([A-Za-z0-9À-ỹ\s_-]+?)(?:[.,;\n]|\s+như|\s+ở|\s+tại|\s+để)/i);
+        if (projectMatch && projectMatch[1]) {
+          topicName = projectMatch[1].trim();
+        } else {
+          const fileMatch = event.quote.text.match(/(?:file(?:\s+tài\s+liệu)?|tài\s+liệu)\s+([^\s\n]+?\.(?:pdf|docx?|xlsx?|pptx?))/i);
+          if (fileMatch && fileMatch[1]) {
+            fileName = fileMatch[1].trim();
+          }
+        }
+      }
+    }
+
     if (genericTopics.has(topicName.toLowerCase()) || !topicName) {
       if (fileName) {
         topicName = fileName
@@ -513,19 +551,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
           .replace(/[_-]+/g, " ")
           .trim();
       }
-      if (!topicName) {
-        topicName = "Tài liệu mới";
-      }
     }
-
-    await sendDirectText(
-      api,
-      sender,
-      `⏳ Dạ em Sen Chúa đang tải và nạp tài liệu "${topicName}" vào kho tri thức vĩnh viễn, Sếp đợi em vài giây nhé...`,
-    );
 
     let fullExtractedText = "";
     let mediaPart: GeminiMediaPart | null = null;
+    let downloadError: string | undefined = undefined;
+    let fileSizeBytes: number | undefined = undefined;
 
     if (targetUrl) {
       console.log(`[admin-assistant] 📥 Đang tải file nạp tri thức: ${targetUrl.slice(0, 80)} (${fileName})`);
@@ -559,6 +590,9 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         } catch (err) {
           console.warn(`[admin-assistant] Lỗi Gemini OCR:`, err);
         }
+      } else if (fileRes?.error) {
+        downloadError = fileRes.error;
+        fileSizeBytes = fileRes.fileSizeBytes;
       }
     }
 
@@ -573,7 +607,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
           fileName = lastDoc.name;
         }
       } else {
-        // 2. Kiểm tra SQLite DB (bền vững ngay cả khi PM2 restart)
+        // 2. Kiểm tra SQLite DB (bền vững ngay cả khi PM2 restart hoặc quote chéo)
         const recentDbDoc = getRecentDirectDocument(sender);
         if (recentDbDoc && Date.now() - recentDbDoc.updatedAt < 2 * 3600 * 1000 && recentDbDoc.text.length >= 50) {
           console.log(`[admin-assistant] 💡 Kế thừa tài liệu từ SQLite DB vừa phân tích: "${recentDbDoc.fileName}" (${recentDbDoc.text.length} ký tự)`);
@@ -597,23 +631,58 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     }
 
     if (!fullExtractedText) {
-      if (targetUrl) {
+      if (downloadError === "FILE_TOO_LARGE") {
+        const mb = fileSizeBytes ? (fileSizeBytes / 1024 / 1024).toFixed(1) : "hơn 50";
+        await sendDirectText(
+          api,
+          sender,
+          `⚠️ Dạ Sếp ơi, file "${fileName || topicName}" có dung lượng quá lớn (${mb} MB)!\n\n` +
+          `👉 Do file vượt quá 50MB (gần 1GB) nên máy chủ không thể tải và nạp trực tiếp được.\n` +
+          `👉 Sếp giúp em:\n` +
+          `1. Xuất file PDF ở mức Standard / Nén dung lượng (khuyên dùng dưới 30MB - 50MB).\n` +
+          `2. Hoặc gửi file Word / Bảng giá Excel / dán đoạn văn bản nội dung dự án bên dưới lệnh: /hoc ${topicName || "Tên dự án"} để em ghi nhớ vĩnh viễn nhé! ☘️`,
+        );
+      } else if (targetUrl) {
         await sendDirectText(
           api,
           sender,
           `⚠️ Em không thể tải hoặc đọc được nội dung từ file "${fileName || topicName}"!\n\n` +
-          `👉 Nguyên nhân: Link tải file trên Zalo có thể đã hết hạn hoặc file PDF scan dạng ảnh không có lớp chữ.\n` +
-          `👉 Sếp vui lòng gửi lại file đính kèm trực tiếp rồi thử lại nhé!`,
+          `👉 Nguyên nhân: Link tải file trên Zalo có thể đã hết hạn, tải bị timeout hoặc file PDF scan dạng ảnh không có lớp chữ.\n` +
+          `👉 Sếp vui lòng gửi file dạng Word/Excel hoặc dán đoạn văn bản trực tiếp để em hỗ trợ nạp nhé!`,
         );
       } else {
+        const displayTopic = (!genericTopics.has(topicName.toLowerCase()) && topicName) ? topicName : "Tên dự án";
         await sendDirectText(
           api,
           sender,
-          `⚠️ Em chưa nhận được nội dung tài liệu để nạp!\n\n👉 Sếp vui lòng:\n1. Gửi File (PDF, Word, Excel, Ảnh) hoặc Reply vào File rồi gõ: /hoc ${topicName || "Tên dự án"}\n2. Hoặc dán trực tiếp đoạn văn bản bên dưới câu lệnh:\n/hoc ${topicName || "Tên dự án"}\n[Nội dung tài liệu...]`,
+          `⚠️ Em chưa nhận được nội dung tài liệu để nạp!\n\n👉 Sếp vui lòng:\n1. Gửi File (PDF, Word, Excel, Ảnh) hoặc Reply vào File rồi gõ: /hoc ${displayTopic}\n2. Hoặc dán trực tiếp đoạn văn bản bên dưới câu lệnh:\n/hoc ${displayTopic}\n[Nội dung tài liệu / chính sách / giá bán...]`,
         );
       }
       return;
     }
+
+    // Chuẩn hóa tên đề tài sau khi đã có dữ liệu thực tế
+    if (genericTopics.has(topicName.toLowerCase()) || !topicName) {
+      if (fileName) {
+        topicName = fileName
+          .replace(/\.[^/.]+$/, "")
+          .replace(/^\[File\]\s*/i, "")
+          .replace(/\(\d+\)/g, "")
+          .replace(/(?:training|tai\s*lieu|slide|du\s*an)[_-]?/gi, "")
+          .replace(/[_-]+/g, " ")
+          .trim();
+      }
+      if (!topicName) {
+        topicName = "Tài liệu mới";
+      }
+    }
+
+    // Gửi thông báo bắt đầu xử lý (chỉ gửi khi ĐÃ CÓ NỘI DUNG VĂN BẢN HỢP LỆ)
+    await sendDirectText(
+      api,
+      sender,
+      `⏳ Dạ em Sen Chúa đang đọc và nạp tài liệu "${topicName}" vào kho tri thức vĩnh viễn, Sếp đợi em vài giây nhé...`,
+    );
 
     let summaryText = "";
     let keywordsText = "";
@@ -847,6 +916,38 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         timestamp: Date.now(),
       });
       saveRecentDirectDocument(sender, fileName || "Tài liệu", fileTextContent);
+    } else {
+      // Báo rõ cho Admin thay vì để Gemini tự đoán mò từ tên file
+      if (fileRes?.error === "FILE_TOO_LARGE") {
+        const mb = fileRes.fileSizeBytes ? (fileRes.fileSizeBytes / 1024 / 1024).toFixed(1) : "hơn 50";
+        await sendDirectText(
+          api,
+          sender,
+          `⚠️ Dạ Sếp ơi, file "${fileName || "tài liệu"}" có dung lượng quá lớn (${mb} MB)!\n\n` +
+          `👉 Do file vượt quá 50MB (gần 1GB) nên máy chủ không thể tải và giải mã trực tiếp trong vài giây được.\n` +
+          `👉 Sếp giúp em:\n` +
+          `1. Xuất lại file PDF ở mức Standard / Nén dung lượng (khuyên dùng dưới 30MB - 50MB).\n` +
+          `2. Hoặc gửi file Word (.docx) / Bảng giá Excel (.xlsx) / dán trực tiếp văn bản nội dung dự án vào đây, em sẽ nạp và ghi nhớ ngay lập tức cho Sếp ạ! ☘️`,
+        );
+        return;
+      }
+      if (fileRes?.error === "DOWNLOAD_TIMEOUT") {
+        await sendDirectText(
+          api,
+          sender,
+          `⚠️ Dạ Sếp ơi, đường truyền tải file "${fileName || "tài liệu"}" từ Zalo bị gián đoạn hoặc timeout (do file quá nặng)!\n\n` +
+          `👉 Sếp vui lòng gửi file nhẹ hơn (dưới 30MB) hoặc gửi file Word / text trực tiếp để em hỗ trợ Sếp nhé!`,
+        );
+        return;
+      }
+      await sendDirectText(
+        api,
+        sender,
+        `⚠️ Dạ Sếp ơi, em không thể tải hoặc đọc được nội dung từ file "${fileName || "tài liệu"}"!\n\n` +
+        `👉 Nguyên nhân: Link tải file từ Zalo bị gián đoạn, quá hạn hoặc file PDF scan dạng ảnh không có lớp chữ.\n` +
+        `👉 Sếp vui lòng gửi file dạng văn bản (Word, Excel, PDF chuẩn) hoặc nén file nhẹ hơn để em hỗ trợ Sếp nhé!`,
+      );
+      return;
     }
   }
 
