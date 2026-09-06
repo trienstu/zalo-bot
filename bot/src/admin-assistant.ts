@@ -18,6 +18,11 @@ import { getWeatherReport } from "./weather.js";
 import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam } from "./reminder.js";
 import { getDailyAiNewsBriefing } from "./ai-news.js";
 import { searchRealtimeNews } from "./realtime-search.js";
+import {
+  parseGoogleUrl,
+  fetchGoogleContent,
+  refreshDynamicKnowledgeIfExpired,
+} from "./google-sync.js";
 
 // Lưu lịch sử trò chuyện nhiều lượt (Multi-turn Chat) giữa Admin và Bot (Lưu tối đa 12 lượt gần nhất)
 const adminChatSessions = new Map<string, { role: "user" | "model"; text: string }[]>();
@@ -429,8 +434,19 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       const summarySnippet = it.summary
         ? it.summary.replace(/\n+/g, " ").slice(0, 120) + "..."
         : "(Đã lưu toàn văn)";
-      lines.push(`${idx + 1}. [ID: ${it.id}] 📁 ${it.topic.toUpperCase()}\n   📄 Nguồn: ${it.title}\n   📅 Ngày học: ${dateStr}\n   📝 Cốt lõi: ${summarySnippet}\n`);
+      const typeBadge =
+        it.sourceType === "google_sheet"
+          ? "📊 [Google Sheet Động]"
+          : it.sourceType === "google_doc"
+            ? "📄 [Google Doc Động]"
+            : "📁 [Tài liệu]";
+      const sourceLine = it.sourceUrl ? `   🔗 Link: ${it.sourceUrl}\n` : `   📄 Nguồn: ${it.title}\n`;
+      const syncLine = it.lastSyncedAt
+        ? `   ⚡ Đồng bộ gần nhất: ${new Date(it.lastSyncedAt).toLocaleTimeString("vi-VN")} ${new Date(it.lastSyncedAt).toLocaleDateString("vi-VN")}\n`
+        : "";
+      lines.push(`${idx + 1}. [ID: ${it.id}] ${typeBadge} ${it.topic.toUpperCase()}\n${sourceLine}${syncLine}   📅 Ngày nạp: ${dateStr}\n   📝 Cốt lõi: ${summarySnippet}\n`);
     });
+    lines.push(`👉 Đồng bộ lại Google Sheet/Doc: /dongbo [tên_dự_án]`);
     lines.push(`👉 Để xóa tài liệu cũ/hết hạn: /xoakienthuc [mã_id_hoặc_tên]`);
     await sendDirectText(api, sender, lines.join("\n"));
     return;
@@ -456,7 +472,52 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     return;
   }
 
-  // 2.10. Lệnh NẠP TRI THỨC VĨNH VIỄN: /hoc [tên_dự_án] hoặc gửi file kèm yêu cầu học
+  // 2.9.1. Lệnh ĐỒNG BỘ GOOGLE SHEET / DOC: /dongbo [tên_dự_án] hoặc /sync
+  if (lower.startsWith("/dongbo") || lower.startsWith("!dongbo") || lower.startsWith("/sync") || lower.startsWith("!sync")) {
+    if (!isAdmin) {
+      await sendDirectText(api, sender, "⚠️ Lệnh đồng bộ chỉ dành cho Admin.");
+      return;
+    }
+    const target = rawText.replace(/^\/(?:dongbo|!dongbo|sync|!sync)\s*/i, "").trim();
+    const items = listPermanentKnowledge(50);
+    const dynamicItems = items.filter(
+      (it) =>
+        (it.sourceType === "google_sheet" || it.sourceType === "google_doc") &&
+        (!target || it.topic.toLowerCase().includes(target.toLowerCase())),
+    );
+
+    if (dynamicItems.length === 0) {
+      await sendDirectText(
+        api,
+        sender,
+        target
+          ? `❌ Không tìm thấy tài liệu Google Sheet/Doc nào khớp với "${target}". Gõ /kienthuc để kiểm tra danh sách nhé Sếp!`
+          : `ℹ️ Hiện chưa có tài liệu nào liên kết Google Sheet hoặc Doc.\n👉 Sếp có thể dùng lệnh:\n/sheet [tên_dự_án] [link_google_sheet]\nđể kết nối nhé!`,
+      );
+      return;
+    }
+
+    await sendDirectText(api, sender, `⏳ Đang đồng bộ dữ liệu thời gian thực từ Google cho ${dynamicItems.length} tài liệu...`);
+    const results: string[] = [];
+    for (const it of dynamicItems) {
+      const updated = await refreshDynamicKnowledgeIfExpired(it, true);
+      results.push(`- ${it.topic}: ${updated ? "⚡ Đã cập nhật dữ liệu mới nhất!" : "✅ Dữ liệu đang mới nhất!"}`);
+    }
+    await sendDirectText(api, sender, `🎉 KẾT QUẢ ĐỒNG BỘ GOOGLE DYNAMIC:\n${results.join("\n")}`);
+    return;
+  }
+
+  // 2.10. Lệnh NẠP TRI THỨC VĨNH VIỄN: /hoc [tên_dự_án], /sheet [tên] [link], /doc [tên] [link]
+  const isSheetCommand =
+    lower.startsWith("/sheet ") ||
+    lower.startsWith("!sheet ") ||
+    lower.startsWith("/sheets ");
+
+  const isDocCommand =
+    lower.startsWith("/doc ") ||
+    lower.startsWith("!doc ") ||
+    lower.startsWith("/docs ");
+
   const isLearnCommand =
     lower.startsWith("/hoc ") ||
     lower.startsWith("!hoc ") ||
@@ -468,9 +529,124 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   const isLearnNaturalIntent =
     isAdmin &&
     (/(?:học|nạp|lưu|ghi nhớ)\s+(?:tài liệu|dữ liệu|thông tin|kiến thức|dự án|chính sách|bảng giá|quy trình)/i.test(rawText) ||
-      /(?:lưu|nạp)\s+(?:vào|vô)\s+(?:kho|bộ nhớ|tri thức)/i.test(rawText));
+      /(?:lưu|nạp)\s+(?:vào|vô)\s+(?:kho|bộ nhớ|tri thức)/i.test(rawText) ||
+      /(?:kết nối|liên kết)\s+(?:sheet|bảng tính|doc|docs|google)/i.test(rawText));
 
-  if (isAdmin && (isLearnCommand || isLearnNaturalIntent)) {
+  if (isAdmin && (isSheetCommand || isDocCommand || isLearnCommand || isLearnNaturalIntent)) {
+    const combinedText = `${rawText} ${event.quote?.text || ""}`;
+    const googleMatch = combinedText.match(/https?:\/\/docs\.google\.com\/(?:spreadsheets|document)\/d\/[a-zA-Z0-9-_]+[^\s]*/i);
+
+    // NẾU CÓ ĐƯỜNG DẪN GOOGLE SHEET HOẶC GOOGLE DOC
+    if (googleMatch) {
+      const googleUrl = googleMatch[0].trim();
+      const parsedGoogle = parseGoogleUrl(googleUrl);
+      if (!parsedGoogle) {
+        await sendDirectText(api, sender, `⚠️ Đường dẫn Google Sheet / Doc không đúng định dạng! Vui lòng kiểm tra lại link nhé Sếp.`);
+        return;
+      }
+
+      let topicName = rawText
+        .replace(/^\/(?:sheet|sheets|doc|docs|hoc|!hoc|learn|!learn)\s*/i, "")
+        .replace(googleUrl, "")
+        .replace(/https?:\/\/[^\s]+/g, "")
+        .trim();
+
+      topicName = topicName
+        .replace(/^(?:này|nay|đây|đó|cái\s+này|dự\s+án\s+này|tài\s+liệu\s+này)\b\s*/i, "")
+        .replace(/\s+(?:này|nay|nhe|nhé|nha|đi|giúp|với|cho|em|bot|ạ)\b.*$/i, "")
+        .replace(/^(?:cho\s+anh|cho\s+em|giúp\s+anh|giúp\s+em|hộ\s+anh)\b\s*/i, "")
+        .replace(/^[–—\-:]\s*/, "")
+        .trim();
+
+      if (!topicName || ["file", "tài liệu", "dự án", "sheet", "doc", "docs"].includes(topicName.toLowerCase())) {
+        if (event.quote?.text) {
+          const projectMatch = event.quote.text.match(/(?:dự\s*án|dự\s*án\s*bất\s*động\s*sản)\s+([A-Za-z0-9À-ỹ\s_-]+?)(?:[.,;\n]|\s+như|\s+ở|\s+tại|\s+để)/i);
+          if (projectMatch && projectMatch[1]) {
+            topicName = projectMatch[1].trim();
+          }
+        }
+      }
+      if (!topicName) {
+        topicName = parsedGoogle.type === "google_sheet" ? "Bảng hàng Google Sheet" : "Tài liệu Google Doc";
+      }
+
+      await sendDirectText(
+        api,
+        sender,
+        `⏳ Dạ em Sen Chúa đang kết nối và tải dữ liệu từ Google ${parsedGoogle.type === "google_sheet" ? "Sheet" : "Doc"} cho "${topicName}", Sếp đợi em vài giây nhé...`,
+      );
+
+      const fetchRes = await fetchGoogleContent(googleUrl);
+      if (!fetchRes.ok || !fetchRes.text) {
+        if (fetchRes.error === "PERMISSION_DENIED") {
+          await sendDirectText(
+            api,
+            sender,
+            `⚠️ Em không thể truy cập Google ${parsedGoogle.type === "google_sheet" ? "Sheet" : "Doc"} này!\n\n` +
+            `👉 Nguyên nhân: File chưa được mở quyền xem công khai (Viewer).\n` +
+            `👉 Cách mở nhanh trong 5 giây:\n` +
+            `1. Mở file Google Sheet/Doc trên trình duyệt/điện thoại.\n` +
+            `2. Bấm nút "Chia sẻ" (Share) ở góc trên bên phải.\n` +
+            `3. Tại mục "Quyền truy cập chung", chọn: "Bất kỳ ai có đường liên kết" -> "Người xem" (Viewer).\n` +
+            `4. Sau đó gửi lại lệnh cho em nhé Sếp! ☘️`,
+          );
+        } else if (fetchRes.error === "EMPTY_CONTENT") {
+          await sendDirectText(api, sender, `⚠️ File Google ${parsedGoogle.type === "google_sheet" ? "Sheet" : "Doc"} này hiện đang trống hoặc không có nội dung chữ để nạp!`);
+        } else {
+          await sendDirectText(api, sender, `⚠️ Lỗi kết nối mạng khi tải dữ liệu từ Google. Sếp vui lòng thử lại sau giây lát nhé!`);
+        }
+        return;
+      }
+
+      // Tóm tắt và lưu vào Kho tri thức vĩnh viễn
+      let summaryText = "";
+      let keywordsText = "";
+      try {
+        const summaryPrompt =
+          `Bạn là trợ lý dữ liệu thông minh. Dưới đây là dữ liệu ${parsedGoogle.type === "google_sheet" ? "bảng tính" : "tài liệu"} về chủ đề "${topicName}".\n` +
+          `Nhiệm vụ của bạn:\n` +
+          `1. Tóm tắt 3 đến 5 điểm then chốt quan trọng nhất (chính sách, chiết khấu, giá, quỹ căn, thời hạn, điều kiện cốt lõi) theo dạng gạch đầu dòng.\n` +
+          `2. Liệt kê 5 đến 8 từ khóa tra cứu quan trọng (bao gồm tên viết tắt, từ đồng nghĩa, thuật ngữ liên quan) cách nhau bởi dấu phẩy.\n` +
+          `3. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown.\n` +
+          `Định dạng trả về chính xác:\n` +
+          `TÓM TẮT:\n- ý 1\n- ý 2\nTỪ KHÓA: từ 1, từ 2, từ 3`;
+
+        const aiRes = await callGemini(summaryPrompt, fetchRes.text.slice(0, 15000), { enableSearch: false });
+        const parts = aiRes.split(/TỪ KHÓA:/i);
+        summaryText = (parts[0] || "").replace(/TÓM TẮT:/i, "").trim();
+        keywordsText = (parts[1] || "").trim();
+      } catch (err) {
+        console.warn(`[admin-assistant] Lỗi Gemini tóm tắt Google Sheet/Doc:`, err);
+        summaryText = fetchRes.text.slice(0, 500);
+      }
+
+      savePermanentKnowledge({
+        topic: topicName,
+        title: parsedGoogle.type === "google_sheet" ? `Google Sheet: ${topicName}` : `Google Doc: ${topicName}`,
+        contentText: fetchRes.text,
+        summary: summaryText,
+        keywords: keywordsText,
+        scope: "all",
+        sourceUrl: googleUrl,
+        sourceType: parsedGoogle.type,
+        lastSyncedAt: Date.now(),
+        createdBy: displayName,
+      });
+
+      await sendDirectText(
+        api,
+        sender,
+        `🎓 ĐÃ KẾT NỐI VÀ NẠP THÀNH CÔNG VÀO KHO TRI THỨC VĨNH VIỄN! 🎉\n\n` +
+        `📁 Dự án / Chủ đề: "${topicName}"\n` +
+        `${parsedGoogle.type === "google_sheet" ? "📊 Nguồn: Google Sheet (Bảng tính động)" : "📄 Nguồn: Google Doc (Văn bản động)"}\n` +
+        `🔗 Link: ${googleUrl}\n` +
+        `⚡ Cơ chế: Tự động đồng bộ thời gian thực (Real-time Dynamic Sync). Mỗi khi Sếp sửa bảng giá / giỏ căn trên Sheet, bot sẽ tự cập nhật khi trả lời!\n\n` +
+        `📝 Tóm tắt cốt lõi:\n${summaryText}\n\n` +
+        `🔑 Từ khóa tra cứu: ${keywordsText}`,
+      );
+      return;
+    }
+
     const targetUrl =
       event.fileAttachment?.url ||
       event.quote?.fileAttachment?.url ||
@@ -1053,16 +1229,28 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
   // 2.2. Tra cứu từ Kho tri thức vĩnh viễn (nếu có tài liệu liên quan đến câu hỏi của Admin)
   const matchedKnowledge = searchPermanentKnowledge(rawText, "all", 2);
+  for (const it of matchedKnowledge) {
+    if (it.sourceType === "google_sheet" || it.sourceType === "google_doc") {
+      await refreshDynamicKnowledgeIfExpired(it);
+    }
+  }
   let permanentKnowledgeSection = "";
   if (matchedKnowledge.length > 0) {
     permanentKnowledgeSection =
       `\n=== TÀI LIỆU CHÍNH THỨC TỪ KHO TRI THỨC VĨNH VIỄN (DO ADMIN NẠP): ===\n` +
       matchedKnowledge
         .map(
-          (k) =>
-            `[CHỦ ĐỀ: ${k.topic.toUpperCase()}]\n${k.summary ? `Tóm tắt cốt lõi:\n${k.summary}\n` : ""}${
-              k.contentText ? `Chi tiết tài liệu:\n${k.contentText.slice(0, 30000)}\n` : ""
-            }`,
+          (k) => {
+            const typeLabel =
+              k.sourceType === "google_sheet"
+                ? " (Bảng tính Google Sheet trực tiếp)"
+                : k.sourceType === "google_doc"
+                  ? " (Văn bản Google Doc trực tiếp)"
+                  : "";
+            return `[CHỦ ĐỀ: ${k.topic.toUpperCase()}${typeLabel}]\n${k.summary ? `Tóm tắt cốt lõi:\n${k.summary}\n` : ""}${
+              k.contentText ? `Chi tiết tài liệu thời gian thực:\n${k.contentText.slice(0, 30000)}\n` : ""
+            }`;
+          },
         )
         .join("\n--------------------\n") +
       "\n";

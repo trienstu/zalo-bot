@@ -88,6 +88,10 @@ function runColumnMigrations(database: Database.Database): void {
     ["bot_groups", "news_auto", "INTEGER NOT NULL DEFAULT 0"],
     ["bot_groups", "news_time", "TEXT NOT NULL DEFAULT '08:30'"],
     ["bot_groups", "news_topic", "TEXT NOT NULL DEFAULT 'AI & Công nghệ trên X'"],
+    // Dữ liệu động liên kết Google Sheets / Google Docs cho Kho tri thức vĩnh viễn
+    ["permanent_knowledge", "source_url", "TEXT NOT NULL DEFAULT ''"],
+    ["permanent_knowledge", "source_type", "TEXT NOT NULL DEFAULT 'static'"],
+    ["permanent_knowledge", "last_synced_at", "INTEGER NOT NULL DEFAULT 0"],
   ];
 
   for (const [table, column, definition] of additions) {
@@ -2203,6 +2207,9 @@ export interface PermanentKnowledgeItem {
   summary: string;
   keywords?: string;
   scope?: string;
+  sourceUrl?: string;
+  sourceType?: "static" | "google_sheet" | "google_doc";
+  lastSyncedAt?: number;
   createdBy?: string;
   createdAt?: number;
   updatedAt?: number;
@@ -2219,6 +2226,9 @@ function ensurePermanentKnowledgeTable(database: Database.Database): void {
         summary        TEXT NOT NULL DEFAULT '',
         keywords       TEXT NOT NULL DEFAULT '',
         scope          TEXT NOT NULL DEFAULT 'all',
+        source_url     TEXT NOT NULL DEFAULT '',
+        source_type    TEXT NOT NULL DEFAULT 'static',
+        last_synced_at INTEGER NOT NULL DEFAULT 0,
         created_by     TEXT NOT NULL DEFAULT 'Admin',
         created_at     INTEGER NOT NULL,
         updated_at     INTEGER NOT NULL
@@ -2250,6 +2260,9 @@ export function savePermanentKnowledge(item: PermanentKnowledgeItem): number {
              summary = @summary,
              keywords = @keywords,
              scope = @scope,
+             source_url = @sourceUrl,
+             source_type = @sourceType,
+             last_synced_at = @lastSyncedAt,
              created_by = @createdBy,
              updated_at = @now
          WHERE id = @id`,
@@ -2260,6 +2273,9 @@ export function savePermanentKnowledge(item: PermanentKnowledgeItem): number {
         summary: item.summary || "",
         keywords: item.keywords || "",
         scope: item.scope || "all",
+        sourceUrl: item.sourceUrl || "",
+        sourceType: item.sourceType || "static",
+        lastSyncedAt: item.lastSyncedAt || 0,
         createdBy: item.createdBy || "Admin",
         now,
       });
@@ -2268,8 +2284,8 @@ export function savePermanentKnowledge(item: PermanentKnowledgeItem): number {
     } else {
       const info = db
         .prepare(
-          `INSERT INTO permanent_knowledge (topic, title, content_text, summary, keywords, scope, created_by, created_at, updated_at)
-           VALUES (@topic, @title, @contentText, @summary, @keywords, @scope, @createdBy, @now, @now)`,
+          `INSERT INTO permanent_knowledge (topic, title, content_text, summary, keywords, scope, source_url, source_type, last_synced_at, created_by, created_at, updated_at)
+           VALUES (@topic, @title, @contentText, @summary, @keywords, @scope, @sourceUrl, @sourceType, @lastSyncedAt, @createdBy, @now, @now)`,
         )
         .run({
           topic: item.topic.trim(),
@@ -2278,6 +2294,9 @@ export function savePermanentKnowledge(item: PermanentKnowledgeItem): number {
           summary: item.summary || "",
           keywords: item.keywords || "",
           scope: item.scope || "all",
+          sourceUrl: item.sourceUrl || "",
+          sourceType: item.sourceType || "static",
+          lastSyncedAt: item.lastSyncedAt || 0,
           createdBy: item.createdBy || "Admin",
           now,
         });
@@ -2287,6 +2306,25 @@ export function savePermanentKnowledge(item: PermanentKnowledgeItem): number {
   } catch (e) {
     console.error(`[db] savePermanentKnowledge error: ${String(e)}`);
     return 0;
+  }
+}
+
+/**
+ * Cập nhật nội dung văn bản mới và thời gian đồng bộ cho tri thức động (Google Sheet/Doc).
+ */
+export function updatePermanentKnowledgeContent(id: number, contentText: string, syncedAt: number): void {
+  try {
+    const db = getDb();
+    ensurePermanentKnowledgeTable(db);
+    db.prepare(
+      `UPDATE permanent_knowledge
+       SET content_text = ?,
+           last_synced_at = ?,
+           updated_at = ?
+       WHERE id = ?`,
+    ).run(contentText, syncedAt, syncedAt, id);
+  } catch (e) {
+    console.warn(`[db] updatePermanentKnowledgeContent error: ${String(e)}`);
   }
 }
 
@@ -2327,7 +2365,9 @@ export function searchPermanentKnowledge(query: string, scope = "all", limit = 3
 
     const rows = db
       .prepare(
-        `SELECT id, topic, title, content_text as contentText, summary, keywords, scope, created_by as createdBy, created_at as createdAt, updated_at as updatedAt
+        `SELECT id, topic, title, content_text as contentText, summary, keywords, scope,
+                source_url as sourceUrl, source_type as sourceType, last_synced_at as lastSyncedAt,
+                created_by as createdBy, created_at as createdAt, updated_at as updatedAt
          FROM permanent_knowledge
          WHERE (${scopeFilter}) AND (${conditions})
          ORDER BY updated_at DESC
@@ -2351,7 +2391,9 @@ export function listPermanentKnowledge(limit = 50): PermanentKnowledgeItem[] {
     ensurePermanentKnowledgeTable(db);
     return db
       .prepare(
-        `SELECT id, topic, title, summary, keywords, scope, created_by as createdBy, created_at as createdAt, updated_at as updatedAt
+        `SELECT id, topic, title, summary, keywords, scope,
+                source_url as sourceUrl, source_type as sourceType, last_synced_at as lastSyncedAt,
+                created_by as createdBy, created_at as createdAt, updated_at as updatedAt
          FROM permanent_knowledge
          ORDER BY updated_at DESC
          LIMIT ?`,

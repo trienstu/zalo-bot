@@ -27,6 +27,7 @@ import { getWeatherReport } from "./weather.js";
 import { getDailyAiNewsBriefing } from "./ai-news.js";
 import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam } from "./reminder.js";
 import { searchRealtimeNews } from "./realtime-search.js";
+import { refreshDynamicKnowledgeIfExpired } from "./google-sync.js";
 
 export interface MemberMessageEvent {
   threadId: string;
@@ -1208,6 +1209,12 @@ async function handleHistoryQA(
   let permanentKnowledgeItems: PermanentKnowledgeItem[] = [];
   try {
     permanentKnowledgeItems = searchPermanentKnowledge(question, threadId, 2);
+    // Nếu có tài liệu động (Google Sheet / Google Doc), tự động làm mới thời gian thực nếu cache quá 60s
+    for (const pk of permanentKnowledgeItems) {
+      if (pk.sourceType === "google_sheet" || pk.sourceType === "google_doc") {
+        await refreshDynamicKnowledgeIfExpired(pk);
+      }
+    }
   } catch (e) {
     console.warn("[handleHistoryQA] Lỗi searchPermanentKnowledge:", e);
   }
@@ -1215,10 +1222,16 @@ async function handleHistoryQA(
   if (permanentKnowledgeItems && permanentKnowledgeItems.length > 0) {
     contextLines.push("=== TÀI LIỆU & CHÍNH SÁCH CHÍNH THỨC TỪ KHO TRI THỨC VĨNH VIỄN (DO ADMIN NẠP) ===");
     for (const pk of permanentKnowledgeItems) {
+      const typeLabel =
+        pk.sourceType === "google_sheet"
+          ? " (Bảng tính Google Sheet trực tiếp)"
+          : pk.sourceType === "google_doc"
+            ? " (Văn bản Google Doc trực tiếp)"
+            : "";
       contextLines.push(
-        `[Chủ đề / Dự án: ${pk.topic.toUpperCase()} - Nguồn: ${pk.title}]:\n` +
+        `[Chủ đề / Dự án: ${pk.topic.toUpperCase()}${typeLabel} - Nguồn: ${pk.title}]:\n` +
           (pk.summary ? `Tóm tắt cốt lõi:\n${pk.summary}\n` : "") +
-          (pk.contentText ? `Nội dung chi tiết tài liệu:\n${pk.contentText.slice(0, 30000)}\n` : ""),
+          (pk.contentText ? `Nội dung chi tiết tài liệu thời gian thực:\n${pk.contentText.slice(0, 30000)}\n` : ""),
       );
     }
     contextLines.push(

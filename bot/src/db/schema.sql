@@ -549,11 +549,14 @@ CREATE INDEX IF NOT EXISTS idx_bot_friends_allow ON bot_friends(allow_direct);
 CREATE TABLE IF NOT EXISTS permanent_knowledge (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
   topic          TEXT NOT NULL,               -- Tên chủ đề / Tên dự án (VD: "Dự án The Privé", "Chính sách bán hàng")
-  title          TEXT NOT NULL DEFAULT '',    -- Tên tài liệu / tên file gốc
+  title          TEXT NOT NULL DEFAULT '',    -- Tên tài liệu / tên file gốc / Google Sheet
   content_text   TEXT NOT NULL,               -- Nội dung văn bản trích xuất (tối đa 50,000 ký tự)
   summary        TEXT NOT NULL DEFAULT '',    -- Bản tóm tắt các điểm cốt lõi, số liệu then chốt
   keywords       TEXT NOT NULL DEFAULT '',    -- Các từ khóa tra cứu, từ đồng nghĩa (phân cách bằng dấu phẩy)
   scope          TEXT NOT NULL DEFAULT 'all', -- 'all' (dùng chung cho mọi nhóm) hoặc thread_id cụ thể
+  source_url     TEXT NOT NULL DEFAULT '',    -- Link Google Sheet / Google Doc nếu là tài liệu động
+  source_type    TEXT NOT NULL DEFAULT 'static', -- 'static' | 'google_sheet' | 'google_doc'
+  last_synced_at INTEGER NOT NULL DEFAULT 0,  -- Thời điểm đồng bộ gần nhất
   created_by     TEXT NOT NULL DEFAULT 'Admin',
   created_at     INTEGER NOT NULL,
   updated_at     INTEGER NOT NULL
