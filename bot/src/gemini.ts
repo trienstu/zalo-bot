@@ -259,6 +259,7 @@ export async function callGemini(
   system: string,
   user: string,
   options?: {
+    model?: string;
     maxTokens?: number;
     temperature?: number;
     json?: boolean;
@@ -274,18 +275,23 @@ export async function callGemini(
     throw new Error("Thiếu GEMINI_API_KEY trong .env");
   }
 
-  let primaryModel = process.env.GEMINI_MODEL?.trim() || config.geminiModel || "gemini-3.7-flash";
-  // Nếu env cũ chứa 3.5 (đã bị khai tử) hoặc rỗng, mặc định gemini-3.7-flash
-  if (!primaryModel || primaryModel.includes("3.5")) {
+  let primaryModel = options?.model?.trim() || process.env.GEMINI_MODEL?.trim() || config.geminiModel || "gemini-3.7-flash";
+  // Nếu env cũ chứa bản 3.5-flash cũ (đã bị đóng) hoặc rỗng, mặc định gemini-3.7-flash (giữ lại gemini-3.5-flash-lite)
+  if (!primaryModel || (primaryModel.includes("3.5") && !primaryModel.includes("lite"))) {
     primaryModel = "gemini-3.7-flash";
   }
 
   // Danh sách model cascading dự phòng khi model chính nghẽn mạng / 503 / 429 / Timeout:
   // 1. gemini-flash-lite-latest: Siêu tốc <1s, độ ổn định cực cao
-  // 2. gemini-3.1-flash-lite-preview: Bản lite 3.1
-  const candidateFallbacks = ["gemini-flash-lite-latest", "gemini-3.1-flash-lite-preview"].filter(
-    (m) => m !== primaryModel,
-  );
+  // 2. gemini-3.5-flash-lite: Bản lite 3.5 siêu tốc (~670ms)
+  // 3. gemini-3.1-flash-lite-preview: Bản lite 3.1
+  // 4. gemini-3.7-flash: Bản tiêu chuẩn chất lượng cao
+  const candidateFallbacks = [
+    "gemini-flash-lite-latest",
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.7-flash",
+  ].filter((m) => m !== primaryModel);
 
   const temperature = options?.temperature ?? 0.3;
   const maxTokens = options?.maxTokens;
