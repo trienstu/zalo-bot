@@ -1036,15 +1036,10 @@ async function handleHistoryQA(
       `HÃY TRẢ LỜI NGAY:`;
 
     try {
-      let answer = await callGemini(quoteSystemPrompt, quoteUserPrompt, {
+      const answer = await callGemini(quoteSystemPrompt, quoteUserPrompt, {
         mediaParts: mediaPart ? [mediaPart] : undefined,
         enableSearch: false,
       });
-      if ((options?.strictDocMode || quotePermanentKnowledge.length > 0 || options?.directDocContent) && docTopicName) {
-        if (!answer.startsWith("📑")) {
-          answer = `📑 [TRA CỨU CHUẨN XÁC TỪ TÀI LIỆU: ${docTopicName.toUpperCase()}]\n\n${answer}`;
-        }
-      }
       return answer;
     } catch (e) {
       console.warn("[member-assistant] Fast-path Quote QA error:", e);
@@ -1472,12 +1467,6 @@ async function handleHistoryQA(
         senderName: displayName,
         createdAt: Date.now(),
       });
-    }
-
-    if ((options?.strictDocMode || permanentKnowledgeItems.length > 0 || options?.directDocContent) && docTopicHeader) {
-      if (!answer.startsWith("📑")) {
-        answer = `📑 [TRA CỨU CHUẨN XÁC TỪ TÀI LIỆU: ${docTopicHeader.toUpperCase()}]\n\n${answer}`;
-      }
     }
 
     return answer;

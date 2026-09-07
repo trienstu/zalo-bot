@@ -2235,6 +2235,7 @@ function ensurePermanentKnowledgeTable(database: Database.Database): void {
       );
       CREATE INDEX IF NOT EXISTS idx_perm_knowledge_topic ON permanent_knowledge(topic);
       CREATE INDEX IF NOT EXISTS idx_perm_knowledge_scope ON permanent_knowledge(scope, updated_at);
+      UPDATE permanent_knowledge SET topic = 'Palm River', title = 'Palm River' WHERE topic LIKE '%PALM RIVER%TRANG 1%';
     `);
   } catch {}
 }
@@ -2344,83 +2345,98 @@ export function searchPermanentKnowledge(
     const fullText = `${query || ""} ${extraContext || ""}`.trim().toLowerCase();
     if (!fullText) return [];
 
-    // 1. Kiểm tra ưu tiên: Nếu trong query hoặc extraContext có nhắc trực tiếp đến tên topic cụ thể trong kho tri thức
     const scopeTopicFilter = scope === "all" ? "1=1" : "(scope = 'all' OR scope = ?)";
     const topicParams = scope === "all" ? [] : [scope];
-    const allTopics = db
-      .prepare(`SELECT DISTINCT topic FROM permanent_knowledge WHERE (${scopeTopicFilter})`)
-      .all(...topicParams) as { topic: string }[];
 
-    for (const t of allTopics) {
-      if (t.topic && t.topic.length >= 2 && fullText.includes(t.topic.toLowerCase())) {
-        // Tìm thấy topic đích danh (ví dụ "palm river" hay tên dự án cụ thể)
-        const matchedTopic = db
-          .prepare(
-            `SELECT id, topic, title, content_text as contentText, summary, keywords, scope,
-                    source_url as sourceUrl, source_type as sourceType, last_synced_at as lastSyncedAt,
-                    created_by as createdBy, created_at as createdAt, updated_at as updatedAt
-             FROM permanent_knowledge
-             WHERE LOWER(topic) = LOWER(?) AND (${scopeTopicFilter})
-             ORDER BY updated_at DESC
-             LIMIT 1`,
-          )
-          .get(...(scope === "all" ? [t.topic] : [t.topic, scope])) as PermanentKnowledgeItem | undefined;
-
-        if (matchedTopic) {
-          const otherItems = db
-            .prepare(
-              `SELECT id, topic, title, content_text as contentText, summary, keywords, scope,
-                      source_url as sourceUrl, source_type as sourceType, last_synced_at as lastSyncedAt,
-                      created_by as createdBy, created_at as createdAt, updated_at as updatedAt
-               FROM permanent_knowledge
-               WHERE id != ? AND (${scopeTopicFilter})
-               ORDER BY updated_at DESC
-               LIMIT ?`,
-            )
-            .all(...(scope === "all" ? [matchedTopic.id, limit - 1] : [matchedTopic.id, scope, limit - 1])) as PermanentKnowledgeItem[];
-
-          return [matchedTopic, ...otherItems];
-        }
-      }
-    }
-
-    const stopWords = new Set([
-      "hỏi", "về", "gì", "cho", "xin", "file", "tài", "liệu", "ảnh", "hình", "xem", "đọc",
-      "sen", "chúa", "bot", "giúp", "với", "các", "những", "cái", "anh", "em", "ơi", "nhé", "nha"
-    ]);
-
-    const words = fullText
-      .replace(/[?,.!/\\:;]/g, " ")
-      .split(/\s+/)
-      .filter((w) => w.length >= 2 && !stopWords.has(w));
-
-    if (words.length === 0) return [];
-
-    const conditions = words
-      .map(() => `(LOWER(topic) LIKE ? OR LOWER(title) LIKE ? OR LOWER(keywords) LIKE ? OR LOWER(summary) LIKE ? OR LOWER(content_text) LIKE ?)`)
-      .join(" OR ");
-
-    const params: string[] = [];
-    for (const w of words) {
-      params.push(`%${w}%`, `%${w}%`, `%${w}%`, `%${w}%`, `%${w}%`);
-    }
-
-    const scopeFilter = scope === "all" ? "1=1" : "(scope = 'all' OR scope = ?)";
-    const finalParams = scope === "all" ? params : [...params, scope];
-
-    const rows = db
+    // Lấy danh sách tri thức theo phạm vi scope
+    const allItems = db
       .prepare(
         `SELECT id, topic, title, content_text as contentText, summary, keywords, scope,
                 source_url as sourceUrl, source_type as sourceType, last_synced_at as lastSyncedAt,
                 created_by as createdBy, created_at as createdAt, updated_at as updatedAt
          FROM permanent_knowledge
-         WHERE (${scopeFilter}) AND (${conditions})
-         ORDER BY updated_at DESC
-         LIMIT ?`,
+         WHERE (${scopeTopicFilter})`,
       )
-      .all(...finalParams, limit) as PermanentKnowledgeItem[];
+      .all(...topicParams) as PermanentKnowledgeItem[];
 
-    return rows;
+    if (allItems.length === 0) return [];
+
+    // 1. Khớp đích danh: Nếu trong tin nhắn hoặc trích dẫn có nhắc đúng tên Topic hoặc Title
+    const directMatches: PermanentKnowledgeItem[] = [];
+    for (const item of allItems) {
+      const topicClean = (item.topic || "").trim().toLowerCase();
+      const titleClean = (item.title || "").trim().toLowerCase();
+      if (
+        (topicClean.length >= 3 && fullText.includes(topicClean)) ||
+        (titleClean.length >= 3 && fullText.includes(titleClean))
+      ) {
+        directMatches.push(item);
+      }
+    }
+
+    if (directMatches.length > 0) {
+      return directMatches.slice(0, limit);
+    }
+
+    // 2. Chấm điểm độ liên quan chặt chẽ (Strict Relevance Scoring)
+    // Loại bỏ toàn bộ stopword giao tiếp, hội thoại thường ngày
+    const stopWords = new Set([
+      "hỏi", "về", "gì", "cho", "xin", "file", "tài", "liệu", "ảnh", "hình", "xem", "đọc",
+      "sen", "chúa", "bot", "giúp", "với", "các", "những", "cái", "anh", "em", "ơi", "nhé", "nha",
+      "yêu", "cầu", "lên", "lịch", "thực", "hiện", "ngay", "được", "không", "nhỉ", "tôi", "bạn",
+      "làm", "viết", "thường", "xuyên", "đi", "chị", "bác", "sếp", "nào", "sao", "thế", "này",
+      "đây", "đó", "kia", "một", "hai", "ba", "vài", "nhiều", "ít", "rồi", "chưa", "đang", "sẽ",
+      "đã", "có", "là", "và", "hoặc", "nhưng", "vì", "nên", "nếu", "thì", "để", "ở", "tại", "từ",
+      "đến", "trong", "ngoài", "trên", "dưới", "theo", "cùng", "nhau", "của", "mình", "người",
+      "nhóm", "group", "chủ", "đề", "bàn", "tin", "thông", "biết", "nói", "bảo", "ai", "muốn",
+      "quay", "clip", "video", "bài", "đăng", "sáng", "trưa", "chiều", "tối", "hôm", "nay", "mai"
+    ]);
+
+    const words = fullText
+      .replace(/[?,.!/\\:;—_\-()[\]{}"]/g, " ")
+      .split(/\s+/)
+      .filter((w) => w.length >= 2 && !stopWords.has(w));
+
+    if (words.length === 0) return [];
+
+    const scoredItems: { item: PermanentKnowledgeItem; score: number }[] = [];
+
+    for (const item of allItems) {
+      let score = 0;
+      const topicLower = (item.topic || "").toLowerCase();
+      const titleLower = (item.title || "").toLowerCase();
+      const keywordsLower = (item.keywords || "").toLowerCase();
+      const summaryLower = (item.summary || "").toLowerCase();
+
+      // Điểm từ keywords được định nghĩa trước
+      const definedKws = keywordsLower
+        .split(/[,\s]+/)
+        .map((k) => k.trim())
+        .filter((k) => k.length >= 2 && !stopWords.has(k));
+
+      for (const kw of definedKws) {
+        if (fullText.includes(kw)) {
+          score += 15;
+        }
+      }
+
+      // Khớp từ khóa từ câu hỏi
+      for (const w of words) {
+        if (topicLower.includes(w)) score += 10;
+        if (titleLower.includes(w)) score += 8;
+        if (keywordsLower.includes(w)) score += 5;
+        if (summaryLower.includes(w)) score += 3;
+      }
+
+      // Ngưỡng tối thiểu >= 15 để kích hoạt: phải trùng tên topic hoặc nhiều từ khóa chuyên môn
+      // Không bao giờ match bừa bãi content_text để tránh nuốt nhầm chat thường ngày
+      if (score >= 15) {
+        scoredItems.push({ item, score });
+      }
+    }
+
+    scoredItems.sort((a, b) => b.score - a.score || (b.item.updatedAt || 0) - (a.item.updatedAt || 0));
+    return scoredItems.slice(0, limit).map((s) => s.item);
   } catch (e) {
     console.warn(`[db] searchPermanentKnowledge error: ${String(e)}`);
     return [];
