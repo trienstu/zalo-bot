@@ -1485,9 +1485,9 @@ export async function runListener(): Promise<void> {
     }
   }
 
-  // Quét ngay lần đầu sau 3 giây, sau đó lặp lại mỗi 10 giây
+  // Quét ngay lần đầu sau 3 giây, sau đó lặp lại mỗi 30 giây (an toàn cho tài khoản Zalo, giả lập tự nhiên)
   setTimeout(() => void checkAutoAcceptFriendsLoop(), 3000);
-  setInterval(() => void checkAutoAcceptFriendsLoop(), 10000);
+  setInterval(() => void checkAutoAcceptFriendsLoop(), 30000);
 }
 
 
