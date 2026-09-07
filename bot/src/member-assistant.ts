@@ -17,7 +17,7 @@ import {
   getRecentGroupImage,
   getMediaByMessageId,
 } from "./db/index.js";
-import { sendGroupText } from "./zalo/client.js";
+import { sendGroupText, sendReaction, sendTyping, Reactions, sleep } from "./zalo/client.js";
 import {
   callGemini,
   downloadFileContent,
@@ -38,6 +38,8 @@ export interface MemberMessageEvent {
   mediaUrl?: string | null;
   mediaType?: string | null;
   mentions?: { uid: string; pos?: number; len?: number }[];
+  msgId?: string;
+  cliMsgId?: string;
   fileAttachment?: {
     name: string;
     url: string;
@@ -65,6 +67,41 @@ export interface MemberMessageEvent {
 // User cooldown map to prevent spamming: userId -> lastResponseTimestamp
 const userCooldowns = new Map<string, number>();
 const COOLDOWN_MS = 500; // 0.5s cooldown to allow smooth conversation
+
+/**
+ * Gửi tin nhắn trả lời trong nhóm có gắn @Mention thật (bắn thông báo Zalo) và Jitter Delay mô phỏng người thật gõ phím.
+ */
+async function sendGroupReplyWithMention(
+  api: any,
+  threadId: string,
+  botName: string,
+  displayName: string,
+  sender: string,
+  content: string,
+  options?: { jitter?: boolean },
+): Promise<void> {
+  const prefix = `🤖 ${botName} trả lời `;
+  const mentionTag = `@${displayName}`;
+  const fullText = `${prefix}${mentionTag}:\n\n${content}`;
+
+  const mentions = sender
+    ? [
+        {
+          uid: String(sender).trim(),
+          pos: prefix.length,
+          len: mentionTag.length,
+        },
+      ]
+    : undefined;
+
+  if (options?.jitter !== false) {
+    // Jitter delay giả lập người thật: từ 1.0s đến 2.5s tùy độ dài câu trả lời
+    const delay = Math.min(2500, Math.max(1000, Math.floor(content.length * 6) + Math.floor(Math.random() * 500)));
+    await sleep(delay);
+  }
+
+  await sendGroupText(api, threadId, fullText, { mentions });
+}
 
 function fmtAgoVi(ts: number | null): string {
   if (!ts) return "Chưa có";
@@ -1609,6 +1646,8 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     lower === "!lenh"
   ) {
     userCooldowns.set(sender, now);
+    void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.OK);
+    void sendTyping(api, threadId);
     const reply = handleHelpCommand();
     await sendGroupText(api, threadId, reply);
     console.log(`[member-assistant] ✅ Đã phản hồi /help cho ${displayName}`);
@@ -1627,6 +1666,8 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     lower === "myrank"
   ) {
     userCooldowns.set(sender, now);
+    void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.OK);
+    void sendTyping(api, threadId);
     const reply = handleRankCommand(sender, displayName, threadId);
     await sendGroupText(api, threadId, reply);
     console.log(`[member-assistant] ✅ Đã phản hồi /rank cho ${displayName}`);
@@ -1647,6 +1688,8 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     lower === "leaderboard"
   ) {
     userCooldowns.set(sender, now);
+    void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.OK);
+    void sendTyping(api, threadId);
     const reply = handleTopCommand(threadId);
     await sendGroupText(api, threadId, reply);
     console.log(`[member-assistant] ✅ Đã phản hồi /top cho ${displayName}`);
@@ -2196,6 +2239,10 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   if (isTagBot) {
     userCooldowns.set(sender, now);
 
+    // Tính năng 4 & 5: Thả reaction xác nhận tiếp nhận & Gửi trạng thái đang soạn tin
+    void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.LIKE);
+    void sendTyping(api, threadId);
+
     let isStrictDocQuery =
       isDocCommand ||
       hasGoogleDocUrl ||
@@ -2488,8 +2535,8 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         return;
       }
 
-      const reply = `🤖 ${botName} trả lời @${displayName}:\n\n${answer}`;
-      await sendGroupText(api, threadId, reply);
+      // Tính năng 4 & 5: Gửi câu trả lời có gắn @Mention thật & Jitter delay chống spam
+      await sendGroupReplyWithMention(api, threadId, botName, displayName, sender, answer, { jitter: true });
       console.log(`[member-assistant] ✅ Đã gửi câu trả lời thành công vào nhóm`);
     } catch (err) {
       console.error(`[member-assistant] ❌ Lỗi xử lý câu hỏi:`, err);
@@ -2499,10 +2546,14 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         !lowerDisplay.includes("mộc miên") &&
         lowerDisplay !== "bot"
       ) {
-        await sendGroupText(
+        await sendGroupReplyWithMention(
           api,
           threadId,
-          `🤖 Dạ câu hỏi của @${displayName} hóc búa quá làm em Sen Chúa xém khét CPU 😄! Bác cho em xin vài giây thở oxy rồi hỏi lại thử xem nè!`,
+          botName,
+          displayName,
+          sender,
+          `Dạ câu hỏi của bác hóc búa quá làm em Sen Chúa xém khét CPU 😄! Bác cho em xin vài giây thở oxy rồi hỏi lại thử xem nè!`,
+          { jitter: false },
         );
       }
     }

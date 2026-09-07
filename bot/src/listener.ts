@@ -899,6 +899,8 @@ export async function runListener(): Promise<void> {
             fileAttachment,
             quote,
             mentions,
+            msgId: String(payload?.data?.msgId ?? ""),
+            cliMsgId: String(payload?.data?.cliMsgId ?? ""),
           }).catch((e) => console.warn(`[member-assistant] lỗi: ${String(e)}`));
         }
       }

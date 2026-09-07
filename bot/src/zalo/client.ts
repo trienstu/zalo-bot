@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Zalo, LoginQRCallbackEventType, ThreadType } from "zca-js";
+import { Zalo, LoginQRCallbackEventType, ThreadType, Reactions } from "zca-js";
+export { Reactions };
 import qrcodeTerminal from "qrcode-terminal";
 import { config } from "../config.js";
 import { setBotState, upsertBotFriend } from "../db/index.js";
@@ -774,34 +775,52 @@ function splitIntoZaloChunks(text: string, maxLen = 2050): string[] {
   return chunks.filter(Boolean);
 }
 
-async function sendSingleGroupChunk(api: ZaloApi, threadIdStr: string, text: string): Promise<void> {
-  // Method 1: { msg }, ThreadType.Group
+export interface SendGroupOptions {
+  mentions?: { uid: string; pos: number; len: number }[];
+  quote?: any;
+}
+
+async function sendSingleGroupChunk(
+  api: ZaloApi,
+  threadIdStr: string,
+  text: string,
+  options?: SendGroupOptions,
+): Promise<void> {
+  const payload: any = { msg: text };
+  if (options?.mentions && options.mentions.length > 0) {
+    payload.mentions = options.mentions;
+  }
+  if (options?.quote) {
+    payload.quote = options.quote;
+  }
+
+  // Method 1: payload object, ThreadType.Group
   try {
-    await api.sendMessage({ msg: text }, threadIdStr, ThreadType.Group);
+    await api.sendMessage(payload, threadIdStr, ThreadType.Group);
     return;
   } catch (e1) {}
 
-  // Method 2: raw string, ThreadType.Group
+  // Method 2: payload object, 1
   try {
-    await api.sendMessage(text, threadIdStr, ThreadType.Group);
+    await api.sendMessage(payload, threadIdStr, 1);
     return;
   } catch (e2) {}
 
-  // Method 3: { msg }, 1
+  // Method 3: payload object
   try {
-    await api.sendMessage({ msg: text }, threadIdStr, 1);
+    await api.sendMessage(payload, threadIdStr);
     return;
   } catch (e3) {}
 
-  // Method 4: raw string, 1
+  // Method 4: raw string, ThreadType.Group (fallback nếu object lỗi)
   try {
-    await api.sendMessage(text, threadIdStr, 1);
+    await api.sendMessage(text, threadIdStr, ThreadType.Group);
     return;
   } catch (e4) {}
 
-  // Method 5: { msg }
+  // Method 5: raw string, 1
   try {
-    await api.sendMessage({ msg: text }, threadIdStr);
+    await api.sendMessage(text, threadIdStr, 1);
     return;
   } catch (e5) {}
 
@@ -810,9 +829,15 @@ async function sendSingleGroupChunk(api: ZaloApi, threadIdStr: string, text: str
 }
 
 /**
- * Gửi text message vào group. Hỗ trợ tự động phân đoạn tin nhắn dài nếu vượt quá giới hạn Zalo.
+ * Gửi text message vào group. Hỗ trợ tự động phân đoạn tin nhắn dài nếu vượt quá giới hạn Zalo,
+ * kèm tuỳ chọn mentions (tag thật) và quote.
  */
-export async function sendGroupText(api: ZaloApi, groupId: string, text: string): Promise<void> {
+export async function sendGroupText(
+  api: ZaloApi,
+  groupId: string,
+  text: string,
+  options?: SendGroupOptions,
+): Promise<void> {
   if (typeof api.sendMessage !== "function") {
     console.error("[sendGroupText] api.sendMessage không tồn tại trong runtime zca-js.");
     throw new Error("zca-js runtime không có api.sendMessage");
@@ -825,13 +850,65 @@ export async function sendGroupText(api: ZaloApi, groupId: string, text: string)
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i]!;
-    await sendSingleGroupChunk(api, threadIdStr, chunk);
+    // Mentions & Quote chỉ áp dụng cho đoạn đầu tiên
+    const chunkOpts = i === 0 ? options : undefined;
+    await sendSingleGroupChunk(api, threadIdStr, chunk, chunkOpts);
     if (i < chunks.length - 1) {
       await sleep(800);
     }
   }
 
   console.log(`[sendGroupText] ✅ Đã gửi thành công ${chunks.length} phần vào nhóm [${threadIdStr}]`);
+}
+
+/**
+ * Thả reaction (Like, Tim, Haha...) vào tin nhắn người dùng.
+ */
+export async function sendReaction(
+  api: ZaloApi,
+  threadId: string,
+  msgId?: string,
+  cliMsgId?: string,
+  icon: Reactions | string = Reactions.LIKE,
+  isGroup = true,
+): Promise<void> {
+  if (!msgId || !cliMsgId || typeof api?.addReaction !== "function") return;
+  try {
+    const threadIdStr = String(threadId).trim();
+    const type = isGroup ? ThreadType.Group : ThreadType.User;
+    await api.addReaction(icon, {
+      data: {
+        msgId: String(msgId),
+        cliMsgId: String(cliMsgId),
+      },
+      threadId: threadIdStr,
+      type,
+    });
+    console.log(`[sendReaction] ❤️ Đã thả reaction [${icon}] vào tin nhắn [${msgId}]`);
+  } catch (err) {
+    // Không chặn luồng chính nếu reaction lỗi
+    console.warn(`[sendReaction] Không thể thả reaction:`, String(err));
+  }
+}
+
+/**
+ * Gửi tín hiệu trạng thái "Đang soạn tin nhắn..." (Typing indicator).
+ */
+export async function sendTyping(
+  api: ZaloApi,
+  threadId: string,
+  isGroup = true,
+): Promise<void> {
+  if (typeof api?.sendTypingEvent !== "function") return;
+  try {
+    const threadIdStr = String(threadId).trim();
+    const type = isGroup ? ThreadType.Group : ThreadType.User;
+    await api.sendTypingEvent(threadIdStr, type);
+    console.log(`[sendTyping] ✍️ Đang gửi trạng thái đang gõ phím đến [${threadIdStr}]`);
+  } catch (err) {
+    // Bỏ qua lỗi typing
+    console.warn(`[sendTyping] Không thể gửi typing event:`, String(err));
+  }
 }
 
 async function sendSingleDirectChunk(api: ZaloApi, targetId: string, text: string): Promise<void> {
