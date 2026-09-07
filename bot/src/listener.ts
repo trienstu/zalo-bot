@@ -45,6 +45,9 @@ import {
   getGroupMode,
   getPendingScheduledReminders,
   markScheduledReminderCompleted,
+  getAutoFriendSettings,
+  upsertBotFriend,
+  setFriendAllowDirect,
 } from "./db/index.js";
 import { getMorningWeatherBriefing } from "./weather.js";
 import { getDailyAiNewsBriefing } from "./ai-news.js";
@@ -1101,6 +1104,77 @@ export async function runListener(): Promise<void> {
       }
     } catch (e) {
       console.warn(`[listener] lỗi xử lý group_event: ${String(e)}`);
+    }
+  });
+
+  api.listener.on("friend_event", async (ev: any) => {
+    try {
+      // FriendEventType: REQUEST = 2, ADD = 0
+      const isRequest =
+        ev?.type === 2 ||
+        ev?.type === "REQUEST" ||
+        String(ev?.type).toUpperCase() === "REQUEST";
+      const fromUid = String(ev?.data?.fromUid || ev?.fromUid || "");
+
+      if (!isRequest || !fromUid) return;
+
+      console.log(`[listener] Nhận yêu cầu kết bạn từ Zalo ID: ${fromUid}`);
+
+      const settings = getAutoFriendSettings();
+      if (!settings.autoAccept) {
+        console.log(`[listener] Chế độ tự động kết bạn đang TẮT. Giữ yêu cầu của ${fromUid} ở hàng đợi.`);
+        return;
+      }
+
+      console.log(`[listener] Đang chuẩn bị tự động chấp nhận kết bạn với ${fromUid} (chờ 2.5s giả lập)...`);
+      await sleep(2500);
+
+      if (typeof (api as any).acceptFriendRequest === "function") {
+        await (api as any).acceptFriendRequest(fromUid);
+        console.log(`[listener] ✅ Đã chấp nhận lời mời kết bạn từ ${fromUid} thành công!`);
+
+        // Tìm thông tin tên và avatar người dùng nếu có
+        let displayName = "";
+        let avatar = "";
+        try {
+          if (typeof (api as any).getUserInfo === "function") {
+            const info = await (api as any).getUserInfo(fromUid);
+            const profile = info?.changed_profiles?.[fromUid];
+            if (profile) {
+              displayName = profile.displayName || profile.zaloName || profile.dName || "";
+              avatar = profile.avatar || "";
+            }
+          }
+        } catch (err) {
+          console.warn(`[listener] getUserInfo(${fromUid}) thất bại: ${String(err)}`);
+        }
+
+        if (!displayName) {
+          const member = getMember(fromUid);
+          displayName = member?.display_name || `Bạn mới ${fromUid.slice(-4)}`;
+        }
+
+        const now = Date.now();
+        upsertBotFriend({
+          userId: fromUid,
+          displayName,
+          avatar,
+          now,
+        });
+        setFriendAllowDirect(fromUid, true);
+        console.log(`[listener] Đã cấp quyền chat 1:1 cho bạn mới: ${displayName} (${fromUid})`);
+
+        // Gửi tin nhắn chào mừng tùy chỉnh nếu có
+        if (settings.welcomeMessage && settings.welcomeMessage.trim()) {
+          await sleep(1000);
+          await sendDirectText(api, fromUid, settings.welcomeMessage.trim());
+          console.log(`[listener] Đã gửi tin nhắn chào mừng 1:1 tới ${displayName} (${fromUid})`);
+        }
+      } else {
+        console.warn(`[listener] acceptFriendRequest không tồn tại trên api zca-js.`);
+      }
+    } catch (e) {
+      console.warn(`[listener] Lỗi xử lý friend_event: ${String(e)}`);
     }
   });
 

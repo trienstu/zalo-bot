@@ -3073,6 +3073,53 @@ export function setFriendAllowDirect(userId: string, allow: boolean): boolean {
   }
 }
 
+// ---- Cấu hình Tự Động Kết Bạn & Tin Nhắn Chào Mừng 1:1 ----
 
+export interface AutoFriendSettings {
+  autoAccept: boolean;
+  welcomeMessage: string;
+}
 
+export const DEFAULT_WELCOME_MESSAGE =
+  "Xin chào bạn! Mình là Trợ lý AI Palm River.\n\n" +
+  "Rất vui được kết nối cùng bạn! Bạn có thể hỏi mình bất cứ điều gì về:\n" +
+  "• Thông tin dự án Palm River & quy hoạch\n" +
+  "• Tra cứu tài liệu, thủ tục pháp lý\n" +
+  "• Hỗ trợ giải đáp nghiệp vụ, kiến thức bất động sản\n\n" +
+  "Hãy nhắn tin trực tiếp cho mình khi bạn cần hỗ trợ nhé!";
 
+export function getAutoFriendSettings(): AutoFriendSettings {
+  try {
+    const raw = getBotState("auto_friend_settings");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        autoAccept: Boolean(parsed.autoAccept),
+        welcomeMessage:
+          typeof parsed.welcomeMessage === "string" && parsed.welcomeMessage.trim()
+            ? parsed.welcomeMessage
+            : DEFAULT_WELCOME_MESSAGE,
+      };
+    }
+  } catch (e) {
+    console.error("[db] getAutoFriendSettings error:", e);
+  }
+  return {
+    autoAccept: false,
+    welcomeMessage: DEFAULT_WELCOME_MESSAGE,
+  };
+}
+
+export function setAutoFriendSettings(settings: Partial<AutoFriendSettings>): void {
+  try {
+    const current = getAutoFriendSettings();
+    const updated: AutoFriendSettings = {
+      autoAccept: settings.autoAccept !== undefined ? Boolean(settings.autoAccept) : current.autoAccept,
+      welcomeMessage:
+        settings.welcomeMessage !== undefined ? String(settings.welcomeMessage) : current.welcomeMessage,
+    };
+    setBotState("auto_friend_settings", JSON.stringify(updated), Date.now());
+  } catch (e) {
+    console.error("[db] setAutoFriendSettings error:", e);
+  }
+}

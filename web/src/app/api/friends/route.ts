@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
-import { DbNotReadyError, listBotFriends, setFriendAllowDirect, getFriendSyncStatus } from "@/lib/db";
+import {
+  DbNotReadyError,
+  listBotFriends,
+  setFriendAllowDirect,
+  getFriendSyncStatus,
+  getAutoFriendSettings,
+  setAutoFriendSettings,
+} from "@/lib/db";
 import { friendSyncRequestPath } from "@/lib/login-status";
 import { isOriginAllowed } from "@/lib/http";
 
@@ -20,16 +27,49 @@ export async function GET(request: Request) {
 
     const friends = listBotFriends(botId);
     const syncStatus = getFriendSyncStatus(botId);
+    const settings = getAutoFriendSettings(botId);
     const requestPath = friendSyncRequestPath(botId);
     const isPending = fs.existsSync(requestPath);
 
     return NextResponse.json({
       ok: true,
       friends,
+      settings,
       sync: {
         ...syncStatus,
         pending: isPending,
       },
+    });
+  } catch (e) {
+    return handleDbError(e);
+  }
+}
+
+export async function POST(request: Request) {
+  if (!isOriginAllowed(request)) {
+    return NextResponse.json({ error: "Origin không hợp lệ" }, { status: 403 });
+  }
+
+  try {
+    const body = (await request.json().catch(() => ({}))) as {
+      autoAccept?: boolean;
+      welcomeMessage?: string;
+      botId?: string;
+    };
+
+    const botId = body.botId || "bot-1";
+    const ok = setAutoFriendSettings(
+      {
+        autoAccept: body.autoAccept,
+        welcomeMessage: body.welcomeMessage,
+      },
+      botId
+    );
+
+    const updated = getAutoFriendSettings(botId);
+    return NextResponse.json({
+      ok,
+      settings: updated,
     });
   } catch (e) {
     return handleDbError(e);
@@ -65,3 +105,4 @@ export async function PATCH(request: Request) {
     return handleDbError(e);
   }
 }
+

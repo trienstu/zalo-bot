@@ -10,6 +10,8 @@ import {
   deletePermanentKnowledge,
   saveRecentDirectDocument,
   getRecentDirectDocument,
+  getBotState,
+  setBotState,
 } from "./db/index.js";
 import { sendDirectText, sendGroupText } from "./zalo/client.js";
 import { callGemini, downloadFileContent, type GeminiMediaPart } from "./gemini.js";
@@ -288,8 +290,25 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   const isAllowedFriend = isUserAllowedDirectChat(sender);
 
   // Nếu người nhắn tin không phải là Admin và không thuộc danh sách được cấp quyền:
-  // Hoàn toàn IM LẶNG - để tài khoản hoạt động như một Zalo cá nhân bình thường, chống spam.
+  // Nhắc nhở họ kết bạn với Bot để bắt đầu tương tác (giới hạn 1 lần mỗi 24h để chống spam).
   if (!isAdmin && !isAllowedFriend) {
+    const strangerKey = `stranger_prompt_${sender}`;
+    const lastPromptStr = getBotState(strangerKey);
+    const lastPrompt = lastPromptStr ? parseInt(lastPromptStr, 10) : 0;
+    const now = Date.now();
+    // Giới hạn nhắc 1 lần trong 24 giờ (24 * 60 * 60 * 1000 ms)
+    if (now - lastPrompt > 24 * 60 * 60 * 1000) {
+      setBotState(strangerKey, String(now), now);
+      const promptMsg =
+        `Xin chào ${displayName}! 👋\n\n` +
+        `Để có thể trò chuyện và sử dụng các tính năng trợ lý AI của mình, bạn vui lòng nhấn nút **"Kết bạn"** với tài khoản Zalo này nhé!\n\n` +
+        `Sau khi kết bạn, mình sẽ sẵn sàng hỗ trợ bạn ngay lập tức. Cảm ơn bạn! ✨`;
+      try {
+        await sendDirectText(api, sender, promptMsg);
+      } catch (e) {
+        console.warn(`[admin-assistant] Gửi lời nhắc kết bạn cho ${sender} thất bại: ${String(e)}`);
+      }
+    }
     return;
   }
 

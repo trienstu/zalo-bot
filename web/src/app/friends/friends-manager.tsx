@@ -1,7 +1,19 @@
 "use client";
 
 import * as React from "react";
-import { Search, RefreshCw, UserCheck, ShieldCheck, MessageSquare, AlertCircle, CheckCircle2 } from "lucide-react";
+import {
+  Search,
+  RefreshCw,
+  UserCheck,
+  ShieldCheck,
+  MessageSquare,
+  AlertCircle,
+  CheckCircle2,
+  UserPlus,
+  Sparkles,
+  Save,
+  RotateCcw,
+} from "lucide-react";
 import { Card, CardTitle, Badge, Button, Input, Table, Th, Td, EmptyState } from "@/components/ui";
 import { fmtDateTime } from "@/lib/utils";
 
@@ -22,22 +34,74 @@ export interface FriendSyncInfo {
   };
 }
 
+export interface AutoFriendSettings {
+  autoAccept: boolean;
+  welcomeMessage: string;
+}
+
+export const DEFAULT_TEMPLATE_MESSAGE =
+  "Xin chào bạn! Mình là Trợ lý AI Palm River.\n\n" +
+  "Rất vui được kết nối cùng bạn! Bạn có thể hỏi mình bất cứ điều gì về:\n" +
+  "• Thông tin dự án Palm River & quy hoạch\n" +
+  "• Tra cứu tài liệu, thủ tục pháp lý\n" +
+  "• Hỗ trợ giải đáp nghiệp vụ, kiến thức bất động sản\n\n" +
+  "Hãy nhắn tin trực tiếp cho mình khi bạn cần hỗ trợ nhé!";
+
 export function FriendsManager({
   initialFriends,
   initialSync,
+  initialSettings,
   botId = "bot-1",
 }: {
   initialFriends: FriendItem[];
   initialSync: FriendSyncInfo;
+  initialSettings?: AutoFriendSettings;
   botId?: string;
 }) {
   const [friends, setFriends] = React.useState<FriendItem[]>(initialFriends);
   const [syncInfo, setSyncInfo] = React.useState<FriendSyncInfo>(initialSync);
+  const [autoAccept, setAutoAccept] = React.useState<boolean>(Boolean(initialSettings?.autoAccept));
+  const [welcomeMessage, setWelcomeMessage] = React.useState<string>(
+    initialSettings?.welcomeMessage ?? DEFAULT_TEMPLATE_MESSAGE
+  );
+  const [savingSettings, setSavingSettings] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const [filterMode, setFilterMode] = React.useState<"all" | "allowed" | "blocked">("all");
   const [syncing, setSyncing] = React.useState(Boolean(initialSync.pending));
   const [toggleLoadingId, setToggleLoadingId] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const handleSaveSettings = async () => {
+    setSavingSettings(true);
+    try {
+      const res = await fetch("/api/friends", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          autoAccept,
+          welcomeMessage,
+          botId,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setNotice({ type: "error", text: data.error || "Không thể lưu cấu hình tự động kết bạn." });
+      } else {
+        setNotice({
+          type: "success",
+          text: `Đã lưu cài đặt! Tự động kết bạn: ${autoAccept ? "BẬT" : "TẮT"}. Tin nhắn chào mừng đã được cập nhật thành công.`,
+        });
+      }
+    } catch {
+      setNotice({ type: "error", text: "Lỗi kết nối khi lưu cài đặt." });
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const handleResetTemplate = () => {
+    setWelcomeMessage(DEFAULT_TEMPLATE_MESSAGE);
+  };
 
   // Poll trạng thái sync nếu đang pending
   React.useEffect(() => {
@@ -181,6 +245,119 @@ export function FriendsManager({
           </button>
         </div>
       )}
+
+      {/* CẤU HÌNH TỰ ĐỘNG KẾT BẠN & TIN NHẮN CHÀO MỪNG */}
+      <Card className="border-indigo-500/30 bg-gradient-to-br from-[var(--color-surface)] via-[var(--color-surface)] to-indigo-950/20 shadow-lg">
+        <div className="flex flex-col gap-5">
+          {/* Header */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-400 ring-1 ring-indigo-500/30 shadow-sm">
+                <UserPlus className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-[var(--color-text)]">
+                  Cấu hình Tự Động Kết Bạn & Tin Nhắn Chào Mừng 1:1
+                </h3>
+                <p className="text-xs text-[var(--color-muted)]">
+                  Bật công tắc để Bot tự động kết bạn khi có người gửi lời mời và gửi tin nhắn chào mừng 1:1.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              <Badge tone={autoAccept ? "ok" : "muted"} className="px-2.5 py-1 text-xs font-semibold">
+                {autoAccept ? "● Tự động: ĐANG BẬT" : "○ Tự động: ĐANG TẮT"}
+              </Badge>
+            </div>
+          </div>
+
+          <div className="h-px bg-[var(--color-border)]" />
+
+          {/* Switch toggle */}
+          <div className="flex flex-col gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)]/50 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-[var(--color-text)]">
+                  Tự động đồng ý khi có lời mời kết bạn mới
+                </span>
+                <span className="rounded bg-indigo-500/15 px-2 py-0.5 text-[10px] font-medium text-indigo-400">
+                  Delay 2.5s giả lập người thật
+                </span>
+              </div>
+              <p className="text-xs text-[var(--color-muted)]">
+                Khi ai đó gửi lời mời kết bạn trên Zalo, Bot sẽ tự động chấp nhận sau 2.5s, cấp quyền trò chuyện 1:1 và gửi tin nhắn chào mừng ngay lập tức.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setAutoAccept(!autoAccept)}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
+                autoAccept ? "bg-emerald-600" : "bg-zinc-700"
+              }`}
+              title={autoAccept ? "Bấm để TẮT tự động kết bạn" : "Bấm để BẬT tự động kết bạn"}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  autoAccept ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* Welcome Message Textarea */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-xs font-semibold text-[var(--color-text)]">
+                <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                Nội dung tin nhắn chào mừng (Gửi riêng 1:1 ngay sau khi kết bạn thành công):
+              </label>
+              <button
+                type="button"
+                onClick={handleResetTemplate}
+                className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                title="Khôi phục lại nội dung lời chào mẫu"
+              >
+                <RotateCcw className="h-3 w-3" />
+                Khôi phục mẫu
+              </button>
+            </div>
+
+            <textarea
+              rows={5}
+              value={welcomeMessage}
+              onChange={(e) => setWelcomeMessage(e.target.value)}
+              placeholder="Nhập nội dung lời chào mừng bạn mới..."
+              className="w-full rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 text-xs leading-relaxed text-[var(--color-text)] placeholder-[var(--color-muted)] outline-none transition focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-mono"
+            />
+            <div className="flex items-center justify-between text-[11px] text-[var(--color-muted)]">
+              <span>💡 Bạn có thể tự do chỉnh sửa nội dung giới thiệu, các lệnh hướng dẫn hoặc thông tin liên hệ tùy ý.</span>
+              <span>{welcomeMessage.length} ký tự</span>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex items-center justify-end gap-3 pt-1">
+            <Button
+              onClick={handleSaveSettings}
+              disabled={savingSettings}
+              className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 px-5 font-semibold text-white shadow-md hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50"
+            >
+              {savingSettings ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Đang lưu cài đặt...
+                </>
+              ) : (
+                <>
+                  <Save className="h-4 w-4" />
+                  Lưu cài đặt
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      </Card>
 
       {/* STATS & ACTIONS HEADER */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

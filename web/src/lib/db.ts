@@ -1716,3 +1716,71 @@ export function getFriendSyncStatus(botId = "bot-1"): {
     return {};
   }
 }
+
+// ---- Cấu hình Tự Động Kết Bạn & Tin Nhắn Chào Mừng 1:1 ----
+
+export interface AutoFriendSettings {
+  autoAccept: boolean;
+  welcomeMessage: string;
+}
+
+export const DEFAULT_WELCOME_MESSAGE =
+  "Xin chào bạn! Mình là Trợ lý AI Palm River.\n\n" +
+  "Rất vui được kết nối cùng bạn! Bạn có thể hỏi mình bất cứ điều gì về:\n" +
+  "• Thông tin dự án Palm River & quy hoạch\n" +
+  "• Tra cứu tài liệu, thủ tục pháp lý\n" +
+  "• Hỗ trợ giải đáp nghiệp vụ, kiến thức bất động sản\n\n" +
+  "Hãy nhắn tin trực tiếp cho mình khi bạn cần hỗ trợ nhé!";
+
+export function getAutoFriendSettings(botId = "bot-1"): AutoFriendSettings {
+  try {
+    if (!tableExists("bot_state")) {
+      return { autoAccept: false, welcomeMessage: DEFAULT_WELCOME_MESSAGE };
+    }
+    const row = getDb(botId)
+      .prepare(`SELECT value FROM bot_state WHERE key = 'auto_friend_settings'`)
+      .get() as { value: string } | undefined;
+    if (row?.value) {
+      const parsed = JSON.parse(row.value);
+      return {
+        autoAccept: Boolean(parsed.autoAccept),
+        welcomeMessage:
+          typeof parsed.welcomeMessage === "string" && parsed.welcomeMessage.trim()
+            ? parsed.welcomeMessage
+            : DEFAULT_WELCOME_MESSAGE,
+      };
+    }
+  } catch (e) {
+    console.error("[web/db] getAutoFriendSettings error:", e);
+  }
+  return {
+    autoAccept: false,
+    welcomeMessage: DEFAULT_WELCOME_MESSAGE,
+  };
+}
+
+export function setAutoFriendSettings(
+  settings: Partial<AutoFriendSettings>,
+  botId = "bot-1"
+): boolean {
+  try {
+    if (!tableExists("bot_state")) return false;
+    const current = getAutoFriendSettings(botId);
+    const updated: AutoFriendSettings = {
+      autoAccept: settings.autoAccept !== undefined ? Boolean(settings.autoAccept) : current.autoAccept,
+      welcomeMessage:
+        settings.welcomeMessage !== undefined ? String(settings.welcomeMessage) : current.welcomeMessage,
+    };
+    const now = Date.now();
+    getDb(botId)
+      .prepare(
+        `INSERT INTO bot_state (key, value, updated_at) VALUES ('auto_friend_settings', @val, @now)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+      )
+      .run({ val: JSON.stringify(updated), now });
+    return true;
+  } catch (e) {
+    console.error("[web/db] setAutoFriendSettings error:", e);
+    return false;
+  }
+}
