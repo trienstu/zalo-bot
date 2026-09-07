@@ -1416,7 +1416,80 @@ export async function runListener(): Promise<void> {
     }
   }
   setInterval(() => void checkDailyAiNewsBriefingLoop(), 30000);
+
+  // =========================================================================
+  // VÒNG LẶP QUÉT & TỰ ĐỘNG CHẤP NHẬN LỜI MỜI KẾT BẠN (MỖI 10 GIÂY)
+  // =========================================================================
+  async function checkAutoAcceptFriendsLoop(): Promise<void> {
+    try {
+      const settings = getAutoFriendSettings();
+      if (!settings.autoAccept) return;
+      if (typeof (api as any).getSentFriendRequest !== "function") return;
+
+      let pendingList: any = null;
+      try {
+        pendingList = await (api as any).getSentFriendRequest();
+      } catch (err: any) {
+        // Zalo ném mã lỗi 112 khi không có lời mời kết bạn nào -> hoàn toàn bình thường
+        if (err?.code === 112 || String(err?.message || "").includes("112")) {
+          return;
+        }
+        return;
+      }
+
+      if (!pendingList || typeof pendingList !== "object") return;
+
+      const entries = Object.entries(pendingList);
+      if (entries.length === 0) return;
+
+      for (const [uid, item] of entries) {
+        const userId = String(uid || (item as any)?.userId || "").trim();
+        if (!userId) continue;
+
+        console.log(`[auto-friend] 🔔 Phát hiện lời mời kết bạn chờ duyệt từ UID: ${userId}`);
+        await sleep(1500);
+
+        try {
+          if (typeof (api as any).acceptFriendRequest === "function") {
+            await (api as any).acceptFriendRequest(userId);
+            console.log(`[auto-friend] ✅ Đã tự động chấp nhận kết bạn với UID: ${userId}`);
+
+            const displayName = String(
+              (item as any)?.displayName || (item as any)?.zaloName || `Bạn mới ${userId.slice(-4)}`
+            );
+            const avatar = String((item as any)?.avatar || "");
+            const now = Date.now();
+
+            upsertBotFriend({
+              userId,
+              displayName,
+              avatar,
+              now,
+            });
+            setFriendAllowDirect(userId, true);
+            console.log(`[auto-friend] Đã cấp quyền chat 1:1 cho bạn mới: ${displayName} (${userId})`);
+
+            // Gửi tin nhắn chào mừng 1:1
+            if (settings.welcomeMessage && settings.welcomeMessage.trim()) {
+              await sleep(1000);
+              await sendDirectText(api, userId, settings.welcomeMessage.trim());
+              console.log(`[auto-friend] Đã gửi tin nhắn chào mừng 1:1 tới ${displayName} (${userId})`);
+            }
+          }
+        } catch (acceptErr) {
+          console.warn(`[auto-friend] Lỗi khi chấp nhận kết bạn với ${userId}:`, acceptErr);
+        }
+      }
+    } catch (e) {
+      console.warn(`[auto-friend] checkAutoAcceptFriendsLoop error: ${String(e)}`);
+    }
+  }
+
+  // Quét ngay lần đầu sau 3 giây, sau đó lặp lại mỗi 10 giây
+  setTimeout(() => void checkAutoAcceptFriendsLoop(), 3000);
+  setInterval(() => void checkAutoAcceptFriendsLoop(), 10000);
 }
+
 
 function normalizeGroupEventType(ev: any): string {
   return String(ev?.type ?? ev?.act ?? ev?.data?.act ?? "")

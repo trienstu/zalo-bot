@@ -12,6 +12,9 @@ import {
   getRecentDirectDocument,
   getBotState,
   setBotState,
+  getAutoFriendSettings,
+  upsertBotFriend,
+  setFriendAllowDirect,
 } from "./db/index.js";
 import { sendDirectText, sendGroupText } from "./zalo/client.js";
 import { callGemini, downloadFileContent, type GeminiMediaPart } from "./gemini.js";
@@ -287,10 +290,36 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   }
 
   // Kiểm tra quyền tương tác 1:1: Admin hoặc Bạn bè được cấp quyền qua Dashboard
-  const isAllowedFriend = isUserAllowedDirectChat(sender);
+  let isAllowedFriend = isUserAllowedDirectChat(sender);
 
-  // Nếu người nhắn tin không phải là Admin và không thuộc danh sách được cấp quyền:
-  // Nhắc nhở họ kết bạn với Bot để bắt đầu tương tác (giới hạn 1 lần mỗi 24h để chống spam).
+  // Nếu người nhắn tin không phải là Admin và chưa có quyền:
+  if (!isAdmin && !isAllowedFriend) {
+    // Nếu chế độ tự động kết bạn đang BẬT: thử đồng ý kết bạn ngay (người dùng vừa bấm kết bạn rồi nhắn tin 1:1)
+    const autoSettings = getAutoFriendSettings();
+    if (autoSettings.autoAccept && typeof (api as any).acceptFriendRequest === "function") {
+      try {
+        await (api as any).acceptFriendRequest(sender);
+        console.log(`[admin-assistant] ✅ Đã tự động chấp nhận kết bạn khi ${displayName} (${sender}) nhắn tin 1:1!`);
+
+        upsertBotFriend({
+          userId: sender,
+          displayName,
+          now: Date.now(),
+        });
+        setFriendAllowDirect(sender, true);
+        isAllowedFriend = true;
+
+        // Gửi tin nhắn chào mừng
+        if (autoSettings.welcomeMessage && autoSettings.welcomeMessage.trim()) {
+          await sendDirectText(api, sender, autoSettings.welcomeMessage.trim());
+        }
+      } catch (e) {
+        // Chưa gửi lời mời kết bạn hoặc không thể accept
+      }
+    }
+  }
+
+  // Nếu sau khi thử vẫn không có quyền -> nhắc nhở kết bạn
   if (!isAdmin && !isAllowedFriend) {
     const strangerKey = `stranger_prompt_${sender}`;
     const lastPromptStr = getBotState(strangerKey);
