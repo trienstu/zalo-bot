@@ -1431,9 +1431,9 @@ async function handleHistoryQA(
     customPromptSection = `\n=== CHỈ THỊ & NỘI QUY RIÊNG CỦA ADMIN CHO NHÓM NÀY (BẮT BUỘC TUÂN THỦ 100%): ===\n${groupSettings.customPrompt.trim()}\n`;
   }
 
-  // 2.0. Nhận diện câu hỏi cần tra cứu thông tin thời gian thực / lịch sử (Google News 3 tầng)
+  // 2.0. Nhận diện câu hỏi cần tra cứu thông tin thời gian thực / lịch sử / bách khoa toàn thư đa lĩnh vực
   const isRealTimeSearchQuery =
-    /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|24h|24 giờ|có gì mới|mới có gì|vừa xong|gần đây|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì|sự kiện|giá vàng|chứng khoán|thị trường|lũ quét|bão số|thiên tai|thế nào rồi|thảm họa|dự án|tổng quan dự án|thông tin về|cho tôi thông tin|tìm hiểu về|ở đâu|giá bao nhiêu|ai là\b|vụ việc\b|vụ án\b|scandal\b|lùm xùm\b|bê bối\b|tiểu sử\b|sự cố\b|nguyên nhân\b|đạo nhái\b|bản quyền\b|phốt\b|drama\b|tìm kiếm thêm|tra cứu|là gì\b|là cái gì\b|là con gì\b|thế nào\b|như thế nào\b|ra sao\b|nghĩa là gì\b|gpt\b|claude\b|deepseek\b|grok\b|openai\b|anthropic\b|astra\b)/i.test(
+    /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|24h|24 giờ|có gì mới|mới có gì|vừa xong|gần đây|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì|sự kiện|giá vàng|chứng khoán|thị trường|lũ quét|bão số|thiên tai|thế nào rồi|thảm họa|dự án|tổng quan dự án|thông tin về|cho tôi thông tin|tìm hiểu về|ở đâu|giá bao nhiêu|ai là\b|vụ việc\b|vụ án\b|scandal\b|lùm xùm\b|bê bối\b|tiểu sử\b|sự cố\b|nguyên nhân\b|đạo nhái\b|bản quyền\b|phốt\b|drama\b|tìm kiếm thêm|tra cứu|khi nào ra|bao giờ ra|khi nào có|bao giờ có|sắp ra|thời điểm ra mắt|ngày ra mắt|lộ trình|phát hành khi nào|ra chưa|bản mới|giá xăng|tỷ giá|ngoại tệ|lãi suất|vn-index|bitcoin|crypto|bóng đá|tỉ số|kết quả trận|lịch thi đấu|bảng xếp hạng|ngoại hạng anh|premier league|cúp c1|champions league|v-league|chuyển nhượng|luật đất đai|sổ đỏ|vneid|cccd|thủ tục|phạt nguội|thuế tncn|nghị định|thông tư|sân bay long thành|vành đai|cao tốc|quy hoạch|bảng giá đất|so sánh|đối chiếu|khác nhau|con nào hơn|nên dùng con nào|nên mua con nào|đánh giá|review|benchmark|gemini\b|gpt\b|claude\b|deepseek\b|grok\b|llama\b|mistral\b|sora\b|qwen\b|openai\b|anthropic\b|nvidia\b|apple\b|iphone\b|macbook\b|chip\b|bán dẫn\b|là gì\b|là cái gì\b|là con gì\b|thế nào\b|như thế nào\b|ra sao\b|nghĩa là gì\b|astra\b)/i.test(
       question
     );
 
@@ -1447,14 +1447,29 @@ async function handleHistoryQA(
   }
 
   const liveNewsSection = liveNews
-    ? `\n=== CÁC BẢN TIN THỜI GIAN THỰC MỚI NHẤT VỪA TRA CỨU TỪ GOOGLE NEWS: ===\n${liveNews}\n`
+    ? `\n=== DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT: ===\n${liveNews}\n`
     : "";
 
   let searchInstruction = "";
   if (isRealTimeSearchQuery) {
     searchInstruction =
-      `\n8. TỔNG HỢP TIN TỨC THỜI GIAN THỰC: Câu hỏi này liên quan đến tin tức, sự kiện hoặc thông tin thời gian thực. BẮT BUỘC ĐỌC KỸ và TRÍCH XUẤT CHÍNH XÁC các thông tin và con số mới nhất từ danh sách các bản tin Google News bên dưới. NGUỒN BẢN TIN GOOGLE NEWS CÓ ĐỘ ƯU TIÊN CAO NHẤT, ĐÈ LÊN MỌI THÔNG TIN VÀ LẬP LUẬN CŨ TRONG LỊCH SỬ CHAT CỦA NHÓM. Nếu trong lịch sử chat trước đây có thành viên hoặc bot từng nói sản phẩm/sự kiện chưa ra mắt hoặc cung cấp số liệu cũ, bạn BẮT BUỘC phải đính chính ngay dựa trên bản tin thời gian thực mới nhất!\n`;
+      `\n8. TỔNG HỢP THÔNG TIN THỜI GIAN THỰC: Câu hỏi này liên quan đến tin tức, sự kiện, thời điểm ra mắt, hoặc số liệu thực tế. BẮT BUỘC ĐỌC KỸ và TRÍCH XUẤT CHÍNH XÁC các thông tin, con số mới nhất từ danh sách bản tin / Wikipedia bên dưới. NGUỒN DỮ LIỆU THỜI GIAN THỰC CÓ ĐỘ ƯU TIÊN CAO NHẤT, ĐÈ LÊN MỌI LẬP LUẬN CŨ TRONG LỊCH SỬ CHAT CỦA NHÓM.\n`;
   }
+
+  const encyclopediaInstruction =
+    `\n12. CHUẨN ĐỊNH DẠNG BÁCH KHOA TOÀN THƯ & CHUYÊN GIA PHÂN TÍCH:\n` +
+    `    - KHI HỎI VỀ SẢN PHẨM / CÔNG NGHỆ / TIẾN ĐỘ RA MẮT:\n` +
+    `      + Trình bày rõ: [🗓️ Tiến độ & Thời điểm phát hành dự kiến] (nêu mốc thời gian thực tế, các bản thử nghiệm/chính thức).\n` +
+    `      + Nếu câu hỏi có so sánh đối thủ: Trình bày [⚖️ So sánh đa chiều], với từng đối thủ nêu rõ 3 ý: ⭐ Điểm mạnh nhất | 🔍 So sánh tương quan | ⚠️ Điểm trừ / Lưu ý.\n` +
+    `      + Kết bài luôn có mục [📌 Tóm lại & Lời khuyên thực chiến] để thành viên biết nên chọn hoặc chờ đợi điều gì.\n` +
+    `    - KHI HỎI VỀ TÀI CHÍNH / GIÁ CẢ THỊ TRƯỜNG (Vàng, Xăng, Ngoại tệ, Lãi suất, Crypto):\n` +
+    `      + Trích xuất số liệu mới nhất, ghi rõ mốc thời gian cập nhật, biến động tăng/giảm.\n` +
+    `    - KHI HỎI VỀ PHÁP LÝ / THỦ TỤC HÀNH CHÍNH (Đất đai, Xe cộ, Thuế, VNeID, Giao thông):\n` +
+    `      + Hướng dẫn dạng checklist từng bước (Bước 1, Bước 2, Bước 3), hồ sơ cần chuẩn bị, nơi nộp và mức phí/mức phạt quy định.\n` +
+    `    - KHI HỎI VỀ THỂ THAO / BÓNG ĐÁ:\n` +
+    `      + Nêu chính xác tỉ số, người ghi bàn, thời gian trận đấu, bảng xếp hạng và nhận định ngắn gọn.\n` +
+    `    - KHI HỎI VỀ ĐỊNH NGHĨA / LỊCH SỬ / KHOA HỌC / ĐỜI SỐNG:\n` +
+    `      + Giải thích bản chất một cách dễ hiểu, sinh động, chuẩn xác như bách khoa toàn thư.\n`;
 
   const systemPrompt =
     `${personaIntro}\n${customPromptSection}\n` +
@@ -1476,7 +1491,8 @@ async function handleHistoryQA(
     `      + BẮT BUỘC LIỆT KÊ ĐỦ: Nếu tài liệu có nhiều phương án (ví dụ có 4 phương thức thanh toán), BẮT BUỘC phải trình bày đầy đủ cả 4 phương án, tuyệt đối không được tự ý bỏ sót bất kỳ phương án nào.\n` +
     `    - Chỉ đối với các câu hỏi về kiến thức công nghệ phổ quát hoặc kỹ năng chung ngoài dự án: Bạn mới giải thích theo kiến thức thực tế.\n` +
     `11. TÀI LIỆU CHÍNH THỨC TỪ KHO TRI THỨC VĨNH VIỄN HOẶC LINK GOOGLE: Có độ ưu tiên cao nhất về tính chính xác. Bạn BẮT BUỘC phải trích xuất chính xác từng con số, từng đợt thanh toán từ tài liệu này để giải đáp cho thành viên!` +
-    searchInstruction;
+    searchInstruction +
+    encyclopediaInstruction;
 
   const userPrompt =
     `${quotePromptSection}\n${fileContentSection}${liveNewsSection}\n` +

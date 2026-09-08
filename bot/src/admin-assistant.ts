@@ -1229,11 +1229,10 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     quoteSection = `\n=== NỘI DUNG TRÍCH DẪN: ===\n"${event.quote.text}"\n`;
   }
 
-  // 2.0. Nhận diện câu hỏi cần tra cứu thông tin thời gian thực / lịch sử (Google News 3 tầng)
-  // Với User thường (1:1), chỉ kích hoạt cào báo khi câu hỏi thực sự liên quan đến thời sự/tin tức nóng để tránh làm chậm 2-3s
+  // 2.0. Nhận diện câu hỏi cần tra cứu thông tin thời gian thực / lịch sử / bách khoa toàn thư đa lĩnh vực
   const isRealTimeSearchQuery = !isAdmin
-    ? /(?:tin tức|tin mới|hôm nay|24h qua|24h|24 giờ|tin nóng|thời sự|bản tin|giá vàng|chứng khoán|lũ quét|bão số|thiên tai|thảm họa|drama\b|scandal\b)/i.test(rawText)
-    : /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|24h|24 giờ|có gì mới|mới có gì|vừa xong|gần đây|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì|sự kiện|giá vàng|chứng khoán|thị trường|lũ quét|bão số|thiên tai|thế nào rồi|thảm họa|dự án|tổng quan dự án|thông tin về|cho tôi thông tin|tìm hiểu về|ở đâu|giá bao nhiêu|ai là\b|vụ việc\b|vụ án\b|scandal\b|lùm xùm\b|bê bối\b|tiểu sử\b|sự cố\b|nguyên nhân\b|đạo nhái\b|bản quyền\b|phốt\b|drama\b|tìm kiếm thêm|tra cứu|là gì\b|là cái gì\b|là con gì\b|thế nào\b|như thế nào\b|ra sao\b|nghĩa là gì\b|gpt\b|claude\b|deepseek\b|grok\b|openai\b|anthropic\b|astra\b)/i.test(
+    ? /(?:tin tức|tin mới|mới nhất|hôm nay|24h|tin nóng|thời sự|bản tin|khi nào ra|bao giờ ra|khi nào có|bao giờ có|sắp ra|thời điểm ra mắt|ngày ra mắt|lộ trình|phát hành khi nào|giá vàng|giá xăng|tỷ giá|chứng khoán|vn-index|lãi suất|bitcoin|crypto|tỉ số|kết quả bóng đá|ngoại hạng anh|cúp c1|luật đất đai|thủ tục|vneid|sổ đỏ|phạt nguội|lũ quét|bão số|thiên tai|thảm họa|drama\b|scandal\b|gemini\b|gpt\b|claude\b|deepseek\b|grok\b|so sánh|đối chiếu|đánh giá)/i.test(rawText)
+    : /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|24h|24 giờ|có gì mới|mới có gì|vừa xong|gần đây|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì|sự kiện|giá vàng|chứng khoán|thị trường|lũ quét|bão số|thiên tai|thế nào rồi|thảm họa|dự án|tổng quan dự án|thông tin về|cho tôi thông tin|tìm hiểu về|ở đâu|giá bao nhiêu|ai là\b|vụ việc\b|vụ án\b|scandal\b|lùm xùm\b|bê bối\b|tiểu sử\b|sự cố\b|nguyên nhân\b|đạo nhái\b|bản quyền\b|phốt\b|drama\b|tìm kiếm thêm|tra cứu|khi nào ra|bao giờ ra|khi nào có|bao giờ có|sắp ra|thời điểm ra mắt|ngày ra mắt|lộ trình|phát hành khi nào|giá xăng|tỷ giá|ngoại tệ|lãi suất|vn-index|bitcoin|crypto|bóng đá|tỉ số|kết quả trận|lịch thi đấu|bảng xếp hạng|ngoại hạng anh|premier league|cúp c1|champions league|v-league|chuyển nhượng|luật đất đai|sổ đỏ|vneid|cccd|thủ tục|phạt nguội|thuế tncn|nghị định|thông tư|sân bay long thành|vành đai|cao tốc|quy hoạch|bảng giá đất|so sánh|đối chiếu|khác nhau|con nào hơn|nên dùng con nào|nên mua con nào|đánh giá|review|benchmark|gemini\b|gpt\b|claude\b|deepseek\b|grok\b|llama\b|mistral\b|sora\b|qwen\b|openai\b|anthropic\b|nvidia\b|apple\b|iphone\b|macbook\b|chip\b|bán dẫn\b|là gì\b|là cái gì\b|là con gì\b|thế nào\b|như thế nào\b|ra sao\b|nghĩa là gì\b|astra\b)/i.test(
         rawText
       );
 
@@ -1247,11 +1246,11 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   }
 
   const liveNewsSection = liveNews
-    ? `\n=== CÁC BẢN TIN THỜI GIAN THỰC MỚI NHẤT VỪA TRA CỨU TỪ GOOGLE NEWS: ===\n${liveNews}\n`
+    ? `\n=== DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT: ===\n${liveNews}\n`
     : "";
 
   const searchInstruction = isRealTimeSearchQuery
-    ? `\n8. TỔNG HỢP TIN TỨC THỜI GIAN THỰC: Câu hỏi này liên quan đến tin tức hoặc sự kiện thực tế. BẮT BUỘC ĐỌC KỸ và TRÍCH XUẤT CHÍNH XÁC các con số thống kê mới nhất (số người chết, mất tích, thiệt hại, ngày tháng, tên nguồn báo chí) từ danh sách các bản tin Google News bên dưới. TUYỆT ĐỐI KHÔNG tự phỏng đoán hoặc đưa các số liệu cũ từ quá khứ nếu đã có số liệu trong danh sách bản tin.\n`
+    ? `\n8. TỔNG HỢP THÔNG TIN THỜI GIAN THỰC: Câu hỏi này liên quan đến tin tức, sự kiện, thời điểm ra mắt, hoặc số liệu thực tế. BẮT BUỘC ĐỌC KỸ và TRÍCH XUẤT CHÍNH XÁC các thông tin, con số mới nhất từ danh sách bản tin / Wikipedia bên dưới. NGUỒN DỮ LIỆU THỜI GIAN THỰC CÓ ĐỘ ƯU TIÊN CAO NHẤT, ĐÈ LÊN MỌI LẬP LUẬN CŨ.\n`
     : "";
 
   // 2.1. Nhận diện câu hỏi kiểm tra / rà soát / tóm tắt tình hình các nhóm Zalo (Chỉ dành cho Admin)
@@ -1314,6 +1313,21 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     ? `\n10. NGUYÊN TẮC CHỐNG BỊA ĐẶT TUYỆT ĐỐI (ZERO HALLUCINATION): Câu hỏi của Sếp liên quan đến tài liệu/chính sách trong [KHO TRI THỨC VĨNH VIỄN]. BẮT BUỘC trích dẫn chính xác 100% số liệu, tỷ lệ %, đợt thanh toán, chính sách từ tài liệu này. TUYỆT ĐỐI CẤM tự ý bịa đặt thêm các chính sách cam kết thuê lại, quà tặng vàng/nội thất, hay tiến độ trả góp nếu tài liệu không đề cập. Nếu tài liệu thiếu hoặc không có thông tin, hãy báo thẳng thắn là tài liệu không đề cập!\n`
     : "";
 
+  const encyclopediaInstruction =
+    `\n11. CHUẨN ĐỊNH DẠNG BÁCH KHOA TOÀN THƯ & CHUYÊN GIA PHÂN TÍCH:\n` +
+    `    - KHI HỎI VỀ SẢN PHẨM / CÔNG NGHỆ / TIẾN ĐỘ RA MẮT:\n` +
+    `      + Trình bày rõ: [🗓️ Tiến độ & Thời điểm phát hành dự kiến] (nêu mốc thời gian thực tế, các bản thử nghiệm/chính thức).\n` +
+    `      + Nếu câu hỏi có so sánh đối thủ: Trình bày [⚖️ So sánh đa chiều], với từng đối thủ nêu rõ 3 ý: ⭐ Điểm mạnh nhất | 🔍 So sánh tương quan | ⚠️ Điểm trừ / Lưu ý.\n` +
+    `      + Kết bài luôn có mục [📌 Tóm lại & Lời khuyên thực chiến] để người dùng biết nên chọn hoặc chờ đợi điều gì.\n` +
+    `    - KHI HỎI VỀ TÀI CHÍNH / GIÁ CẢ THỊ TRƯỜNG (Vàng, Xăng, Ngoại tệ, Lãi suất, Crypto):\n` +
+    `      + Trích xuất số liệu mới nhất, ghi rõ mốc thời gian cập nhật, biến động tăng/giảm.\n` +
+    `    - KHI HỎI VỀ PHÁP LÝ / THỦ TỤC HÀNH CHÍNH (Đất đai, Xe cộ, Thuế, VNeID, Giao thông):\n` +
+    `      + Hướng dẫn dạng checklist từng bước (Bước 1, Bước 2, Bước 3), hồ sơ cần chuẩn bị, nơi nộp và mức phí/mức phạt quy định.\n` +
+    `    - KHI HỎI VỀ THỂ THAO / BÓNG ĐÁ:\n` +
+    `      + Nêu chính xác tỉ số, người ghi bàn, thời gian trận đấu, bảng xếp hạng và nhận định ngắn gọn.\n` +
+    `    - KHI HỎI VỀ ĐỊNH NGHĨA / LỊCH SỬ / KHOA HỌC / ĐỜI SỐNG:\n` +
+    `      + Giải thích bản chất một cách dễ hiểu, sinh động, chuẩn xác như bách khoa toàn thư.\n`;
+
   const userPrompt =
     (historyText ? `LỊCH SỬ TRÒ CHUYỆN TRƯỚC ĐÓ:\n${historyText}\n\n` : "") +
     `${quoteSection}${fileSection}${liveNewsSection}${groupActivitiesSection}${permanentKnowledgeSection}\n` +
@@ -1325,7 +1339,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       ? (process.env.USER_DIRECT_GEMINI_MODEL?.trim() || "gemini-flash-lite-latest")
       : (process.env.ADMIN_DIRECT_GEMINI_MODEL?.trim() || undefined);
 
-    const answer = await callGemini(systemPrompt + searchInstruction + groupInstruction + knowledgeInstruction, userPrompt, {
+    const answer = await callGemini(systemPrompt + searchInstruction + groupInstruction + knowledgeInstruction + encyclopediaInstruction, userPrompt, {
       model: chosenModel,
       maxTokens: !isAdmin ? 600 : undefined,
       mediaParts: mediaPart ? [mediaPart] : undefined,
