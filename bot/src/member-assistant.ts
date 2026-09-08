@@ -20,6 +20,7 @@ import {
 import { sendGroupText, sendReaction, sendTyping, Reactions, sleep } from "./zalo/client.js";
 import {
   callGemini,
+  callGeminiAgentLoop,
   downloadFileContent,
   type GeminiMediaPart,
 } from "./gemini.js";
@@ -1073,10 +1074,19 @@ async function handleHistoryQA(
       `HÃY TRẢ LỜI NGAY:`;
 
     try {
-      const answer = await callGemini(quoteSystemPrompt, quoteUserPrompt, {
-        mediaParts: mediaPart ? [mediaPart] : undefined,
-        enableSearch: false,
-      });
+      let answer = "";
+      const isGreetingQuote =
+        /^(?:chào|hi|hello|alo|ê|cảm ơn|thanks|ok)\b/i.test(question.trim()) && question.trim().length < 25;
+      if (needsExternalSearch && !isGreetingQuote) {
+        answer = await callGeminiAgentLoop(quoteSystemPrompt, quoteUserPrompt, {
+          mediaParts: mediaPart ? [mediaPart] : undefined,
+        });
+      } else {
+        answer = await callGemini(quoteSystemPrompt, quoteUserPrompt, {
+          mediaParts: mediaPart ? [mediaPart] : undefined,
+          enableSearch: false,
+        });
+      }
       return answer;
     } catch (e) {
       console.warn("[member-assistant] Fast-path Quote QA error:", e);
@@ -1492,7 +1502,15 @@ async function handleHistoryQA(
     `    - Chỉ đối với các câu hỏi về kiến thức công nghệ phổ quát hoặc kỹ năng chung ngoài dự án: Bạn mới giải thích theo kiến thức thực tế.\n` +
     `11. TÀI LIỆU CHÍNH THỨC TỪ KHO TRI THỨC VĨNH VIỄN HOẶC LINK GOOGLE: Có độ ưu tiên cao nhất về tính chính xác. Bạn BẮT BUỘC phải trích xuất chính xác từng con số, từng đợt thanh toán từ tài liệu này để giải đáp cho thành viên!` +
     searchInstruction +
-    encyclopediaInstruction;
+    encyclopediaInstruction +
+    `\n13. NGUYÊN TẮC NEO DỮ KIỆN & LỌC SỰ THẬT CÓ NGÀY THÁNG (CLAIM GROUNDING WITH DATES):\n` +
+    `    - KHI TRẢ LỜI VỀ TIN TỨC, CÔNG NGHỆ, MÔ HÌNH AI, SỰ KIỆN, PHÁT HÀNH, GIÁ CẢ:\n` +
+    `      + BẮT BUỘC chỉ khẳng định những dữ kiện có NGÀY THÁNG RÕ RÀNG + SỐ LIỆU + NGUỒN XÁC THỰC từ các công cụ (web_search, wiki_lookup, hn_search, arxiv_search, github_search).\n` +
+    `      + Nếu thông tin chưa có ngày tháng công bố chính thức hoặc chỉ là đồn đoán trên mạng: BẮT BUỘC ghi rõ là "chưa chốt / tin đồn" hoặc "chưa có thông cáo chính thức", tuyệt đối không tự bịa đặt mốc thời gian.\n` +
+    `      + Luôn trích dẫn 2-3 nguồn tham khảo uy tín (tên nguồn hoặc link) ở cuối câu trả lời.\n` +
+    `    - CÔ LẬP NGUỒN DỮ LIỆU & CHỐNG LÂY NHIỄM (ANTI-POLLUTION):\n` +
+    `      + <chat_history> CHỈ là lịch sử trò chuyện nội bộ của nhóm Zalo để nắm ngữ cảnh giao tiếp.\n` +
+    `      + TUYỆT ĐỐI KHÔNG đem các chủ đề tán gẫu nội bộ (ví dụ: bàn về cấu hình bot nhà mình, antihack, sửa code, đùa giỡn trong nhóm) vào câu trả lời khi thành viên đang hỏi về kiến thức công nghệ, khoa học, dự án, thời sự bên ngoài.\n`;
 
   const userPrompt =
     `${quotePromptSection}\n${fileContentSection}${liveNewsSection}\n` +
@@ -1502,10 +1520,28 @@ async function handleHistoryQA(
     `HÃY TRẢ LỜI THẬT DUYÊN DÁNG, CHUẨN XÁC VÀ HÓM HỈNH:`;
 
   try {
-    let answer = await callGemini(systemPrompt, userPrompt, {
-      mediaParts: mediaPart ? [mediaPart] : undefined,
-      enableSearch: false, // Dùng Google News RSS đã nhúng trực tiếp, tránh lỗi 429 quota search grounding của Gemini Free
-    });
+    const isGreetingQuery =
+      /^(?:chào|hi|hello|alo|ê|helo|hế lô|bye|tạm biệt|cảm ơn|thanks|ok|oki|được rồi|thôi|dạ|vâng)\b/i.test(question.trim()) &&
+      question.trim().length < 30;
+
+    const isSearchDisabled =
+      process.env.DISABLE_SEARCH === "true" ||
+      Boolean((groupSettings as any)?.disableSearch) ||
+      Boolean((groupSettings as any)?.enableSearch === 0) ||
+      /tắt search|không tìm kiếm|không tra cứu/i.test(groupSettings.customPrompt || "");
+
+    let answer = "";
+    if (isRealTimeSearchQuery && !isGreetingQuery && !isSearchDisabled) {
+      // 🚀 AGENT LOOP ĐÍCH THỰC (Tự chọn web_search, fetch_url, wiki, HN, arXiv, GitHub tối đa 3 vòng)
+      answer = await callGeminiAgentLoop(systemPrompt, userPrompt, {
+        mediaParts: mediaPart ? [mediaPart] : undefined,
+      });
+    } else {
+      answer = await callGemini(systemPrompt, userPrompt, {
+        mediaParts: mediaPart ? [mediaPart] : undefined,
+        enableSearch: false,
+      });
+    }
 
     // 🧠 TỰ ĐỘNG GHI NHỚ VÀO BỘ NHỚ DÀI HẠN NẾU ĐÂY LÀ TÀI LIỆU/FILE PHÂN TÍCH
     if (targetUrl && fileName) {

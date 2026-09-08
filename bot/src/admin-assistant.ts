@@ -17,7 +17,7 @@ import {
   setFriendAllowDirect,
 } from "./db/index.js";
 import { sendDirectText, sendGroupText } from "./zalo/client.js";
-import { callGemini, downloadFileContent, type GeminiMediaPart } from "./gemini.js";
+import { callGemini, callGeminiAgentLoop, downloadFileContent, type GeminiMediaPart } from "./gemini.js";
 import type { MemberMessageEvent } from "./member-assistant.js";
 import { getWeatherReport } from "./weather.js";
 import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam } from "./reminder.js";
@@ -1328,6 +1328,13 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `    - KHI HỎI VỀ ĐỊNH NGHĨA / LỊCH SỬ / KHOA HỌC / ĐỜI SỐNG:\n` +
     `      + Giải thích bản chất một cách dễ hiểu, sinh động, chuẩn xác như bách khoa toàn thư.\n`;
 
+  const claimGroundingInstruction =
+    `\n13. NGUYÊN TẮC NEO DỮ KIỆN & LỌC SỰ THẬT CÓ NGÀY THÁNG (CLAIM GROUNDING WITH DATES):\n` +
+    `    - KHI TRẢ LỜI VỀ TIN TỨC, CÔNG NGHỆ, MÔ HÌNH AI, SỰ KIỆN, PHÁT HÀNH, GIÁ CẢ:\n` +
+    `      + BẮT BUỘC chỉ khẳng định những dữ kiện có NGÀY THÁNG RÕ RÀNG + SỐ LIỆU + NGUỒN XÁC THỰC từ các công cụ (web_search, wiki_lookup, hn_search, arxiv_search, github_search).\n` +
+    `      + Nếu thông tin chưa có ngày tháng công bố chính thức hoặc chỉ là đồn đoán trên mạng: BẮT BUỘC ghi rõ là "chưa chốt / tin đồn" hoặc "chưa có thông cáo chính thức", tuyệt đối không tự bịa đặt mốc thời gian.\n` +
+    `      + Luôn trích dẫn 2-3 nguồn tham khảo uy tín (tên nguồn hoặc link) ở cuối câu trả lời.\n`;
+
   const userPrompt =
     (historyText ? `LỊCH SỬ TRÒ CHUYỆN TRƯỚC ĐÓ:\n${historyText}\n\n` : "") +
     `${quoteSection}${fileSection}${liveNewsSection}${groupActivitiesSection}${permanentKnowledgeSection}\n` +
@@ -1339,12 +1346,34 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       ? (process.env.USER_DIRECT_GEMINI_MODEL?.trim() || "gemini-flash-lite-latest")
       : (process.env.ADMIN_DIRECT_GEMINI_MODEL?.trim() || undefined);
 
-    const answer = await callGemini(systemPrompt + searchInstruction + groupInstruction + knowledgeInstruction + encyclopediaInstruction, userPrompt, {
-      model: chosenModel,
-      maxTokens: !isAdmin ? 600 : undefined,
-      mediaParts: mediaPart ? [mediaPart] : undefined,
-      enableSearch: false, // Dùng kết quả Google News RSS đã nhúng trực tiếp, tránh lỗi 429 quota search grounding của Gemini Free
-    });
+    const isGreetingQuery =
+      /^(?:chào|hi|hello|alo|ê|helo|hế lô|bye|tạm biệt|cảm ơn|thanks|ok|oki|được rồi|thôi|dạ|vâng)\b/i.test(rawText.trim()) &&
+      rawText.trim().length < 30;
+    const isSearchDisabled = process.env.DISABLE_SEARCH === "true";
+
+    const fullSystemPrompt =
+      systemPrompt +
+      searchInstruction +
+      groupInstruction +
+      knowledgeInstruction +
+      encyclopediaInstruction +
+      claimGroundingInstruction;
+
+    let answer = "";
+    if (isRealTimeSearchQuery && !isGreetingQuery && !isSearchDisabled) {
+      // 🚀 AGENT LOOP ĐÍCH THỰC (Tự chọn web_search, fetch_url, wiki, HN, arXiv, GitHub tối đa 3 vòng)
+      answer = await callGeminiAgentLoop(fullSystemPrompt, userPrompt, {
+        model: chosenModel,
+        mediaParts: mediaPart ? [mediaPart] : undefined,
+      });
+    } else {
+      answer = await callGemini(fullSystemPrompt, userPrompt, {
+        model: chosenModel,
+        maxTokens: !isAdmin ? 600 : undefined,
+        mediaParts: mediaPart ? [mediaPart] : undefined,
+        enableSearch: false,
+      });
+    }
 
     // Kiểm tra và thực thi thẻ hành động [ACTION:SEND_GROUP target="..."]...[/ACTION] CHỈ DÀNH CHO ADMIN
     let finalAnswer = answer;

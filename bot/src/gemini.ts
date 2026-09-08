@@ -1,5 +1,13 @@
 import fs from "node:fs";
 import { config } from "./config.js";
+import {
+  webSearch,
+  fetchUrl,
+  wikiLookup,
+  hnSearch,
+  arxivSearch,
+  githubSearch,
+} from "./tools/vertical-tools.js";
 
 /**
  * Lớp gọi Google Gemini API dùng chung (Tóm tắt hội thoại Zalo, bóc tách dữ liệu).
@@ -434,3 +442,315 @@ export async function callGeminiJson(
 ): Promise<string> {
   return callGemini(system, user, { maxTokens, json: true });
 }
+
+export interface AgentLoopOptions {
+  model?: string;
+  maxTurns?: number; // default 3
+  temperature?: number;
+  maxTokens?: number;
+  images?: GeminiImagePart[];
+  mediaParts?: GeminiMediaPart[];
+  onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
+}
+
+const AGENT_TOOLS_DECLARATION = {
+  functionDeclarations: [
+    {
+      name: "web_search",
+      description: "Tìm kiếm thông tin thời gian thực, tin tức mới nhất, sự kiện, thời điểm ra mắt, giá cả hoặc số liệu trên web.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          query: { type: "STRING", description: "Từ khóa tìm kiếm ngắn gọn, rõ ràng" },
+        },
+        required: ["query"],
+      },
+    },
+    {
+      name: "fetch_url",
+      description: "Đọc chi tiết nội dung trang web từ một URL cụ thể để trích xuất số liệu, ngày tháng và nội dung bài viết gốc.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          url: { type: "STRING", description: "URL bài viết cần đọc nội dung" },
+        },
+        required: ["url"],
+      },
+    },
+    {
+      name: "wiki_lookup",
+      description: "Tra cứu bách khoa toàn thư Wikipedia về thực thể, công nghệ, nhân vật, lịch sử hoặc khái niệm.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          query: { type: "STRING", description: "Tên thực thể hoặc chủ đề bách khoa" },
+        },
+        required: ["query"],
+      },
+    },
+    {
+      name: "hn_search",
+      description: "Tra cứu tin tức công nghệ, AI, releases và thảo luận kỹ thuật chuyên sâu từ cộng đồng Hacker News.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          query: { type: "STRING", description: "Từ khóa công nghệ hoặc tên mô hình/thư viện" },
+        },
+        required: ["query"],
+      },
+    },
+    {
+      name: "arxiv_search",
+      description: "Tra cứu bài báo khoa học, nghiên cứu kỹ thuật AI/ML mới nhất trên arXiv.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          query: { type: "STRING", description: "Chủ đề nghiên cứu AI hoặc tên mô hình/paper" },
+        },
+        required: ["query"],
+      },
+    },
+    {
+      name: "github_search",
+      description: "Tra cứu kho lưu trữ mã nguồn mở (repository), thư viện, release trên GitHub.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          query: { type: "STRING", description: "Tên thư viện hoặc từ khóa repo mã nguồn" },
+        },
+        required: ["query"],
+      },
+    },
+  ],
+};
+
+async function executeAgentTool(name: string, args: Record<string, any>): Promise<any> {
+  switch (name) {
+    case "web_search": {
+      const q = String(args?.query || "").trim();
+      if (!q) return { results: [] };
+      const items = await webSearch(q, 5);
+      return { results: items };
+    }
+    case "fetch_url": {
+      const url = String(args?.url || "").trim();
+      if (!url) return { error: "Thiếu URL cần đọc" };
+      return await fetchUrl(url, 2500);
+    }
+    case "wiki_lookup": {
+      const q = String(args?.query || "").trim();
+      if (!q) return { error: "Thiếu từ khóa tra cứu" };
+      const res = await wikiLookup(q);
+      return res || { message: "Không tìm thấy trên Wikipedia" };
+    }
+    case "hn_search": {
+      const q = String(args?.query || "").trim();
+      if (!q) return { results: [] };
+      const items = await hnSearch(q, 4);
+      return { results: items };
+    }
+    case "arxiv_search": {
+      const q = String(args?.query || "").trim();
+      if (!q) return { results: [] };
+      const items = await arxivSearch(q, 3);
+      return { results: items };
+    }
+    case "github_search": {
+      const q = String(args?.query || "").trim();
+      if (!q) return { results: [] };
+      const items = await githubSearch(q, 3);
+      return { results: items };
+    }
+    default:
+      return { error: `Công cụ ${name} không tồn tại` };
+  }
+}
+
+/**
+ * Agent Loop gọi Gemini với khả năng tự chọn tool (web_search, fetch_url, wiki_lookup, hn_search, arxiv_search, github_search).
+ * Tối đa 3 vòng lặp. Tự động bảo lưu thoughtSignature và cascading fallback an toàn.
+ */
+export async function callGeminiAgentLoop(
+  system: string,
+  user: string,
+  options?: AgentLoopOptions,
+): Promise<string> {
+  const rawKey = (process.env.GEMINI_API_KEY || config.geminiApiKey || "").trim();
+  const apiKeys = rawKey.split(",").map((k) => k.trim()).filter(Boolean);
+
+  if (apiKeys.length === 0) {
+    throw new Error("Thiếu GEMINI_API_KEY trong .env");
+  }
+
+  const primaryModel = options?.model?.trim() || process.env.GEMINI_MODEL?.trim() || config.geminiModel || "gemini-3.7-flash";
+  const maxTurns = options?.maxTurns || 3;
+  const temperature = options?.temperature ?? 0.2;
+  const maxTokens = options?.maxTokens;
+
+  // Xây dựng userParts ban đầu
+  const initialUserParts: Record<string, unknown>[] = [];
+  const allMedia = [...(options?.images || []), ...(options?.mediaParts || [])];
+  for (const img of allMedia) {
+    initialUserParts.push({
+      inline_data: {
+        mime_type: img.mimeType || "image/jpeg",
+        data: img.data,
+      },
+    });
+  }
+  initialUserParts.push({ text: user });
+
+  const contents: Array<{ role: string; parts: any[] }> = [
+    {
+      role: "user",
+      parts: initialUserParts,
+    },
+  ];
+
+  let apiKeyIdx = botKeyOffset % apiKeys.length;
+
+  try {
+    for (let turn = 0; turn < maxTurns; turn++) {
+      const apiKey = apiKeys[apiKeyIdx];
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${primaryModel}:generateContent?key=${apiKey}`;
+
+      const requestBody: Record<string, unknown> = {
+        system_instruction: system ? { parts: [{ text: system }] } : undefined,
+        contents,
+        tools: [AGENT_TOOLS_DECLARATION],
+        generationConfig: {
+          temperature,
+          ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
+        },
+      };
+
+      const resp = await fetch(endpoint, {
+        method: "POST",
+        signal: AbortSignal.timeout(20_000),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!resp.ok) {
+        const errText = await resp.text().catch(() => "");
+        console.warn(`[gemini-agent] Turn ${turn + 1} gặp HTTP ${resp.status}: ${errText.slice(0, 150)}`);
+        if (resp.status === 429 && apiKeys.length > 1) {
+          apiKeyIdx = (apiKeyIdx + 1) % apiKeys.length;
+          continue;
+        }
+        throw new Error(`Gemini Agent HTTP ${resp.status}: ${errText.slice(0, 200)}`);
+      }
+
+      const data = (await resp.json()) as {
+        candidates?: Array<{
+          content?: {
+            parts?: Array<any>;
+          };
+        }>;
+      };
+
+      const candidate = data.candidates?.[0];
+      const parts = candidate?.content?.parts || [];
+
+      if (parts.length === 0) {
+        throw new Error("Candidate content rỗng từ Gemini API");
+      }
+
+      // Kiểm tra xem model có gọi functionCall nào không
+      const functionCalls = parts
+        .filter((p) => p.functionCall)
+        .map((p) => p.functionCall);
+
+      if (functionCalls.length === 0) {
+        // Model không gọi tool nữa, trả lời hoàn tất!
+        const textAnswer = parts
+          .map((p) => p.text || "")
+          .join("")
+          .trim();
+        botKeyOffset = (apiKeyIdx + 1) % apiKeys.length;
+        return textAnswer;
+      }
+
+      // BẮT BUỘC: Thêm model turn vào contents, giữ nguyên toàn bộ parts (bao gồm thoughtSignature)
+      contents.push({
+        role: "model",
+        parts,
+      });
+
+      console.log(
+        `[gemini-agent] 🔄 Vòng ${turn + 1}/${maxTurns}: Model gọi ${functionCalls.length} tool(s): ` +
+          functionCalls.map((fc: any) => `${fc.name}(${JSON.stringify(fc.args || {})})`).join(", "),
+      );
+
+      // Chạy các tool song song
+      const toolResponses = await Promise.all(
+        functionCalls.map(async (fc: any) => {
+          options?.onToolCall?.(fc.name, fc.args || {});
+          const result = await executeAgentTool(fc.name, fc.args || {});
+          return {
+            functionResponse: {
+              name: fc.name,
+              response: { result },
+            },
+          };
+        }),
+      );
+
+      // Thêm kết quả trả về của tool vào contents cho vòng lặp tiếp theo
+      contents.push({
+        role: "user",
+        parts: toolResponses,
+      });
+    }
+
+    // Nếu đã hết maxTurns mà model vẫn gọi tool, gọi 1 lượt chốt không tool để tổng hợp văn bản
+    const finalKey = apiKeys[apiKeyIdx];
+    const finalEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${primaryModel}:generateContent?key=${finalKey}`;
+    const finalBody = {
+      system_instruction: system ? { parts: [{ text: system }] } : undefined,
+      contents,
+      generationConfig: {
+        temperature,
+        ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
+      },
+    };
+    const finalResp = await fetch(finalEndpoint, {
+      method: "POST",
+      signal: AbortSignal.timeout(20_000),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(finalBody),
+    });
+    if (finalResp.ok) {
+      const finalData = (await finalResp.json()) as any;
+      const candidate = finalData.candidates?.[0];
+      const finalText = candidate?.content?.parts?.map((p: any) => p.text || "").join("").trim();
+      if (finalText) {
+        botKeyOffset = (apiKeyIdx + 1) % apiKeys.length;
+        return finalText;
+      }
+    }
+  } catch (agentErr) {
+    console.warn("[gemini-agent] Lỗi agent loop, tự động fallback về callGemini:", agentErr);
+  }
+
+  // Graceful Fallback: Tìm kiếm DuckDuckGo trực tiếp và gọi callGemini chuẩn
+  try {
+    const queryForSearch = user.replace(/<[^>]+>/g, " ").slice(0, 100).trim();
+    const fallbackResults = await webSearch(queryForSearch, 4);
+    let enrichedUser = user;
+    if (fallbackResults.length > 0) {
+      enrichedUser += `\n\n=== DỮ LIỆU TÌM KIẾM BỔ SUNG ===\n` +
+        fallbackResults.map((r, i) => `[${i + 1}] ${r.title}\n${r.snippet}\nNguồn: ${r.url}`).join("\n\n");
+    }
+    return await callGemini(system, enrichedUser, {
+      model: options?.model,
+      temperature: options?.temperature,
+      maxTokens: options?.maxTokens,
+      images: options?.images,
+      mediaParts: options?.mediaParts,
+    });
+  } catch (fallbackErr) {
+    throw fallbackErr;
+  }
+}
+
