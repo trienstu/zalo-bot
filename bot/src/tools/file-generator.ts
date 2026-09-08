@@ -141,9 +141,9 @@ export async function generateExcelFile(
     }
 
     // Auto-fit column widths
-    sheet.columns.forEach((col) => {
+    sheet.columns.forEach((col: any) => {
       let maxLen = 12;
-      col.eachCell?.({ includeEmpty: false }, (cell) => {
+      col.eachCell?.({ includeEmpty: false }, (cell: any) => {
         const valStr = cell.value ? String(cell.value) : "";
         if (valStr.length > maxLen) maxLen = Math.min(valStr.length + 4, 45);
       });
