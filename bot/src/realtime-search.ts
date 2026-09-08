@@ -321,11 +321,16 @@ export async function searchRealtimeNews(query: string): Promise<string> {
       try {
         const snippetQueries: string[] = [];
 
-        // Query 1: Từ khóa chính hoặc phát ngôn mới nhất
+        // Query 1: Từ khóa chính hoặc phát ngôn mới nhất (tiếng Việt)
         if (isWorldPolitics) {
           snippetQueries.push(`${cleanQ} phát ngôn tuyên bố mới nhất 2026`);
         } else {
           snippetQueries.push(cleanQ);
+        }
+
+        // Query 2: Nguồn báo chí quốc tế / tiếng Anh (Reuters, AP, Bloomberg, CNN, BBC, White House...)
+        if (needEnglishSearch && enQueryStr) {
+          snippetQueries.push(`${enQueryStr} latest statement news`);
         }
 
         // Query 2 & 3: Lấy từ các tiêu đề nổi bật nhất trong danh sách bản tin (bỏ tên báo phía sau)

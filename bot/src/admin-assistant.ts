@@ -1324,7 +1324,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `      + TRÍCH DẪN NGUYÊN VĂN: BẮT BUỘC đặt các phát ngôn, tuyên bố then chốt trong ngoặc kép "..." (ví dụ: "Sản phẩm của họ không đủ tốt!", "chuyện nhỏ").\n` +
     `      + NÊU RÕ NỀN TẢNG & BỐI CẢNH CỤ THỂ: Nêu rõ phát biểu được đưa ra ở đâu (bài đăng trên mạng xã hội Truth Social, trả lời họp báo tại Nhà Trắng, mạng xã hội X, phỏng vấn báo chí, sắc lệnh ban hành).\n` +
     `      + NÊU RÕ THỜI ĐIỂM CỤ THỂ: Ghi rõ ngày tháng diễn ra (ví dụ: ngày 07/09/2026, ngày 04/09/2026).\n` +
-    `      + NGUỒN TỔNG HỢP: Ghi rõ nguồn tin báo chí ở cuối câu trả lời dạng: (Nguồn tổng hợp: Báo Tuổi Trẻ, VnEconomy, VnExpress, Báo Mới cập nhật ngày DD/MM/YYYY).\n` +
+    `      + NGUỒN TỔNG HỢP: Ghi rõ nguồn tin báo chí trong nước và quốc tế ở cuối câu trả lời dạng: (Nguồn tổng hợp: Báo Tuổi Trẻ, VnEconomy, VnExpress, Reuters, AP, Bloomberg, BBC cập nhật ngày DD/MM/YYYY).\n` +
     `      + CHỦ ĐỘNG GỢI Ý CÂU HỎI MỞ: Luôn kết thúc bằng một câu hỏi tương tác tinh tế, gợi mở đào sâu các mảng liên quan (ví dụ: "Anh/Sếp đang theo dõi cụ thể phát ngôn của ông ấy về mảng kinh tế thương mại hay chiến sự Trung Đông để em tìm sâu hơn ạ?").\n` +
     `      + ĐỊNH DẠNG: Tuyệt đối KHÔNG dùng dấu ** in đậm, KHÔNG spam icon ở từng dòng; dùng gạch đầu dòng '-' hoặc '*' hoặc '•' rõ ràng, mạch lạc.\n` +
     `    - KHI HỎI VỀ SẢN PHẨM / CÔNG NGHỆ / TIẾN ĐỘ RA MẮT:\n` +
