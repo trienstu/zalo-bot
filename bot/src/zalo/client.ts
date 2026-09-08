@@ -971,6 +971,71 @@ export async function sendDirectText(api: ZaloApi, userId: string, text: string)
 }
 
 /**
+ * Gửi file đính kèm (Word .docx, Excel .xlsx, PDF, Markdown .md, TXT) vào Group Zalo.
+ */
+export async function sendGroupFile(
+  api: ZaloApi,
+  groupId: string,
+  filePath: string,
+  caption = "",
+): Promise<void> {
+  if (typeof api.sendMessage !== "function") {
+    throw new Error("zca-js runtime không có api.sendMessage");
+  }
+  const threadIdStr = String(groupId).trim();
+  const payload: any = {
+    msg: caption || "",
+    attachments: [filePath],
+  };
+
+  console.log(`[sendGroupFile] 📎 Đang gửi file [${path.basename(filePath)}] vào nhóm [${threadIdStr}]...`);
+  try {
+    await api.sendMessage(payload, threadIdStr, ThreadType.Group);
+    return;
+  } catch (e1) {
+    try {
+      await api.sendMessage(payload, threadIdStr, 1);
+      return;
+    } catch (e2) {
+      await api.sendMessage(payload, threadIdStr);
+    }
+  }
+}
+
+/**
+ * Gửi file đính kèm (Word .docx, Excel .xlsx, PDF, Markdown .md, TXT) trong tin nhắn 1:1.
+ */
+export async function sendDirectFile(
+  api: ZaloApi,
+  userId: string,
+  filePath: string,
+  caption = "",
+): Promise<void> {
+  if (typeof api.sendMessage !== "function") {
+    throw new Error("zca-js runtime không có api.sendMessage");
+  }
+  const targetId = String(userId).trim();
+  const payload: any = {
+    msg: caption || "",
+    attachments: [filePath],
+  };
+
+  console.log(`[sendDirectFile] 📎 Đang gửi file 1:1 [${path.basename(filePath)}] đến [${targetId}]...`);
+  try {
+    await api.sendMessage(payload, targetId, ThreadType.User);
+    return;
+  } catch (e1) {
+    try {
+      await api.sendMessage(payload, targetId, 0);
+      return;
+    } catch (e2) {
+      await api.sendMessage(payload, targetId);
+    }
+  }
+}
+
+
+/**
  * Xoá 1 member khỏi group. zca-js bản đang cài không expose type definition cho method
  * này, nhưng các runtime/fork thường có một trong các tên dưới. Nếu không có, dừng rõ
  * để user không tưởng bot đã xoá thành công.

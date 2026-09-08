@@ -17,7 +17,7 @@ import {
   getRecentGroupImage,
   getMediaByMessageId,
 } from "./db/index.js";
-import { sendGroupText, sendReaction, sendTyping, Reactions, sleep } from "./zalo/client.js";
+import { sendGroupText, sendGroupFile, sendReaction, sendTyping, Reactions, sleep } from "./zalo/client.js";
 import {
   callGemini,
   callGeminiAgentLoop,
@@ -851,6 +851,7 @@ async function handleHistoryQA(
   displayName: string,
   threadId: string,
   options?: {
+    api?: any;
     imageUrl?: string;
     fileAttachment?: MemberMessageEvent["fileAttachment"];
     quote?: MemberMessageEvent["quote"];
@@ -1510,7 +1511,13 @@ async function handleHistoryQA(
     `      + Luôn trích dẫn 2-3 nguồn tham khảo uy tín (tên nguồn hoặc link) ở cuối câu trả lời.\n` +
     `    - CÔ LẬP NGUỒN DỮ LIỆU & CHỐNG LÂY NHIỄM (ANTI-POLLUTION):\n` +
     `      + <chat_history> CHỈ là lịch sử trò chuyện nội bộ của nhóm Zalo để nắm ngữ cảnh giao tiếp.\n` +
-    `      + TUYỆT ĐỐI KHÔNG đem các chủ đề tán gẫu nội bộ (ví dụ: bàn về cấu hình bot nhà mình, antihack, sửa code, đùa giỡn trong nhóm) vào câu trả lời khi thành viên đang hỏi về kiến thức công nghệ, khoa học, dự án, thời sự bên ngoài.\n`;
+    `      + TUYỆT ĐỐI KHÔNG đem các chủ đề tán gẫu nội bộ (ví dụ: bàn về cấu hình bot nhà mình, antihack, sửa code, đùa giỡn trong nhóm) vào câu trả lời khi thành viên đang hỏi về kiến thức công nghệ, khoa học, dự án, thời sự bên ngoài.\n` +
+    `\n14. KỸ NĂNG XUẤT TÀI LIỆU THÀNH FILE THẬT (.DOCX, .XLSX, .MD, .TXT):\n` +
+    `    - Khi người dùng yêu cầu "xuất file", "tạo file", "tổng hợp thành file", "lập bảng tính", "soạn hợp đồng", "viết SOP thành file", "báo giá", hoặc muốn nhận tài liệu dạng file đính kèm:\n` +
+    `      + BẮT BUỘC GỌI CÔNG CỤ 'generate_file' để tạo file thực tế.\n` +
+    `      + Với báo cáo, SOP, đề xuất, hợp đồng, tài liệu dài: Chọn fileType="docx" hoặc "md", truyền đầy đủ nội dung chi tiết trong 'content'.\n` +
+    `      + Với bảng tính, báo giá, chấm công, số liệu: Chọn fileType="xlsx", cung cấp excelHeaders và excelRows (có thể chứa công thức tính như =SUM(...)).\n` +
+    `      + Sau khi gọi công cụ, hệ thống sẽ tự động gửi file đính kèm trực tiếp vào Zalo. Hãy viết lời nhắn xác nhận ngắn gọn và tóm tắt nội dung file cho người dùng.\n`;
 
   const userPrompt =
     `${quotePromptSection}\n${fileContentSection}${liveNewsSection}\n` +
@@ -1524,6 +1531,9 @@ async function handleHistoryQA(
       /^(?:chào|hi|hello|alo|ê|helo|hế lô|bye|tạm biệt|cảm ơn|thanks|ok|oki|được rồi|thôi|dạ|vâng)\b/i.test(question.trim()) &&
       question.trim().length < 30;
 
+    const isFileRequest =
+      /(?:xuất file|xuat file|tạo file|tao file|lập file|lap file|lưu file|luu file|thành file|thanh file|gửi file|gui file|bảng tính|bang tinh|báo giá|bao gia|soạn thảo|soan thao|hợp đồng|hop dong|viết sop|viet sop|tổng hợp file|tong hop file|file excel|file word|file docx|file xlsx|file md|file txt)/i.test(question);
+
     const isSearchDisabled =
       process.env.DISABLE_SEARCH === "true" ||
       Boolean((groupSettings as any)?.disableSearch) ||
@@ -1531,10 +1541,19 @@ async function handleHistoryQA(
       /tắt search|không tìm kiếm|không tra cứu/i.test(groupSettings.customPrompt || "");
 
     let answer = "";
-    if (isRealTimeSearchQuery && !isGreetingQuery && !isSearchDisabled) {
-      // 🚀 AGENT LOOP ĐÍCH THỰC (Tự chọn web_search, fetch_url, wiki, HN, arXiv, GitHub tối đa 3 vòng)
+    if ((isRealTimeSearchQuery || isFileRequest) && !isGreetingQuery && !isSearchDisabled) {
+      // 🚀 AGENT LOOP ĐÍCH THỰC (Tự chọn web_search, fetch_url, wiki, HN, arXiv, GitHub, generate_file tối đa 3 vòng)
       answer = await callGeminiAgentLoop(systemPrompt, userPrompt, {
         mediaParts: mediaPart ? [mediaPart] : undefined,
+        onFileGenerated: async (file) => {
+          try {
+            if (options?.api) {
+              await sendGroupFile(options.api, threadId, file.filePath, `📄 Sen Chúa đã tạo file [${file.fileName}] thành công!`);
+            }
+          } catch (fileErr) {
+            console.warn("[member-assistant] sendGroupFile error:", fileErr);
+          }
+        },
       });
     } else {
       answer = await callGemini(systemPrompt, userPrompt, {
@@ -2562,6 +2581,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       }
 
       const answer = await handleHistoryQA(question, displayName, threadId, {
+        api,
         imageUrl: targetImageUrl,
         fileAttachment: event.fileAttachment,
         quote: event.quote,

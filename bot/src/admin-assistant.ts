@@ -16,7 +16,7 @@ import {
   upsertBotFriend,
   setFriendAllowDirect,
 } from "./db/index.js";
-import { sendDirectText, sendGroupText } from "./zalo/client.js";
+import { sendDirectText, sendDirectFile, sendGroupText } from "./zalo/client.js";
 import { callGemini, callGeminiAgentLoop, downloadFileContent, type GeminiMediaPart } from "./gemini.js";
 import type { MemberMessageEvent } from "./member-assistant.js";
 import { getWeatherReport } from "./weather.js";
@@ -1333,7 +1333,13 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `    - KHI TRẢ LỜI VỀ TIN TỨC, CÔNG NGHỆ, MÔ HÌNH AI, SỰ KIỆN, PHÁT HÀNH, GIÁ CẢ:\n` +
     `      + BẮT BUỘC chỉ khẳng định những dữ kiện có NGÀY THÁNG RÕ RÀNG + SỐ LIỆU + NGUỒN XÁC THỰC từ các công cụ (web_search, wiki_lookup, hn_search, arxiv_search, github_search).\n` +
     `      + Nếu thông tin chưa có ngày tháng công bố chính thức hoặc chỉ là đồn đoán trên mạng: BẮT BUỘC ghi rõ là "chưa chốt / tin đồn" hoặc "chưa có thông cáo chính thức", tuyệt đối không tự bịa đặt mốc thời gian.\n` +
-    `      + Luôn trích dẫn 2-3 nguồn tham khảo uy tín (tên nguồn hoặc link) ở cuối câu trả lời.\n`;
+    `      + Luôn trích dẫn 2-3 nguồn tham khảo uy tín (tên nguồn hoặc link) ở cuối câu trả lời.\n` +
+    `\n14. KỸ NĂNG XUẤT TÀI LIỆU THÀNH FILE THẬT (.DOCX, .XLSX, .MD, .TXT):\n` +
+    `    - Khi người dùng yêu cầu "xuất file", "tạo file", "tổng hợp thành file", "lập bảng tính", "soạn hợp đồng", "viết SOP thành file", "báo giá", hoặc muốn nhận tài liệu dạng file đính kèm:\n` +
+    `      + BẮT BUỘC GỌI CÔNG CỤ 'generate_file' để tạo file thực tế.\n` +
+    `      + Với báo cáo, SOP, đề xuất, hợp đồng, tài liệu dài: Chọn fileType="docx" hoặc "md", truyền đầy đủ nội dung chi tiết trong 'content'.\n` +
+    `      + Với bảng tính, báo giá, chấm công, số liệu: Chọn fileType="xlsx", cung cấp excelHeaders và excelRows (có thể chứa công thức tính như =SUM(...)).\n` +
+    `      + Sau khi gọi công cụ, hệ thống sẽ tự động gửi file đính kèm trực tiếp vào Zalo. Hãy viết lời nhắn xác nhận ngắn gọn và tóm tắt nội dung file cho người dùng.\n`;
 
   const userPrompt =
     (historyText ? `LỊCH SỬ TRÒ CHUYỆN TRƯỚC ĐÓ:\n${historyText}\n\n` : "") +
@@ -1349,6 +1355,10 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     const isGreetingQuery =
       /^(?:chào|hi|hello|alo|ê|helo|hế lô|bye|tạm biệt|cảm ơn|thanks|ok|oki|được rồi|thôi|dạ|vâng)\b/i.test(rawText.trim()) &&
       rawText.trim().length < 30;
+
+    const isFileRequest =
+      /(?:xuất file|xuat file|tạo file|tao file|lập file|lap file|lưu file|luu file|thành file|thanh file|gửi file|gui file|bảng tính|bang tinh|báo giá|bao gia|soạn thảo|soan thao|hợp đồng|hop dong|viết sop|viet sop|tổng hợp file|tong hop file|file excel|file word|file docx|file xlsx|file md|file txt)/i.test(rawText);
+
     const isSearchDisabled = process.env.DISABLE_SEARCH === "true";
 
     const fullSystemPrompt =
@@ -1360,11 +1370,18 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       claimGroundingInstruction;
 
     let answer = "";
-    if (isRealTimeSearchQuery && !isGreetingQuery && !isSearchDisabled) {
-      // 🚀 AGENT LOOP ĐÍCH THỰC (Tự chọn web_search, fetch_url, wiki, HN, arXiv, GitHub tối đa 3 vòng)
+    if ((isRealTimeSearchQuery || isFileRequest) && !isGreetingQuery && !isSearchDisabled) {
+      // 🚀 AGENT LOOP ĐÍCH THỰC (Tự chọn web_search, fetch_url, wiki, HN, arXiv, GitHub, generate_file tối đa 3 vòng)
       answer = await callGeminiAgentLoop(fullSystemPrompt, userPrompt, {
         model: chosenModel,
         mediaParts: mediaPart ? [mediaPart] : undefined,
+        onFileGenerated: async (file) => {
+          try {
+            await sendDirectFile(api, sender, file.filePath, `📄 Sen Chúa đã tạo file [${file.fileName}] thành công!`);
+          } catch (fileErr) {
+            console.warn("[admin-assistant] sendDirectFile error:", fileErr);
+          }
+        },
       });
     } else {
       answer = await callGemini(fullSystemPrompt, userPrompt, {

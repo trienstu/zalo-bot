@@ -8,6 +8,12 @@ import {
   arxivSearch,
   githubSearch,
 } from "./tools/vertical-tools.js";
+import {
+  generateWordDoc,
+  generateExcelFile,
+  generateTextFile,
+  type GeneratedFileResult,
+} from "./tools/file-generator.js";
 
 /**
  * Lớp gọi Google Gemini API dùng chung (Tóm tắt hội thoại Zalo, bóc tách dữ liệu).
@@ -451,6 +457,7 @@ export interface AgentLoopOptions {
   images?: GeminiImagePart[];
   mediaParts?: GeminiMediaPart[];
   onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
+  onFileGenerated?: (file: GeneratedFileResult) => Promise<void>;
 }
 
 const AGENT_TOOLS_DECLARATION = {
@@ -521,6 +528,45 @@ const AGENT_TOOLS_DECLARATION = {
         required: ["query"],
       },
     },
+    {
+      name: "generate_file",
+      description: "Tạo và xuất file tài liệu thực tế (Word .docx, Excel .xlsx, Markdown .md, Text .txt, Code .py/.js/.sh) khi người dùng yêu cầu soạn thảo văn bản, báo cáo, SOP, hợp đồng, bảng tính, báo giá, hoặc tổng hợp thành file gửi vào Zalo.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          fileType: {
+            type: "STRING",
+            description: "Định dạng file cần xuất: 'docx' (Word), 'xlsx' (Excel), 'md' (Markdown/SOP), 'txt' (văn bản thuần), 'code' (mã nguồn)",
+          },
+          fileName: {
+            type: "STRING",
+            description: "Tên file viết liền không dấu, ví dụ: 'sop_xay_dung_bot_zalo', 'bao_gia_thiet_bi'",
+          },
+          title: {
+            type: "STRING",
+            description: "Tiêu đề chính của tài liệu hoặc văn bản",
+          },
+          content: {
+            type: "STRING",
+            description: "Toàn bộ nội dung văn bản chi tiết đầy đủ (dành cho file docx, md, txt, code)",
+          },
+          excelHeaders: {
+            type: "ARRAY",
+            items: { type: "STRING" },
+            description: "Danh sách tên cột cho file Excel (chỉ dùng khi fileType là xlsx)",
+          },
+          excelRows: {
+            type: "ARRAY",
+            items: {
+              type: "ARRAY",
+              items: { type: "STRING" },
+            },
+            description: "Mảng 2 chiều chứa các dòng dữ liệu cho file Excel (chỉ dùng khi fileType là xlsx)",
+          },
+        },
+        required: ["fileType", "fileName", "title"],
+      },
+    },
   ],
 };
 
@@ -560,6 +606,37 @@ async function executeAgentTool(name: string, args: Record<string, any>): Promis
       if (!q) return { results: [] };
       const items = await githubSearch(q, 3);
       return { results: items };
+    }
+    case "generate_file": {
+      const fileType = String(args?.fileType || "md").toLowerCase().trim();
+      const fileName = String(args?.fileName || "tai_lieu").trim();
+      const title = String(args?.title || "Tài liệu").trim();
+      const content = String(args?.content || "").trim();
+
+      if (fileType === "xlsx") {
+        const headers = Array.isArray(args?.excelHeaders) ? args.excelHeaders.map(String) : ["STT", "Nội dung", "Ghi chú"];
+        const rows = Array.isArray(args?.excelRows) ? args.excelRows : [];
+        const result = await generateExcelFile(fileName, title || "Sheet1", headers, rows);
+        return result;
+      } else if (fileType === "docx") {
+        const rawSections = content.split(/\n(?=#{1,3}\s|[A-Z0-9IVX]+\.\s)/g);
+        const sections = rawSections.map((sec) => {
+          const lines = sec.trim().split("\n");
+          let heading = "";
+          let paras = lines;
+          if (lines[0] && (lines[0].startsWith("#") || /^[A-Z0-9IVX]+\.\s/.test(lines[0]))) {
+            heading = lines[0].replace(/^#+\s*/, "").trim();
+            paras = lines.slice(1);
+          }
+          return { heading, paragraphs: paras.filter(Boolean) };
+        });
+        const result = await generateWordDoc(fileName, title, sections);
+        return result;
+      } else {
+        const ext = fileType === "code" ? (args?.fileExt || "txt") : fileType;
+        const result = await generateTextFile(fileName, content, ext);
+        return result;
+      }
     }
     default:
       return { error: `Công cụ ${name} không tồn tại` };
@@ -626,7 +703,7 @@ export async function callGeminiAgentLoop(
 
       const resp = await fetch(endpoint, {
         method: "POST",
-        signal: AbortSignal.timeout(20_000),
+        signal: AbortSignal.timeout(60_000),
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
       });
@@ -687,6 +764,13 @@ export async function callGeminiAgentLoop(
         functionCalls.map(async (fc: any) => {
           options?.onToolCall?.(fc.name, fc.args || {});
           const result = await executeAgentTool(fc.name, fc.args || {});
+          if (fc.name === "generate_file" && result?.success && options?.onFileGenerated) {
+            try {
+              await options.onFileGenerated(result);
+            } catch (fileErr) {
+              console.warn("[gemini-agent] onFileGenerated callback error:", fileErr);
+            }
+          }
           return {
             functionResponse: {
               name: fc.name,
@@ -716,7 +800,7 @@ export async function callGeminiAgentLoop(
     };
     const finalResp = await fetch(finalEndpoint, {
       method: "POST",
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(60_000),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(finalBody),
     });
