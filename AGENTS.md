@@ -43,3 +43,13 @@ This project is indexed by GitNexus as **zalo-bot** (3435 symbols, 8462 relation
 | Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus-cli/SKILL.md` |
 
 <!-- gitnexus:end -->
+
+# Quy Tắc Cập Nhật & Triển Khai (Deployment Rules)
+
+- **LUÔN CẬP NHẬT ĐỒNG THỜI CẢ 2 BOT**: Trên VPS (`zalo-bot-free`), hệ thống chạy mô hình 2 bot độc lập:
+  - Bot 1 (`zalo-bot-1`): thư mục `~/zalo-bot`
+  - Bot 2 (`zalo-bot-2`): thư mục `~/zalo-bot-2`
+  - Khi gửi câu lệnh cập nhật cho người dùng, **BẮT BUỘC** luôn cung cấp lệnh đồng bộ, build và restart cho CẢ 2 BOT cùng lúc:
+    ```bash
+    (cd ~/zalo-bot && git pull origin main && npm run build --prefix bot) && (cd ~/zalo-bot-2 && git pull origin main && npm run build --prefix bot) && pm2 restart all
+    ```
