@@ -3,7 +3,10 @@
  * - Tầng 1: Tin nóng trong ngày (24 giờ qua - when:1d)
  * - Tầng 2: Diễn biến gần đây (7 ngày qua - when:7d)
  * - Tầng 3: Toàn bộ kho lưu trữ lịch sử (Không giới hạn thời gian - All-time Relevance)
+ * Kết hợp DuckDuckGo Web Search Snippets để bóc tách phát ngôn nguyên văn trong ngoặc kép và bối cảnh sự kiện.
  */
+
+import { webSearch, SearchResultItem } from "./tools/vertical-tools.js";
 
 function decodeXml(str: string): string {
   return str
@@ -305,16 +308,91 @@ export async function searchRealtimeNews(query: string): Promise<string> {
       }
     }
 
-    // 10. Trả về tổng hợp bao gồm cả Wikipedia (nếu có) và danh sách bản tin thời gian thực
+    // 10. Trích xuất trích dẫn nguyên văn & bối cảnh chuyên sâu qua DuckDuckGo Web Search Snippets
+    let richSnippetsText = "";
+    const needsDeepSnippets =
+      isWorldPolitics ||
+      isTechAI ||
+      /(?:phát ngôn|phát biểu|tuyên bố|nói gì|đánh giá|nhận định|chi tiết|nguyên văn|lý do|tại sao|vụ việc|bê bối|scandal|hôm nay|24h|mới nhất|tình hình|diễn biến)/i.test(
+        query
+      );
+
+    if (needsDeepSnippets) {
+      try {
+        const snippetQueries: string[] = [];
+
+        // Query 1: Từ khóa chính hoặc phát ngôn mới nhất
+        if (isWorldPolitics) {
+          snippetQueries.push(`${cleanQ} phát ngôn tuyên bố mới nhất 2026`);
+        } else {
+          snippetQueries.push(cleanQ);
+        }
+
+        // Query 2 & 3: Lấy từ các tiêu đề nổi bật nhất trong danh sách bản tin (bỏ tên báo phía sau)
+        for (const item of mergedItems.slice(0, 5)) {
+          const rawTitle = item.title.split(/\s*-\s*[^-]+$/)[0]?.trim();
+          if (rawTitle && rawTitle.length > 10 && !snippetQueries.some((q) => q.includes(rawTitle.slice(0, 20)))) {
+            snippetQueries.push(rawTitle);
+            if (snippetQueries.length >= 3) break;
+          }
+        }
+
+        const snippetResults = await Promise.allSettled(
+          snippetQueries.map((q) => webSearch(q, 3))
+        );
+
+        const collectedSnippets: SearchResultItem[] = [];
+        const seenSnippets = new Set<string>();
+
+        for (const res of snippetResults) {
+          if (res.status === "fulfilled" && Array.isArray(res.value)) {
+            for (const item of res.value) {
+              const snippetClean = item.snippet.replace(/\s+/g, " ").trim();
+              if (snippetClean.length > 40 && !seenSnippets.has(snippetClean.slice(0, 50))) {
+                seenSnippets.add(snippetClean.slice(0, 50));
+                collectedSnippets.push({
+                  ...item,
+                  snippet: snippetClean,
+                });
+                if (collectedSnippets.length >= 6) break;
+              }
+            }
+          }
+          if (collectedSnippets.length >= 6) break;
+        }
+
+        if (collectedSnippets.length > 0) {
+          const snippetLines = collectedSnippets
+            .map((item, idx) => {
+              let domain = "";
+              try {
+                domain = new URL(item.url).hostname.replace(/^www\./, "");
+              } catch {
+                domain = item.url;
+              }
+              return `${idx + 1}. [Nguồn: ${domain} | Tiêu đề: ${item.title}]\n   "${item.snippet}"`;
+            })
+            .join("\n\n");
+
+          richSnippetsText = `🔥 TRÍCH DẪN & DIỄN BIẾN CHI TIẾT TỪ BÁO CHÍ (CHỨA PHÁT NGÔN NGUYÊN VĂN, BỐI CẢNH & NỀN TẢNG):\n${snippetLines}`;
+        }
+      } catch (err) {
+        console.warn("[realtime-search] Lỗi bóc tách snippet:", err);
+      }
+    }
+
+    // 11. Trả về tổng hợp bao gồm Wikipedia (nếu có), Snippets trích dẫn và danh sách bản tin thời gian thực
     const newsLines = mergedItems
       .slice(0, 25)
       .map((item, idx) => `${idx + 1}. [${item.timeLabel}] ${item.title}`)
       .join("\n");
 
-    if (wikiText && newsLines) {
-      return `${wikiText}\n📰 CÁC BẢN TIN THỜI SỰ LIÊN QUAN:\n${newsLines}`;
-    }
-    return wikiText || newsLines;
+    const sections: string[] = [];
+    if (wikiText) sections.push(wikiText);
+    if (richSnippetsText) sections.push(richSnippetsText);
+    if (newsLines) sections.push(`📰 DANH SÁCH BẢN TIN THỜI SỰ LIÊN QUAN:\n${newsLines}`);
+
+    return sections.join("\n\n");
   } catch (e) {
     console.warn("[realtime-search] Lỗi tra cứu tin tức:", e);
     return "";
