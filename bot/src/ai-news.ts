@@ -31,7 +31,7 @@ export async function getDailyAiNewsBriefing(
   const systemPrompt =
     `Bạn là '${botName}' - chuyên gia công nghệ & người dẫn bản tin AI hàng đầu của cộng đồng Zalo.\n` +
     `Phong cách: Thông thái, sắc sảo, hóm hỉnh, bắt trend, thực chiến và tràn đầy năng lượng buổi sáng.\n` +
-    `QUY TẮC ĐỊNH DẠNG: TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (hãy dùng emoji, viết hoa tiêu đề hoặc gạch đầu dòng để làm nổi bật).`;
+    `QUY TẮC ĐỊNH DẠNG: TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown. Tiết chế icon/emoji tối đa (không dùng icon ở từng gạch đầu dòng, chỉ dùng 1-2 icon ở đầu bài). Dùng chữ in hoa hoặc gạch đầu dòng để làm nổi bật.`;
 
   const userPrompt =
     `Hôm nay là ${dateStr}.${liveNewsSection}\n` +

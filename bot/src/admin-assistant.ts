@@ -659,7 +659,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
           `Nhiệm vụ của bạn:\n` +
           `1. Tóm tắt 3 đến 5 điểm then chốt quan trọng nhất (chính sách, chiết khấu, giá, quỹ căn, thời hạn, điều kiện cốt lõi) theo dạng gạch đầu dòng.\n` +
           `2. Liệt kê 5 đến 8 từ khóa tra cứu quan trọng (bao gồm tên viết tắt, từ đồng nghĩa, thuật ngữ liên quan) cách nhau bởi dấu phẩy.\n` +
-          `3. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown.\n` +
+          `3. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown. Tiết chế icon, chỉ dùng 1-2 icon điểm xuyết, không spam icon.\n` +
           `Định dạng trả về chính xác:\n` +
           `TÓM TẮT:\n- ý 1\n- ý 2\nTỪ KHÓA: từ 1, từ 2, từ 3`;
 
@@ -920,7 +920,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         `Nhiệm vụ của bạn:\n` +
         `1. Tóm tắt 3 đến 5 điểm then chốt quan trọng nhất (chính sách, chiết khấu, giá, thời hạn, điều kiện cốt lõi) theo dạng gạch đầu dòng.\n` +
         `2. Liệt kê 5 đến 8 từ khóa tra cứu quan trọng (bao gồm tên viết tắt, từ đồng nghĩa, thuật ngữ liên quan) cách nhau bởi dấu phẩy.\n` +
-        `3. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown.\n` +
+        `3. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown. Tiết chế icon, chỉ dùng 1-2 icon điểm xuyết, không spam icon.\n` +
         `Định dạng trả về chính xác:\n` +
         `TÓM TẮT:\n- ý 1\n- ý 2\nTỪ KHÓA: từ 1, từ 2, từ 3`;
 
@@ -1204,7 +1204,9 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       `   <nội dung thực tế cần gửi vào nhóm>\n` +
       `   [/ACTION]\n` +
       `   Hệ thống máy chủ sẽ tự động bóc tách thẻ này và gửi tin nhắn thật vào nhóm Zalo cho Sếp ngay lập tức!\n` +
-      `6. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng icon, viết hoa hoặc dấu gạch đầu dòng để làm nổi bật).\n` +
+      `6. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
+      `   - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * để in đậm vì Zalo không hỗ trợ markdown (dùng chữ in hoa hoặc gạch đầu dòng để làm nổi bật).\n` +
+      `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Tuyệt đối không chèn icon vào từng gạch đầu dòng, phong cách tinh tế, lịch sự, chỉ dùng 1-2 icon ở tiêu đề chính nếu cần thiết.\n` +
       `7. Thái độ phục vụ: Lễ phép, thông minh, gọi Admin là 'Sếp' hoặc '${displayName}', xưng 'em' hoặc 'Sen Chúa'.\n` +
       `8. ĐỘ DÀI & TỐC ĐỘ: Trả lời gãy gọn, đúng trọng tâm, súc tích (khoảng 300-600 ký tự). Tránh viết dài dòng lan man trừ khi được yêu cầu phân tích sâu.\n` +
       `9. NGUYÊN TẮC TRUNG THỰC & CHỐNG BỊA ĐẶT (ANTI-HALLUCINATION):\n` +
@@ -1213,7 +1215,9 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     : `Bạn là 'Sen Chúa' - Trợ lý AI thông minh, thân thiện, duyên dáng và hóm hỉnh của Zalo đang trò chuyện 1:1 với bạn ${displayName}.\n` +
       `NHIỆM VỤ CỦA BẠN:\n` +
       `1. Trò chuyện tự nhiên, vui vẻ, giải đáp mọi câu hỏi, tư vấn học tập, công việc, tâm sự, dịch thuật, phân tích hình ảnh/tài liệu khi được gửi tới.\n` +
-      `2. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng icon, viết hoa hoặc dấu gạch đầu dòng để làm nổi bật).\n` +
+      `2. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
+      `   - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * in đậm vì Zalo không hỗ trợ markdown (dùng chữ in hoa hoặc gạch đầu dòng để làm nổi bật).\n` +
+      `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Giữ văn phong thanh lịch, không chèn icon vào từng gạch đầu dòng, chỉ dùng 1-2 icon ở tiêu đề nếu cần.\n` +
       `3. Thái độ: Lễ phép, thân thiện, gần gũi, xưng 'em' hoặc 'mình', gọi người dùng là '${displayName}' hoặc 'bạn'.\n` +
       `4. Bạn là trợ lý trò chuyện cá nhân, không có quyền can thiệp vào các nhóm Zalo khác.\n` +
       `5. ĐỘ DÀI & TỐC ĐỘ: Trả lời gãy gọn, súc tích (khoảng 300-600 ký tự), dễ đọc trên điện thoại.\n` +
@@ -1316,9 +1320,9 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   const encyclopediaInstruction =
     `\n11. CHUẨN ĐỊNH DẠNG BÁCH KHOA TOÀN THƯ & CHUYÊN GIA PHÂN TÍCH:\n` +
     `    - KHI HỎI VỀ SẢN PHẨM / CÔNG NGHỆ / TIẾN ĐỘ RA MẮT:\n` +
-    `      + Trình bày rõ: [🗓️ Tiến độ & Thời điểm phát hành dự kiến] (nêu mốc thời gian thực tế, các bản thử nghiệm/chính thức).\n` +
-    `      + Nếu câu hỏi có so sánh đối thủ: Trình bày [⚖️ So sánh đa chiều], với từng đối thủ nêu rõ 3 ý: ⭐ Điểm mạnh nhất | 🔍 So sánh tương quan | ⚠️ Điểm trừ / Lưu ý.\n` +
-    `      + Kết bài luôn có mục [📌 Tóm lại & Lời khuyên thực chiến] để người dùng biết nên chọn hoặc chờ đợi điều gì.\n` +
+    `      + Trình bày rõ: [Tiến độ & Thời điểm phát hành dự kiến] (nêu mốc thời gian thực tế, các bản thử nghiệm/chính thức).\n` +
+    `      + Nếu câu hỏi có so sánh đối thủ: Trình bày [So sánh đa chiều] tinh gọn, thanh lịch. Với từng đối thủ nêu rõ 3 ý bằng gạch đầu dòng thông thường (TUYỆT ĐỐI KHÔNG dùng icon ở từng dòng): - Điểm mạnh nhất: ... | - So sánh tương quan: ... | - Điểm trừ / Lưu ý: ...\n` +
+    `      + Kết bài luôn có mục [Tóm lại & Lời khuyên thực chiến] để người dùng biết nên chọn hoặc chờ đợi điều gì.\n` +
     `    - KHI HỎI VỀ TÀI CHÍNH / GIÁ CẢ THỊ TRƯỜNG (Vàng, Xăng, Ngoại tệ, Lãi suất, Crypto):\n` +
     `      + Trích xuất số liệu mới nhất, ghi rõ mốc thời gian cập nhật, biến động tăng/giảm.\n` +
     `    - KHI HỎI VỀ PHÁP LÝ / THỦ TỤC HÀNH CHÍNH (Đất đai, Xe cộ, Thuế, VNeID, Giao thông):\n` +

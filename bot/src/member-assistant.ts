@@ -17,7 +17,7 @@ import {
   getRecentGroupImage,
   getMediaByMessageId,
 } from "./db/index.js";
-import { sendGroupText, sendGroupFile, sendReaction, sendTyping, Reactions, sleep } from "./zalo/client.js";
+import { sendGroupText, sendGroupFile, sendReaction, sendTyping, Reactions, sleep, cleanZaloText } from "./zalo/client.js";
 import {
   callGemini,
   callGeminiAgentLoop,
@@ -81,9 +81,10 @@ async function sendGroupReplyWithMention(
   content: string,
   options?: { jitter?: boolean },
 ): Promise<void> {
+  const sanitizedContent = cleanZaloText(content);
   const prefix = `🤖 ${botName} trả lời `;
   const mentionTag = `@${displayName}`;
-  const fullText = `${prefix}${mentionTag}:\n\n${content}`;
+  const fullText = `${prefix}${mentionTag}:\n\n${sanitizedContent}`;
 
   const mentions = sender
     ? [
@@ -930,7 +931,10 @@ async function handleHistoryQA(
       `2. ĐỌC KỸ TOÀN BỘ NỘI DUNG trong hình ảnh / tài liệu đính kèm.\n` +
       `3. Trả lời trực tiếp, đầy đủ, rõ ràng và chuẩn xác theo đúng câu hỏi/yêu cầu của thành viên.\n` +
       `4. NGUYÊN TẮC TRUNG THỰC - TUYỆT ĐỐI KHÔNG BỊA ĐẶT: Nếu trong hình ảnh/tài liệu không có thông tin chi tiết về điều thành viên hỏi, BẮT BUỘC phải nói rõ là trong ảnh/tài liệu không có chi tiết này. TUYỆT ĐỐI KHÔNG tự suy đoán, bịa đặt sự kiện, sản phẩm, con số hay câu chuyện không có thật.\n` +
-      `5. Trả lời chuẩn theo phong cách của bạn (hóm hỉnh, chuyên nghiệp, thông minh).`;
+      `5. Trả lời chuẩn theo phong cách của bạn (hóm hỉnh, chuyên nghiệp, thông minh).\n` +
+      `6. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
+      `   - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * để in đậm vì Zalo không hỗ trợ markdown (sẽ hiện nguyên văn hai dấu sao rất xấu). Hãy viết hoa chữ cái đầu hoặc viết hoa tiêu đề để làm nổi bật (ví dụ: '1. NHÂN VẬT CHÍNH:', '2. KHÁCH HÀNG:').\n` +
+      `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Giữ phong cách thanh lịch, gọn gàng. TUYỆT ĐỐI KHÔNG spam icon ở từng dòng hay từng gạch đầu dòng.`;
 
     const fastUserPrompt =
       `${quoteTextSection}${fileContentSnippet}\n` +
@@ -1036,7 +1040,9 @@ async function handleHistoryQA(
       `     + NẾU TRONG TÀI LIỆU KHÔNG CÓ THÔNG TIN về điều thành viên hỏi (ví dụ tài liệu thiếu phương án, hoặc không có số liệu cụ thể): BẮT BUỘC PHẢI THẲNG THẮN TRẢ LỜI: "Trong tài liệu [Tên tài liệu] hiện tại không có thông tin về [nội dung hỏi]. Sen Chúa không tự suy diễn hoặc bịa số liệu." TUYỆT ĐỐI KHÔNG ĐƯỢC TỰ ĐOÁN MÒ!\n` +
       `     + BẮT BUỘC LIỆT KÊ ĐỦ: Nếu tài liệu có nhiều phương án (ví dụ 4 phương án), phải trình bày đầy đủ, không được tự ý bỏ sót bất kỳ phương án nào.\n` +
       `   - Đối với các câu hỏi kỹ thuật công nghệ phổ quát hoặc thao tác sử dụng chung ngoài dự án: Có thể giải thích chi tiết, hữu ích.\n` +
-      `4. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (dùng viết hoa, gạch đầu dòng hoặc icon).\n` +
+      `4. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
+      `   - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * in đậm vì Zalo không hỗ trợ markdown (hãy viết hoa tiêu đề hoặc dùng gạch đầu dòng để làm nổi bật).\n` +
+      `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Tuyệt đối không chèn icon vào từng gạch đầu dòng, chỉ dùng 1-2 icon ở tiêu đề chính nếu thực sự cần thiết.\n` +
       `5. Trả lời chuẩn xác, minh bạch, trung thực và súc tích.`;
 
     let quoteLiveNews = "";
@@ -1470,9 +1476,9 @@ async function handleHistoryQA(
   const encyclopediaInstruction =
     `\n12. CHUẨN ĐỊNH DẠNG BÁCH KHOA TOÀN THƯ & CHUYÊN GIA PHÂN TÍCH:\n` +
     `    - KHI HỎI VỀ SẢN PHẨM / CÔNG NGHỆ / TIẾN ĐỘ RA MẮT:\n` +
-    `      + Trình bày rõ: [🗓️ Tiến độ & Thời điểm phát hành dự kiến] (nêu mốc thời gian thực tế, các bản thử nghiệm/chính thức).\n` +
-    `      + Nếu câu hỏi có so sánh đối thủ: Trình bày [⚖️ So sánh đa chiều], với từng đối thủ nêu rõ 3 ý: ⭐ Điểm mạnh nhất | 🔍 So sánh tương quan | ⚠️ Điểm trừ / Lưu ý.\n` +
-    `      + Kết bài luôn có mục [📌 Tóm lại & Lời khuyên thực chiến] để thành viên biết nên chọn hoặc chờ đợi điều gì.\n` +
+    `      + Trình bày rõ: [Tiến độ & Thời điểm phát hành dự kiến] (nêu mốc thời gian thực tế, các bản thử nghiệm/chính thức).\n` +
+    `      + Nếu câu hỏi có so sánh đối thủ: Trình bày [So sánh đa chiều] tinh gọn, thanh lịch. Với từng đối thủ nêu rõ 3 ý bằng gạch đầu dòng thông thường (TUYỆT ĐỐI KHÔNG dùng icon ở từng dòng): - Điểm mạnh nhất: ... | - So sánh tương quan: ... | - Điểm trừ / Lưu ý: ...\n` +
+    `      + Kết bài luôn có mục [Tóm lại & Lời khuyên thực chiến] để thành viên biết nên chọn hoặc chờ đợi điều gì.\n` +
     `    - KHI HỎI VỀ TÀI CHÍNH / GIÁ CẢ THỊ TRƯỜNG (Vàng, Xăng, Ngoại tệ, Lãi suất, Crypto):\n` +
     `      + Trích xuất số liệu mới nhất, ghi rõ mốc thời gian cập nhật, biến động tăng/giảm.\n` +
     `    - KHI HỎI VỀ PHÁP LÝ / THỦ TỤC HÀNH CHÍNH (Đất đai, Xe cộ, Thuế, VNeID, Giao thông):\n` +
@@ -1490,7 +1496,9 @@ async function handleHistoryQA(
     `3. Nếu câu hỏi yêu cầu tìm kiếm link/repo/tài nguyên: Dựa vào 'KHO TÀI LIỆU & LINK LIÊN QUAN' được cung cấp để liệt kê đầy đủ link và lời bình thực tế, tuyệt đối không tự bịa link.\n` +
     `4. Nếu có NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): Hiểu rằng người dùng đang hỏi hoặc đào sâu tiếp về chủ thể, sản phẩm, vấn đề trong nội dung được trích dẫn. Hãy vận dụng kiến thức chuyên môn và thông tin tra cứu để tư vấn, giải đáp trọn vẹn (giá cả, địa chỉ mua, cách dùng, tính năng, đánh giá...), không trả lời máy móc từ chối.\n` +
     `5. Luôn trả lời chuẩn theo phong cách cá tính được quy định ở trên.\n` +
-    `6. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown (hãy dùng dấu gạch đầu dòng, viết hoa hoặc icon để làm nổi bật).\n` +
+    `6. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
+    `       - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * để in đậm vì Zalo không hỗ trợ markdown. Dùng chữ in hoa hoặc gạch đầu dòng để làm nổi bật tiêu đề.\n` +
+    `       - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Tuyệt đối không chèn icon vào từng gạch đầu dòng (CẤM các kiểu '- ⭐', '- 🔍', '- ⚠️' lặp lại). Gạch đầu dòng chỉ dùng dấu '-' hoặc '•'. Toàn bài chỉ dùng tối đa 1-2 icon ở tiêu đề chính.\n` +
     `7. ĐẶC BIỆT KHI THÀNH VIÊN HỎI VỀ QUY TRÌNH, HƯỚNG DẪN, CÁCH LÀM HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Bạn BẮT BUỘC phải TRÍCH DẪN VÀ DIỄN GIẢI CHI TIẾT TỪNG BƯỚC (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến mà các thành viên đã từng chia sẻ trong lịch sử chat của nhóm này. TUYỆT ĐỐI KHÔNG ĐƯỢC chỉ đưa mỗi link tải tài liệu; phải giải thích cặn kẽ nội dung quy trình để người hỏi áp dụng được ngay, link tài liệu chỉ là phần đính kèm ở cuối để tham khảo thêm.\n` +
     `8. ĐỘ DÀI & TỐC ĐỘ PHẢN HỒI: Với các câu chào hỏi, giao lưu, tấu hài hoặc thắc mắc thường ngày, BẮT BUỘC trả lời súc tích, duyên dáng, ngắn gọn trong 2-3 đoạn (khoảng 300-500 ký tự) để đọc nhanh trên Zalo điện thoại. Không viết dài dòng lê thê trừ khi thành viên yêu cầu giải thích quy trình hoặc phân tích sâu.\n` +
     `9. CÔ LẬP TUYỆT ĐỐI THEO NHÓM (KHÔNG NHẮC TÊN NGƯỜI TỪ NHÓM KHÁC): Bạn đang hoạt động trong nhóm này. TUYỆT ĐỐI CHỈ tương tác hoặc nhắc tên những thành viên CÓ MẶT trong nhóm này (được xuất hiện trong dữ liệu chat/thành viên ở trên hoặc người đang hỏi là ${displayName}). TUYỆT ĐỐI KHÔNG nhắc tên bất kỳ người lạ nào từ nhóm khác, KHÔNG tự bịa ra tên người nếu trong lịch sử chat nhóm này không có.\n` +

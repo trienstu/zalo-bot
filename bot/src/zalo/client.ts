@@ -829,6 +829,53 @@ async function sendSingleGroupChunk(
 }
 
 /**
+ * Làm sạch văn bản cho định dạng Zalo:
+ * 1. Bóc tách toàn bộ Markdown bold/italic (***, **, *, __, _) vì Zalo chat không hỗ trợ markdown và sẽ hiện ký tự thô.
+ * 2. Chuyển đổi Markdown link [text](url) thành text (url) để Zalo tự động nhận diện URL xanh.
+ * 3. Chuyển đổi Markdown headers (#, ##, ###) thành text thuần.
+ * 4. Tiết chế icon/emoji: Loại bỏ icon lặp lại sau gạch đầu dòng (- ⭐, - 🔍, - ⚠️), chuyển icon sao bullet (⭐) thành bullet "•", thu gọn emoji spam.
+ */
+export function cleanZaloText(text: string): string {
+  if (!text) return "";
+  let res = text;
+
+  // 1. Markdown links [text](url) -> text (url)
+  res = res.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, "$1 ($2)");
+
+  // 2. Markdown headers (#, ##, ###) -> text thuần
+  res = res.replace(/^#{1,6}\s+(.+)$/gm, "$1");
+
+  // 3. Markdown bold italic ***text***, bold **text**
+  res = res.replace(/\*\*\*([^*]+)\*\*\*/g, "$1");
+  res = res.replace(/\*\*([^*]+)\*\*/g, "$1");
+
+  // 4. Markdown italic *text* (chỉ match khi ký tự sau * không phải khoảng trắng và trước * không phải khoảng trắng)
+  res = res.replace(/(^|[\s(])\*([^\s*][^*]*?[^\s*]|[^\s*])\*(?=[\s.,;:!?)\x22\x27\-]|$)/g, "$1$2");
+
+  // Xóa bất kỳ cặp ** hoặc *** nào còn sót lại
+  res = res.replace(/\*{2,}/g, "");
+
+  // 5. Markdown underline / italic với gạch dưới __text__ hoặc _text_
+  res = res.replace(/__([^_]+)__/g, "$1");
+  res = res.replace(/(^|[\s(])_([^\s_][^_]*?[^\s_]|[^\s_])_(?=[\s.,;:!?)\x22\x27\-]|$)/g, "$1$2");
+
+  // 6. Tiết chế icon / emoji:
+  // - Bỏ icon lặp lại ngay sau gạch đầu dòng (ví dụ: "- ⭐ Điểm mạnh", "- 🔍 So sánh", "- ⚠️ Điểm trừ" -> "- Điểm mạnh", "- So sánh", "- Điểm trừ")
+  res = res.replace(/^(\s*[-*•]\s*)(?:\p{Extended_Pictographic}\uFE0F?|\uFE0F)\s*/gmu, "$1");
+
+  // - Chuyển icon ngôi sao đầu dòng thành bullet "•"
+  res = res.replace(/^(\s*)(?:[⭐🌟])\uFE0F?\s+/gmu, "$1• ");
+
+  // - Thu gọn 3+ emoji giống nhau liên tiếp thành 1
+  res = res.replace(/(\p{Extended_Pictographic}\uFE0F?)\1{2,}/gmu, "$1");
+
+  // - Dọn dẹp variation selector mồ côi
+  res = res.replace(/^\s*\uFE0F\s*/gm, "");
+
+  return res.trim();
+}
+
+/**
  * Gửi text message vào group. Hỗ trợ tự động phân đoạn tin nhắn dài nếu vượt quá giới hạn Zalo,
  * kèm tuỳ chọn mentions (tag thật) và quote.
  */
@@ -844,9 +891,10 @@ export async function sendGroupText(
   }
 
   const threadIdStr = String(groupId).trim();
-  const chunks = splitIntoZaloChunks(text, 2050);
+  const textToSend = (!options?.mentions || options.mentions.length === 0) ? cleanZaloText(text) : text;
+  const chunks = splitIntoZaloChunks(textToSend, 2050);
 
-  console.log(`[sendGroupText] 📤 Đang gửi tin vào nhóm [${threadIdStr}] (${chunks.length} phần, tổng ${text.length} ký tự)...`);
+  console.log(`[sendGroupText] 📤 Đang gửi tin vào nhóm [${threadIdStr}] (${chunks.length} phần, tổng ${textToSend.length} ký tự)...`);
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i]!;
@@ -955,9 +1003,10 @@ export async function sendDirectText(api: ZaloApi, userId: string, text: string)
   }
 
   const targetId = String(userId).trim();
-  const chunks = splitIntoZaloChunks(text, 2050);
+  const textToSend = cleanZaloText(text);
+  const chunks = splitIntoZaloChunks(textToSend, 2050);
 
-  console.log(`[sendDirectText] 📤 Đang gửi tin nhắn 1:1 đến [${targetId}] (${chunks.length} phần, tổng ${text.length} ký tự)...`);
+  console.log(`[sendDirectText] 📤 Đang gửi tin nhắn 1:1 đến [${targetId}] (${chunks.length} phần, tổng ${textToSend.length} ký tự)...`);
 
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i]!;
