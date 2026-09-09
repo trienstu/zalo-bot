@@ -94,17 +94,31 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
     return results.slice(0, maxResults);
   }
 
-  // 1.3. Fallback: Bing News RSS + Google News RSS (Trích xuất đầy đủ tóm tắt nội dung thực tế thay vì chỉ lặp lại tiêu đề)
+  // 1.3. Fallback: VnExpress RSS (Cung cấp tóm tắt bài báo thực tế trong ngày, loại bỏ hoàn toàn Bing vì Bing bị lỗi tin cũ)
   try {
-    const bingUrl = `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&format=rss`;
-    const bingRes = await fetch(bingUrl, {
+    let vnExpressFeed = "https://vnexpress.net/rss/tin-moi-nhat.rss";
+    if (/(?:bất động sản|nhà đất|chung cư|dự án|đất đai|căn hộ|quy hoạch)/i.test(query)) {
+      vnExpressFeed = "https://vnexpress.net/rss/bat-dong-san.rss";
+    } else if (/(?:kinh doanh|kinh tế|chứng khoán|cổ phiếu|ngân hàng|doanh nghiệp|tài chính)/i.test(query)) {
+      vnExpressFeed = "https://vnexpress.net/rss/kinh-doanh.rss";
+    } else if (/(?:công nghệ|ai\b|mô hình|gpt|gemini|số hóa|chip|bán dẫn)/i.test(query)) {
+      vnExpressFeed = "https://vnexpress.net/rss/so-hoa.rss";
+    } else if (/(?:thế giới|quốc tế|chiến sự|nga|ukraine|mỹ|trung quốc)/i.test(query)) {
+      vnExpressFeed = "https://vnexpress.net/rss/the-gioi.rss";
+    } else if (/(?:thời sự|chính phủ|thủ tướng|bộ|luật|nghị định|giao thông)/i.test(query)) {
+      vnExpressFeed = "https://vnexpress.net/rss/thoi-su.rss";
+    }
+
+    const vnRes = await fetch(vnExpressFeed, {
       signal: AbortSignal.timeout(5000),
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)" },
     });
 
-    if (bingRes.ok) {
-      const xml = await bingRes.text();
+    if (vnRes.ok) {
+      const xml = await vnRes.text();
       const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
+      const queryTokens = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+
       for (const it of items) {
         if (results.length >= maxResults) break;
         const block = it[1] || "";
@@ -115,6 +129,8 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
 
         const cleanStr = (s: string) =>
           s
+            .replace(/<!\[CDATA\[/gi, "")
+            .replace(/\]\]>/gi, "")
             .replace(/<[^>]+>/g, " ")
             .replace(/&quot;/g, '"')
             .replace(/&#39;/g, "'")
@@ -126,6 +142,13 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
         const title = tMatch && tMatch[1] ? cleanStr(tMatch[1]) : "";
         let snippet = dMatch && dMatch[1] ? cleanStr(dMatch[1]) : "";
         const url = lMatch && lMatch[1] ? lMatch[1].trim() : "";
+
+        const isGeneral = /^(?:bất động sản|nhà đất|kinh tế|thời sự|tin tức|tin mới|công nghệ|thế giới)/i.test(query.trim());
+        if (!isGeneral && queryTokens.length > 0) {
+          const combined = (title + " " + snippet).toLowerCase();
+          const matches = queryTokens.some((tok) => combined.includes(tok));
+          if (!matches) continue;
+        }
 
         let dateStr = "";
         if (pMatch && pMatch[1]) {
@@ -145,8 +168,8 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
         }
       }
     }
-  } catch (bingErr) {
-    // Bing News error
+  } catch (vnErr) {
+    // VnExpress error fallback
   }
 
   // 1.4. Fallback phụ: Google News RSS

@@ -27,65 +27,118 @@ interface ParsedNewsItem {
   ageHours: number;
 }
 
-async function fetchBingNewsRss(keyword: string): Promise<ParsedNewsItem[]> {
+const VNEXPRESS_CATEGORY_MAP: Record<string, string> = {
+  "bat-dong-san": "https://vnexpress.net/rss/bat-dong-san.rss",
+  "kinh-doanh": "https://vnexpress.net/rss/kinh-doanh.rss",
+  "thoi-su": "https://vnexpress.net/rss/thoi-su.rss",
+  "so-hoa": "https://vnexpress.net/rss/so-hoa.rss",
+  "the-gioi": "https://vnexpress.net/rss/the-gioi.rss",
+  "tin-moi-nhat": "https://vnexpress.net/rss/tin-moi-nhat.rss",
+};
+
+export function detectNewsCategories(query: string): string[] {
+  const cats: string[] = [];
+  if (/(?:bất động sản|nhà đất|chung cư|dự án|đất đai|căn hộ|quy hoạch|mặt bằng|bds|vinhomes|novaland)/i.test(query)) {
+    cats.push("bat-dong-san");
+  }
+  if (/(?:kinh doanh|kinh tế|chứng khoán|cổ phiếu|ngân hàng|doanh nghiệp|tài chính|giá vàng|giá xăng|lãi suất|vn-index)/i.test(query)) {
+    cats.push("kinh-doanh");
+  }
+  if (/(?:công nghệ|ai\b|mô hình|gpt|gemini|bán dẫn|chip|apple|iphone|macbook|số hóa|deepseek|claude)/i.test(query)) {
+    cats.push("so-hoa");
+  }
+  if (/(?:thế giới|quốc tế|chiến sự|nga|ukraine|mỹ|trung quốc|israel|iran|bầu cử|trump|putin|zelensky)/i.test(query)) {
+    cats.push("the-gioi");
+  }
+  if (/(?:thời sự|chính phủ|thủ tướng|bộ|ban hành|nghị định|luật|giao thông|bão|lũ|sạt lở|thiên tai)/i.test(query)) {
+    cats.push("thoi-su");
+  }
+  if (cats.length === 0) {
+    cats.push("tin-moi-nhat");
+  }
+  return cats;
+}
+
+async function fetchVnExpressRss(category: string, filterKeyword = ""): Promise<ParsedNewsItem[]> {
   try {
-    const url = `https://www.bing.com/news/search?q=${encodeURIComponent(keyword)}&format=rss`;
-    const res = await fetch(url, {
+    const feedUrl = VNEXPRESS_CATEGORY_MAP[category] || `https://vnexpress.net/rss/${category}.rss`;
+    const res = await fetch(feedUrl, {
       signal: AbortSignal.timeout(5000),
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)",
+      },
     });
     if (!res.ok) return [];
     const xml = await res.text();
     const itemBlocks = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
     const now = Date.now();
 
-    return itemBlocks
-      .map((block) => {
-        const content = block[1] || "";
-        const titleMatch = content.match(/<title>([\s\S]*?)<\/title>/i);
-        const descMatch = content.match(/<description>([\s\S]*?)<\/description>/i);
-        const pubDateMatch = content.match(/<pubDate>([\s\S]*?)<\/pubDate>/i);
+    const cleanStr = (s: string) =>
+      decodeXml(
+        s
+          .replace(/<!\[CDATA\[/gi, "")
+          .replace(/\]\]>/gi, "")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/&#x27;/g, "'")
+          .replace(/&amp;/g, "&")
+          .replace(/\s+/g, " ")
+          .trim()
+      );
 
-        const cleanStr = (s: string) =>
-          decodeXml(
-            s
-              .replace(/<[^>]+>/g, " ")
-              .replace(/&quot;/g, '"')
-              .replace(/&#39;/g, "'")
-              .replace(/&#x27;/g, "'")
-              .replace(/&amp;/g, "&")
-              .replace(/\s+/g, " ")
-              .trim(),
-          );
+    const filterTokens = filterKeyword
+      ? filterKeyword.toLowerCase().split(/\s+/).filter((t) => t.length > 2)
+      : [];
 
-        const title = titleMatch && titleMatch[1] ? cleanStr(titleMatch[1]) : "";
-        let snippet = descMatch && descMatch[1] ? cleanStr(descMatch[1]) : "";
+    const items: ParsedNewsItem[] = [];
 
-        const rawDate = pubDateMatch && pubDateMatch[1] ? pubDateMatch[1].trim() : "";
-        const dateObj = new Date(rawDate);
-        const timestamp = !isNaN(dateObj.getTime()) ? dateObj.getTime() : now;
-        const ageHours = (now - timestamp) / (1000 * 60 * 60);
+    for (const block of itemBlocks) {
+      const content = block[1] || "";
+      const titleMatch = content.match(/<title>([\s\S]*?)<\/title>/i);
+      const descMatch = content.match(/<description>([\s\S]*?)<\/description>/i);
+      const pubDateMatch = content.match(/<pubDate>([\s\S]*?)<\/pubDate>/i);
 
-        let timeLabel = "";
-        if (timestamp > 0) {
-          const dStr = dateObj.toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
-          const tStr = dateObj.toLocaleTimeString("vi-VN", {
-            timeZone: "Asia/Ho_Chi_Minh",
-            hour: "2-digit",
-            minute: "2-digit",
-          });
-          if (ageHours < 1) {
-            timeLabel = `Vừa xong (< 1 giờ trước - ${tStr} ngày ${dStr})`;
-          } else if (ageHours < 24) {
-            timeLabel = `${Math.round(ageHours)} giờ trước - ${tStr} ngày ${dStr}`;
-          } else {
-            timeLabel = `Bài báo ngày ${dStr}`;
-          }
+      const title = titleMatch && titleMatch[1] ? cleanStr(titleMatch[1]) : "";
+      let snippet = descMatch && descMatch[1] ? cleanStr(descMatch[1]) : "";
+
+      const rawDate = pubDateMatch && pubDateMatch[1] ? pubDateMatch[1].trim() : "";
+      const dateObj = new Date(rawDate);
+      const timestamp = !isNaN(dateObj.getTime()) ? dateObj.getTime() : now;
+      const ageHours = (now - timestamp) / (1000 * 60 * 60);
+
+      // Nếu có filterTokens, chỉ lấy các bài có chứa ít nhất 1 từ khóa
+      if (filterTokens.length > 0) {
+        const fullText = (title + " " + snippet).toLowerCase();
+        const matchesAny = filterTokens.some((token) => fullText.includes(token));
+        if (!matchesAny) continue;
+      }
+
+      let timeLabel = "";
+      if (timestamp > 0) {
+        const dStr = dateObj.toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+        const tStr = dateObj.toLocaleTimeString("vi-VN", {
+          timeZone: "Asia/Ho_Chi_Minh",
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+        if (ageHours < 1) {
+          timeLabel = `Vừa xong (< 1 giờ trước - ${tStr} ngày ${dStr})`;
+        } else if (ageHours < 24) {
+          timeLabel = `${Math.round(ageHours)} giờ trước - ${tStr} ngày ${dStr}`;
+        } else if (ageHours < 24 * 7) {
+          timeLabel = `${Math.round(ageHours / 24)} ngày trước - ngày ${dStr}`;
+        } else {
+          timeLabel = `Bài báo ngày ${dStr}`;
         }
+      }
 
-        return { title, snippet, timeLabel, timestamp, ageHours };
-      })
-      .filter((it) => it.title.length > 0);
+      if (title) {
+        items.push({ title, snippet, timeLabel, timestamp, ageHours });
+      }
+    }
+
+    return items;
   } catch {
     return [];
   }
@@ -189,32 +242,46 @@ async function fetchWikipediaSummary(query: string): Promise<string> {
 }
 
 /**
- * Thực hiện tìm kiếm Google News + Bing News theo từ khóa và bộ lọc thời gian chỉ định
+ * Thực hiện tìm kiếm tin tức qua VnExpress RSS (Chuyên mục & Tin nóng) + Google News RSS
  */
 async function queryNewsPipeline(
   cleanQ: string,
   timeFilter: string,
   needEnglishSearch: boolean,
   secondaryQ = "",
-  enQueryStr = ""
+  enQueryStr = "",
+  categories: string[] = []
 ): Promise<ParsedNewsItem[]> {
   const queryStr = timeFilter ? `${cleanQ} ${timeFilter}` : cleanQ;
   const fetchPromises: Promise<ParsedNewsItem[]>[] = [
-    fetchBingNewsRss(cleanQ),
     fetchGoogleNewsRss(queryStr, "vi"),
   ];
+
+  const hasSpecificEntity = /(?:vinhomes|novaland|masterise|keppel|sun group|flc|ecopark|vinfast|vietcombank|fpt|viettel|binance|btc|eth|apple|nvidia|trump|putin|biden|zelensky)/i.test(cleanQ);
+  const isGeneralCategory = !hasSpecificEntity && (
+    cleanQ.trim().length <= 4 ||
+    /(?:bất động sản|nhà đất|chung cư|kinh tế|kinh doanh|tài chính|thời sự|tin tức|công nghệ|thế giới|thị trường)/i.test(cleanQ)
+  );
+
+  for (const cat of categories) {
+    if (isGeneralCategory) {
+      // Với câu hỏi tổng quan thị trường, lấy toàn bộ tin nóng mới nhất của chuyên mục (chứa tóm tắt nội dung 2-3 câu hoàn chỉnh)
+      fetchPromises.push(fetchVnExpressRss(cat));
+    } else {
+      // Với câu hỏi có từ khóa cụ thể, lọc tin VnExpress theo từ khóa
+      fetchPromises.push(fetchVnExpressRss(cat, cleanQ));
+    }
+  }
 
   if (secondaryQ) {
     const secStr = timeFilter ? `${secondaryQ} ${timeFilter}` : secondaryQ;
     fetchPromises.push(fetchGoogleNewsRss(secStr, "vi"));
-    fetchPromises.push(fetchBingNewsRss(secondaryQ));
   }
 
   // Quét thêm nguồn tiếng Anh nếu là chủ đề Công nghệ / AI hoặc Chính trị / Địa chính trị quốc tế
   if (needEnglishSearch && enQueryStr) {
     const enStr = timeFilter ? `${enQueryStr} ${timeFilter}` : enQueryStr;
     fetchPromises.push(fetchGoogleNewsRss(enStr, "en"));
-    fetchPromises.push(fetchBingNewsRss(enQueryStr));
   }
 
   const allResults = (await Promise.all(fetchPromises)).flat();
@@ -335,29 +402,30 @@ export async function searchRealtimeNews(query: string): Promise<string> {
 
     // 6. KIẾN TRÚC PHÂN TẦNG THỜI GIAN (CASCADING 3-TIER SEARCH):
     let candidates: ParsedNewsItem[] = [];
+    const categories = detectNewsCategories(query);
 
     if (is24hStrict) {
       // TẦNG 1: Ép cứng 24h qua (when:1d)
-      const res24h = await queryNewsPipeline(cleanQ, "when:1d", needEnglishSearch, secondaryQ, enQueryStr);
+      const res24h = await queryNewsPipeline(cleanQ, "when:1d", needEnglishSearch, secondaryQ, enQueryStr, categories);
       candidates = res24h.filter((r) => r.ageHours <= 26);
 
       // Nếu tầng 24h không có tin nào, tự động thác đổ xuống Tầng 2 (7 ngày)
       if (candidates.length === 0) {
-        const res7d = await queryNewsPipeline(cleanQ, "when:7d", needEnglishSearch, secondaryQ, enQueryStr);
+        const res7d = await queryNewsPipeline(cleanQ, "when:7d", needEnglishSearch, secondaryQ, enQueryStr, categories);
         candidates = res7d.filter((r) => r.ageHours <= 7 * 24 + 6);
       }
     } else if (is7dRecent) {
       // TẦNG 2: Trong 7 ngày qua (when:7d)
-      const res7d = await queryNewsPipeline(cleanQ, "when:7d", needEnglishSearch, secondaryQ, enQueryStr);
+      const res7d = await queryNewsPipeline(cleanQ, "when:7d", needEnglishSearch, secondaryQ, enQueryStr, categories);
       candidates = res7d.filter((r) => r.ageHours <= 7 * 24 + 6);
 
       // Nếu tầng 7 ngày không có tin nào, thác đổ xuống Tầng 3 (Không giới hạn)
       if (candidates.length === 0) {
-        candidates = await queryNewsPipeline(cleanQ, "", needEnglishSearch, secondaryQ, enQueryStr);
+        candidates = await queryNewsPipeline(cleanQ, "", needEnglishSearch, secondaryQ, enQueryStr, categories);
       }
     } else {
       // TẦNG 3: KHÔNG GIỚI HẠN THỜI GIAN (Mặc định cho các câu hỏi tra cứu thông tin/hồ sơ/sự việc)
-      candidates = await queryNewsPipeline(cleanQ, "", needEnglishSearch, secondaryQ, enQueryStr);
+      candidates = await queryNewsPipeline(cleanQ, "", needEnglishSearch, secondaryQ, enQueryStr, categories);
     }
 
     // 7. Tra cứu song song Bách khoa toàn thư Wikipedia nếu là câu hỏi khái niệm / danh nhân / lịch sử
@@ -370,6 +438,27 @@ export async function searchRealtimeNews(query: string): Promise<string> {
     }
 
     if (candidates.length === 0 && !wikiText) return "";
+
+    // 7.5. Lọc bỏ các tin lạc đề hoàn toàn không liên quan đến chủ đề đang hỏi (nếu có chuyên mục cụ thể)
+    if (categories.includes("bat-dong-san")) {
+      const bdsRegex = /(?:bất động sản|địa ốc|nhà đất|chung cư|đất đai|dự án|đô thị|căn hộ|vinhomes|novaland|mặt bằng|quy hoạch|xây dựng|nhà phố|biệt thự|thuê đất|bds)/i;
+      candidates = candidates.filter((it) => {
+        if (it.snippet && it.snippet.length > 25) return true;
+        return bdsRegex.test(it.title);
+      });
+    } else if (categories.includes("kinh-doanh")) {
+      const kdRegex = /(?:kinh doanh|kinh tế|chứng khoán|cổ phiếu|ngân hàng|doanh nghiệp|tài chính|giá vàng|giá xăng|lãi suất|vn-index|thương mại|xuất khẩu|nhập khẩu|lợi nhuận|doanh thu)/i;
+      candidates = candidates.filter((it) => {
+        if (it.snippet && it.snippet.length > 25) return true;
+        return kdRegex.test(it.title);
+      });
+    } else if (categories.includes("so-hoa")) {
+      const techRegex = /(?:công nghệ|ai\b|mô hình|gpt|gemini|bán dẫn|chip|apple|iphone|macbook|số hóa|deepseek|claude|phần mềm|smartphone|điện thoại|máy tính)/i;
+      candidates = candidates.filter((it) => {
+        if (it.snippet && it.snippet.length > 25) return true;
+        return techRegex.test(it.title);
+      });
+    }
 
     // 8. Sắp xếp kết quả: ưu tiên các bản tin có tóm tắt chi tiết (snippet), sau đó đến độ mới (timestamp)
     candidates.sort((a, b) => {
