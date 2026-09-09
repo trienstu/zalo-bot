@@ -303,14 +303,16 @@ export async function callGemini(
 
   // Danh sách model cascading dự phòng khi model chính nghẽn mạng / 503 / 429 / Timeout:
   // 1. gemini-flash-lite-latest: Siêu tốc <1s, độ ổn định cực cao
-  // 2. gemini-3.5-flash-lite: Bản lite 3.5 siêu tốc (~670ms)
-  // 3. gemini-3.1-flash-lite-preview: Bản lite 3.1
-  // 4. gemini-3.7-flash: Bản tiêu chuẩn chất lượng cao
+  // 2. gemini-3.8-flash: Bản mới nhất
+  // 3. gemini-3.7-flash: Bản tiêu chuẩn chất lượng cao
+  // 4. gemini-3.5-flash-lite: Bản lite 3.5 siêu tốc (~670ms)
+  // 5. gemini-3.1-flash-lite-preview: Bản lite 3.1
   const candidateFallbacks = [
     "gemini-flash-lite-latest",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite-preview",
-    "gemini-3.7-flash",
   ].filter((m) => m !== primaryModel);
 
   const temperature = options?.temperature ?? 0.3;
@@ -350,6 +352,7 @@ export async function callGemini(
           parts: userParts,
         },
       ],
+      ...(options?.enableSearch ? { tools: [{ googleSearch: {} }] } : {}),
       generationConfig: {
         temperature,
         ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
@@ -359,7 +362,7 @@ export async function callGemini(
 
     const executeModel = async (targetModel: string, timeoutMs: number): Promise<string | null> => {
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${apiKey}`;
-      const resp = await fetch(endpoint, {
+      let resp = await fetch(endpoint, {
         method: "POST",
         signal: AbortSignal.timeout(timeoutMs),
         headers: {
@@ -367,6 +370,20 @@ export async function callGemini(
         },
         body: JSON.stringify(requestBody),
       });
+
+      // Nếu yêu cầu Google Search Grounding bị lỗi 429 (vượt hạn mức / chưa có billing), tự động fallback gọi không có grounding tool
+      if (!resp.ok && options?.enableSearch && resp.status === 429) {
+        delete requestBody.tools;
+        const retryResp = await fetch(endpoint, {
+          method: "POST",
+          signal: AbortSignal.timeout(timeoutMs),
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        });
+        if (retryResp.ok) {
+          resp = retryResp;
+        }
+      }
 
       if (!resp.ok) {
         const errText = await resp.text().catch(() => "");
@@ -379,11 +396,33 @@ export async function callGemini(
         candidates?: { content?: { parts?: { text?: string }[] } }[];
       };
       const candidate = data.candidates?.[0];
-      const content = candidate?.content?.parts?.map((p: { text?: string }) => p.text || "").join("").trim();
+      let content = candidate?.content?.parts?.map((p: { text?: string }) => p.text || "").join("").trim();
       if (!content) {
         lastError = new Error(`Response Gemini API (${targetModel}) rỗng`);
         return null;
       }
+
+      // Trích xuất grounding metadata nếu có (chuẩn Vertex AI Search / Grounding như bot Kevin)
+      const groundingMetadata = (candidate as any)?.groundingMetadata;
+      if (groundingMetadata?.groundingChunks && Array.isArray(groundingMetadata.groundingChunks)) {
+        const sources: string[] = [];
+        groundingMetadata.groundingChunks.forEach((chunk: any, idx: number) => {
+          if (chunk.web?.uri) {
+            const domain = chunk.web.title || (function() {
+              try {
+                return new URL(chunk.web.uri).hostname.replace(/^www\./, "");
+              } catch {
+                return "Nguồn";
+              }
+            })();
+            sources.push(`${idx + 1}. ${domain}: ${chunk.web.uri}`);
+          }
+        });
+        if (sources.length > 0 && !content.includes("Nguồn tham khảo")) {
+          content += `\n\nNguồn tham khảo:\n${sources.join("\n")}`;
+        }
+      }
+
       return content;
     };
 
