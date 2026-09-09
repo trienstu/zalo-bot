@@ -14,6 +14,11 @@ import {
   generateTextFile,
   type GeneratedFileResult,
 } from "./tools/file-generator.js";
+import {
+  getCryptoTicker,
+  getFearAndGreedIndex,
+  getFinancialMarketSummary,
+} from "./tools/finance-tools.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
 
 /**
@@ -572,11 +577,35 @@ const AGENT_TOOLS_DECLARATION = {
         required: ["fileType", "fileName", "title"],
       },
     },
+    {
+      name: "finance_market_lookup",
+      description: "Tra cứu bảng giá trực tiếp của các đồng tiền số (Bitcoin, Ethereum, Solana, Altcoin...) từ sàn Binance, Chỉ số Sợ hãi & Tham lam (Crypto Fear & Greed Index) và tỷ giá ngoại tệ thật theo thời gian thực. BẮT BUỘC DÙNG khi người dùng hỏi về giá crypto, thị trường tiền số, bitcoin, altcoin, tỷ giá.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          symbol: {
+            type: "STRING",
+            description: "Mã đồng tiền cần tra cứu (ví dụ: 'BTC', 'ETH', 'SOL', 'BNB', 'DOGE', hoặc 'market' để lấy toàn cảnh thị trường)",
+          },
+        },
+        required: ["symbol"],
+      },
+    },
   ],
 };
 
 async function executeAgentTool(name: string, args: Record<string, any>): Promise<any> {
   switch (name) {
+    case "finance_market_lookup": {
+      const sym = String(args?.symbol || "market").trim();
+      if (sym.toLowerCase() === "market" || !sym) {
+        const summary = await getFinancialMarketSummary("crypto");
+        return { summary };
+      }
+      const ticker = await getCryptoTicker(sym);
+      const fng = await getFearAndGreedIndex();
+      return { ticker, fearAndGreed: fng };
+    }
     case "web_search": {
       const q = String(args?.query || "").trim();
       if (!q) return { results: [] };
@@ -707,6 +736,9 @@ export async function callGeminiAgentLoop(
         generationConfig: {
           temperature,
           ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
+          ...(primaryModel.includes("3.7") || primaryModel.includes("2.5")
+            ? { thinkingConfig: { thinkingBudget: 1024 } }
+            : {}),
         },
       };
 
@@ -805,6 +837,9 @@ export async function callGeminiAgentLoop(
       generationConfig: {
         temperature,
         ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
+        ...(primaryModel.includes("3.7") || primaryModel.includes("2.5")
+          ? { thinkingConfig: { thinkingBudget: 1024 } }
+          : {}),
       },
     };
     const finalResp = await fetch(finalEndpoint, {

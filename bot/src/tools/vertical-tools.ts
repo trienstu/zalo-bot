@@ -12,77 +12,138 @@ export interface SearchResultItem {
 }
 
 /**
- * 1. Web Search via DuckDuckGo HTML endpoint
- * Returns rich 200-300 character snippets per result.
+ * 1. Web Search via DuckDuckGo HTML endpoint with Automatic Google News RSS Fallback.
+ * Tự động chuyển đổi mượt mà sang Google News RSS nếu DuckDuckGo bị chặn CAPTCHA / 202.
  */
 export async function webSearch(query: string, maxResults = 5): Promise<SearchResultItem[]> {
+  const results: SearchResultItem[] = [];
+
+  // 1.1. Thử cào qua DuckDuckGo HTML
   try {
     const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(query), {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(6000),
     });
 
-    if (!res.ok) return [];
-    const html = await res.text();
+    if (res.ok) {
+      const html = await res.text();
+      // Nếu dính trang anomaly / CAPTCHA của DuckDuckGo thì bỏ qua để xuống tầng fallback
+      if (!html.includes("anomaly-modal") && !html.includes("challenge-form")) {
+        const blocks = html.split('<div class="result results_links');
+        for (const block of blocks.slice(1)) {
+          if (results.length >= maxResults) break;
 
-    const results: SearchResultItem[] = [];
-    const blocks = html.split('<div class="result results_links');
+          const urlMatch =
+            block.match(/href="([^"]+uddg=([^"&]+)[^"]*)"/i) ||
+            block.match(/<a class="result__url"[^>]*href="([^"]+)"/i);
+          const snippetMatch = block.match(/<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i);
 
-    for (const block of blocks.slice(1)) {
-      if (results.length >= maxResults) break;
-
-      const urlMatch = block.match(/href="([^"]+uddg=([^"&]+)[^"]*)"/i) || block.match(/<a class="result__url"[^>]*href="([^"]+)"/i);
-      const snippetMatch = block.match(/<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i);
-
-      let rawUrl = "";
-      if (urlMatch) {
-        if (urlMatch[2]) {
-          try {
-            rawUrl = decodeURIComponent(urlMatch[2]);
-          } catch {
-            rawUrl = urlMatch[2] || "";
+          let rawUrl = "";
+          if (urlMatch) {
+            if (urlMatch[2]) {
+              try {
+                rawUrl = decodeURIComponent(urlMatch[2]);
+              } catch {
+                rawUrl = urlMatch[2] || "";
+              }
+            } else {
+              rawUrl = urlMatch[1] || "";
+            }
           }
-        } else {
-          rawUrl = urlMatch[1] || "";
+
+          const cleanText = (str: string) =>
+            str
+              .replace(/<[^>]+>/g, " ")
+              .replace(/&quot;/g, '"')
+              .replace(/&#x27;/g, "'")
+              .replace(/&apos;/g, "'")
+              .replace(/&#39;/g, "'")
+              .replace(/&amp;/g, "&")
+              .replace(/&lt;/g, "<")
+              .replace(/&gt;/g, ">")
+              .replace(/&nbsp;/g, " ")
+              .replace(/\s+/g, " ")
+              .trim();
+
+          const snippet = snippetMatch && snippetMatch[1] ? cleanText(snippetMatch[1]) : "";
+          const titleMatch2 =
+            block.match(/<a class="result__snippet"[^>]*title="([^"]+)"/i) ||
+            block.match(/<h2[^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i);
+          const title = titleMatch2 && titleMatch2[1] ? cleanText(titleMatch2[1]) : cleanText(snippet.slice(0, 60));
+
+          if (snippet && rawUrl && !rawUrl.includes("duckduckgo.com")) {
+            results.push({
+              title: title || rawUrl,
+              snippet,
+              url: rawUrl,
+            });
+          }
         }
       }
+    }
+  } catch {
+    // DuckDuckGo timeout hoặc lỗi mạng
+  }
 
-      const cleanText = (str: string) =>
-        str
-          .replace(/<[^>]+>/g, " ")
+  // 1.2. Nếu DuckDuckGo có đủ kết quả, trả về ngay
+  if (results.length >= 2) {
+    return results.slice(0, maxResults);
+  }
+
+  // 1.3. Fallback: Google News RSS (Cực kỳ ổn định, không bao giờ bị CAPTCHA, tin mới 100%)
+  try {
+    const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=vi&gl=VN&ceid=VN:vi`;
+    const res = await fetch(rssUrl, {
+      signal: AbortSignal.timeout(6000),
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)",
+      },
+    });
+
+    if (res.ok) {
+      const xml = await res.text();
+      const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
+      for (const it of items) {
+        if (results.length >= maxResults) break;
+        const block = it[1] || "";
+        const tMatch = block.match(/<title>(.*?)<\/title>/i);
+        const lMatch = block.match(/<link>(.*?)<\/link>/i) || block.match(/<link\/>(.*?)&/);
+        const dMatch = block.match(/<pubDate>(.*?)<\/pubDate>/i);
+
+        const title = (tMatch && tMatch[1] ? tMatch[1] : "")
           .replace(/&quot;/g, '"')
-          .replace(/&#x27;/g, "'")
-          .replace(/&apos;/g, "'")
-          .replace(/&#39;/g, "'")
           .replace(/&amp;/g, "&")
-          .replace(/&lt;/g, "<")
-          .replace(/&gt;/g, ">")
-          .replace(/&nbsp;/g, " ")
-          .replace(/\s+/g, " ")
+          .replace(/&#39;/g, "'")
           .trim();
 
-      const snippet = snippetMatch && snippetMatch[1] ? cleanText(snippetMatch[1]) : "";
-      const titleMatch2 = block.match(/<a class="result__snippet"[^>]*title="([^"]+)"/i) ||
-                          block.match(/<h2[^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i);
-      const title = titleMatch2 && titleMatch2[1] ? cleanText(titleMatch2[1]) : cleanText(snippet.slice(0, 60));
+        if (title && !results.some((r) => r.title === title)) {
+          let dateStr = "";
+          if (dMatch && dMatch[1]) {
+            const dt = new Date(dMatch[1]);
+            if (!isNaN(dt.getTime())) {
+              dateStr = dt.toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+            }
+          }
 
-      if (snippet && rawUrl && !rawUrl.includes("duckduckgo.com")) {
-        results.push({
-          title: title || rawUrl,
-          snippet,
-          url: rawUrl,
-        });
+          results.push({
+            title,
+            snippet: dateStr ? `[Tin ngày ${dateStr}] ${title}` : title,
+            url: lMatch && lMatch[1] ? lMatch[1].trim() : "",
+            date: dateStr,
+          });
+        }
       }
     }
-
-    return results;
-  } catch (err) {
-    console.warn(`[vertical-tools] webSearch error for "${query}":`, err);
-    return [];
+  } catch (rssErr) {
+    console.warn(`[vertical-tools] Fallback Google News RSS error for "${query}":`, rssErr);
   }
+
+  return results.slice(0, maxResults);
 }
 
 /**

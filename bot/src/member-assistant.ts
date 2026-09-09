@@ -1548,8 +1548,9 @@ async function handleHistoryQA(
     `      + Nếu câu hỏi có so sánh đối thủ: Trình bày [So sánh đa chiều] tinh gọn, thanh lịch. Với từng đối thủ nêu rõ 3 ý bằng gạch đầu dòng thông thường (TUYỆT ĐỐI KHÔNG dùng icon ở từng dòng): - Điểm mạnh nhất: ... | - So sánh tương quan: ... | - Điểm trừ / Lưu ý: ...\n` +
     `      + Kết bài luôn có mục [Tóm lại & Lời khuyên thực chiến] để thành viên biết nên chọn hoặc chờ đợi điều gì.\n` +
     `    - KHI HỎI VỀ TÀI CHÍNH / GIÁ CẢ THỊ TRƯỜNG (Vàng, Xăng, Ngoại tệ, Lãi suất, Bitcoin/Crypto):\n` +
-    `      + BẮT BUỘC trích xuất chính xác các con số niêm yết mới nhất từ dữ liệu được cung cấp hoặc tìm kiếm (ghi rõ mốc ngày giờ, đơn vị triệu đồng/lượng hoặc USD/ounce hoặc USD/BTC).\n` +
-    `      + Nêu rõ nguồn số liệu niêm yết (SJC, DOJI, Kitco, Binance, CoinGecko, Petrolimex, Vietcombank...).\n` +
+    `      + BẮT BUỘC trích xuất chính xác các con số niêm yết mới nhất từ dữ liệu được cung cấp hoặc công cụ tra cứu (ghi rõ mốc ngày giờ, đơn vị triệu đồng/lượng hoặc USD/ounce hoặc USD/BTC).\n` +
+    `      + Nêu rõ nguồn số liệu niêm yết (SJC, DOJI, Kitco, Binance, CoinGecko, Alternative.me, Petrolimex, Vietcombank...).\n` +
+    `      + NGUYÊN TẮC FACT-GROUNDING CHỐNG ẢO GIÁC TUYỆT ĐỐI: BẮT BUỘC dùng đúng con số thực tế được cung cấp trong bảng giá live. Nếu trong dữ liệu cung cấp hoặc công cụ tìm kiếm KHÔNG CÓ con số niêm yết cụ thể, BẮT BUỘC phải thông báo rõ là "hiện chưa có dữ liệu niêm yết trực tiếp", TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT HOẶC ĐOÁN MÒ MỨC GIÁ!\n` +
     `      + Nếu câu hỏi hỏi nhiều tài sản cùng lúc (ví dụ cả Vàng và Bitcoin/Crypto): BẮT BUỘC cung cấp cụ thể số liệu của TẤT CẢ các tài sản được hỏi, tuyệt đối không được bỏ sót con số của bất kỳ loại tài sản nào.\n` +
     `    - KHI HỎI VỀ PHÁP LÝ / THỦ TỤC HÀNH CHÍNH (Đất đai, Xe cộ, Thuế, VNeID, Giao thông):\n` +
     `      + Hướng dẫn dạng checklist từng bước (Bước 1, Bước 2, Bước 3), hồ sơ cần chuẩn bị, nơi nộp và mức phí/mức phạt quy định.\n` +

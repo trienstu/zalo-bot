@@ -7,6 +7,7 @@
  */
 
 import { webSearch, SearchResultItem } from "./tools/vertical-tools.js";
+import { getFinancialMarketSummary } from "./tools/finance-tools.js";
 
 function decodeXml(str: string): string {
   return str
@@ -425,6 +426,17 @@ export async function searchRealtimeNews(query: string): Promise<string> {
       .join("\n");
 
     const sections: string[] = [];
+
+    // 10.5. Nếu liên quan đến crypto / tài chính / tỷ giá, tiêm bảng giá trực tiếp Binance
+    try {
+      const marketSummary = await getFinancialMarketSummary(query);
+      if (marketSummary) {
+        sections.push(marketSummary);
+      }
+    } catch (mErr) {
+      console.warn("[realtime-search] Lỗi lấy market summary:", mErr);
+    }
+
     if (wikiText) sections.push(wikiText);
     if (richSnippetsText) sections.push(richSnippetsText);
     if (newsLines) sections.push(`📰 DANH SÁCH BẢN TIN THỜI SỰ LIÊN QUAN:\n${newsLines}`);
