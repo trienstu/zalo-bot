@@ -1418,8 +1418,10 @@ export async function runListener(): Promise<void> {
   setInterval(() => void checkDailyAiNewsBriefingLoop(), 30000);
 
   // =========================================================================
-  // VÒNG LẶP QUÉT & TỰ ĐỘNG CHẤP NHẬN LỜI MỜI KẾT BẠN (MỖI 10 GIÂY)
+  // VÒNG LẶP QUÉT & TỰ ĐỘNG CHẤP NHẬN LỜI MỜI KẾT BẠN (MỖI 30 GIÂY)
   // =========================================================================
+  const failedFriendAttempts = new Map<string, { attempts: number; lastTried: number }>();
+
   async function checkAutoAcceptFriendsLoop(): Promise<void> {
     try {
       const settings = getAutoFriendSettings();
@@ -1446,12 +1448,19 @@ export async function runListener(): Promise<void> {
         const userId = String(uid || (item as any)?.userId || "").trim();
         if (!userId) continue;
 
+        // Bỏ qua các UID đã thử chấp nhận thất bại (ví dụ lỗi 170 do chặn tin nhắn/vi phạm Zalo) trong 1 giờ
+        const failedInfo = failedFriendAttempts.get(userId);
+        if (failedInfo && failedInfo.attempts >= 2 && Date.now() - failedInfo.lastTried < 3600_000) {
+          continue;
+        }
+
         console.log(`[auto-friend] 🔔 Phát hiện lời mời kết bạn chờ duyệt từ UID: ${userId}`);
         await sleep(1500);
 
         try {
           if (typeof (api as any).acceptFriendRequest === "function") {
             await (api as any).acceptFriendRequest(userId);
+            failedFriendAttempts.delete(userId);
             console.log(`[auto-friend] ✅ Đã tự động chấp nhận kết bạn với UID: ${userId}`);
 
             const displayName = String(
@@ -1476,8 +1485,10 @@ export async function runListener(): Promise<void> {
               console.log(`[auto-friend] Đã gửi tin nhắn chào mừng 1:1 tới ${displayName} (${userId})`);
             }
           }
-        } catch (acceptErr) {
-          console.warn(`[auto-friend] Lỗi khi chấp nhận kết bạn với ${userId}:`, acceptErr);
+        } catch (acceptErr: any) {
+          const prev = failedFriendAttempts.get(userId) || { attempts: 0, lastTried: 0 };
+          failedFriendAttempts.set(userId, { attempts: prev.attempts + 1, lastTried: Date.now() });
+          console.warn(`[auto-friend] Lỗi khi chấp nhận kết bạn với ${userId} (lần ${prev.attempts + 1}): ${String(acceptErr?.message || acceptErr)}`);
         }
       }
     } catch (e) {

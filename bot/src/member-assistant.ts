@@ -1671,9 +1671,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     rawText.startsWith("ℹ️") ||
     rawText.startsWith("✅") ||
     rawText.startsWith("⚠️") ||
-    rawText.includes("Sen Chúa trả lời") ||
-    rawText.includes("Mộc Miên trả lời") ||
-    rawText.includes("trả lời @") ||
+    /^(?:🤖\s*)?(?:Sen Chúa|Mộc Miên)\s+trả lời\s+@/i.test(rawText) ||
     rawText.includes("[BÁO THỨC") ||
     rawText.includes("LỊCH HẸN THÀNH CÔNG") ||
     rawText.includes("[Mã #")
