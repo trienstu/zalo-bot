@@ -30,6 +30,7 @@ import { handleSetReminder, handleListReminders, handleCancelReminder, parseNatu
 import { searchRealtimeNews } from "./realtime-search.js";
 import { refreshDynamicKnowledgeIfExpired, fetchGoogleContent, parseGoogleUrl } from "./google-sync.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
+import { planSearchQueries } from "./query-planner.js";
 
 export interface MemberMessageEvent {
   threadId: string;
@@ -1108,48 +1109,24 @@ async function handleHistoryQA(
       `6. Trả lời chuẩn xác, minh bạch, trung thực, khiêm tốn, tự nhiên và đúng cá tính Sen Chúa.`;
 
     let quoteLiveNews = "";
-    const needsExternalSearch =
-      /(?:tìm kiếm|tra cứu|tin tức|tin mới|thông tin mới|thông tin thêm|xem có|là ai\b|vụ gì\b|sự việc gì\b|bản quyền|đạo nhái|phốt|drama|tiểu sử|vụ việc|giá|bao nhiêu|ở đâu|mua ở đâu|bán ở đâu|chỗ nào|nơi nào|link|web|shop|mua|check|kiểm tra|xác thực|đối soát|có thật không|đúng không|thực hư|chuẩn chưa|chính xác chưa|sai không|đúng hay sai|soi lại|check lại|ngáo|xem lại|bịa|hư cấu)/i.test(
-        question
-      );
-    if (needsExternalSearch) {
-      try {
-        let subject = "";
-        const matchProduct = options.quote.text.match(/(?:tên sản phẩm|sản phẩm|thiết bị|mô hình|model|dự án|tên|tiêu đề)[:\s]+([^\n.,;]+)/i);
-        if (matchProduct && matchProduct[1]) {
-          subject = matchProduct[1].trim();
-        } else {
-          const cleanQuote = options.quote.text
-            .replace(/^[🤖\s]*[^\n]*?(?:trả lời|chào|bản tin)[^\n]*\n*/gi, "")
-            .replace(/Chào anh[^.!\n]+[.!\n]*/gi, "")
-            .replace(/[\/?.!,]+/g, " ")
-            .trim();
-          subject = cleanQuote.slice(0, 80);
-        }
+    let isSearchNeeded = false;
+    try {
+      const plan = await planSearchQueries({
+        question,
+        quoteText: options.quote.text,
+        displayName,
+      });
 
-        const cleanQ = question
-          .replace(/@\S+/g, "")
-          .replace(/\b(?:sen chúa|mộc miên|kevin|bot)\b/gi, "")
-          .replace(/\b(?:hãy|vui lòng|giúp|check|kiểm tra|xem|nội dung|trên này|có chính xác chưa|chính xác chưa|báo rõ ra|đúng không|có thật không|nhé|nha|ạ|em|anh|bác)\b/gi, "")
-          .replace(/[\/?.!,]+/g, " ")
-          .trim();
-
-        let searchKeywords = "";
-        if (cleanQ.length >= 6 && !/^(?:tin tức|thế giới|hôm nay)$/i.test(cleanQ)) {
-          searchKeywords = cleanQ;
-        } else if (subject.length > 0) {
-          searchKeywords = subject;
-        } else {
-          searchKeywords = `${subject} ${cleanQ}`.trim();
-        }
-
-        searchKeywords = searchKeywords.replace(/\s+/g, " ").trim().slice(0, 80);
-        if (searchKeywords) {
-          quoteLiveNews = await searchRealtimeNews(searchKeywords);
-        }
-      } catch (e) {
-        console.warn("[member-assistant] Quote QA searchRealtimeNews error:", e);
+      isSearchNeeded = plan.needsSearch;
+      if (plan.needsSearch && plan.queries.length > 0) {
+        // Chạy song song tối đa 3 truy vấn chuyên biệt bóc tách từ ngữ nghĩa người dùng
+        const searchResults = await Promise.all(
+          plan.queries.slice(0, 3).map((q) => searchRealtimeNews(q).catch(() => ""))
+        );
+        quoteLiveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
       }
+    } catch (e) {
+      console.warn("[member-assistant] Quote QA planSearchQueries error:", e);
     }
 
     const quoteLiveNewsSection = quoteLiveNews
@@ -1167,7 +1144,7 @@ async function handleHistoryQA(
       let answer = "";
       const isGreetingQuote =
         /^(?:chào|hi|hello|alo|ê|cảm ơn|thanks|ok)\b/i.test(question.trim()) && question.trim().length < 25;
-      if (needsExternalSearch && !isGreetingQuote) {
+      if ((isSearchNeeded || Boolean(quoteLiveNews)) && !isGreetingQuote) {
         answer = await callGeminiAgentLoop(quoteSystemPrompt, quoteUserPrompt, {
           mediaParts: mediaPart ? [mediaPart] : undefined,
         });
