@@ -162,15 +162,26 @@ export async function searchRealtimeNews(query: string): Promise<string> {
       query
     );
 
-    // 2. Làm sạch từ khóa tìm kiếm
-    let cleanQ = query
+    // 2. Làm sạch từ khóa tìm kiếm (bảo vệ ranh giới từ để không cắt xén các từ như bitcoin, coin)
+    let cleanQ = (" " + query + " ")
       .replace(/@[^\s,!?]+/g, " ")
       .replace(/(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot ơi|bot oi|bot|admin|ad ơi|ad oi|ad|trợ lý|tro ly)/gi, " ")
-      .replace(/(?:là gì thế|là gì vậy|là gì nè|là gì|là cái gì|là con gì|thế nào|như thế nào|ra sao|nghĩa là gì|là sao)/gi, " ")
-      .replace(
-        /(?:cập nhật|tình hình|mới nhất|tin tức|tin mới|hôm nay|24h qua|24h|24 giờ|cho tôi|giúp tôi|với|nha|nhé|ạ|ơi|hỏi về|xem|tin nóng|vừa ra mắt|thời sự|bản tin|vừa công bố|thế nào rồi|có gì mới|cho biết|đi|về|nào|coi|nói về|hãy|tìm kiếm thêm thông tin về|tìm kiếm thêm thông tin|tìm kiếm thêm|tra cứu|xem có nội dung cụ thể|nội dung cụ thể|cái gì bị)/gi,
-        " "
-      )
+      .replace(/(?:là gì thế|là gì vậy|là gì nè|là gì|là cái gì|là con gì|thế nào|như thế nào|ra sao|nghĩa là gì|là sao)/gi, " ");
+
+    const stopWords = [
+      "cập nhật", "tình hình", "mới nhất", "tin tức", "tin mới", "hôm nay", "24h qua", "24h", "24 giờ",
+      "cho tôi", "giúp tôi", "với", "nha", "nhé", "ạ", "ơi", "hỏi về", "xem", "tin nóng", "vừa ra mắt",
+      "thời sự", "bản tin", "vừa công bố", "thế nào rồi", "có gì mới", "cho biết", "đi", "về", "nào", "coi",
+      "nói về", "hãy", "tìm kiếm thêm thông tin về", "tìm kiếm thêm thông tin", "tìm kiếm thêm", "tra cứu",
+      "xem có nội dung cụ thể", "nội dung cụ thể", "cái gì bị", "giùm", "dùm", "cho mình", "xem nào", "phân tích thêm"
+    ];
+
+    for (const w of stopWords) {
+      const regex = new RegExp(`(^|\\s|[,.?!;:])${w.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}(?=\\s|[,.?!;:]|$)`, "gi");
+      cleanQ = cleanQ.replace(regex, "$1 ");
+    }
+
+    cleanQ = cleanQ
       .replace(/[?!,.:;"'()\[\]{}–—\-]/g, " ")
       .replace(/\s+/g, " ")
       .trim();
@@ -310,9 +321,13 @@ export async function searchRealtimeNews(query: string): Promise<string> {
 
     // 10. Trích xuất trích dẫn nguyên văn & bối cảnh chuyên sâu qua DuckDuckGo Web Search Snippets
     let richSnippetsText = "";
+    const isFinancialQuery = /(?:giá|vàng|sjc|bitcoin|btc|crypto|tiền ảo|tiền điện tử|chứng khoán|vn-index|cổ phiếu|xăng|dầu|ngoại tệ|tỷ giá|usd|lãi suất)/i.test(
+      query
+    );
     const needsDeepSnippets =
       isWorldPolitics ||
       isTechAI ||
+      isFinancialQuery ||
       /(?:phát ngôn|phát biểu|tuyên bố|nói gì|đánh giá|nhận định|chi tiết|nguyên văn|lý do|tại sao|vụ việc|bê bối|scandal|hôm nay|24h|mới nhất|tình hình|diễn biến)/i.test(
         query
       );
@@ -328,17 +343,34 @@ export async function searchRealtimeNews(query: string): Promise<string> {
           snippetQueries.push(cleanQ);
         }
 
-        // Query 2: Nguồn báo chí quốc tế / tiếng Anh (Reuters, AP, Bloomberg, CNN, BBC, White House...)
+        // Bổ sung các truy vấn chuyên biệt cho tài chính / thị trường để có ngay số liệu niêm yết chuẩn
+        if (/(?:vàng|gold|sjc)/i.test(query)) {
+          snippetQueries.push("giá vàng SJC 9999 hôm nay 2026");
+        }
+        if (/(?:bitcoin|btc|crypto|tiền ảo|tiền điện tử)/i.test(query)) {
+          snippetQueries.push("giá bitcoin hôm nay BTC USD 2026");
+        }
+        if (/(?:chứng khoán|vn-index|cổ phiếu)/i.test(query)) {
+          snippetQueries.push("chứng khoán VN-Index hôm nay");
+        }
+        if (/(?:xăng|dầu|ron 95|e5)/i.test(query)) {
+          snippetQueries.push("giá xăng dầu hôm nay Petrolimex");
+        }
+        if (/(?:ngoại tệ|tỷ giá|usd|đô la)/i.test(query)) {
+          snippetQueries.push("tỷ giá USD Vietcombank hôm nay");
+        }
+
+        // Query tiếng Anh nếu cần
         if (needEnglishSearch && enQueryStr) {
           snippetQueries.push(`${enQueryStr} latest statement news`);
         }
 
-        // Query 2 & 3: Lấy từ các tiêu đề nổi bật nhất trong danh sách bản tin (bỏ tên báo phía sau)
+        // Lấy từ các tiêu đề nổi bật nhất trong danh sách bản tin (bỏ tên báo phía sau)
         for (const item of mergedItems.slice(0, 5)) {
           const rawTitle = item.title.split(/\s*-\s*[^-]+$/)[0]?.trim();
           if (rawTitle && rawTitle.length > 10 && !snippetQueries.some((q) => q.includes(rawTitle.slice(0, 20)))) {
             snippetQueries.push(rawTitle);
-            if (snippetQueries.length >= 3) break;
+            if (snippetQueries.length >= 5) break;
           }
         }
 
