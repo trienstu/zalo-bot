@@ -14,6 +14,7 @@ import {
   generateTextFile,
   type GeneratedFileResult,
 } from "./tools/file-generator.js";
+import { getSystemTemporalPrompt } from "./temporal.js";
 
 /**
  * Lớp gọi Google Gemini API dùng chung (Tóm tắt hội thoại Zalo, bóc tách dữ liệu).
@@ -327,13 +328,17 @@ export async function callGemini(
   }
   userParts.push({ text: user });
 
+  const effectiveSystem = system?.includes("SYSTEM TEMPORAL ANCHOR")
+    ? system
+    : (system ? `${getSystemTemporalPrompt()}\n\n${system}` : getSystemTemporalPrompt());
+
   // Thử lần lượt qua từng API Key nếu có nhiều key (Xoay vòng chống 429 Rate Limit)
   for (let attempt = 0; attempt < numKeys; attempt += 1) {
     const keyIdx = (botKeyOffset + attempt) % numKeys;
     const apiKey = apiKeys[keyIdx];
 
     const requestBody: Record<string, unknown> = {
-      system_instruction: system ? { parts: [{ text: system }] } : undefined,
+      system_instruction: effectiveSystem ? { parts: [{ text: effectiveSystem }] } : undefined,
       contents: [
         {
           role: "user",
@@ -686,13 +691,17 @@ export async function callGeminiAgentLoop(
 
   let apiKeyIdx = botKeyOffset % apiKeys.length;
 
+  const effectiveSystem = system?.includes("SYSTEM TEMPORAL ANCHOR")
+    ? system
+    : (system ? `${getSystemTemporalPrompt()}\n\n${system}` : getSystemTemporalPrompt());
+
   try {
     for (let turn = 0; turn < maxTurns; turn++) {
       const apiKey = apiKeys[apiKeyIdx];
       const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${primaryModel}:generateContent?key=${apiKey}`;
 
       const requestBody: Record<string, unknown> = {
-        system_instruction: system ? { parts: [{ text: system }] } : undefined,
+        system_instruction: effectiveSystem ? { parts: [{ text: effectiveSystem }] } : undefined,
         contents,
         tools: [AGENT_TOOLS_DECLARATION],
         generationConfig: {

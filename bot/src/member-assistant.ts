@@ -29,6 +29,7 @@ import { getDailyAiNewsBriefing } from "./ai-news.js";
 import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam } from "./reminder.js";
 import { searchRealtimeNews } from "./realtime-search.js";
 import { refreshDynamicKnowledgeIfExpired, fetchGoogleContent, parseGoogleUrl } from "./google-sync.js";
+import { getSystemTemporalPrompt } from "./temporal.js";
 
 export interface MemberMessageEvent {
   threadId: string;
@@ -972,6 +973,7 @@ async function handleHistoryQA(
     }
 
     const fastSystemPrompt =
+      `${getSystemTemporalPrompt()}\n\n` +
       `${personaIntro}\n${customPromptSection}\n` +
       `NHIỆM VỤ:\n` +
       `1. Bạn vừa nhận được một hình ảnh hoặc tài liệu văn bản đính kèm từ thành viên.\n` +
@@ -1076,6 +1078,7 @@ async function handleHistoryQA(
     }
 
     const quoteSystemPrompt =
+      `${getSystemTemporalPrompt()}\n\n` +
       `${personaIntro}\n${customPromptSection}\n` +
       `NHIỆM VỤ:\n` +
       `1. Thành viên đang trích dẫn (quote) một tin nhắn hoặc nội dung thảo luận trước đó và đặt câu hỏi tiếp theo.\n` +
@@ -1087,14 +1090,21 @@ async function handleHistoryQA(
       `     + NẾU TRONG TÀI LIỆU KHÔNG CÓ THÔNG TIN về điều thành viên hỏi (ví dụ tài liệu thiếu phương án, hoặc không có số liệu cụ thể): BẮT BUỘC PHẢI THẲNG THẮN TRẢ LỜI: "Trong tài liệu [Tên tài liệu] hiện tại không có thông tin về [nội dung hỏi]. Sen Chúa không tự suy diễn hoặc bịa số liệu." TUYỆT ĐỐI KHÔNG ĐƯỢC TỰ ĐOÁN MÒ!\n` +
       `     + BẮT BUỘC LIỆT KÊ ĐỦ: Nếu tài liệu có nhiều phương án (ví dụ 4 phương án), phải trình bày đầy đủ, không được tự ý bỏ sót bất kỳ phương án nào.\n` +
       `   - Đối với các câu hỏi kỹ thuật công nghệ phổ quát hoặc thao tác sử dụng chung ngoài dự án: Có thể giải thích chi tiết, hữu ích.\n` +
-      `4. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
+      `4. KIỂM CHỨNG TÍNH XÁC THỰC (FACT-CHECKING / ĐỐI SOÁT TIN TỨC & THỜI SỰ):\n` +
+      `   - Khi thành viên quote một bản tin, phát ngôn, sự kiện hoặc số liệu và yêu cầu kiểm tra ("check xem đúng không", "chính xác chưa", "có thật không", "tin tức thế giới", "đối soát lại", "chuẩn chưa"):\n` +
+      `     + BẮT BUỘC sử dụng công cụ tìm kiếm (web_search) để kiểm tra từng sự kiện/luận điểm thực tế trên báo chí chính thống (VnExpress, Tuổi Trẻ, Reuters, AP, Bloomberg, BBC, TTXVN...).\n` +
+      `     + MỐC THỜI GIAN HIỆN TẠI LÀ NĂM ${new Date().getFullYear()}. TUYỆT ĐỐI KHÔNG ĐƯỢC lấy lý do "mốc thời gian ở tương lai" để phủ nhận bản tin!\n` +
+      `     + NẾU TÌM THẤY BẰNG CHỨNG XÁC THỰC: Trình bày rõ ràng sự kiện diễn ra thế nào, số liệu cụ thể kèm nguồn báo chí uy tín.\n` +
+      `     + NẾU KHÔNG TÌM THẤY BẰNG CHỨNG: Trả lời lịch thiệp, trung thực, khiêm tốn: "Hiện tại em đối soát trên các kênh thông tấn chính thống thì chưa ghi nhận thông tin xác nhận về [tên sự việc/số liệu]. Các bác nên theo dõi thêm thông cáo chính thức nhé!".\n` +
+      `     + TUYỆT ĐỐI CẤM ĐÔI CO, TRANH CÃI HOẶC CHỤP MŨ: CẤM bảo người dùng "kiểm tra lại đồng hồ thiết bị", cấm nói "đây là lỗi prompting", cấm chụp mũ bản tin là "giả lập / simulation / AI hallucination" với thái độ tiêu cực.\n` +
+      `5. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
       `   - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * in đậm vì Zalo không hỗ trợ markdown (hãy viết hoa tiêu đề hoặc dùng gạch đầu dòng để làm nổi bật).\n` +
       `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Tuyệt đối không chèn icon vào từng gạch đầu dòng, chỉ dùng 1-2 icon ở tiêu đề chính nếu thực sự cần thiết.\n` +
-      `5. Trả lời chuẩn xác, minh bạch, trung thực và súc tích.`;
+      `6. Trả lời chuẩn xác, minh bạch, trung thực, khiêm tốn và súc tích.`;
 
     let quoteLiveNews = "";
     const needsExternalSearch =
-      /(?:tìm kiếm|tra cứu|tin tức|tin mới|thông tin thêm|xem có|là ai\b|vụ gì\b|sự việc gì\b|bản quyền|đạo nhái|phốt|drama|tiểu sử|vụ việc|giá|bao nhiêu|ở đâu|mua ở đâu|bán ở đâu|chỗ nào|nơi nào|link|web|shop|mua)/i.test(
+      /(?:tìm kiếm|tra cứu|tin tức|tin mới|thông tin mới|thông tin thêm|xem có|là ai\b|vụ gì\b|sự việc gì\b|bản quyền|đạo nhái|phốt|drama|tiểu sử|vụ việc|giá|bao nhiêu|ở đâu|mua ở đâu|bán ở đâu|chỗ nào|nơi nào|link|web|shop|mua|check|kiểm tra|xác thực|đối soát|có thật không|đúng không|thực hư|chuẩn chưa|chính xác chưa|sai không|đúng hay sai|soi lại|check lại|ngáo|xem lại|bịa|hư cấu)/i.test(
         question
       );
     if (needsExternalSearch) {
@@ -1105,12 +1115,33 @@ async function handleHistoryQA(
           subject = matchProduct[1].trim();
         } else {
           const cleanQuote = options.quote.text
-            .replace(/^[🤖\s]*[^\n]*?(?:trả lời|chào)[^\n]*\n+/gi, "")
+            .replace(/^[🤖\s]*[^\n]*?(?:trả lời|chào|bản tin)[^\n]*\n*/gi, "")
+            .replace(/Chào anh[^.!\n]+[.!\n]*/gi, "")
+            .replace(/[\/?.!,]+/g, " ")
             .trim();
-          subject = cleanQuote.slice(0, 100);
+          subject = cleanQuote.slice(0, 80);
         }
-        const combinedQ = `${subject} ${question}`.trim();
-        quoteLiveNews = await searchRealtimeNews(combinedQ);
+
+        const cleanQ = question
+          .replace(/@\S+/g, "")
+          .replace(/\b(?:sen chúa|mộc miên|kevin|bot)\b/gi, "")
+          .replace(/\b(?:hãy|vui lòng|giúp|check|kiểm tra|xem|nội dung|trên này|có chính xác chưa|chính xác chưa|báo rõ ra|đúng không|có thật không|nhé|nha|ạ|em|anh|bác)\b/gi, "")
+          .replace(/[\/?.!,]+/g, " ")
+          .trim();
+
+        let searchKeywords = "";
+        if (cleanQ.length >= 6 && !/^(?:tin tức|thế giới|hôm nay)$/i.test(cleanQ)) {
+          searchKeywords = cleanQ;
+        } else if (subject.length > 0) {
+          searchKeywords = subject;
+        } else {
+          searchKeywords = `${subject} ${cleanQ}`.trim();
+        }
+
+        searchKeywords = searchKeywords.replace(/\s+/g, " ").trim().slice(0, 80);
+        if (searchKeywords) {
+          quoteLiveNews = await searchRealtimeNews(searchKeywords);
+        }
       } catch (e) {
         console.warn("[member-assistant] Quote QA searchRealtimeNews error:", e);
       }
@@ -1497,7 +1528,7 @@ async function handleHistoryQA(
 
   // 2.0. Nhận diện câu hỏi cần tra cứu thông tin thời gian thực / lịch sử / bách khoa toàn thư đa lĩnh vực
   const isRealTimeSearchQuery =
-    /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|24h|24 giờ|có gì mới|mới có gì|vừa xong|gần đây|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì|sự kiện|giá vàng|chứng khoán|thị trường|lũ quét|bão số|thiên tai|thế nào rồi|thảm họa|dự án|tổng quan dự án|thông tin về|cho tôi thông tin|tìm hiểu về|ở đâu|giá bao nhiêu|ai là\b|vụ việc\b|vụ án\b|scandal\b|lùm xùm\b|bê bối\b|tiểu sử\b|sự cố\b|nguyên nhân\b|đạo nhái\b|bản quyền\b|phốt\b|drama\b|tìm kiếm thêm|tra cứu|khi nào ra|bao giờ ra|khi nào có|bao giờ có|sắp ra|thời điểm ra mắt|ngày ra mắt|lộ trình|phát hành khi nào|ra chưa|bản mới|giá xăng|tỷ giá|ngoại tệ|lãi suất|vn-index|bitcoin|crypto|bóng đá|tỉ số|kết quả trận|lịch thi đấu|bảng xếp hạng|ngoại hạng anh|premier league|cúp c1|champions league|v-league|chuyển nhượng|luật đất đai|sổ đỏ|vneid|cccd|thủ tục|phạt nguội|thuế tncn|nghị định|thông tư|sân bay long thành|vành đai|cao tốc|quy hoạch|bảng giá đất|so sánh|đối chiếu|khác nhau|con nào hơn|nên dùng con nào|nên mua con nào|đánh giá|review|benchmark|gemini\b|gpt\b|claude\b|deepseek\b|grok\b|llama\b|mistral\b|sora\b|qwen\b|openai\b|anthropic\b|nvidia\b|apple\b|iphone\b|macbook\b|chip\b|bán dẫn\b|trump\b|biden\b|putin\b|harris\b|tập cận bình\b|xi jinping\b|zelensky\b|netanyahu\b|kim jong un\b|phát ngôn\b|phát biểu\b|tuyên bố\b|nói gì\b|chính trị\b|địa chính trị\b|thế giới\b|quốc tế\b|bầu cử\b|tranh cử\b|tổng thống\b|thủ tướng\b|ngoại trưởng\b|nhà trắng\b|white house\b|kremlin\b|lầu năm góc\b|quốc hội mỹ\b|thượng đỉnh\b|hội đàm\b|áp thuế\b|thuế quan\b|trừng phạt\b|cấm vận\b|chiến sự\b|xung đột\b|chiến tranh\b|đình chiến\b|ngừng bắn\b|ukraine\b|israel\b|gaza\b|hamas\b|hezbollah\b|iran\b|houthi\b|nato\b|brics\b|liên hợp quốc\b|là gì\b|là cái gì\b|là con gì\b|thế nào\b|như thế nào\b|ra sao\b|nghĩa là gì\b|astra\b)/i.test(
+    /(?:tin tức|tin mới|mới nhất|hôm nay|24h qua|24h|24 giờ|có gì mới|mới có gì|vừa xong|gần đây|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|vừa ra mắt|cập nhật mới|tin nóng|thời sự|bản tin|vừa công bố|ra mắt gì|sự kiện|giá vàng|chứng khoán|thị trường|lũ quét|bão số|thiên tai|thế nào rồi|thảm họa|dự án|tổng quan dự án|thông tin về|cho tôi thông tin|tìm hiểu về|ở đâu|giá bao nhiêu|ai là\b|vụ việc\b|vụ án\b|scandal\b|lùm xùm\b|bê bối\b|tiểu sử\b|sự cố\b|nguyên nhân\b|đạo nhái\b|bản quyền\b|phốt\b|drama\b|tìm kiếm thêm|tra cứu|khi nào ra|bao giờ ra|khi nào có|bao giờ có|sắp ra|thời điểm ra mắt|ngày ra mắt|lộ trình|phát hành khi nào|ra chưa|bản mới|giá xăng|tỷ giá|ngoại tệ|lãi suất|vn-index|bitcoin|crypto|bóng đá|tỉ số|kết quả trận|lịch thi đấu|bảng xếp hạng|ngoại hạng anh|premier league|cúp c1|champions league|v-league|chuyển nhượng|luật đất đai|sổ đỏ|vneid|cccd|thủ tục|phạt nguội|thuế tncn|nghị định|thông tư|sân bay long thành|vành đai|cao tốc|quy hoạch|bảng giá đất|so sánh|đối chiếu|khác nhau|con nào hơn|nên dùng con nào|nên mua con nào|đánh giá|review|benchmark|gemini\b|gpt\b|claude\b|deepseek\b|grok\b|llama\b|mistral\b|sora\b|qwen\b|openai\b|anthropic\b|nvidia\b|apple\b|iphone\b|macbook\b|chip\b|bán dẫn\b|trump\b|biden\b|putin\b|harris\b|tập cận bình\b|xi jinping\b|zelensky\b|netanyahu\b|kim jong un\b|phát ngôn\b|phát biểu\b|tuyên bố\b|nói gì\b|chính trị\b|địa chính trị\b|thế giới\b|quốc tế\b|bầu cử\b|tranh cử\b|tổng thống\b|thủ tướng\b|ngoại trưởng\b|nhà trắng\b|white house\b|kremlin\b|lầu năm góc\b|quốc hội mỹ\b|thượng đỉnh\b|hội đàm\b|áp thuế\b|thuế quan\b|trừng phạt\b|cấm vận\b|chiến sự\b|xung đột\b|chiến tranh\b|đình chiến\b|ngừng bắn\b|ukraine\b|israel\b|gaza\b|hamas\b|hezbollah\b|iran\b|houthi\b|nato\b|brics\b|liên hợp quốc\b|là gì\b|là cái gì\b|là con gì\b|thế nào\b|như thế nào\b|ra sao\b|nghĩa là gì\b|astra\b|check|kiểm tra|xác thực|đối soát|chính xác chưa|có thật không|đúng không)/i.test(
       question
     );
 
@@ -1546,6 +1577,7 @@ async function handleHistoryQA(
     `      + Giải thích bản chất một cách dễ hiểu, sinh động, chuẩn xác như bách khoa toàn thư.\n`;
 
   const systemPrompt =
+    `${getSystemTemporalPrompt()}\n\n` +
     `${personaIntro}\n${customPromptSection}\n` +
     `NHIỆM VỤ CHUNG:\n` +
     `1. Nếu có FILE TÀI LIỆU (PDF, Word, Excel, Code, TXT, Âm thanh, Hình ảnh) đính kèm: ĐỌC KỸ TOÀN BỘ NỘI DUNG, trích xuất dữ liệu, dịch thuật, phân tích chuyên sâu hoặc tóm tắt đầy đủ.\n` +

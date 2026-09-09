@@ -18,6 +18,7 @@ import {
 } from "./db/index.js";
 import { sendDirectText, sendDirectFile, sendGroupText } from "./zalo/client.js";
 import { callGemini, callGeminiAgentLoop, downloadFileContent, type GeminiMediaPart } from "./gemini.js";
+import { getSystemTemporalPrompt } from "./temporal.js";
 import type { MemberMessageEvent } from "./member-assistant.js";
 import { getWeatherReport } from "./weather.js";
 import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam } from "./reminder.js";
@@ -1191,7 +1192,8 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         .join("\n")
     : "";
 
-  const systemPrompt = isAdmin
+  const temporalPrompt = getSystemTemporalPrompt();
+  const systemPrompt = `${temporalPrompt}\n\n` + (isAdmin
     ? `Bạn là 'Sen Chúa' - Trợ lý AI cá nhân cao cấp, thông minh, tận tâm và hóm hỉnh phục vụ riêng cho Admin/Chủ bot (${displayName}).\n` +
       `NHIỆM VỤ CỦA BẠN TRONG TIN NHẮN 1:1:\n` +
       `1. Nhớ kỹ toàn bộ ngữ cảnh hội thoại trước đó với Admin để tư vấn, hỗ trợ, sửa đổi bài viết, giải đáp liền mạch.\n` +
@@ -1221,7 +1223,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       `3. Thái độ: Lễ phép, thân thiện, gần gũi, xưng 'em' hoặc 'mình', gọi người dùng là '${displayName}' hoặc 'bạn'.\n` +
       `4. Bạn là trợ lý trò chuyện cá nhân, không có quyền can thiệp vào các nhóm Zalo khác.\n` +
       `5. ĐỘ DÀI & TỐC ĐỘ: Trả lời gãy gọn, súc tích (khoảng 300-600 ký tự), dễ đọc trên điện thoại.\n` +
-      `6. NGUYÊN TẮC TRUNG THỰC: Nếu không có dữ liệu chi tiết, hãy nói rõ là không có thông tin, tuyệt đối không tự bịa đặt câu chuyện hay chi tiết không có thật.`;
+      `6. NGUYÊN TẮC TRUNG THỰC: Nếu không có dữ liệu chi tiết, hãy nói rõ là không có thông tin, tuyệt đối không tự bịa đặt câu chuyện hay chi tiết không có thật.`) ;
 
   let fileSection = "";
   if (fileTextContent) {
