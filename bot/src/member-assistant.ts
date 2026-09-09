@@ -63,6 +63,7 @@ export interface MemberMessageEvent {
       extension?: string;
     } | null;
   } | null;
+  rawMessage?: any;
 }
 
 // User cooldown map to prevent spamming: userId -> lastResponseTimestamp
@@ -70,31 +71,77 @@ const userCooldowns = new Map<string, number>();
 const COOLDOWN_MS = 500; // 0.5s cooldown to allow smooth conversation
 
 /**
- * Gửi tin nhắn trả lời trong nhóm có gắn @Mention thật (bắn thông báo Zalo) và Jitter Delay mô phỏng người thật gõ phím.
+ * Xây dựng object Quote tương thích chuẩn Zalo zca-js để hiển thị khung trích dẫn tin nhắn gốc.
+ */
+function buildQuoteObject(event: MemberMessageEvent): any | undefined {
+  const raw = event.rawMessage || {};
+  const msgId = String(event.msgId || raw.msgId || "").trim();
+  const cliMsgId = String(event.cliMsgId || raw.cliMsgId || "").trim();
+  const uidFrom = String(event.sender || raw.uidFrom || "").trim();
+
+  if (!msgId && !cliMsgId) return undefined;
+
+  let contentText = (event.text || "").trim();
+  if (!contentText && typeof raw.content === "string") {
+    contentText = raw.content.trim();
+  } else if (!contentText && raw.content && typeof raw.content === "object" && typeof raw.content.msg === "string") {
+    contentText = raw.content.msg.trim();
+  }
+  if (!contentText && event.fileAttachment?.name) {
+    contentText = `[Tệp: ${event.fileAttachment.name}]`;
+  }
+  if (!contentText && event.mediaUrl) {
+    contentText = event.mediaType === "video" ? "[Video]" : "[Hình ảnh]";
+  }
+
+  return {
+    msgId: msgId || cliMsgId,
+    cliMsgId: cliMsgId || msgId,
+    uidFrom: uidFrom,
+    msgType: "chat.message",
+    content: contentText || "...",
+    propertyExt: raw.propertyExt || {},
+    ts: raw.ts || Date.now(),
+    ttl: raw.ttl || 0,
+  };
+}
+
+/**
+ * Gửi tin nhắn trả lời trong nhóm có gắn @Mention thật (bắn thông báo Zalo), Quote tin nhắn gốc và Jitter Delay mô phỏng người thật gõ phím.
  */
 async function sendGroupReplyWithMention(
   api: any,
   threadId: string,
-  botName: string,
+  _botName: string,
   displayName: string,
   sender: string,
   content: string,
-  options?: { jitter?: boolean },
+  options?: { jitter?: boolean; quote?: any },
 ): Promise<void> {
-  const sanitizedContent = cleanZaloText(content);
-  const prefix = `🤖 ${botName} trả lời `;
-  const mentionTag = `@${displayName}`;
-  const fullText = `${prefix}${mentionTag}:\n\n${sanitizedContent}`;
+  let sanitizedContent = cleanZaloText(content)
+    .replace(/^(?:🤖\s*)?(?:[^\n]*?)(?:trả lời|tra loi)\s*@[^\n:]*:\s*/gi, "")
+    .trim();
 
-  const mentions = sender
-    ? [
-        {
-          uid: String(sender).trim(),
-          pos: prefix.length,
-          len: mentionTag.length,
-        },
-      ]
-    : undefined;
+  const mentionTag = `@${displayName}`;
+  let fullText: string;
+  let mentions: { uid: string; pos: number; len: number }[] | undefined = undefined;
+
+  if (sender && displayName) {
+    if (sanitizedContent.startsWith(mentionTag)) {
+      fullText = sanitizedContent;
+    } else {
+      fullText = `${mentionTag} ${sanitizedContent}`;
+    }
+    mentions = [
+      {
+        uid: String(sender).trim(),
+        pos: 0,
+        len: mentionTag.length,
+      },
+    ];
+  } else {
+    fullText = sanitizedContent;
+  }
 
   if (options?.jitter !== false) {
     // Jitter delay giả lập người thật: từ 1.0s đến 2.5s tùy độ dài câu trả lời
@@ -102,7 +149,7 @@ async function sendGroupReplyWithMention(
     await sleep(delay);
   }
 
-  await sendGroupText(api, threadId, fullText, { mentions });
+  await sendGroupText(api, threadId, fullText, { mentions, quote: options?.quote });
 }
 
 function fmtAgoVi(ts: number | null): string {
@@ -2387,10 +2434,14 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
           directDocContent = fetchRes.text;
           console.log(`[member-assistant] ✅ Đã tải trực tiếp thành công ${fetchRes.text.length} ký tự từ Google Doc/Sheet`);
         } else if (fetchRes.error === "PERMISSION_DENIED") {
-          await sendGroupText(
+          await sendGroupReplyWithMention(
             api,
             threadId,
-            `🤖 Sen Chúa trả lời @${displayName}:\n\n⚠️ Em không thể đọc link Google Doc/Sheet này do chưa được mở quyền xem công khai (Viewer)!\n👉 Bác hãy mở file trên Google, bấm nút "Chia sẻ" (Share) -> chọn "Bất kỳ ai có đường liên kết" thành "Người xem" (Viewer) rồi gửi lại câu hỏi cho em nhé!`,
+            botName,
+            displayName,
+            sender,
+            `⚠️ Em không thể đọc link Google Doc/Sheet này do chưa được mở quyền xem công khai (Viewer)!\n👉 Bác hãy mở file trên Google, bấm nút "Chia sẻ" (Share) -> chọn "Bất kỳ ai có đường liên kết" thành "Người xem" (Viewer) rồi gửi lại câu hỏi cho em nhé!`,
+            { quote: buildQuoteObject(event) },
           );
           return;
         }
@@ -2509,10 +2560,14 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         qLower.includes("triệu view trong 1 đêm") ||
         qLower.includes("triệu view 1 đêm"))
     ) {
-      await sendGroupText(
+      await sendGroupReplyWithMention(
         api,
         threadId,
-        `🤖 Sen Chúa trả lời @${displayName}:\n\nDạ bí kíp đạt 1 triệu view trong 1 đêm nhanh nhất là: Tối nay bác cứ đăng video lên rồi đi ngủ sớm... mơ một giấc thật đẹp là sáng mai có ngay 1 triệu view ạ 😄!\n\nHoặc bác có thể trao đổi với các anh em cao thủ trong nhóm để xin tút chạy ads và làm content viral chuẩn chỉnh nhé!`,
+        botName,
+        displayName,
+        sender,
+        `Dạ bí kíp đạt 1 triệu view trong 1 đêm nhanh nhất là: Tối nay bác cứ đăng video lên rồi đi ngủ sớm... mơ một giấc thật đẹp là sáng mai có ngay 1 triệu view ạ 😄!\n\nHoặc bác có thể trao đổi với các anh em cao thủ trong nhóm để xin tút chạy ads và làm content viral chuẩn chỉnh nhé!`,
+        { quote: buildQuoteObject(event) },
       );
       return;
     }
@@ -2535,10 +2590,10 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       else if (qLower.includes("canva")) filterWord = "canva";
       else if (qLower.includes("drive")) filterWord = "drive";
 
-      const reply =
-        `🤖 Sen Chúa tổng hợp link cho @${displayName}:\n\n` +
-        handleLinksCommand(threadId, filterWord || undefined);
-      await sendGroupText(api, threadId, reply);
+      const reply = handleLinksCommand(threadId, filterWord || undefined);
+      await sendGroupReplyWithMention(api, threadId, botName, displayName, sender, reply, {
+        quote: buildQuoteObject(event),
+      });
       console.log(`[member-assistant] ✅ Đã gửi tổng hợp link tự động cho ${displayName}`);
       return;
     }
@@ -2557,10 +2612,10 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         /(?:danh sách|thống kê|kiểm tra|xem|ai|những ai|ai là)\s+(?:thành viên\s+)?(?:tàu ngầm|nằm vùng|chưa từng chat|chưa từng nhắn|chưa nhắn tin|chưa chat|ít tương tác|lười chat)/i.test(qLower));
 
     if (isInactiveMemberIntent) {
-      const reply =
-        `🤖 Sen Chúa trả lời @${displayName}:\n\n` +
-        handleInactiveCommand(threadId);
-      await sendGroupText(api, threadId, reply);
+      const reply = handleInactiveCommand(threadId);
+      await sendGroupReplyWithMention(api, threadId, botName, displayName, sender, reply, {
+        quote: buildQuoteObject(event),
+      });
       console.log(`[member-assistant] ✅ Đã gửi thống kê tàu ngầm tự động cho ${displayName}`);
       return;
     }
@@ -2623,8 +2678,11 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         return;
       }
 
-      // Tính năng 4 & 5: Gửi câu trả lời có gắn @Mention thật & Jitter delay chống spam
-      await sendGroupReplyWithMention(api, threadId, botName, displayName, sender, answer, { jitter: true });
+      // Tính năng 4 & 5: Gửi câu trả lời có gắn @Mention thật, Quote tin nhắn gốc & Jitter delay chống spam
+      await sendGroupReplyWithMention(api, threadId, botName, displayName, sender, answer, {
+        jitter: true,
+        quote: buildQuoteObject(event),
+      });
       console.log(`[member-assistant] ✅ Đã gửi câu trả lời thành công vào nhóm`);
     } catch (err) {
       console.error(`[member-assistant] ❌ Lỗi xử lý câu hỏi:`, err);
@@ -2641,7 +2699,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
           displayName,
           sender,
           `Dạ câu hỏi của bác hóc búa quá làm em Sen Chúa xém khét CPU 😄! Bác cho em xin vài giây thở oxy rồi hỏi lại thử xem nè!`,
-          { jitter: false },
+          { jitter: false, quote: buildQuoteObject(event) },
         );
       }
     }

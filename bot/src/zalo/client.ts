@@ -786,39 +786,56 @@ async function sendSingleGroupChunk(
   text: string,
   options?: SendGroupOptions,
 ): Promise<void> {
-  const payload: any = { msg: text };
-  if (options?.mentions && options.mentions.length > 0) {
-    payload.mentions = options.mentions;
-  }
+  // 1. Thử gửi kèm Quote nếu có
   if (options?.quote) {
-    payload.quote = options.quote;
+    const payloadWithQuote: any = { msg: text, quote: options.quote };
+    if (options.mentions && options.mentions.length > 0) {
+      payloadWithQuote.mentions = options.mentions;
+    }
+
+    try {
+      await api.sendMessage(payloadWithQuote, threadIdStr, ThreadType.Group);
+      return;
+    } catch (e1) {}
+
+    try {
+      await api.sendMessage(payloadWithQuote, threadIdStr, 1);
+      return;
+    } catch (e2) {}
+
+    try {
+      await api.sendMessage(payloadWithQuote, threadIdStr);
+      return;
+    } catch (e3) {}
   }
 
-  // Method 1: payload object, ThreadType.Group
+  // 2. Thử gửi có Mentions (không kèm quote nếu quote lỗi hoặc không có quote)
+  const payloadBase: any = { msg: text };
+  if (options?.mentions && options.mentions.length > 0) {
+    payloadBase.mentions = options.mentions;
+  }
+
   try {
-    await api.sendMessage(payload, threadIdStr, ThreadType.Group);
+    await api.sendMessage(payloadBase, threadIdStr, ThreadType.Group);
     return;
   } catch (e1) {}
 
-  // Method 2: payload object, 1
   try {
-    await api.sendMessage(payload, threadIdStr, 1);
+    await api.sendMessage(payloadBase, threadIdStr, 1);
     return;
   } catch (e2) {}
 
-  // Method 3: payload object
   try {
-    await api.sendMessage(payload, threadIdStr);
+    await api.sendMessage(payloadBase, threadIdStr);
     return;
   } catch (e3) {}
 
-  // Method 4: raw string, ThreadType.Group (fallback nếu object lỗi)
+  // 3. Fallback chuỗi thuần
   try {
     await api.sendMessage(text, threadIdStr, ThreadType.Group);
     return;
   } catch (e4) {}
 
-  // Method 5: raw string, 1
   try {
     await api.sendMessage(text, threadIdStr, 1);
     return;

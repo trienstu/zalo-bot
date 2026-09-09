@@ -904,6 +904,7 @@ export async function runListener(): Promise<void> {
             mentions,
             msgId: String(payload?.data?.msgId ?? ""),
             cliMsgId: String(payload?.data?.cliMsgId ?? ""),
+            rawMessage: payload?.data,
           }).catch((e) => console.warn(`[member-assistant] lỗi: ${String(e)}`));
         }
       }
