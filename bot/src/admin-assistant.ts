@@ -1355,7 +1355,10 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `      + BẮT BUỘC GỌI CÔNG CỤ 'generate_file' để tạo file thực tế.\n` +
     `      + Với báo cáo, SOP, đề xuất, hợp đồng, tài liệu dài: Chọn fileType="docx" hoặc "md", truyền đầy đủ nội dung chi tiết trong 'content'.\n` +
     `      + Với bảng tính, báo giá, chấm công, số liệu: Chọn fileType="xlsx", cung cấp excelHeaders và excelRows (có thể chứa công thức tính như =SUM(...)).\n` +
-    `      + Sau khi gọi công cụ, hệ thống sẽ tự động gửi file đính kèm trực tiếp vào Zalo. Hãy viết lời nhắn xác nhận ngắn gọn và tóm tắt nội dung file cho người dùng.\n`;
+    `      + Sau khi gọi công cụ, hệ thống sẽ tự động gửi file đính kèm trực tiếp vào Zalo. Hãy viết lời nhắn xác nhận ngắn gọn và tóm tắt nội dung file cho người dùng.\n` +
+    `\n15. TỐI ƯU TỐC ĐỘ PHẢN HỒI (AGENT SPEED OPTIMIZATION):\n` +
+    `    - Nếu trong phần [DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT] hoặc context bên dưới đã có đầy đủ thông tin/tin tức/số liệu để trả lời câu hỏi, bạn PHẢI TẬP TRUNG TRẢ LỜI NGAY TRONG VÒNG ĐẦU TIÊN, TUYỆT ĐỐI KHÔNG GỌI THÊM CÔNG CỤ TÌM KIẾM (web_search) LẶP LẠI để tránh làm chậm thời gian phản hồi của người dùng!\n` +
+    `    - Chỉ gọi công cụ (finance_market_lookup, web_search, generate_file, fetch_url) KHI dữ liệu cung cấp chưa có hoặc người dùng yêu cầu rõ việc tra cứu/tạo file.\n`;
 
   const userPrompt =
     (historyText ? `LỊCH SỬ TRÒ CHUYỆN TRƯỚC ĐÓ:\n${historyText}\n\n` : "") +

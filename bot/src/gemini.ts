@@ -704,7 +704,7 @@ export async function callGeminiAgentLoop(
   }
 
   const primaryModel = options?.model?.trim() || process.env.GEMINI_MODEL?.trim() || config.geminiModel || "gemini-3.7-flash";
-  const maxTurns = options?.maxTurns || 3;
+  const maxTurns = options?.maxTurns || 2;
   const temperature = options?.temperature ?? 0.2;
   const maxTokens = options?.maxTokens;
 
@@ -740,8 +740,8 @@ export async function callGeminiAgentLoop(
       let resp: Response | null = null;
       let lastErrText = "";
 
-      // Thử gọi model với cơ chế retry (đổi key hoặc fallback model nếu gặp 503/429)
-      for (let retry = 0; retry < 3; retry++) {
+      // Thử gọi model với cơ chế retry nhanh (đổi key hoặc fallback model nếu gặp 503/429)
+      for (let retry = 0; retry < 2; retry++) {
         const apiKey = apiKeys[apiKeyIdx];
         const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKey}`;
 
@@ -753,7 +753,7 @@ export async function callGeminiAgentLoop(
             temperature,
             ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
             ...(currentModel.includes("3.7") || currentModel.includes("2.5")
-              ? { thinkingConfig: { thinkingBudget: 1024 } }
+              ? { thinkingConfig: { thinkingBudget: 256 } }
               : {}),
           },
         };
@@ -761,7 +761,7 @@ export async function callGeminiAgentLoop(
         try {
           resp = await fetch(endpoint, {
             method: "POST",
-            signal: AbortSignal.timeout(90_000),
+            signal: AbortSignal.timeout(30_000),
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(requestBody),
           });
