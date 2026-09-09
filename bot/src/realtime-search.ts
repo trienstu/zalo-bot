@@ -9,14 +9,33 @@
 import { webSearch, SearchResultItem } from "./tools/vertical-tools.js";
 import { getFinancialMarketSummary } from "./tools/finance-tools.js";
 
-function decodeXml(str: string): string {
+function decodeXmlAndHtml(str: string): string {
   return str
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
     .replace(/&#39;/g, "'")
+    .replace(/&#039;/g, "'")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&");
+    .replace(/&amp;/g, "&")
+    .replace(/&agrave;/gi, "à")
+    .replace(/&aacute;/gi, "á")
+    .replace(/&atilde;/gi, "ã")
+    .replace(/&acirc;/gi, "â")
+    .replace(/&egrave;/gi, "è")
+    .replace(/&eacute;/gi, "é")
+    .replace(/&ecirc;/gi, "ê")
+    .replace(/&igrave;/gi, "ì")
+    .replace(/&iacute;/gi, "í")
+    .replace(/&ograve;/gi, "ò")
+    .replace(/&oacute;/gi, "ó")
+    .replace(/&ocirc;/gi, "ô")
+    .replace(/&otilde;/gi, "õ")
+    .replace(/&ugrave;/gi, "ù")
+    .replace(/&uacute;/gi, "ú")
+    .replace(/&yacute;/gi, "ý")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
 }
 
 interface ParsedNewsItem {
@@ -27,13 +46,50 @@ interface ParsedNewsItem {
   ageHours: number;
 }
 
-const VNEXPRESS_CATEGORY_MAP: Record<string, string> = {
-  "bat-dong-san": "https://vnexpress.net/rss/bat-dong-san.rss",
-  "kinh-doanh": "https://vnexpress.net/rss/kinh-doanh.rss",
-  "thoi-su": "https://vnexpress.net/rss/thoi-su.rss",
-  "so-hoa": "https://vnexpress.net/rss/so-hoa.rss",
-  "the-gioi": "https://vnexpress.net/rss/the-gioi.rss",
-  "tin-moi-nhat": "https://vnexpress.net/rss/tin-moi-nhat.rss",
+export interface FeedSource {
+  sourceName: string;
+  url: string;
+  lang: "vi" | "en";
+}
+
+const CATEGORY_FEEDS_REGISTRY: Record<string, FeedSource[]> = {
+  "bat-dong-san": [
+    { sourceName: "VnExpress", url: "https://vnexpress.net/rss/bat-dong-san.rss", lang: "vi" },
+    { sourceName: "CafeF", url: "https://cafef.vn/bat-dong-san.rss", lang: "vi" },
+    { sourceName: "VietnamNet", url: "https://vietnamnet.vn/rss/bat-dong-san.rss", lang: "vi" },
+  ],
+  "kinh-doanh": [
+    { sourceName: "VnExpress", url: "https://vnexpress.net/rss/kinh-doanh.rss", lang: "vi" },
+    { sourceName: "CafeF", url: "https://cafef.vn/thi-truong-chung-khoan.rss", lang: "vi" },
+    { sourceName: "Tuổi Trẻ", url: "https://tuoitre.vn/rss/kinh-doanh.rss", lang: "vi" },
+    { sourceName: "Thanh Niên", url: "https://thanhnien.vn/rss/kinh-te.rss", lang: "vi" },
+    { sourceName: "VietnamNet", url: "https://vietnamnet.vn/rss/kinh-doanh.rss", lang: "vi" },
+  ],
+  "so-hoa": [
+    { sourceName: "VnExpress Số Hóa", url: "https://vnexpress.net/rss/so-hoa.rss", lang: "vi" },
+    { sourceName: "The Verge", url: "https://theverge.com/rss/index.xml", lang: "en" },
+    { sourceName: "TechCrunch", url: "https://techcrunch.com/feed/", lang: "en" },
+    { sourceName: "BBC Tech", url: "https://feeds.bbci.co.uk/news/technology/rss.xml", lang: "en" },
+  ],
+  "the-gioi": [
+    { sourceName: "VnExpress Thế Giới", url: "https://vnexpress.net/rss/the-gioi.rss", lang: "vi" },
+    { sourceName: "Tuổi Trẻ Thế Giới", url: "https://tuoitre.vn/rss/the-gioi.rss", lang: "vi" },
+    { sourceName: "Thanh Niên Thế Giới", url: "https://thanhnien.vn/rss/the-gioi.rss", lang: "vi" },
+    { sourceName: "BBC World", url: "https://feeds.bbci.co.uk/news/world/rss.xml", lang: "en" },
+  ],
+  "thoi-su": [
+    { sourceName: "VnExpress Thời Sự", url: "https://vnexpress.net/rss/thoi-su.rss", lang: "vi" },
+    { sourceName: "Tuổi Trẻ Thời Sự", url: "https://tuoitre.vn/rss/thoi-su.rss", lang: "vi" },
+    { sourceName: "Thanh Niên Thời Sự", url: "https://thanhnien.vn/rss/thoi-su.rss", lang: "vi" },
+    { sourceName: "VietnamNet Thời Sự", url: "https://vietnamnet.vn/rss/thoi-su.rss", lang: "vi" },
+  ],
+  "crypto": [
+    { sourceName: "CoinDesk", url: "https://www.coindesk.com/arc/outboundfeeds/rss/", lang: "en" },
+  ],
+  "tin-moi-nhat": [
+    { sourceName: "VnExpress", url: "https://vnexpress.net/rss/tin-moi-nhat.rss", lang: "vi" },
+    { sourceName: "Tuổi Trẻ", url: "https://tuoitre.vn/rss/tin-moi-nhat.rss", lang: "vi" },
+  ],
 };
 
 export function detectNewsCategories(query: string): string[] {
@@ -44,14 +100,17 @@ export function detectNewsCategories(query: string): string[] {
   if (/(?:kinh doanh|kinh tế|chứng khoán|cổ phiếu|ngân hàng|doanh nghiệp|tài chính|giá vàng|giá xăng|lãi suất|vn-index)/i.test(query)) {
     cats.push("kinh-doanh");
   }
-  if (/(?:công nghệ|ai\b|mô hình|gpt|gemini|bán dẫn|chip|apple|iphone|macbook|số hóa|deepseek|claude)/i.test(query)) {
+  if (/(?:công nghệ|ai\b|mô hình|gpt|gemini|bán dẫn|chip|apple|iphone|macbook|số hóa|deepseek|claude|nintendo|switch)/i.test(query)) {
     cats.push("so-hoa");
   }
-  if (/(?:thế giới|quốc tế|chiến sự|nga|ukraine|mỹ|trung quốc|israel|iran|bầu cử|trump|putin|zelensky)/i.test(query)) {
+  if (/(?:thế giới|quốc tế|chiến sự|nga|ukraine|mỹ|trung quốc|israel|iran|bầu cử|trump|putin|zelensky|đức|pháp|nhật|hàn|trung đông|centcom)/i.test(query)) {
     cats.push("the-gioi");
   }
   if (/(?:thời sự|chính phủ|thủ tướng|bộ|ban hành|nghị định|luật|giao thông|bão|lũ|sạt lở|thiên tai)/i.test(query)) {
     cats.push("thoi-su");
+  }
+  if (/(?:crypto|bitcoin|btc|eth|solana|binance|tiền ảo|tiền điện tử|blockchain|web3)/i.test(query)) {
+    cats.push("crypto");
   }
   if (cats.length === 0) {
     cats.push("tin-moi-nhat");
@@ -59,60 +118,73 @@ export function detectNewsCategories(query: string): string[] {
   return cats;
 }
 
-async function fetchVnExpressRss(category: string, filterKeyword = ""): Promise<ParsedNewsItem[]> {
+interface CachedFeed {
+  fetchedAt: number;
+  items: ParsedNewsItem[];
+}
+
+const RSS_MEMORY_CACHE = new Map<string, CachedFeed>();
+const RSS_CACHE_TTL_MS = 8 * 60 * 1000; // 8 phút TTL trong RAM
+
+async function fetchSingleRssFeed(source: FeedSource, timeoutMs = 2500): Promise<ParsedNewsItem[]> {
+  const now = Date.now();
+  const cached = RSS_MEMORY_CACHE.get(source.url);
+  if (cached && now - cached.fetchedAt < RSS_CACHE_TTL_MS) {
+    return cached.items;
+  }
+
   try {
-    const feedUrl = VNEXPRESS_CATEGORY_MAP[category] || `https://vnexpress.net/rss/${category}.rss`;
-    const res = await fetch(feedUrl, {
-      signal: AbortSignal.timeout(5000),
+    const res = await fetch(source.url, {
+      signal: AbortSignal.timeout(timeoutMs),
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)",
+        Accept: "application/rss+xml, application/xml, text/xml, */*",
       },
     });
     if (!res.ok) return [];
     const xml = await res.text();
-    const itemBlocks = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
-    const now = Date.now();
+    const itemBlocks = [...xml.matchAll(/<(?:item|entry)>([\s\S]*?)<\/(?:item|entry)>/gi)].slice(0, 30);
 
     const cleanStr = (s: string) =>
-      decodeXml(
+      decodeXmlAndHtml(
         s
           .replace(/<!\[CDATA\[/gi, "")
           .replace(/\]\]>/gi, "")
           .replace(/<[^>]+>/g, " ")
-          .replace(/&quot;/g, '"')
-          .replace(/&#39;/g, "'")
-          .replace(/&#x27;/g, "'")
-          .replace(/&amp;/g, "&")
           .replace(/\s+/g, " ")
           .trim()
       );
-
-    const filterTokens = filterKeyword
-      ? filterKeyword.toLowerCase().split(/\s+/).filter((t) => t.length > 2)
-      : [];
 
     const items: ParsedNewsItem[] = [];
 
     for (const block of itemBlocks) {
       const content = block[1] || "";
-      const titleMatch = content.match(/<title>([\s\S]*?)<\/title>/i);
-      const descMatch = content.match(/<description>([\s\S]*?)<\/description>/i);
-      const pubDateMatch = content.match(/<pubDate>([\s\S]*?)<\/pubDate>/i);
+      const titleMatch = content.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+      const descMatch =
+        content.match(/<description[^>]*>([\s\S]*?)<\/description>/i) ||
+        content.match(/<summary[^>]*>([\s\S]*?)<\/summary>/i) ||
+        content.match(/<content[^>]*>([\s\S]*?)<\/content>/i);
+      const pubDateMatch =
+        content.match(/<pubDate[^>]*>([\s\S]*?)<\/pubDate>/i) ||
+        content.match(/<published[^>]*>([\s\S]*?)<\/published>/i) ||
+        content.match(/<updated[^>]*>([\s\S]*?)<\/updated>/i);
 
-      const title = titleMatch && titleMatch[1] ? cleanStr(titleMatch[1]) : "";
+      let title = titleMatch && titleMatch[1] ? cleanStr(titleMatch[1]) : "";
       let snippet = descMatch && descMatch[1] ? cleanStr(descMatch[1]) : "";
 
+      if (title && !title.includes(source.sourceName)) {
+        title = `${title} - ${source.sourceName}`;
+      }
+
       const rawDate = pubDateMatch && pubDateMatch[1] ? pubDateMatch[1].trim() : "";
-      const dateObj = new Date(rawDate);
+      let dateObj = new Date(rawDate);
+      if (isNaN(dateObj.getTime()) || dateObj.getFullYear() < 100) {
+        const fixed = rawDate.replace(/\b([0-9]{2})\b(?=\s+[0-9]{2}:)/, "20$1");
+        dateObj = new Date(fixed);
+      }
+
       const timestamp = !isNaN(dateObj.getTime()) ? dateObj.getTime() : now;
       const ageHours = (now - timestamp) / (1000 * 60 * 60);
-
-      // Nếu có filterTokens, chỉ lấy các bài có chứa ít nhất 1 từ khóa
-      if (filterTokens.length > 0) {
-        const fullText = (title + " " + snippet).toLowerCase();
-        const matchesAny = filterTokens.some((token) => fullText.includes(token));
-        if (!matchesAny) continue;
-      }
 
       let timeLabel = "";
       if (timestamp > 0) {
@@ -138,10 +210,39 @@ async function fetchVnExpressRss(category: string, filterKeyword = ""): Promise<
       }
     }
 
+    RSS_MEMORY_CACHE.set(source.url, { fetchedAt: now, items });
     return items;
   } catch {
     return [];
   }
+}
+
+async function fetchMultiSourceRss(category: string, filterKeyword = ""): Promise<ParsedNewsItem[]> {
+  const sources = CATEGORY_FEEDS_REGISTRY[category] || CATEGORY_FEEDS_REGISTRY["tin-moi-nhat"] || [];
+  if (sources.length === 0) return [];
+
+  const feedPromises = sources.map((src) => fetchSingleRssFeed(src, 2500));
+  const settled = await Promise.allSettled(feedPromises);
+  const allItems: ParsedNewsItem[] = [];
+
+  for (const s of settled) {
+    if (s.status === "fulfilled" && Array.isArray(s.value)) {
+      allItems.push(...s.value);
+    }
+  }
+
+  const filterTokens = filterKeyword
+    ? filterKeyword.toLowerCase().split(/\s+/).filter((t) => t.length > 2)
+    : [];
+
+  if (filterTokens.length === 0) {
+    return allItems;
+  }
+
+  return allItems.filter((item) => {
+    const full = (item.title + " " + (item.snippet || "")).toLowerCase();
+    return filterTokens.some((tok) => full.includes(tok));
+  });
 }
 
 async function fetchGoogleNewsRss(keyword: string, lang: "vi" | "en" = "vi"): Promise<ParsedNewsItem[]> {
@@ -174,7 +275,7 @@ async function fetchGoogleNewsRss(keyword: string, lang: "vi" | "en" = "vi"): Pr
           const content = block[1] || "";
           const titleMatch = content.match(/<title>(.*?)<\/title>/i);
           const pubDateMatch = content.match(/<pubDate>(.*?)<\/pubDate>/i);
-          const title = titleMatch && titleMatch[1] ? decodeXml(titleMatch[1].trim()) : "";
+          const title = titleMatch && titleMatch[1] ? decodeXmlAndHtml(titleMatch[1].trim()) : "";
           const rawDate = pubDateMatch && pubDateMatch[1] ? pubDateMatch[1].trim() : "";
           const dateObj = new Date(rawDate);
           const timestamp = !isNaN(dateObj.getTime()) ? dateObj.getTime() : 0;
@@ -242,7 +343,7 @@ async function fetchWikipediaSummary(query: string): Promise<string> {
 }
 
 /**
- * Thực hiện tìm kiếm tin tức qua VnExpress RSS (Chuyên mục & Tin nóng) + Google News RSS
+ * Thực hiện tìm kiếm tin tức qua RSS đa nguồn (VnExpress, Tuổi Trẻ, CafeF, Thanh Niên, VietnamNet, The Verge, BBC...) + Google News RSS
  */
 async function queryNewsPipeline(
   cleanQ: string,
@@ -265,11 +366,11 @@ async function queryNewsPipeline(
 
   for (const cat of categories) {
     if (isGeneralCategory) {
-      // Với câu hỏi tổng quan thị trường, lấy toàn bộ tin nóng mới nhất của chuyên mục (chứa tóm tắt nội dung 2-3 câu hoàn chỉnh)
-      fetchPromises.push(fetchVnExpressRss(cat));
+      // Với câu hỏi tổng quan thị trường, lấy toàn bộ tin nóng mới nhất của chuyên mục từ các báo lớn (chứa tóm tắt nội dung 2-3 câu hoàn chỉnh)
+      fetchPromises.push(fetchMultiSourceRss(cat));
     } else {
-      // Với câu hỏi có từ khóa cụ thể, lọc tin VnExpress theo từ khóa
-      fetchPromises.push(fetchVnExpressRss(cat, cleanQ));
+      // Với câu hỏi có từ khóa cụ thể, lọc tin RSS đa nguồn theo từ khóa
+      fetchPromises.push(fetchMultiSourceRss(cat, cleanQ));
     }
   }
 
