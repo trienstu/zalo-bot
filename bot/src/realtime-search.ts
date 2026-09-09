@@ -21,9 +21,74 @@ function decodeXml(str: string): string {
 
 interface ParsedNewsItem {
   title: string;
+  snippet?: string;
   timeLabel: string;
   timestamp: number;
   ageHours: number;
+}
+
+async function fetchBingNewsRss(keyword: string): Promise<ParsedNewsItem[]> {
+  try {
+    const url = `https://www.bing.com/news/search?q=${encodeURIComponent(keyword)}&format=rss`;
+    const res = await fetch(url, {
+      signal: AbortSignal.timeout(5000),
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+    });
+    if (!res.ok) return [];
+    const xml = await res.text();
+    const itemBlocks = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
+    const now = Date.now();
+
+    return itemBlocks
+      .map((block) => {
+        const content = block[1] || "";
+        const titleMatch = content.match(/<title>([\s\S]*?)<\/title>/i);
+        const descMatch = content.match(/<description>([\s\S]*?)<\/description>/i);
+        const pubDateMatch = content.match(/<pubDate>([\s\S]*?)<\/pubDate>/i);
+
+        const cleanStr = (s: string) =>
+          decodeXml(
+            s
+              .replace(/<[^>]+>/g, " ")
+              .replace(/&quot;/g, '"')
+              .replace(/&#39;/g, "'")
+              .replace(/&#x27;/g, "'")
+              .replace(/&amp;/g, "&")
+              .replace(/\s+/g, " ")
+              .trim(),
+          );
+
+        const title = titleMatch && titleMatch[1] ? cleanStr(titleMatch[1]) : "";
+        let snippet = descMatch && descMatch[1] ? cleanStr(descMatch[1]) : "";
+
+        const rawDate = pubDateMatch && pubDateMatch[1] ? pubDateMatch[1].trim() : "";
+        const dateObj = new Date(rawDate);
+        const timestamp = !isNaN(dateObj.getTime()) ? dateObj.getTime() : now;
+        const ageHours = (now - timestamp) / (1000 * 60 * 60);
+
+        let timeLabel = "";
+        if (timestamp > 0) {
+          const dStr = dateObj.toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+          const tStr = dateObj.toLocaleTimeString("vi-VN", {
+            timeZone: "Asia/Ho_Chi_Minh",
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+          if (ageHours < 1) {
+            timeLabel = `Vừa xong (< 1 giờ trước - ${tStr} ngày ${dStr})`;
+          } else if (ageHours < 24) {
+            timeLabel = `${Math.round(ageHours)} giờ trước - ${tStr} ngày ${dStr}`;
+          } else {
+            timeLabel = `Bài báo ngày ${dStr}`;
+          }
+        }
+
+        return { title, snippet, timeLabel, timestamp, ageHours };
+      })
+      .filter((it) => it.title.length > 0);
+  } catch {
+    return [];
+  }
 }
 
 async function fetchGoogleNewsRss(keyword: string, lang: "vi" | "en" = "vi"): Promise<ParsedNewsItem[]> {
@@ -124,7 +189,7 @@ async function fetchWikipediaSummary(query: string): Promise<string> {
 }
 
 /**
- * Thực hiện tìm kiếm Google News theo từ khóa và bộ lọc thời gian chỉ định (hoặc không giới hạn thời gian).
+ * Thực hiện tìm kiếm Google News + Bing News theo từ khóa và bộ lọc thời gian chỉ định
  */
 async function queryNewsPipeline(
   cleanQ: string,
@@ -135,18 +200,21 @@ async function queryNewsPipeline(
 ): Promise<ParsedNewsItem[]> {
   const queryStr = timeFilter ? `${cleanQ} ${timeFilter}` : cleanQ;
   const fetchPromises: Promise<ParsedNewsItem[]>[] = [
+    fetchBingNewsRss(cleanQ),
     fetchGoogleNewsRss(queryStr, "vi"),
   ];
 
   if (secondaryQ) {
     const secStr = timeFilter ? `${secondaryQ} ${timeFilter}` : secondaryQ;
     fetchPromises.push(fetchGoogleNewsRss(secStr, "vi"));
+    fetchPromises.push(fetchBingNewsRss(secondaryQ));
   }
 
   // Quét thêm nguồn tiếng Anh nếu là chủ đề Công nghệ / AI hoặc Chính trị / Địa chính trị quốc tế
   if (needEnglishSearch && enQueryStr) {
     const enStr = timeFilter ? `${enQueryStr} ${timeFilter}` : enQueryStr;
     fetchPromises.push(fetchGoogleNewsRss(enStr, "en"));
+    fetchPromises.push(fetchBingNewsRss(enQueryStr));
   }
 
   const allResults = (await Promise.all(fetchPromises)).flat();
@@ -303,22 +371,26 @@ export async function searchRealtimeNews(query: string): Promise<string> {
 
     if (candidates.length === 0 && !wikiText) return "";
 
-    // 8. Sắp xếp kết quả:
-    if (is24hStrict || is7dRecent) {
-      candidates.sort((a, b) => b.timestamp - a.timestamp);
-    }
+    // 8. Sắp xếp kết quả: ưu tiên các bản tin có tóm tắt chi tiết (snippet), sau đó đến độ mới (timestamp)
+    candidates.sort((a, b) => {
+      const aHasSnippet = a.snippet && a.snippet.length > 25 ? 1 : 0;
+      const bHasSnippet = b.snippet && b.snippet.length > 25 ? 1 : 0;
+      if (bHasSnippet !== aHasSnippet) return bHasSnippet - aHasSnippet;
+      return b.timestamp - a.timestamp;
+    });
 
-    // 9. Khử trùng lặp tiêu đề
-    const seenTitles = new Set<string>();
-    const mergedItems: ParsedNewsItem[] = [];
-
+    // 9. Khử trùng lặp tiêu đề, ưu tiên giữ lại bản ghi có tóm tắt snippet
+    const titleMap = new Map<string, ParsedNewsItem>();
     for (const item of candidates) {
       const coreTitle = (item.title.split(/\s*-\s*[^-]+$/)[0] || item.title).trim().toLowerCase();
-      if (!seenTitles.has(coreTitle)) {
-        seenTitles.add(coreTitle);
-        mergedItems.push(item);
+      const existing = titleMap.get(coreTitle);
+      if (!existing) {
+        titleMap.set(coreTitle, item);
+      } else if (!existing.snippet && item.snippet) {
+        titleMap.set(coreTitle, item);
       }
     }
+    const mergedItems = Array.from(titleMap.values());
 
     // 10. Trích xuất trích dẫn nguyên văn & bối cảnh chuyên sâu qua DuckDuckGo Web Search Snippets
     let richSnippetsText = "";
@@ -421,9 +493,14 @@ export async function searchRealtimeNews(query: string): Promise<string> {
 
     // 11. Trả về tổng hợp bao gồm Wikipedia (nếu có), Snippets trích dẫn và danh sách bản tin thời gian thực
     const newsLines = mergedItems
-      .slice(0, 25)
-      .map((item, idx) => `${idx + 1}. [${item.timeLabel}] ${item.title}`)
-      .join("\n");
+      .slice(0, 15)
+      .map((item, idx) => {
+        const snippetPart = item.snippet && item.snippet !== item.title
+          ? `\n   - Tóm tắt diễn biến: ${item.snippet}`
+          : "";
+        return `${idx + 1}. [${item.timeLabel}] ${item.title}${snippetPart}`;
+      })
+      .join("\n\n");
 
     const sections: string[] = [];
 

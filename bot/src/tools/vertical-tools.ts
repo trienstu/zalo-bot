@@ -94,53 +94,110 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
     return results.slice(0, maxResults);
   }
 
-  // 1.3. Fallback: Google News RSS (Cực kỳ ổn định, không bao giờ bị CAPTCHA, tin mới 100%)
+  // 1.3. Fallback: Bing News RSS + Google News RSS (Trích xuất đầy đủ tóm tắt nội dung thực tế thay vì chỉ lặp lại tiêu đề)
   try {
-    const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=vi&gl=VN&ceid=VN:vi`;
-    const res = await fetch(rssUrl, {
-      signal: AbortSignal.timeout(6000),
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)",
-      },
+    const bingUrl = `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&format=rss`;
+    const bingRes = await fetch(bingUrl, {
+      signal: AbortSignal.timeout(5000),
+      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
     });
 
-    if (res.ok) {
-      const xml = await res.text();
+    if (bingRes.ok) {
+      const xml = await bingRes.text();
       const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
       for (const it of items) {
         if (results.length >= maxResults) break;
         const block = it[1] || "";
-        const tMatch = block.match(/<title>(.*?)<\/title>/i);
-        const lMatch = block.match(/<link>(.*?)<\/link>/i) || block.match(/<link\/>(.*?)&/);
-        const dMatch = block.match(/<pubDate>(.*?)<\/pubDate>/i);
+        const tMatch = block.match(/<title>([\s\S]*?)<\/title>/i);
+        const dMatch = block.match(/<description>([\s\S]*?)<\/description>/i);
+        const lMatch = block.match(/<link>([\s\S]*?)<\/link>/i);
+        const pMatch = block.match(/<pubDate>([\s\S]*?)<\/pubDate>/i);
 
-        const title = (tMatch && tMatch[1] ? tMatch[1] : "")
-          .replace(/&quot;/g, '"')
-          .replace(/&amp;/g, "&")
-          .replace(/&#39;/g, "'")
-          .trim();
+        const cleanStr = (s: string) =>
+          s
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/&#x27;/g, "'")
+            .replace(/&amp;/g, "&")
+            .replace(/\s+/g, " ")
+            .trim();
+
+        const title = tMatch && tMatch[1] ? cleanStr(tMatch[1]) : "";
+        let snippet = dMatch && dMatch[1] ? cleanStr(dMatch[1]) : "";
+        const url = lMatch && lMatch[1] ? lMatch[1].trim() : "";
+
+        let dateStr = "";
+        if (pMatch && pMatch[1]) {
+          const dt = new Date(pMatch[1]);
+          if (!isNaN(dt.getTime())) {
+            dateStr = dt.toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+          }
+        }
 
         if (title && !results.some((r) => r.title === title)) {
-          let dateStr = "";
-          if (dMatch && dMatch[1]) {
-            const dt = new Date(dMatch[1]);
-            if (!isNaN(dt.getTime())) {
-              dateStr = dt.toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
-            }
-          }
-
           results.push({
             title,
-            snippet: dateStr ? `[Tin ngày ${dateStr}] ${title}` : title,
-            url: lMatch && lMatch[1] ? lMatch[1].trim() : "",
+            snippet: snippet || (dateStr ? `[Tin ngày ${dateStr}] ${title}` : title),
+            url,
             date: dateStr,
           });
         }
       }
     }
-  } catch (rssErr) {
-    console.warn(`[vertical-tools] Fallback Google News RSS error for "${query}":`, rssErr);
+  } catch (bingErr) {
+    // Bing News error
+  }
+
+  // 1.4. Fallback phụ: Google News RSS
+  if (results.length < maxResults) {
+    try {
+      const rssUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=vi&gl=VN&ceid=VN:vi`;
+      const res = await fetch(rssUrl, {
+        signal: AbortSignal.timeout(5000),
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)",
+        },
+      });
+
+      if (res.ok) {
+        const xml = await res.text();
+        const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
+        for (const it of items) {
+          if (results.length >= maxResults) break;
+          const block = it[1] || "";
+          const tMatch = block.match(/<title>(.*?)<\/title>/i);
+          const lMatch = block.match(/<link>(.*?)<\/link>/i) || block.match(/<link\/>(.*?)&/);
+          const dMatch = block.match(/<pubDate>(.*?)<\/pubDate>/i);
+
+          const title = (tMatch && tMatch[1] ? tMatch[1] : "")
+            .replace(/&quot;/g, '"')
+            .replace(/&amp;/g, "&")
+            .replace(/&#39;/g, "'")
+            .trim();
+
+          if (title && !results.some((r) => r.title === title)) {
+            let dateStr = "";
+            if (dMatch && dMatch[1]) {
+              const dt = new Date(dMatch[1]);
+              if (!isNaN(dt.getTime())) {
+                dateStr = dt.toLocaleDateString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh" });
+              }
+            }
+
+            results.push({
+              title,
+              snippet: dateStr ? `[Tin ngày ${dateStr}] ${title}` : title,
+              url: lMatch && lMatch[1] ? lMatch[1].trim() : "",
+              date: dateStr,
+            });
+          }
+        }
+      }
+    } catch (rssErr) {
+      console.warn(`[vertical-tools] Fallback Google News RSS error for "${query}":`, rssErr);
+    }
   }
 
   return results.slice(0, maxResults);

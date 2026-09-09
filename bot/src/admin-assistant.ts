@@ -1321,6 +1321,11 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
   const encyclopediaInstruction =
     `\n11. CHUẨN ĐỊNH DẠNG BÁCH KHOA TOÀN THƯ & CHUYÊN GIA PHÂN TÍCH:\n` +
+    `    - KHI HỎI VỀ THỊ TRƯỜNG / BẤT ĐỘNG SẢN / DỰ ÁN / KINH TẾ / TIN TỨC SỰ KIỆN NÓNG (Hôm nay có gì hot, tin nóng, tình hình):\n` +
+    `      + BẮT BUỘC TRÌNH BÀY ĐỦ 2 PHẦN CHO MỖI ĐIỂM TIN: [TIÊU ĐỀ RÕ RÀNG] KÈM [TÓM TẮT DIỄN BIẾN CĂN BẢN 2-3 CÂU].\n` +
+    `      + Định dạng chuẩn cho từng điểm tin:\n` +
+    `        - Tên sự kiện / Dự án / Chủ đầu tư: [Tóm tắt căn bản 2-3 câu giải thích rõ: Cụ thể sự việc gì đang diễn ra? Doanh nghiệp/chủ đầu tư nào liên quan? Ở địa phương nào? Mức giá/diện tích/số căn cụ thể là bao nhiêu? Thay đổi hay tác động cụ thể ra sao?]\n` +
+    `      + TUYỆT ĐỐI CẤM CHỈ LIỆT KÊ TIÊU ĐỀ MẬP MỜ KHÔNG CÓ NỘI DUNG (CẤM các câu viết lửng lơ như "có những thay đổi quan trọng lúc 9h", "dành 40% cho một hạng mục đặc biệt", "đại gia Singapore bán 10.000 căn" mà không nói rõ thay đổi gì, hạng mục gì, đại gia nào). Người đọc phải hiểu ngay bản chất sự việc một cách mạch lạc mà không cần phải đi tra lại báo!\n` +
     `    - KHI HỎI VỀ CHÍNH TRỊ / THẾ GIỚI / PHÁT NGÔN LÃNH ĐẠO (Trump, Putin, Biden, Bầu cử, Chiến sự, Thuế quan):\n` +
     `      + BẮT BUỘC TRÍCH XUẤT CÁC PHÁT NGÔN / DIỄN BIẾN MỚI NHẤT từ dữ liệu thời gian thực được cung cấp (trong 24h - 7 ngày qua).\n` +
     `      + TRÍCH DẪN NGUYÊN VĂN: BẮT BUỘC đặt các phát ngôn, tuyên bố then chốt trong ngoặc kép "..." (ví dụ: "Sản phẩm của họ không đủ tốt!", "chuyện nhỏ").\n` +

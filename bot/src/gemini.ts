@@ -778,11 +778,11 @@ export async function callGeminiAgentLoop(
           }
 
           if (resp.status === 503) {
-            if (currentModel !== "gemini-3.6-flash") {
-              console.log(`[gemini-agent] ⚡ Chuyển sang model dự phòng gemini-3.6-flash do ${currentModel} quá tải 503...`);
-              currentModel = "gemini-3.6-flash";
+            if (currentModel !== "gemini-flash-latest") {
+              console.log(`[gemini-agent] ⚡ Chuyển sang model dự phòng gemini-flash-latest do ${currentModel} quá tải 503...`);
+              currentModel = "gemini-flash-latest";
             }
-            await new Promise((r) => setTimeout(r, 1200));
+            await new Promise((r) => setTimeout(r, 1000));
           } else if (resp.status === 429) {
             await new Promise((r) => setTimeout(r, 1500));
           }
