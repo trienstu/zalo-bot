@@ -1088,7 +1088,7 @@ async function handleHistoryQA(
       `   - TUYỆT ĐỐI KHÔNG xưng 'tôi', KHÔNG gọi 'chào bạn', KHÔNG trả lời khô khan như văn bản hành chính nhà nước.\n` +
       `3. KHI THÀNH VIÊN YÊU CẦU ĐỐI SOÁT / FACT-CHECK BẢN TIN KÈM CẬP NHẬT TIN MỚI:\n` +
       `   - TRẢ LỜI ĐẦY ĐỦ CẢ 2 VẾ CỦA CÂU HỎI:\n` +
-      `     + Vế 1: Điểm ngắn gọn 2-3 tin thời sự thế giới NÓNG NHẤT THỰC TẾ HÔM NAY (dựa vào dữ liệu báo chí được cung cấp hoặc tìm kiếm).\n` +
+      `     + Vế 1: Điểm ngắn gọn 2-3 tin thời sự thế giới NÓNG NHẤT THỰC TẾ HÔM NAY (dựa vào dữ liệu báo chí được cung cấp hoặc tìm kiếm). Lưu ý phân biệt giữa sự kiện mới diễn ra hôm nay với các chủ đề công nghệ đã ra mắt trước đó đang tiếp tục được bàn luận hoặc có cập nhật mới.\n` +
       `     + Vế 2: Đối soát chi tiết từng ý của bản tin được dẫn chiếu (chỉ rõ cái nào đúng, cái nào sai/thêu dệt, cung cấp số liệu thực tế thay thế).\n` +
       `   - TUYỆT ĐỐI KHÔNG TRẢ LỜI ĐÙN ĐẨY / NÉ TRÁNH: CẤM lặp đi lặp lại điệp khúc "chưa ghi nhận / cần kiểm chứng trên Bloomberg/Kitco/TTXVN" ở từng dòng. CẤM bảo người dùng tự đi kiểm tra!\n` +
       `   - NẾU THIẾU SỐ LIỆU (như giá vàng hôm nay, sự kiện cụ thể): BẮT BUỘC GỌI CÔNG CỤ 'web_search' để tra cứu ngay số liệu thực tế rồi trả lời cho người dùng.\n` +
