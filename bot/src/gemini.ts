@@ -579,13 +579,13 @@ const AGENT_TOOLS_DECLARATION = {
     },
     {
       name: "finance_market_lookup",
-      description: "Tra cứu bảng giá trực tiếp của các đồng tiền số (Bitcoin, Ethereum, Solana, Altcoin...) từ sàn Binance, Chỉ số Sợ hãi & Tham lam (Crypto Fear & Greed Index) và tỷ giá ngoại tệ thật theo thời gian thực. BẮT BUỘC DÙNG khi người dùng hỏi về giá crypto, thị trường tiền số, bitcoin, altcoin, tỷ giá.",
+      description: "Tra cứu bảng giá trực tiếp của các đồng tiền số (Bitcoin, Ethereum, Solana, Altcoin...) từ sàn live (Binance/OKX/Bybit/CoinGecko), Chỉ số Sợ hãi & Tham lam (Crypto Fear & Greed Index) và tỷ giá ngoại tệ thật theo thời gian thực. BẮT BUỘC DÙNG khi người dùng hỏi về giá crypto, thị trường tiền số, bitcoin, altcoin, tỷ giá.",
       parameters: {
         type: "OBJECT",
         properties: {
           symbol: {
             type: "STRING",
-            description: "Mã đồng tiền cần tra cứu (ví dụ: 'BTC', 'ETH', 'SOL', 'BNB', 'DOGE', hoặc 'market' để lấy toàn cảnh thị trường)",
+            description: "Mã đồng tiền cần tra cứu (ví dụ: 'BTC', 'ETH', 'BNB', 'SOL', 'BTC,ETH,BNB', hoặc 'market' để lấy toàn cảnh thị trường)",
           },
         },
         required: ["symbol"],
@@ -598,13 +598,23 @@ async function executeAgentTool(name: string, args: Record<string, any>): Promis
   switch (name) {
     case "finance_market_lookup": {
       const sym = String(args?.symbol || "market").trim();
-      if (sym.toLowerCase() === "market" || !sym) {
-        const summary = await getFinancialMarketSummary("crypto");
+      if (
+        sym.toLowerCase() === "market" ||
+        sym.toLowerCase() === "crypto" ||
+        sym.includes(",") ||
+        sym.includes(" ") ||
+        !sym
+      ) {
+        const summary = await getFinancialMarketSummary(sym || "crypto");
         return { summary };
       }
       const ticker = await getCryptoTicker(sym);
       const fng = await getFearAndGreedIndex();
-      return { ticker, fearAndGreed: fng };
+      if (ticker) {
+        return { ticker, fearAndGreed: fng };
+      }
+      const summary = await getFinancialMarketSummary(sym);
+      return { summary, fearAndGreed: fng };
     }
     case "web_search": {
       const q = String(args?.query || "").trim();
@@ -725,38 +735,68 @@ export async function callGeminiAgentLoop(
     : (system ? `${getSystemTemporalPrompt()}\n\n${system}` : getSystemTemporalPrompt());
 
   try {
+    let currentModel = primaryModel;
     for (let turn = 0; turn < maxTurns; turn++) {
-      const apiKey = apiKeys[apiKeyIdx];
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${primaryModel}:generateContent?key=${apiKey}`;
+      let resp: Response | null = null;
+      let lastErrText = "";
 
-      const requestBody: Record<string, unknown> = {
-        system_instruction: effectiveSystem ? { parts: [{ text: effectiveSystem }] } : undefined,
-        contents,
-        tools: [AGENT_TOOLS_DECLARATION],
-        generationConfig: {
-          temperature,
-          ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
-          ...(primaryModel.includes("3.7") || primaryModel.includes("2.5")
-            ? { thinkingConfig: { thinkingBudget: 1024 } }
-            : {}),
-        },
-      };
+      // Thử gọi model với cơ chế retry (đổi key hoặc fallback model nếu gặp 503/429)
+      for (let retry = 0; retry < 3; retry++) {
+        const apiKey = apiKeys[apiKeyIdx];
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKey}`;
 
-      const resp = await fetch(endpoint, {
-        method: "POST",
-        signal: AbortSignal.timeout(60_000),
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      });
+        const requestBody: Record<string, unknown> = {
+          system_instruction: effectiveSystem ? { parts: [{ text: effectiveSystem }] } : undefined,
+          contents,
+          tools: [AGENT_TOOLS_DECLARATION],
+          generationConfig: {
+            temperature,
+            ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
+            ...(currentModel.includes("3.7") || currentModel.includes("2.5")
+              ? { thinkingConfig: { thinkingBudget: 1024 } }
+              : {}),
+          },
+        };
 
-      if (!resp.ok) {
-        const errText = await resp.text().catch(() => "");
-        console.warn(`[gemini-agent] Turn ${turn + 1} gặp HTTP ${resp.status}: ${errText.slice(0, 150)}`);
-        if (resp.status === 429 && apiKeys.length > 1) {
-          apiKeyIdx = (apiKeyIdx + 1) % apiKeys.length;
-          continue;
+        try {
+          resp = await fetch(endpoint, {
+            method: "POST",
+            signal: AbortSignal.timeout(90_000),
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(requestBody),
+          });
+
+          if (resp.ok) {
+            break;
+          }
+
+          lastErrText = await resp.text().catch(() => "");
+          console.warn(`[gemini-agent] Turn ${turn + 1} (${currentModel}, Key #${apiKeyIdx + 1}) gặp HTTP ${resp.status}: ${lastErrText.slice(0, 150)}`);
+
+          if (apiKeys.length > 1) {
+            apiKeyIdx = (apiKeyIdx + 1) % apiKeys.length;
+          }
+
+          if (resp.status === 503) {
+            if (currentModel !== "gemini-3.6-flash") {
+              console.log(`[gemini-agent] ⚡ Chuyển sang model dự phòng gemini-3.6-flash do ${currentModel} quá tải 503...`);
+              currentModel = "gemini-3.6-flash";
+            }
+            await new Promise((r) => setTimeout(r, 1200));
+          } else if (resp.status === 429) {
+            await new Promise((r) => setTimeout(r, 1500));
+          }
+        } catch (fetchErr) {
+          console.warn(`[gemini-agent] Turn ${turn + 1} fetch error:`, fetchErr);
+          if (apiKeys.length > 1) {
+            apiKeyIdx = (apiKeyIdx + 1) % apiKeys.length;
+          }
+          await new Promise((r) => setTimeout(r, 1000));
         }
-        throw new Error(`Gemini Agent HTTP ${resp.status}: ${errText.slice(0, 200)}`);
+      }
+
+      if (!resp || !resp.ok) {
+        throw new Error(`Gemini Agent HTTP ${resp?.status || "ERR"}: ${lastErrText.slice(0, 200)}`);
       }
 
       const data = (await resp.json()) as {
