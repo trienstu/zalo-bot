@@ -1209,6 +1209,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       `6. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
       `   - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * để in đậm vì Zalo không hỗ trợ markdown (dùng chữ in hoa hoặc gạch đầu dòng để làm nổi bật).\n` +
       `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Tuyệt đối không chèn icon vào từng gạch đầu dòng, phong cách tinh tế, lịch sự, chỉ dùng 1-2 icon ở tiêu đề chính nếu cần thiết.\n` +
+      `   - KHI TRÌNH BÀY BẢNG BIỂU / SO SÁNH / LÃI SUẤT: Tuyệt đối không dùng bảng Markdown (| Cột 1 | Cột 2 |) vì sẽ bị gãy dòng trên Zalo. Dùng định dạng Khối thẻ (Card layout) hoặc dòng so sánh rút gọn.\n` +
       `7. Thái độ phục vụ: Lễ phép, thông minh, gọi Admin là 'Sếp' hoặc '${displayName}', xưng 'em' hoặc 'Sen Chúa'.\n` +
       `8. ĐỘ DÀI & TỐC ĐỘ: Trả lời gãy gọn, đúng trọng tâm, súc tích (khoảng 300-600 ký tự). Tránh viết dài dòng lan man trừ khi được yêu cầu phân tích sâu.\n` +
       `9. NGUYÊN TẮC TRUNG THỰC & CHỐNG BỊA ĐẶT (ANTI-HALLUCINATION):\n` +

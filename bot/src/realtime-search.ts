@@ -622,6 +622,10 @@ export async function searchRealtimeNews(query: string): Promise<string> {
         if (/(?:ngoại tệ|tỷ giá|usd|đô la)/i.test(query)) {
           snippetQueries.push("tỷ giá USD Vietcombank hôm nay");
         }
+        if (/(?:lãi suất|lai suat|vay vốn|tiền gửi|tiết kiệm|big4)/i.test(query)) {
+          snippetQueries.push("bảng lãi suất tiền gửi tiết kiệm Big4 mới nhất hôm nay 2026");
+          snippetQueries.push("lãi suất cho vay mua nhà ngân hàng Big4 mới nhất hôm nay 2026");
+        }
 
         // Query tiếng Anh nếu cần
         if (needEnglishSearch && enQueryStr) {

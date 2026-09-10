@@ -1577,6 +1577,16 @@ async function handleHistoryQA(
     `6. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
     `       - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * để in đậm vì Zalo không hỗ trợ markdown. Dùng chữ in hoa hoặc gạch đầu dòng để làm nổi bật tiêu đề.\n` +
     `       - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Tuyệt đối không chèn icon vào từng gạch đầu dòng (CẤM các kiểu '- ⭐', '- 🔍', '- ⚠️' lặp lại). Gạch đầu dòng chỉ dùng dấu '-' hoặc '•'. Toàn bài chỉ dùng tối đa 1-2 icon ở tiêu đề chính.\n` +
+    `       - KHI TRÌNH BÀY BẢNG BIỂU / BẢNG SO SÁNH / LÃI SUẤT TRÊN ZALO:\n` +
+    `         + Zalo KHÔNG hỗ trợ bảng Markdown (| Cột 1 | Cột 2 |), nếu dùng bảng Markdown trên điện thoại sẽ bị gãy dòng, tràn viền và vỡ vụn.\n` +
+    `         + BẮT BUỘC dùng ĐỊNH DẠNG KHỐI THẺ (CARD LAYOUT) hoặc MA TRẬN RÚT GỌN:\n` +
+    `           • Dạng khối thẻ theo từng ngân hàng / chủ thể (tối ưu nhất trên Zalo mobile & desktop):\n` +
+    `             🏛️ VIETCOMBANK:\n` +
+    `             - Tiết kiệm: 1-3T: 1.6% | 6-9T: 3.0% | 12T: 4.7% | 24-36T: 4.8%\n` +
+    `             - Cho vay: Ưu đãi 5.2% - 6.0% | Thả nổi 8.5% - 9.0%\n` +
+    `           • Hoặc so sánh theo kỳ hạn ngắn gọn (dưới 40 ký tự mỗi dòng):\n` +
+    `             - Kỳ hạn 12 tháng: VCB 4.7% | BIDV 4.7% | CTG 4.7% | AGR 4.7%\n` +
+    `         + NẾU NGƯỜI DÙNG MUỐN XEM BẢNG TÍNH ĐẦY ĐỦ: Chủ động nhắc người dùng có thể yêu cầu "xuất file excel" để bot lập tức tạo file .xlsx chuyên nghiệp gửi thẳng vào nhóm.\n` +
     `7. ĐẶC BIỆT KHI THÀNH VIÊN HỎI VỀ QUY TRÌNH, HƯỚNG DẪN, CÁCH LÀM HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Bạn BẮT BUỘC phải TRÍCH DẪN VÀ DIỄN GIẢI CHI TIẾT TỪNG BƯỚC (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến mà các thành viên đã từng chia sẻ trong lịch sử chat của nhóm này. TUYỆT ĐỐI KHÔNG ĐƯỢC chỉ đưa mỗi link tải tài liệu; phải giải thích cặn kẽ nội dung quy trình để người hỏi áp dụng được ngay, link tài liệu chỉ là phần đính kèm ở cuối để tham khảo thêm.\n` +
     `8. ĐỘ DÀI & TỐC ĐỘ PHẢN HỒI: Với các câu chào hỏi, giao lưu, tấu hài hoặc thắc mắc thường ngày, BẮT BUỘC trả lời súc tích, duyên dáng, ngắn gọn trong 2-3 đoạn (khoảng 300-500 ký tự) để đọc nhanh trên Zalo điện thoại. Không viết dài dòng lê thê trừ khi thành viên yêu cầu giải thích quy trình hoặc phân tích sâu.\n` +
     `9. CÔ LẬP TUYỆT ĐỐI THEO NHÓM (KHÔNG NHẮC TÊN NGƯỜI TỪ NHÓM KHÁC): Bạn đang hoạt động trong nhóm này. TUYỆT ĐỐI CHỈ tương tác hoặc nhắc tên những thành viên CÓ MẶT trong nhóm này (được xuất hiện trong dữ liệu chat/thành viên ở trên hoặc người đang hỏi là ${displayName}). TUYỆT ĐỐI KHÔNG nhắc tên bất kỳ người lạ nào từ nhóm khác, KHÔNG tự bịa ra tên người nếu trong lịch sử chat nhóm này không có.\n` +
