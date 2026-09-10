@@ -402,27 +402,6 @@ export async function callGemini(
         return null;
       }
 
-      // Trích xuất grounding metadata nếu có (chuẩn Vertex AI Search / Grounding như bot Kevin)
-      const groundingMetadata = (candidate as any)?.groundingMetadata;
-      if (groundingMetadata?.groundingChunks && Array.isArray(groundingMetadata.groundingChunks)) {
-        const sources: string[] = [];
-        groundingMetadata.groundingChunks.forEach((chunk: any, idx: number) => {
-          if (chunk.web?.uri) {
-            const domain = chunk.web.title || (function() {
-              try {
-                return new URL(chunk.web.uri).hostname.replace(/^www\./, "");
-              } catch {
-                return "Nguồn";
-              }
-            })();
-            sources.push(`${idx + 1}. ${domain}: ${chunk.web.uri}`);
-          }
-        });
-        if (sources.length > 0 && !content.includes("Nguồn tham khảo")) {
-          content += `\n\nNguồn tham khảo:\n${sources.join("\n")}`;
-        }
-      }
-
       return content;
     };
 
