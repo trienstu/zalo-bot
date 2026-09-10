@@ -352,7 +352,7 @@ export async function callGemini(
           parts: userParts,
         },
       ],
-      ...(options?.enableSearch ? { tools: [{ googleSearch: {} }] } : {}),
+      ...(options?.enableSearch ? { tools: [{ google_search: {} }] } : {}),
       generationConfig: {
         temperature,
         ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
