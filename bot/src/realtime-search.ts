@@ -231,9 +231,19 @@ async function fetchMultiSourceRss(category: string, filterKeyword = ""): Promis
     }
   }
 
-  const filterTokens = filterKeyword
+  const STOP_WORDS = new Set([
+    "các", "tại", "cho", "với", "trong", "của", "này", "việt", "nam",
+    "những", "được", "người", "theo", "nhiều", "ngày", "năm", "tháng",
+    "thông", "tin", "xem", "kiểm", "tra", "tổng", "dự", "án", "giúp",
+    "nhé", "nha", "ạ", "em", "anh", "chị", "bác", "về", "lại", "đến",
+    "cho", "mình", "hỏi", "đang", "cũng", "như", "nào"
+  ]);
+
+  const rawTokens = filterKeyword
     ? filterKeyword.toLowerCase().split(/\s+/).filter((t) => t.length > 2)
     : [];
+  const meaningfulTokens = rawTokens.filter((t) => !STOP_WORDS.has(t));
+  const filterTokens = meaningfulTokens.length > 0 ? meaningfulTokens : rawTokens;
 
   if (filterTokens.length === 0) {
     return allItems;

@@ -1025,6 +1025,42 @@ async function handleHistoryQA(
     const groupSettings = getGroupSettings(threadId);
     const botName = groupSettings.botName || "Sen Chúa";
 
+    // 0. Lấy 15 tin nhắn gần nhất trong nhóm để tái hiện trọn vẹn ngữ cảnh hội thoại đa lượt (multi-turn quote chain)
+    let recentChatContext = "";
+    try {
+      const recentMsgs = db
+        .prepare(
+          `SELECT display_name, text, ts
+           FROM group_messages
+           WHERE thread_id = ?
+             AND text IS NOT NULL
+             AND text != ''
+             AND deleted_at IS NULL
+             AND text NOT LIKE '/%'
+             AND text NOT LIKE '!%'
+           ORDER BY ts DESC
+           LIMIT 15`,
+        )
+        .all(threadId) as { display_name: string; text: string; ts: number }[];
+
+      if (recentMsgs && recentMsgs.length > 0) {
+        recentMsgs.reverse();
+        const formatted = recentMsgs.map((m) => {
+          const rawTs = Number(m.ts) || Date.now();
+          let timeStr = "";
+          try {
+            timeStr = new Date(rawTs + 7 * 3600 * 1000).toISOString().slice(11, 16);
+          } catch {
+            timeStr = "";
+          }
+          return `[${timeStr}] ${m.display_name || "Thành viên"}: ${m.text}`;
+        });
+        recentChatContext = `\n=== LỊCH SỬ THẢO LUẬN GẦN ĐÂY TRONG NHÓM (NGỮ CẢNH HỘI THOẠI ĐA LƯỢT / CÁC LƯỢT QUOTE TRƯỚC ĐÓ): ===\n${formatted.join("\n")}\n`;
+      }
+    } catch (e) {
+      console.warn("[member-assistant] Quote QA fetch recent messages error:", e);
+    }
+
     // 1. Tra cứu tri thức dự án / văn bản chính thức (kết hợp câu hỏi + nội dung quote để bắt đúng dự án/chủ đề)
     let quotePermanentKnowledge: PermanentKnowledgeItem[] = [];
     try {
@@ -1087,22 +1123,19 @@ async function handleHistoryQA(
       `   - Luôn giữ đúng danh phận 'Sen Chúa' - trợ lý AI hóm hỉnh, sắc sảo, thông minh, chu đáo và mặn mà của cộng đồng Zalo.\n` +
       `   - Luôn xưng 'em' hoặc 'Sen Chúa', gọi người hỏi là 'anh/chị/bác ${displayName}' hoặc 'các bác'.\n` +
       `   - TUYỆT ĐỐI KHÔNG xưng 'tôi', KHÔNG gọi 'chào bạn', KHÔNG trả lời khô khan như văn bản hành chính nhà nước.\n` +
-      `3. KHI THÀNH VIÊN YÊU CẦU ĐỐI SOÁT / FACT-CHECK BẢN TIN KÈM CẬP NHẬT TIN MỚI:\n` +
-      `   - TRẢ LỜI ĐẦY ĐỦ CẢ 2 VẾ CỦA CÂU HỎI:\n` +
-      `     + Vế 1: Điểm ngắn gọn 2-3 tin thời sự thế giới NÓNG NHẤT THỰC TẾ HÔM NAY (dựa vào dữ liệu báo chí được cung cấp hoặc tìm kiếm). Lưu ý phân biệt giữa sự kiện mới diễn ra hôm nay với các chủ đề công nghệ đã ra mắt trước đó đang tiếp tục được bàn luận hoặc có cập nhật mới.\n` +
-      `     + Vế 2: Đối soát chi tiết từng ý của bản tin được dẫn chiếu (chỉ rõ cái nào đúng, cái nào sai/thêu dệt, cung cấp số liệu thực tế thay thế).\n` +
-      `   - TUYỆT ĐỐI KHÔNG TRẢ LỜI ĐÙN ĐẨY / NÉ TRÁNH: CẤM lặp đi lặp lại điệp khúc "chưa ghi nhận / cần kiểm chứng trên Bloomberg/Kitco/TTXVN" ở từng dòng. CẤM bảo người dùng tự đi kiểm tra!\n` +
-      `   - NẾU THIẾU SỐ LIỆU (như giá vàng hôm nay, sự kiện cụ thể): BẮT BUỘC GỌI CÔNG CỤ 'web_search' để tra cứu ngay số liệu thực tế rồi trả lời cho người dùng.\n` +
-      `   - BỐ CỤC CHUẨN (TINH GỌN, DỄ ĐỌC TRÊN ZALO, KHÔNG DÀI DÒNG LÊ THÊ):\n` +
-      `     1. ĐIỂM TIN THẾ GIỚI NÓNG NHẤT HÔM NAY: 2-3 tin ngắn gọn thực tế.\n` +
-      `     2. ĐỐI SOÁT BẢN TIN TRÍCH DẪN: Phân tích gãy gọn các điểm chưa chuẩn, kèm số liệu/thực tế đúng.\n` +
-      `     3. LỜI BÌNH SEN CHÚA: 1-2 câu kết hóm hỉnh, duyên dáng, sắc sảo.\n` +
+      `3. NGUYÊN TẮC PHÂN TÍCH & TRẢ LỜI TIN NHẮN TRÍCH DẪN (QUOTE):\n` +
+      `   - TRỌNG TÂM CÂU HỎI: Tập trung trực tiếp vào câu hỏi/yêu cầu của thành viên và nội dung được trích dẫn (kết hợp với lịch sử thảo luận gần đây nếu là cuộc đối đáp/quote qua lại nhiều lượt).\n` +
+      `   - ĐỐI SOÁT & KIỂM CHỨNG: Nếu thành viên hỏi về tính đúng/sai, số liệu đối soát, hoặc xin thông tin chính xác, hãy phân tích gãy gọn, chỉ rõ điểm chuẩn/lệch pha và cung cấp dữ liệu thực tế chuẩn xác.\n` +
+      `   - TUYỆT ĐỐI KHÔNG tự tiện chèn thêm các mục điểm tin thế giới, tài chính vĩ mô, giá vàng không liên quan trừ khi thành viên CÓ YÊU CẦU CỤ THỂ về điểm tin/thời sự.\n` +
+      `   - BỐ CỤC TINH GỌN, DỄ ĐỌC TRÊN ZALO: Viết gãy gọn, xuống dòng thoáng mắt, dùng gạch đầu dòng và viết hoa tiêu đề để phân đoạn rõ ràng (tuyệt đối không dùng markdown in đậm ** ** vì Zalo không hỗ trợ).\n` +
+      `   - LỜI BÌNH SEN CHÚA: 1-2 câu kết duyên dáng, hóm hỉnh, mặn mà đúng chất Sen Chúa.\n` +
       `4. NGUYÊN TẮC CHỐNG BỊA ĐẶT TUYỆT ĐỐI (ZERO-HALLUCINATION TRONG DỰ ÁN BẤT ĐỘNG SẢN / CHÍNH SÁCH BÁN HÀNG):\n` +
-      `   - Khi câu hỏi liên quan đến DỰ ÁN, PHƯƠNG THỨC THANH TOÁN, TIẾN ĐỘ, CHÍNH SÁCH BÁN HÀNG, CHIẾT KHẤU, BẢNG GIÁ, SỐ LIỆU TÀI CHÍNH:\n` +
+      `   - Khi câu hỏi liên quan đến CHÍNH SÁCH BÁN HÀNG, PHƯƠNG THỨC THANH TOÁN, TIẾN ĐỘ, CHIẾT KHẤU, BẢNG GIÁ, SỐ LIỆU TÀI CHÍNH từ tài liệu nội bộ được cung cấp:\n` +
       `     + BẮT BUỘC 100% các con số, tỷ lệ %, số đợt, số tháng, điều kiện ưu đãi PHẢI LẤY NGUYÊN BẢN từ tài liệu chính thức được cung cấp ở trên.\n` +
       `     + TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT các chính sách không có trong tài liệu (như cam kết thuê lại 6-8%, quà tặng vàng/nội thất, miễn phí quản lý, tiến độ 1-1.5%/tháng nếu tài liệu không đề cập).\n` +
       `     + NẾU TRONG TÀI LIỆU KHÔNG CÓ THÔNG TIN: BẮT BUỘC PHẢI THẲNG THẮN TRẢ LỜI: "Trong tài liệu [Tên tài liệu] hiện tại không có thông tin về [nội dung hỏi]. Sen Chúa không tự suy diễn hoặc bịa số liệu."\n` +
       `     + BẮT BUỘC LIỆT KÊ ĐỦ nếu tài liệu có nhiều phương án.\n` +
+      `   - Khi câu hỏi về DANH MỤC DỰ ÁN, CHỦ ĐẦU TƯ (như Keppel Land, Vingroup, Gamuda...), TIN TỨC THỜI SỰ THỊ TRƯỜNG: Vận dụng dữ liệu báo chí tra cứu được (Google News) và kiến thức chuẩn xác để phân tích, tổng hợp danh mục đúng thực tế cho thành viên.\n` +
       `5. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
       `   - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * in đậm vì Zalo không hỗ trợ markdown (hãy viết hoa tiêu đề hoặc dùng gạch đầu dòng để làm nổi bật).\n` +
       `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Tuyệt đối không chèn icon vào từng gạch đầu dòng, chỉ dùng 1-2 icon ở tiêu đề chính nếu thực sự cần thiết.\n` +
@@ -1114,6 +1147,7 @@ async function handleHistoryQA(
       const plan = await planSearchQueries({
         question,
         quoteText: options.quote.text,
+        recentContext: recentChatContext,
         displayName,
       });
 
@@ -1134,6 +1168,7 @@ async function handleHistoryQA(
       : "";
 
     const quoteUserPrompt =
+      `${recentChatContext}\n` +
       `=== NỘI DUNG ĐƯỢC TRÍCH DẪN (TỪ ${options.quote.senderName || "THÀNH VIÊN"}): ===\n` +
       `"${options.quote.text}"\n` +
       `${quoteDocSection}${quoteLiveNewsSection}\n` +
@@ -1596,7 +1631,7 @@ async function handleHistoryQA(
     `      + TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT các chính sách không có trong tài liệu (như cam kết thuê lại 6-8%, quà tặng vàng/nội thất, miễn phí quản lý, tiến độ 1-1.5%/tháng nếu tài liệu không đề cập).\n` +
     `      + NẾU TRONG TÀI LIỆU KHÔNG CÓ THÔNG TIN về điều thành viên hỏi (ví dụ tài liệu thiếu phương án, hoặc không có số liệu cụ thể): BẮT BUỘC PHẢI TRẢ LỜI THẲNG THẮN: "Trong tài liệu chính thức hiện tại không có thông tin về [nội dung hỏi]. Sen Chúa không tự suy diễn hoặc bịa số liệu." TUYỆT ĐỐI KHÔNG ĐƯỢC TỰ ĐOÁN MÒ!\n` +
     `      + BẮT BUỘC LIỆT KÊ ĐỦ: Nếu tài liệu có nhiều phương án (ví dụ có 4 phương thức thanh toán), BẮT BUỘC phải trình bày đầy đủ cả 4 phương án, tuyệt đối không được tự ý bỏ sót bất kỳ phương án nào.\n` +
-    `    - Chỉ đối với các câu hỏi về kiến thức công nghệ phổ quát hoặc kỹ năng chung ngoài dự án: Bạn mới giải thích theo kiến thức thực tế.\n` +
+    `    - Đối với câu hỏi về DANH MỤC DỰ ÁN, THÔNG TIN CHỦ ĐẦU TƯ (ví dụ: Keppel Land, Vingroup, Gamuda Land...), TIN TỨC THỜI SỰ HOẶC KIẾN THỨC PHỔ QUÁT mà không có tài liệu nội bộ đính kèm: Hãy sử dụng dữ liệu tra cứu thị trường thời gian thực / Google Search / bách khoa toàn thư được cung cấp để giải đáp đầy đủ, chính xác, không được từ chối trả lời.\n` +
     `11. TÀI LIỆU CHÍNH THỨC TỪ KHO TRI THỨC VĨNH VIỄN HOẶC LINK GOOGLE: Có độ ưu tiên cao nhất về tính chính xác. Bạn BẮT BUỘC phải trích xuất chính xác từng con số, từng đợt thanh toán từ tài liệu này để giải đáp cho thành viên!` +
     searchInstruction +
     encyclopediaInstruction +

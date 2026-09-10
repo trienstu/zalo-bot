@@ -64,9 +64,10 @@ function fallbackRegexPlanner(question: string, quoteText = ""): QueryPlanResult
 export async function planSearchQueries(params: {
   question: string;
   quoteText?: string;
+  recentContext?: string;
   displayName?: string;
 }): Promise<QueryPlanResult> {
-  const { question, quoteText, displayName } = params;
+  const { question, quoteText, recentContext, displayName } = params;
 
   // Nếu câu chào đơn giản hoặc quá ngắn, bỏ qua planner để tiết kiệm tài nguyên
   const trimmed = question.trim();
@@ -82,11 +83,13 @@ export async function planSearchQueries(params: {
     `${getSystemTemporalPrompt()}\n\n` +
     `Bạn là Bộ Lập Kế Hoạch Ngữ Nghĩa (Query Planner) chuyên bóc tách ý định người dùng trong cộng đồng Zalo.\n` +
     `NHIỆM VỤ:\n` +
-    `1. Đọc câu hỏi của người dùng và nội dung được trích dẫn (nếu có).\n` +
+    `1. Đọc câu hỏi của người dùng, nội dung được trích dẫn (nếu có), và lịch sử thảo luận gần đây (nếu có).\n` +
     `2. Xác định người dùng có cần tra cứu thông tin bên ngoài không (needsSearch: true/false).\n` +
     `3. Nếu cần tra cứu: BÓC TÁCH TỐI ĐA 2-3 TỪ KHÓA TÌM KIẾM CÔ ĐỌNG (queries) cho từng khía cạnh/sự kiện cụ thể.\n` +
     `   - Ví dụ người dùng hỏi: "check tin thế giới hôm nay và kiểm tra xem Kevin nói Mỹ Iran, thuế Canada và giá vàng đúng chưa":\n` +
     `     => queries: ["tin tức thế giới nóng nhất hôm nay", "quân sự Mỹ Iran CENTCOM tàu dầu", "giá vàng thế giới hôm nay"]\n` +
+    `   - Ví dụ người dùng quote câu trả lời về dự án Keppel và hỏi "em cho a thông tin chính xác đi":\n` +
+    `     => queries: ["danh sách các dự án Keppel Land tại Việt Nam", "tổng số dự án Keppel Land Việt Nam"]\n` +
     `   - Từng query phải ngắn gọn, súc tích (dưới 10 từ), tập trung vào thực thể và hành động chính, loại bỏ hoàn toàn các từ rác (hãy, check, xem, giúp, sen chúa...).\n` +
     `4. Xuất định dạng JSON duy nhất:\n` +
     `{\n` +
@@ -97,6 +100,7 @@ export async function planSearchQueries(params: {
     `}`;
 
   const user =
+    (recentContext ? `=== LỊCH SỬ THẢO LUẬN GẦN ĐÂY TRONG NHÓM: ===\n${recentContext.slice(-2000)}\n\n` : "") +
     (quoteText ? `=== NỘI DUNG ĐƯỢC TRÍCH DẪN: ===\n"${quoteText.slice(0, 1000)}"\n\n` : "") +
     `NGƯỜI DÙNG (${displayName || "Thành viên"}): ${question}\n\n` +
     `HÃY XUẤT KẾ HOẠCH JSON:`;
