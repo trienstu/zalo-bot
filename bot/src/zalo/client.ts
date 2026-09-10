@@ -778,6 +778,7 @@ function splitIntoZaloChunks(text: string, maxLen = 2050): string[] {
 export interface SendGroupOptions {
   mentions?: { uid: string; pos: number; len: number }[];
   quote?: any;
+  styles?: { start: number; len: number; st: string }[];
 }
 
 async function sendSingleGroupChunk(
@@ -791,6 +792,9 @@ async function sendSingleGroupChunk(
     const payloadWithQuote: any = { msg: text, quote: options.quote };
     if (options.mentions && options.mentions.length > 0) {
       payloadWithQuote.mentions = options.mentions;
+    }
+    if (options.styles && options.styles.length > 0) {
+      payloadWithQuote.styles = options.styles;
     }
 
     try {
@@ -813,6 +817,9 @@ async function sendSingleGroupChunk(
   const payloadBase: any = { msg: text };
   if (options?.mentions && options.mentions.length > 0) {
     payloadBase.mentions = options.mentions;
+  }
+  if (options?.styles && options.styles.length > 0) {
+    payloadBase.styles = options.styles;
   }
 
   try {
@@ -908,7 +915,8 @@ export async function sendGroupText(
   }
 
   const threadIdStr = String(groupId).trim();
-  const textToSend = (!options?.mentions || options.mentions.length === 0) ? cleanZaloText(text) : text;
+  const hasFormattingOrMentions = Boolean((options?.styles && options.styles.length > 0) || (options?.mentions && options.mentions.length > 0));
+  const textToSend = hasFormattingOrMentions ? text : cleanZaloText(text);
   const chunks = splitIntoZaloChunks(textToSend, 2050);
 
   console.log(`[sendGroupText] 📤 Đang gửi tin vào nhóm [${threadIdStr}] (${chunks.length} phần, tổng ${textToSend.length} ký tự)...`);
