@@ -10,7 +10,7 @@ import { getSystemTemporalPrompt } from "./temporal.js";
 
 export interface QueryPlanResult {
   needsSearch: boolean;
-  intent: "fact_check" | "realtime_news" | "project_qa" | "chat";
+  intent: "fact_check" | "realtime_news" | "project_qa" | "knowledge" | "chat";
   queries: string[];
   summaryIntent?: string;
 }
@@ -81,25 +81,28 @@ export async function planSearchQueries(params: {
 
   const system =
     `${getSystemTemporalPrompt()}\n\n` +
-    `Bạn là Bộ Lập Kế Hoạch Ngữ Nghĩa (Query Planner) chuyên bóc tách ý định người dùng trong cộng đồng Zalo.\n` +
+    `Bạn là Bộ Điều Hướng Ngữ Nghĩa & Lập Kế Hoạch Tra Cứu (Semantic Router & Query Planner) chuyên bóc tách ý định người dùng.\n` +
     `NHIỆM VỤ:\n` +
-    `1. Đọc câu hỏi của người dùng, nội dung được trích dẫn (nếu có), và lịch sử thảo luận gần đây (nếu có).\n` +
-    `2. Xác định người dùng có cần tra cứu thông tin bên ngoài không (needsSearch: true/false).\n` +
-    `   - ĐẶC BIỆT LƯU Ý: Khi người dùng dùng các từ như "check", "kiểm tra", "nay", "hôm nay", "hiện nay", "thời điểm này", "mới nhất", "bây giờ", "có bao nhiêu", "thay đổi gì", "danh sách", hoặc hỏi về số liệu thực tế, sự kiện, chính sách, đơn vị hành chính, luật pháp, danh mục dự án/doanh nghiệp:\n` +
-    `     => BẮT BUỘC ĐẶT needsSearch: true!\n` +
-    `     Vì các dữ kiện thực tế luôn có thể có cập nhật mới (ví dụ: nghị quyết thành lập thành phố mới, sáp nhập tỉnh thành, quy hoạch mới, dự án mới).\n` +
-    `3. Nếu cần tra cứu: BÓC TÁCH TỐI ĐA 2-3 TỪ KHÓA TÌM KIẾM CÔ ĐỌNG (queries) cho từng khía cạnh/sự kiện cụ thể.\n` +
-    `   - Ví dụ người dùng hỏi: "Sen chúa check xem nay ở Việt Nam Có bao nhiêu tỉnh thành":\n` +
-    `     => needsSearch: true, queries: ["số lượng tỉnh thành phố trực thuộc trung ương Việt Nam mới nhất", "Thành phố Huế trực thuộc trung ương"]\n` +
-    `   - Ví dụ người dùng hỏi: "check tin thế giới hôm nay và kiểm tra xem Kevin nói Mỹ Iran, thuế Canada và giá vàng đúng chưa":\n` +
-    `     => needsSearch: true, queries: ["tin tức thế giới nóng nhất hôm nay", "quân sự Mỹ Iran CENTCOM tàu dầu", "giá vàng thế giới hôm nay"]\n` +
-    `   - Ví dụ người dùng hỏi: "tổng hợp cho anh các dự án của Keppel, chỉ nêu đúng số lượng dự án và liệt kê tên các dự án":\n` +
-    `     => needsSearch: true, queries: ["danh sách các dự án Keppel Land tại Việt Nam", "Keppel Land Việt Nam"]\n` +
-    `   - Từng query phải ngắn gọn, súc tích (dưới 10 từ), tập trung vào thực thể và hành động chính, loại bỏ hoàn toàn các từ rác (hãy, check, xem, giúp, sen chúa, cho anh...).\n` +
+    `1. Đọc kỹ câu hỏi của người dùng, nội dung trích dẫn (nếu có) và lịch sử thảo luận gần đây (nếu có).\n` +
+    `2. Phân loại câu hỏi thành 2 nhóm rõ rệt:\n` +
+    `   a) NHÓM TRI THỨC NỀN TẢNG / TƯ DUY / CHAT (needsSearch: false):\n` +
+    `      - Câu hỏi về lý thuyết, khoa học nền tảng, định lý, toán học, vật lý, triết học, lập trình/code, viết lách, dịch thuật, giải thích khái niệm bất biến, tư vấn logic, hoặc chào hỏi tán gẫu thông thường.\n` +
+    `      - Những câu hỏi này KHÔNG cần tìm kiếm bên ngoài vì bộ não tri thức có sẵn của mô hình đã đủ để trả lời xuất sắc.\n` +
+    `      => needsSearch: false, intent: "knowledge" hoặc "chat", queries: []\n\n` +
+    `   b) NHÓM DỮ LIỆU THỰC TẾ BIẾN ĐỘNG / THỜI GIAN THỰC (needsSearch: true):\n` +
+    `      - Câu hỏi về tin tức thời sự, sự kiện nóng, biến động 24h-7 ngày qua, thể thao, giá cả/thị trường, thời tiết, phát ngôn mới.\n` +
+    `        => needsSearch: true, intent: "realtime_news"\n` +
+    `      - Câu hỏi về pháp lý, luật mới, nghị quyết, quy định, đơn vị hành chính/tỉnh thành, số liệu thực tế, hồ sơ nhân vật/doanh nghiệp, tiến độ dự án có khả năng đã thay đổi ngoài đời thực.\n` +
+    `        => needsSearch: true, intent: "fact_check"\n\n` +
+    `3. Khi needsSearch: true -> Bóc tách 1-3 cụm từ tìm kiếm (queries) tối ưu:\n` +
+    `   - Bóc tách đúng THỰC THỂ CHÍNH (Entities) và MỤC TIÊU CẦN TÌM (Target attribute/action).\n` +
+    `   - LOẠI BỎ TOÀN BỘ từ rác, từ xưng hô, mệnh lệnh (như: check, kiểm tra, xem, giúp, cho anh, sen chúa, kevin, bot ơi, nhé, nha, ạ...).\n` +
+    `   - TUYỆT ĐỐI KHÔNG TỰ BỊA ĐẶT hay đoán trước kết quả con vào query (Ví dụ: hỏi về tỉnh thành thì query là "số lượng đơn vị hành chính cấp tỉnh Việt Nam hiện nay", KHÔNG tự ý nhét tên một tỉnh/thành phố cụ thể nào vào query nếu người dùng không nhắc tới).\n` +
+    `   - Giữ query súc tích, tự nhiên, mang tính tra cứu thông tin khách quan.\n\n` +
     `4. Xuất định dạng JSON duy nhất:\n` +
     `{\n` +
     `  "needsSearch": boolean,\n` +
-    `  "intent": "fact_check" | "realtime_news" | "project_qa" | "chat",\n` +
+    `  "intent": "realtime_news" | "fact_check" | "knowledge" | "chat",\n` +
     `  "queries": string[],\n` +
     `  "summaryIntent": string\n` +
     `}`;
@@ -131,7 +134,7 @@ export async function planSearchQueries(params: {
       const queries = Array.isArray(raw.queries)
         ? raw.queries.map((q: any) => String(q).trim()).filter((q: string) => q.length > 2).slice(0, 3)
         : [];
-      const intent = ["fact_check", "realtime_news", "project_qa", "chat"].includes(raw.intent)
+      const intent = ["fact_check", "realtime_news", "project_qa", "knowledge", "chat"].includes(raw.intent)
         ? raw.intent
         : "chat";
 

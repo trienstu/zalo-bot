@@ -437,15 +437,14 @@ export async function searchRealtimeNews(query: string): Promise<string> {
       .replace(/(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot ơi|bot oi|bot|admin|ad ơi|ad oi|ad|trợ lý|tro ly)/gi, " ")
       .replace(/(?:là gì thế|là gì vậy|là gì nè|là gì|là cái gì|là con gì|thế nào|như thế nào|ra sao|nghĩa là gì|là sao)/gi, " ");
 
-    const stopWords = [
-      "cập nhật", "tình hình", "mới nhất", "tin tức", "tin mới", "hôm nay", "24h qua", "24h", "24 giờ",
-      "cho tôi", "giúp tôi", "với", "nha", "nhé", "ạ", "ơi", "hỏi về", "xem", "tin nóng", "vừa ra mắt",
-      "thời sự", "bản tin", "vừa công bố", "thế nào rồi", "có gì mới", "cho biết", "đi", "về", "nào", "coi",
-      "nói về", "hãy", "tìm kiếm thêm thông tin về", "tìm kiếm thêm thông tin", "tìm kiếm thêm", "tra cứu",
-      "xem có nội dung cụ thể", "nội dung cụ thể", "cái gì bị", "giùm", "dùm", "cho mình", "xem nào", "phân tích thêm"
+    const conversationalStopWords = [
+      "cho tôi", "giúp tôi", "với", "nha", "nhé", "ạ", "ơi", "hỏi về",
+      "cho biết", "đi", "về", "nào", "coi", "nói về", "hãy",
+      "tìm kiếm thêm thông tin về", "tìm kiếm thêm thông tin", "tìm kiếm thêm", "tra cứu",
+      "xem có nội dung cụ thể", "nội dung cụ thể", "giùm", "dùm", "cho mình", "xem nào", "phân tích thêm"
     ];
 
-    for (const w of stopWords) {
+    for (const w of conversationalStopWords) {
       const regex = new RegExp(`(^|\\s|[,.?!;:])${w.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}(?=\\s|[,.?!;:]|$)`, "gi");
       cleanQ = cleanQ.replace(regex, "$1 ");
     }
@@ -623,30 +622,9 @@ export async function searchRealtimeNews(query: string): Promise<string> {
         snippetQueries.push(`${cleanQ} phát ngôn tuyên bố mới nhất 2026`);
       }
 
-      // Bổ sung các truy vấn chuyên biệt cho tài chính / thị trường để có ngay số liệu niêm yết chuẩn
-      if (/(?:vàng|gold|sjc)/i.test(query)) {
-        snippetQueries.push("giá vàng SJC 9999 hôm nay 2026");
-      }
-      if (/(?:bitcoin|btc|crypto|tiền ảo|tiền điện tử)/i.test(query)) {
-        snippetQueries.push("giá bitcoin hôm nay BTC USD 2026");
-      }
-      if (/(?:chứng khoán|vn-index|cổ phiếu)/i.test(query)) {
-        snippetQueries.push("chứng khoán VN-Index hôm nay");
-      }
-      if (/(?:xăng|dầu|ron 95|e5)/i.test(query)) {
-        snippetQueries.push("giá xăng dầu hôm nay Petrolimex");
-      }
-      if (/(?:ngoại tệ|tỷ giá|usd|đô la)/i.test(query)) {
-        snippetQueries.push("tỷ giá USD Vietcombank hôm nay");
-      }
-      if (/(?:lãi suất|lai suat|vay vốn|tiền gửi|tiết kiệm|big4)/i.test(query)) {
-        snippetQueries.push("bảng lãi suất tiền gửi tiết kiệm Big4 mới nhất hôm nay 2026");
-        snippetQueries.push("lãi suất cho vay mua nhà ngân hàng Big4 mới nhất hôm nay 2026");
-      }
-
-      // Query tiếng Anh nếu cần
+      // Query tiếng Anh nếu cần thiết cho mảng thế giới / AI công nghệ
       if (needEnglishSearch && enQueryStr) {
-        snippetQueries.push(`${enQueryStr} latest statement news`);
+        snippetQueries.push(enQueryStr);
       }
 
       // Chỉ lấy thêm tiêu đề từ mergedItems nếu là câu hỏi tin tức thế giới/chính trị

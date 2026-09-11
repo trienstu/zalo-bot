@@ -1371,8 +1371,8 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `      + Nêu chính xác tỉ số, người ghi bàn, thời gian trận đấu, bảng xếp hạng và nhận định ngắn gọn.\n` +
     `    - KHI HỎI VỀ ĐỊNH NGHĨA / LỊCH SỬ / KHOA HỌC / ĐỜI SỐNG:\n` +
     `      + Giải thích bản chất một cách dễ hiểu, sinh động, chuẩn xác như bách khoa toàn thư.\n` +
-    `    - CẬP NHẬT DỮ KIỆN HÀNH CHÍNH & SỰ KIỆN PHÁP LUẬT MỚI:\n` +
-    `      + BẮT BUỘC ưu tiên dữ liệu mới nhất từ phần 'DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT', không bám vào số liệu cũ trong trí nhớ đã lỗi thời (ví dụ: Thành phố Huế đã chính thức là Thành phố trực thuộc Trung ương từ 01/01/2025 theo Nghị quyết 175/2024/QH15 của Quốc hội; các nghị quyết sáp nhập/sắp xếp đơn vị hành chính mới). Phải giải thích rõ ràng và cập nhật số liệu mới nhất cho Sếp/người hỏi!\n`;
+    `    - CẬP NHẬT DỮ KIỆN THỜI GIAN THỰC & PHÁP LUẬT / HÀNH CHÍNH MỚI NHẤT:\n` +
+    `      + BẮT BUỘC ưu tiên dữ liệu mới nhất từ phần 'DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT'. Khi câu hỏi liên quan đến dữ kiện thực tế có tính biến động (chính sách, luật pháp, đơn vị hành chính, giá cả, số liệu): TUYỆT ĐỐI KHÔNG bám vào số liệu cũ trong trí nhớ đã lỗi thời nếu dữ liệu tra cứu cung cấp văn bản, nghị quyết hoặc số liệu mới hơn. Phải giải thích rõ ràng và cập nhật số liệu mới nhất cho Sếp/người hỏi!\n`;
 
   const claimGroundingInstruction =
     `\n13. NGUYÊN TẮC NEO DỮ KIỆN & LỌC SỰ THẬT CÓ NGÀY THÁNG (CLAIM GROUNDING WITH DATES):\n` +
