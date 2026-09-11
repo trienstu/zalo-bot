@@ -94,6 +94,41 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
     return results.slice(0, maxResults);
   }
 
+  // 1.25. Fallback qua Wikipedia Search API nếu DuckDuckGo bị chặn hoặc chưa đủ kết quả
+  if (results.length < maxResults) {
+    try {
+      const wikiUrl = `https://vi.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json`;
+      const wRes = await fetch(wikiUrl, {
+        headers: { "User-Agent": "ZaloBot/2.0 (contact@bahub.vn)" },
+        signal: AbortSignal.timeout(3500),
+      });
+      if (wRes.ok) {
+        const wData = (await wRes.json()) as any;
+        const searchItems = wData?.query?.search || [];
+        for (const it of searchItems.slice(0, maxResults - results.length)) {
+          const rawSnippet = String(it.snippet || "")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/&amp;/g, "&")
+            .replace(/\s+/g, " ")
+            .trim();
+          if (rawSnippet && !results.some((r) => r.title === it.title)) {
+            results.push({
+              title: it.title,
+              snippet: rawSnippet,
+              url: `https://vi.wikipedia.org/wiki/${encodeURIComponent(it.title)}`,
+            });
+          }
+        }
+      }
+    } catch {}
+  }
+
+  if (results.length >= maxResults) {
+    return results.slice(0, maxResults);
+  }
+
   // 1.3. Fallback: VnExpress RSS (Cung cấp tóm tắt bài báo thực tế trong ngày, loại bỏ hoàn toàn Bing vì Bing bị lỗi tin cũ)
   try {
     let vnExpressFeed = "https://vnexpress.net/rss/tin-moi-nhat.rss";
@@ -118,6 +153,15 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
       const xml = await vnRes.text();
       const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
       const queryTokens = query.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+      const STOP_WORDS = new Set([
+        "các", "tại", "cho", "với", "trong", "của", "này", "việt", "nam",
+        "những", "được", "người", "theo", "nhiều", "ngày", "năm", "tháng",
+        "thông", "tin", "xem", "kiểm", "tra", "tổng", "dự", "án", "giúp",
+        "nhé", "nha", "ạ", "em", "anh", "chị", "bác", "về", "lại", "đến",
+        "mình", "hỏi", "đang", "cũng", "như", "nào"
+      ]);
+      const meaningfulTokens = queryTokens.filter((t) => !STOP_WORDS.has(t));
+      const requiredTokens = meaningfulTokens.length > 0 ? meaningfulTokens : queryTokens;
 
       for (const it of items) {
         if (results.length >= maxResults) break;
@@ -144,10 +188,11 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
         const url = lMatch && lMatch[1] ? lMatch[1].trim() : "";
 
         const isGeneral = /^(?:bất động sản|nhà đất|kinh tế|thời sự|tin tức|tin mới|công nghệ|thế giới)/i.test(query.trim());
-        if (!isGeneral && queryTokens.length > 0) {
+        if (!isGeneral && requiredTokens.length > 0) {
           const combined = (title + " " + snippet).toLowerCase();
-          const matches = queryTokens.some((tok) => combined.includes(tok));
-          if (!matches) continue;
+          const matchCount = requiredTokens.filter((tok) => combined.includes(tok)).length;
+          const minMatches = requiredTokens.length >= 3 ? 2 : 1;
+          if (matchCount < minMatches) continue;
         }
 
         let dateStr = "";

@@ -103,16 +103,17 @@ export function detectNewsCategories(query: string): string[] {
   if (/(?:công nghệ|ai\b|mô hình|gpt|gemini|bán dẫn|chip|apple|iphone|macbook|số hóa|deepseek|claude|nintendo|switch)/i.test(query)) {
     cats.push("so-hoa");
   }
-  if (/(?:thế giới|quốc tế|chiến sự|nga|ukraine|mỹ|trung quốc|israel|iran|bầu cử|trump|putin|zelensky|đức|pháp|nhật|hàn|trung đông|centcom)/i.test(query)) {
+  const isVnQuery = /(?:việt nam|tỉnh thành|hành chính|thành phố|thừa thiên|huế|hà nội|đà nẵng|tp\.?\s*hcm|hồ chí minh|sài gòn|cần thơ|hải phòng|bắc ninh|quảng ninh|đồng nai)/i.test(query);
+  if (!isVnQuery && /\b(?:thế giới|quốc tế|chiến sự|nước nga|ukraine|nước mỹ|hoa kỳ|trung quốc|israel|iran|bầu cử|trump|putin|zelensky|nước đức|nước pháp|nhật bản|hàn quốc|triều tiên|trung đông|centcom)\b/i.test(query)) {
     cats.push("the-gioi");
   }
-  if (/(?:thời sự|chính phủ|thủ tướng|bộ|ban hành|nghị định|luật|giao thông|bão|lũ|sạt lở|thiên tai)/i.test(query)) {
+  if (/(?:thời sự|chính phủ|thủ tướng|quốc hội|bộ|ban hành|nghị quyết|nghị định|luật|giao thông|bão|lũ|sạt lở|thiên tai|tỉnh thành|hành chính)/i.test(query)) {
     cats.push("thoi-su");
   }
   if (/(?:crypto|bitcoin|btc|eth|solana|binance|tiền ảo|tiền điện tử|blockchain|web3)/i.test(query)) {
     cats.push("crypto");
   }
-  if (cats.length === 0) {
+  if (cats.length === 0 && /(?:tin tức|tin mới|hôm nay|24h|nóng|thời sự)/i.test(query)) {
     cats.push("tin-moi-nhat");
   }
   return cats;
@@ -280,6 +281,17 @@ async function fetchGoogleNewsRss(keyword: string, lang: "vi" | "en" = "vi"): Pr
       const itemBlocks = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
       const now = Date.now();
 
+      const STOP_WORDS = new Set([
+        "các", "tại", "cho", "với", "trong", "của", "này", "việt", "nam",
+        "những", "được", "người", "theo", "nhiều", "ngày", "năm", "tháng",
+        "thông", "tin", "xem", "kiểm", "tra", "tổng", "dự", "án", "giúp",
+        "nhé", "nha", "ạ", "em", "anh", "chị", "bác", "về", "lại", "đến",
+        "cho", "mình", "hỏi", "đang", "cũng", "như", "nào", "hôm", "nay", "mới", "nhất"
+      ]);
+      const rawTokens = keyword.toLowerCase().split(/\s+/).filter((t) => t.length > 1);
+      const meaningfulTokens = rawTokens.filter((t) => !STOP_WORDS.has(t));
+      const filterTokens = meaningfulTokens.length > 0 ? meaningfulTokens : rawTokens;
+
       return itemBlocks
         .map((block) => {
           const content = block[1] || "";
@@ -314,7 +326,12 @@ async function fetchGoogleNewsRss(keyword: string, lang: "vi" | "en" = "vi"): Pr
 
           return { title, timeLabel, timestamp, ageHours };
         })
-        .filter((it) => it.title.length > 0);
+        .filter((it) => {
+          if (it.title.length === 0) return false;
+          if (filterTokens.length === 0) return true;
+          const full = it.title.toLowerCase();
+          return filterTokens.some((tok) => full.includes(tok));
+        });
     } catch {
       if (attempt === 0) continue;
       return [];
@@ -328,24 +345,29 @@ async function fetchGoogleNewsRss(keyword: string, lang: "vi" | "en" = "vi"): Pr
  */
 async function fetchWikipediaSummary(query: string): Promise<string> {
   try {
-    const searchUrl = `https://vi.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(query)}&limit=1&namespace=0&format=json`;
+    const searchUrl = `https://vi.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json`;
     const res = await fetch(searchUrl, {
       headers: { "User-Agent": "ZaloBotEncyclopedia/1.0 (contact@bahub.vn)" },
       signal: AbortSignal.timeout(3000),
     });
     if (!res.ok) return "";
     const data = (await res.json()) as any;
-    if (data && Array.isArray(data[1]) && data[1][0]) {
-      const pageTitle = String(data[1][0]);
-      const summaryUrl = `https://vi.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pageTitle)}`;
+    const searchItems = data?.query?.search || [];
+    if (searchItems.length > 0) {
+      const topTitle = String(searchItems[0].title);
+      const summaryUrl = `https://vi.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=true&explaintext=true&titles=${encodeURIComponent(topTitle)}&format=json`;
       const sRes = await fetch(summaryUrl, {
         headers: { "User-Agent": "ZaloBotEncyclopedia/1.0 (contact@bahub.vn)" },
         signal: AbortSignal.timeout(3000),
       });
       if (!sRes.ok) return "";
       const sData = (await sRes.json()) as any;
-      if (sData?.extract) {
-        return `📖 DỮ LIỆU TỪ BÁCH KHOA TOÀN THƯ WIKIPEDIA (${sData.title}):\n"${sData.extract.slice(0, 700)}"\n`;
+      const pages = sData?.query?.pages;
+      if (pages) {
+        const page = Object.values(pages)[0] as any;
+        if (page?.extract) {
+          return `📖 DỮ LIỆU TỪ BÁCH KHOA TOÀN THƯ WIKIPEDIA (${page.title}):\n"${page.extract.slice(0, 700)}"\n`;
+        }
       }
     }
   } catch {}
@@ -539,16 +561,16 @@ export async function searchRealtimeNews(query: string): Promise<string> {
       candidates = await queryNewsPipeline(cleanQ, "", needEnglishSearch, secondaryQ, enQueryStr, categories);
     }
 
-    // 7. Tra cứu song song Bách khoa toàn thư Wikipedia nếu là câu hỏi khái niệm / danh nhân / lịch sử
-    const isEncyclopedia = /(?:ai là|là ai|tiểu sử|nguồn gốc|lịch sử|năm nào|định nghĩa|khái niệm|nguyên lý|hiện tượng|tại sao lại|ý nghĩa của|chiến dịch|nhà văn|tác giả|diễn viên)/i.test(
-      query
-    );
+    // 7. Tra cứu song song Bách khoa toàn thư Wikipedia nếu là câu hỏi khái niệm / danh nhân / lịch sử / địa danh / hành chính
     let wikiText = "";
-    if (isEncyclopedia) {
-      wikiText = await fetchWikipediaSummary(cleanQ);
-    }
-
-    if (candidates.length === 0 && !wikiText) return "";
+    try {
+      const isEncyclopedia = /(?:ai là|là ai|tiểu sử|nguồn gốc|lịch sử|năm nào|định nghĩa|khái niệm|nguyên lý|hiện tượng|tại sao lại|ý nghĩa của|chiến dịch|nhà văn|tác giả|diễn viên|tỉnh thành|thành phố|trung ương|đơn vị hành chính)/i.test(
+        query
+      );
+      if (isEncyclopedia) {
+        wikiText = await fetchWikipediaSummary(cleanQ);
+      }
+    } catch {}
 
     // 7.5. Lọc bỏ các tin lạc đề hoàn toàn không liên quan đến chủ đề đang hỏi (nếu có chuyên mục cụ thể)
     if (categories.includes("bat-dong-san")) {
@@ -592,119 +614,97 @@ export async function searchRealtimeNews(query: string): Promise<string> {
     }
     const mergedItems = Array.from(titleMap.values());
 
-    // 10. Trích xuất trích dẫn nguyên văn & bối cảnh chuyên sâu qua DuckDuckGo Web Search Snippets
+    // 10. Luôn luôn trích xuất dữ liệu web chuyên sâu & bách khoa qua DuckDuckGo Web Search Snippets
     let richSnippetsText = "";
-    const isFinancialQuery = /(?:giá|vàng|sjc|bitcoin|btc|crypto|tiền ảo|tiền điện tử|chứng khoán|vn-index|cổ phiếu|xăng|dầu|ngoại tệ|tỷ giá|usd|lãi suất)/i.test(
-      query
-    );
-    const needsDeepSnippets =
-      isWorldPolitics ||
-      isTechAI ||
-      isFinancialQuery ||
-      /(?:phát ngôn|phát biểu|tuyên bố|nói gì|đánh giá|nhận định|chi tiết|nguyên văn|lý do|tại sao|vụ việc|bê bối|scandal|hôm nay|24h|mới nhất|tình hình|diễn biến)/i.test(
-        query
-      );
+    try {
+      const snippetQueries: string[] = [cleanQ];
 
-    if (needsDeepSnippets) {
-      try {
-        const snippetQueries: string[] = [];
+      if (isWorldPolitics) {
+        snippetQueries.push(`${cleanQ} phát ngôn tuyên bố mới nhất 2026`);
+      }
 
-        // Query 1: Từ khóa chính hoặc phát ngôn mới nhất (tiếng Việt)
-        if (isWorldPolitics) {
-          snippetQueries.push(`${cleanQ} phát ngôn tuyên bố mới nhất 2026`);
-        } else {
-          snippetQueries.push(cleanQ);
-        }
+      // Bổ sung các truy vấn chuyên biệt cho tài chính / thị trường để có ngay số liệu niêm yết chuẩn
+      if (/(?:vàng|gold|sjc)/i.test(query)) {
+        snippetQueries.push("giá vàng SJC 9999 hôm nay 2026");
+      }
+      if (/(?:bitcoin|btc|crypto|tiền ảo|tiền điện tử)/i.test(query)) {
+        snippetQueries.push("giá bitcoin hôm nay BTC USD 2026");
+      }
+      if (/(?:chứng khoán|vn-index|cổ phiếu)/i.test(query)) {
+        snippetQueries.push("chứng khoán VN-Index hôm nay");
+      }
+      if (/(?:xăng|dầu|ron 95|e5)/i.test(query)) {
+        snippetQueries.push("giá xăng dầu hôm nay Petrolimex");
+      }
+      if (/(?:ngoại tệ|tỷ giá|usd|đô la)/i.test(query)) {
+        snippetQueries.push("tỷ giá USD Vietcombank hôm nay");
+      }
+      if (/(?:lãi suất|lai suat|vay vốn|tiền gửi|tiết kiệm|big4)/i.test(query)) {
+        snippetQueries.push("bảng lãi suất tiền gửi tiết kiệm Big4 mới nhất hôm nay 2026");
+        snippetQueries.push("lãi suất cho vay mua nhà ngân hàng Big4 mới nhất hôm nay 2026");
+      }
 
-        // Bổ sung các truy vấn chuyên biệt cho tài chính / thị trường để có ngay số liệu niêm yết chuẩn
-        if (/(?:vàng|gold|sjc)/i.test(query)) {
-          snippetQueries.push("giá vàng SJC 9999 hôm nay 2026");
-        }
-        if (/(?:bitcoin|btc|crypto|tiền ảo|tiền điện tử)/i.test(query)) {
-          snippetQueries.push("giá bitcoin hôm nay BTC USD 2026");
-        }
-        if (/(?:chứng khoán|vn-index|cổ phiếu)/i.test(query)) {
-          snippetQueries.push("chứng khoán VN-Index hôm nay");
-        }
-        if (/(?:xăng|dầu|ron 95|e5)/i.test(query)) {
-          snippetQueries.push("giá xăng dầu hôm nay Petrolimex");
-        }
-        if (/(?:ngoại tệ|tỷ giá|usd|đô la)/i.test(query)) {
-          snippetQueries.push("tỷ giá USD Vietcombank hôm nay");
-        }
-        if (/(?:lãi suất|lai suat|vay vốn|tiền gửi|tiết kiệm|big4)/i.test(query)) {
-          snippetQueries.push("bảng lãi suất tiền gửi tiết kiệm Big4 mới nhất hôm nay 2026");
-          snippetQueries.push("lãi suất cho vay mua nhà ngân hàng Big4 mới nhất hôm nay 2026");
-        }
+      // Query tiếng Anh nếu cần
+      if (needEnglishSearch && enQueryStr) {
+        snippetQueries.push(`${enQueryStr} latest statement news`);
+      }
 
-        // Query tiếng Anh nếu cần
-        if (needEnglishSearch && enQueryStr) {
-          snippetQueries.push(`${enQueryStr} latest statement news`);
-        }
-
-        // Lấy từ các tiêu đề nổi bật nhất trong danh sách bản tin (bỏ tên báo phía sau)
-        for (const item of mergedItems.slice(0, 5)) {
+      // Chỉ lấy thêm tiêu đề từ mergedItems nếu là câu hỏi tin tức thế giới/chính trị
+      if (isWorldPolitics) {
+        for (const item of mergedItems.slice(0, 3)) {
           const rawTitle = item.title.split(/\s*-\s*[^-]+$/)[0]?.trim();
           if (rawTitle && rawTitle.length > 10 && !snippetQueries.some((q) => q.includes(rawTitle.slice(0, 20)))) {
             snippetQueries.push(rawTitle);
-            if (snippetQueries.length >= 5) break;
+            if (snippetQueries.length >= 4) break;
           }
         }
+      }
 
-        const snippetResults = await Promise.allSettled(
-          snippetQueries.map((q) => webSearch(q, 3))
-        );
+      const snippetResults = await Promise.allSettled(
+        snippetQueries.map((q) => webSearch(q, 4))
+      );
 
-        const collectedSnippets: SearchResultItem[] = [];
-        const seenSnippets = new Set<string>();
+      const collectedSnippets: SearchResultItem[] = [];
+      const seenSnippets = new Set<string>();
 
-        for (const res of snippetResults) {
-          if (res.status === "fulfilled" && Array.isArray(res.value)) {
-            for (const item of res.value) {
-              const snippetClean = item.snippet.replace(/\s+/g, " ").trim();
-              if (snippetClean.length > 40 && !seenSnippets.has(snippetClean.slice(0, 50))) {
-                seenSnippets.add(snippetClean.slice(0, 50));
-                collectedSnippets.push({
-                  ...item,
-                  snippet: snippetClean,
-                });
-                if (collectedSnippets.length >= 6) break;
-              }
+      for (const res of snippetResults) {
+        if (res.status === "fulfilled" && Array.isArray(res.value)) {
+          for (const item of res.value) {
+            const snippetClean = item.snippet.replace(/\s+/g, " ").trim();
+            if (snippetClean.length > 25 && !seenSnippets.has(snippetClean.slice(0, 50))) {
+              seenSnippets.add(snippetClean.slice(0, 50));
+              collectedSnippets.push({
+                ...item,
+                snippet: snippetClean,
+              });
+              if (collectedSnippets.length >= 8) break;
             }
           }
-          if (collectedSnippets.length >= 6) break;
         }
-
-        if (collectedSnippets.length > 0) {
-          const snippetLines = collectedSnippets
-            .map((item, idx) => {
-              let domain = "";
-              try {
-                domain = new URL(item.url).hostname.replace(/^www\./, "");
-              } catch {
-                domain = item.url;
-              }
-              return `${idx + 1}. [Nguồn: ${domain} | Tiêu đề: ${item.title}]\n   "${item.snippet}"`;
-            })
-            .join("\n\n");
-
-          richSnippetsText = `🔥 TRÍCH DẪN & DIỄN BIẾN CHI TIẾT TỪ BÁO CHÍ (CHỨA PHÁT NGÔN NGUYÊN VĂN, BỐI CẢNH & NỀN TẢNG):\n${snippetLines}`;
-        }
-      } catch (err) {
-        console.warn("[realtime-search] Lỗi bóc tách snippet:", err);
+        if (collectedSnippets.length >= 8) break;
       }
+
+      if (collectedSnippets.length > 0) {
+        const snippetLines = collectedSnippets
+          .map((item, idx) => {
+            let domain = "";
+            try {
+              domain = new URL(item.url).hostname.replace(/^www\./, "");
+            } catch {
+              domain = item.url;
+            }
+            return `${idx + 1}. [Nguồn: ${domain} | Tiêu đề: ${item.title}]\n   "${item.snippet}"`;
+          })
+          .join("\n\n");
+
+        richSnippetsText = `🔥 TRÍCH DẪN & DỮ LIỆU THỰC TẾ TỪ BÁO CHÍ VÀ VĂN BẢN CHÍNH THỨC:\n${snippetLines}`;
+      }
+    } catch (err) {
+      console.warn("[realtime-search] Lỗi bóc tách snippet:", err);
     }
 
-    // 11. Trả về tổng hợp bao gồm Wikipedia (nếu có), Snippets trích dẫn và danh sách bản tin thời gian thực
-    const newsLines = mergedItems
-      .slice(0, 15)
-      .map((item, idx) => {
-        const snippetPart = item.snippet && item.snippet !== item.title
-          ? `\n   - Tóm tắt diễn biến: ${item.snippet}`
-          : "";
-        return `${idx + 1}. [${item.timeLabel}] ${item.title}${snippetPart}`;
-      })
-      .join("\n\n");
+    // Nếu cả Wikipedia, DuckDuckGo snippets và tin tức đều không có gì: trả về rỗng
+    if (!wikiText && !richSnippetsText && mergedItems.length === 0) return "";
 
     const sections: string[] = [];
 
@@ -720,7 +720,21 @@ export async function searchRealtimeNews(query: string): Promise<string> {
 
     if (wikiText) sections.push(wikiText);
     if (richSnippetsText) sections.push(richSnippetsText);
-    if (newsLines) sections.push(`📰 DANH SÁCH BẢN TIN THỜI SỰ LIÊN QUAN:\n${newsLines}`);
+
+    const isAskingNews = /(?:tin tức|tin mới|hôm nay|24h|nóng|thời sự|vừa xảy ra|diễn biến mới)/i.test(query);
+    if (mergedItems.length > 0 && (isAskingNews || !richSnippetsText)) {
+      const newsLines = mergedItems
+        .slice(0, 10)
+        .map((item, idx) => {
+          const snippetPart =
+            item.snippet && item.snippet !== item.title
+              ? `\n   - Tóm tắt diễn biến: ${item.snippet}`
+              : "";
+          return `${idx + 1}. [${item.timeLabel}] ${item.title}${snippetPart}`;
+        })
+        .join("\n\n");
+      sections.push(`📰 DANH SÁCH BẢN TIN THỜI SỰ LIÊN QUAN:\n${newsLines}`);
+    }
 
     return sections.join("\n\n");
   } catch (e) {
