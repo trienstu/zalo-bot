@@ -1163,9 +1163,14 @@ async function handleHistoryQA(
       `     + Với thực thể/thị trường mở (xe cộ, đồ công nghệ, điện thoại, tài chính, dự án, pháp luật, người nổi tiếng): Phân cụm thực thể chuẩn xác, không đánh đồng hay nhầm lẫn chéo giữa các thương hiệu/hãng. Tận dụng dữ liệu báo chí/tìm kiếm để giải đáp toàn diện, không từ chối trả lời.\n` +
       `   - [NGUYÊN TẮC 2 - ZALO RICH TEXT & MARKDOWN]: Thoải mái dùng Markdown (**in đậm** cho từ khóa/số liệu, [do]đỏ[/do], [xanh]xanh[/xanh], [cam]cam[/cam], gạch đầu dòng '-' hoặc '•') vì hệ thống tự động render màu sắc và kiểu chữ native trên Zalo. Tiết chế icon (tối đa 1-2 icon ở tiêu đề, cấm spam icon ở từng đầu gạch dòng). Bảng biểu dùng Khối thẻ (Card Layout).\n` +
       `   - [NGUYÊN TẮC 3 - ĐỘ DÀI THÍCH ỨNG]: Trả lời đúng trọng tâm câu hỏi quote. Đối soát rõ ràng, ngắn gọn nếu là câu hỏi kiểm tra đúng/sai; phân tích đầy đủ, sâu sắc nếu người dùng hỏi sâu quy trình hay giải thích chi tiết.\n` +
-      `   - [NGUYÊN TẮC 4 - PHONG CÁCH SEN CHÚA]: Xưng 'em' hoặc 'Sen Chúa', gọi người hỏi là 'anh/chị/bác ${displayName}'. Duyên dáng, mặn mà, hóm hỉnh, tôn trọng nhưng cực kỳ uy tín về tri thức. Không xưng 'tôi', không gọi 'bạn'.\n` +
+      `   - [NGUYÊN TẮC 4 - PHONG CÁCH ${botName.toUpperCase()}]: Xưng 'em' hoặc '${botName}', gọi người hỏi là 'anh/chị/bác ${displayName}'. Duyên dáng, mặn mà, hóm hỉnh, tôn trọng nhưng cực kỳ uy tín về tri thức. Không xưng 'tôi', không gọi 'bạn'.\n` +
       `   - [NGUYÊN TẮC 5 - CÔ LẬP DỮ LIỆU & ĐỘ ƯU TIÊN THỜI GIAN THỰC]: Dữ liệu thời gian thực tra cứu được (Live News, Web Search, Bách khoa toàn thư) CÓ ĐỘ ƯU TIÊN CAO NHẤT, ĐÈ LÊN MỌI LẬP LUẬN CŨ TRONG LỊCH SỬ CHAT VÀ DỮ LIỆU LỖI THỜI TRONG TRÍ NHỚ. Tuyệt đối không lặp lại số liệu cũ nếu có thông tin mới hơn!\n` +
-      `   - [CẬP NHẬT DỮ KIỆN THỜI GIAN THỰC & PHÁP LUẬT / HÀNH CHÍNH MỚI NHẤT]: BẮT BUỘC ưu tiên dữ liệu mới nhất từ phần 'DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT'. Khi câu hỏi liên quan đến dữ kiện thực tế có tính biến động (chính sách, luật pháp, đơn vị hành chính, giá cả, số liệu): TUYỆT ĐỐI KHÔNG bám vào số liệu cũ trong trí nhớ đã lỗi thời hay câu trả lời cũ trong lịch sử chat nếu dữ liệu tra cứu cung cấp văn bản, nghị quyết hoặc số liệu mới hơn. Phải giải thích rõ ràng và cập nhật số liệu mới nhất cho người hỏi!`;
+      `   - [CẬP NHẬT DỮ KIỆN THỜI GIAN THỰC & PHÁP LUẬT / HÀNH CHÍNH MỚI NHẤT]: BẮT BUỘC ưu tiên dữ liệu mới nhất từ phần 'DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT'. Khi câu hỏi liên quan đến dữ kiện thực tế có tính biến động (chính sách, luật pháp, đơn vị hành chính, giá cả, số liệu): TUYỆT ĐỐI KHÔNG bám vào số liệu cũ trong trí nhớ đã lỗi thời hay câu trả lời cũ trong lịch sử chat nếu dữ liệu tra cứu cung cấp văn bản, nghị quyết hoặc số liệu mới hơn. Phải giải thích rõ ràng và cập nhật số liệu mới nhất cho người hỏi!\n` +
+      `   - [QUY TẮC BẮT BUỘC KHI XUẤT / TẠO FILE TÀI LIỆU (Word .docx, Excel .xlsx, Markdown .md, Text .txt)]:\n` +
+      `     + Khi người dùng yêu cầu tạo file, xuất file Word/Excel/tệp văn bản từ nội dung được trích dẫn (quote) hoặc từ yêu cầu của họ:\n` +
+      `       * BẮT BUỘC PHẢI GỌI CÔNG CỤ (TOOL) 'generate_file' với đầy đủ tham số: fileType ('docx'/'xlsx'/'txt'/'md'), fileName (tên file viết liền không dấu, ví dụ: 'mua_thu_ha_noi'), title (tiêu đề bài viết), content (toàn bộ nội dung văn bản chi tiết đầy đủ lấy từ trích dẫn/yêu cầu).\n` +
+      `       * Sau khi gọi tool thành công, hệ thống máy chủ sẽ tự động đính kèm và gửi file thật lên nhóm Zalo cho người dùng!\n` +
+      `       * TUYỆT ĐỐI CẤM TỰ Ý BỊA ĐẶT TIN NHẮN GIẢ MẠO rằng "em đã xuất xong file", "anh có thể bấm tải file ngay phía trên", "đã đóng gói hoàn tất" khi CHƯA THỰC SỰ GỌI TOOL generate_file! Mọi hành vi tự viết tin nhắn giả vờ đã gửi file mà không gọi tool là hành vi BỊ NGHIÊM CẤM HOÀN TOÀN!`;
 
     let quoteLiveNews = "";
     let isSearchNeeded = false;
@@ -1201,13 +1206,32 @@ async function handleHistoryQA(
       `YÊU CẦU / CÂU HỎI TỪ ${displayName}: ${question || "Hãy giải thích ngắn gọn nội dung này giúp tôi."}\n\n` +
       `HÃY TRẢ LỜI NGAY DỰA TRÊN DỮ LIỆU MỚI NHẤT ĐƯỢC CUNG CẤP:`;
 
+    const isFileGenerationQuery =
+      /(?:tạo|xuất|làm|lưu|gửi|convert|chuyển|viết)\s*(?:thành\s*)?(?:file|tệp)?\s*(?:word|excel|docx|xlsx|doc|sheet|bảng|pdf|txt|md|code)/i.test(question) ||
+      /(?:file|tệp)\s*(?:word|excel|docx|xlsx)/i.test(question) ||
+      /(?:tạo|xuất|làm)\s*(?:file|tệp)/i.test(question);
+
     try {
       let answer = "";
       const isGreetingQuote =
         /^(?:chào|hi|hello|alo|ê|cảm ơn|thanks|ok)\b/i.test(question.trim()) && question.trim().length < 25;
-      if ((isSearchNeeded || Boolean(quoteLiveNews)) && !isGreetingQuote) {
+      if ((isSearchNeeded || Boolean(quoteLiveNews) || isFileGenerationQuery) && !isGreetingQuote) {
         answer = await callGeminiAgentLoop(quoteSystemPrompt, quoteUserPrompt, {
           mediaParts: mediaPart ? [mediaPart] : undefined,
+          onFileGenerated: async (file) => {
+            try {
+              if (options?.api) {
+                await sendGroupFile(
+                  options.api,
+                  threadId,
+                  file.filePath,
+                  `📄 ${botName} đã tạo và gửi file [${file.fileName}] lên nhóm thành công! Bác tải về xem nhé.`,
+                );
+              }
+            } catch (fileErr) {
+              console.warn("[member-assistant] Quote QA sendGroupFile error:", fileErr);
+            }
+          },
         });
       } else {
         answer = await callGemini(quoteSystemPrompt, quoteUserPrompt, {
@@ -1638,6 +1662,9 @@ async function handleHistoryQA(
     `  + TUYỆT ĐỐI KHÔNG chỉ nêu tên giải hoặc giờ đấu chung chung mà thiếu tên 2 đội bóng thi đấu!\n` +
     `  + Trích dẫn nguồn (ví dụ: Nguồn: Lịch thi đấu VietNamNet, VOV cập nhật ngày DD/MM/YYYY).\n` +
     `  + Kết bài bằng 1 câu gợi ý hóm hỉnh hỏi người dùng định theo dõi trận nào hoặc có kèo ruột nào chưa.\n` +
+    `- KHI YÊU CẦU TẠO / XUẤT FILE TÀI LIỆU (Word .docx, Excel .xlsx, Markdown .md, Text .txt, Code):\n` +
+    `  + BẮT BUỘC PHẢI GỌI CÔNG CỤ (TOOL) 'generate_file' với đầy đủ tham số (fileType, fileName, title, content) để hệ thống tạo và gửi file thật lên nhóm Zalo!\n` +
+    `  + TUYỆT ĐỐI CẤM TỰ Ý VIẾT TIN NHẮN GIẢ MẠO rằng "em đã xuất xong file", "anh có thể bấm tải file ngay phía trên", "đã đóng gói hoàn tất" khi CHƯA THỰC SỰ GỌI TOOL generate_file!\n` +
     `- KHI HỎI VỀ KHOA HỌC / ĐỊNH NGHĨA: Nêu thông số chính xác, giải thích sinh động, chuẩn mực bách khoa toàn thư.\n`;
 
   const systemPrompt =
@@ -1709,7 +1736,7 @@ async function handleHistoryQA(
         onFileGenerated: async (file) => {
           try {
             if (options?.api) {
-              await sendGroupFile(options.api, threadId, file.filePath, `📄 Sen Chúa đã tạo file [${file.fileName}] thành công!`);
+              await sendGroupFile(options.api, threadId, file.filePath, `📄 ${botName} đã tạo và gửi file [${file.fileName}] lên nhóm thành công! Bác tải về xem nhé.`);
             }
           } catch (fileErr) {
             console.warn("[member-assistant] sendGroupFile error:", fileErr);
@@ -2397,24 +2424,54 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
-  // 10. Lệnh /hoi [câu hỏi], Tag bot, Nhắc tên Sen Chúa, Chào hỏi, Lệnh đọc file/ảnh
+  // 10. Lệnh /hoi [câu hỏi], Tag bot, Nhắc tên Bot, Chào hỏi, Lệnh đọc file/ảnh
   // QUY TẮC: BOT CHỈ TRẢ LỜI KHI THÀNH VIÊN THỰC SỰ GỌI TÊN HOẶC DÙNG LỆNH CỦA BOT.
   // Tránh việc thành viên chat bình thường/quote với nhau mà bot tự ý xen vào.
   const lowerBotName = botName.toLowerCase();
-  const mentionsBot =
-    lower.includes("@sen chúa") ||
-    lower.includes("@sen chua") ||
-    lower.includes("sen chúa") ||
-    lower.includes("sen chua") ||
-    lower.includes("@senchua") ||
+  const isThisBotSenChua = lowerBotName.includes("sen");
+  const isThisBotMocMien = lowerBotName.includes("miên") || lowerBotName.includes("kevin");
+
+  const isExplicitlyCallingMocMien =
     lower.includes("@mộc miên") ||
     lower.includes("@moc mien") ||
-    lower.includes("mộc miên") ||
-    lower.includes("moc mien") ||
     lower.includes("@kevin") ||
-    lower.includes("kevin") ||
+    lower.startsWith("mộc miên") ||
+    lower.startsWith("moc mien") ||
+    lower.startsWith("miên ơi") ||
+    lower.startsWith("mien oi") ||
+    lower.includes("nhờ miên") ||
+    lower.includes("hỏi miên");
+
+  const isExplicitlyCallingSenChua =
+    lower.includes("@sen chúa") ||
+    lower.includes("@sen chua") ||
+    lower.includes("@senchua") ||
+    lower.startsWith("sen chúa") ||
+    lower.startsWith("sen chua") ||
+    lower.startsWith("sen ơi") ||
+    lower.startsWith("sen oi") ||
+    lower.includes("nhờ sen") ||
+    lower.includes("hỏi sen");
+
+  // Nếu người dùng gọi đích danh Mộc Miên mà bot hiện tại là Sen Chúa -> Bỏ qua, nhường cho Mộc Miên!
+  if (isExplicitlyCallingMocMien && isThisBotSenChua) {
+    console.log(`[member-assistant] ⏭️ Nhường tin nhắn cho Mộc Miên (người dùng gọi đích danh @Mộc Miên)`);
+    return;
+  }
+
+  // Nếu người dùng gọi đích danh Sen Chúa mà bot hiện tại là Mộc Miên -> Bỏ qua, nhường cho Sen Chúa!
+  if (isExplicitlyCallingSenChua && isThisBotMocMien) {
+    console.log(`[member-assistant] ⏭️ Nhường tin nhắn cho Sen Chúa (người dùng gọi đích danh @Sen Chúa)`);
+    return;
+  }
+
+  const mentionsThisBot =
     lower.includes(`@${lowerBotName}`) ||
     lower.includes(lowerBotName) ||
+    (isThisBotSenChua && (lower.includes("@sen chúa") || lower.includes("@sen chua") || lower.includes("sen chúa") || lower.includes("sen chua") || lower.includes("@senchua") || lower.includes("sen ơi") || lower.includes("sen oi") || lower.includes("nhờ sen") || lower.includes("hỏi sen") || lower.includes("cho sen") || lower.startsWith("sen "))) ||
+    (isThisBotMocMien && (lower.includes("@mộc miên") || lower.includes("@moc mien") || lower.includes("mộc miên") || lower.includes("moc mien") || lower.includes("@kevin") || lower.includes("kevin") || lower.includes("miên ơi") || lower.includes("mien oi") || lower.includes("nhờ miên") || lower.includes("hỏi miên") || lower.includes("cho miên") || lower.startsWith("miên ")));
+
+  const mentionsGenericBot =
     lower.includes("@bot") ||
     lower.startsWith("bot ơi") ||
     lower.startsWith("bot oi") ||
@@ -2423,28 +2480,14 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     lower.startsWith("alo bot") ||
     lower.startsWith("hi bot") ||
     lower.startsWith("hello bot") ||
-    lower.startsWith("sen ơi") ||
-    lower.startsWith("sen oi") ||
-    lower.startsWith("miên ơi") ||
-    lower.startsWith("mien oi") ||
     lower.includes("bot ơi") ||
     lower.includes("bot oi") ||
-    lower.includes("sen ơi") ||
-    lower.includes("sen oi") ||
-    lower.includes("miên ơi") ||
-    lower.includes("mien oi") ||
     lower.includes("nhờ bot") ||
-    lower.includes("nhờ sen") ||
-    lower.includes("nhờ miên") ||
     lower.includes("hỏi bot") ||
-    lower.includes("hỏi sen") ||
-    lower.includes("hỏi miên") ||
     lower.includes("cho bot") ||
-    lower.includes("cho sen") ||
-    lower.includes("cho miên") ||
-    lower.startsWith("bot ") ||
-    lower.startsWith("sen ") ||
-    lower.startsWith("miên ");
+    lower.startsWith("bot ");
+
+  const mentionsBot = mentionsThisBot || mentionsGenericBot;
 
   const isDocCommand =
     lower.startsWith("/doc") ||
