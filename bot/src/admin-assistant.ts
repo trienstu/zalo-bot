@@ -1353,9 +1353,6 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       ? (process.env.USER_DIRECT_GEMINI_MODEL?.trim() || "gemini-flash-lite-latest")
       : (process.env.ADMIN_DIRECT_GEMINI_MODEL?.trim() || undefined);
 
-    const isGreetingQuery =
-      /^(?:chào|hi|hello|alo|ê|helo|hế lô|bye|tạm biệt|cảm ơn|thanks|ok|oki|được rồi|thôi|dạ|vâng)\b/i.test(rawText.trim()) &&
-      rawText.trim().length < 30;
     const isSearchDisabled = process.env.DISABLE_SEARCH === "true";
 
     const fullSystemPrompt =
@@ -1366,12 +1363,16 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       encyclopediaInstruction +
       claimGroundingInstruction;
 
-    // 🧠 AGENTIC BRAIN: Mọi câu hỏi thực tế đều được trao toàn quyền Agent Loop với đầy đủ bộ công cụ
-    const isPureShortGreeting = isGreetingQuery && rawText.trim().length < 25;
+    // 🧠 FAST-PATH HOẶC AGENTIC BRAIN:
+    const isFileGenerationQuery =
+      /(?:tạo|xuất|làm|lưu|gửi|convert|chuyển|viết)\s*(?:thành\s*)?(?:file|tệp)?\s*(?:word|excel|docx|xlsx|doc|sheet|bảng|pdf|txt|md|code)/i.test(rawText) ||
+      /(?:file|tệp)\s*(?:word|excel|docx|xlsx)/i.test(rawText) ||
+      /(?:tạo|xuất|làm)\s*(?:file|tệp)/i.test(rawText);
+    const needsAgentLoop = isFileGenerationQuery || /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(rawText);
 
     let answer = "";
-    if (!isPureShortGreeting && !isSearchDisabled) {
-      // 🚀 AGENT LOOP ĐÍCH THỰC (Tự chọn finance_market_lookup, web_search, fetch_url, wiki, HN, arXiv, GitHub, generate_file tối đa 3 vòng)
+    if (needsAgentLoop && !isSearchDisabled) {
+      // 🚀 AGENT LOOP (Chỉ dùng khi cần tạo/xuất file hoặc tải link)
       answer = await callGeminiAgentLoop(fullSystemPrompt, userPrompt, {
         model: chosenModel,
         mediaParts: mediaPart ? [mediaPart] : undefined,
@@ -1384,6 +1385,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         },
       });
     } else {
+      // ⚡ FAST-PATH: Trả lời siêu tốc trong 1 lượt duy nhất (~1 giây)
       answer = await callGemini(fullSystemPrompt, userPrompt, {
         model: chosenModel,
         maxTokens: !isAdmin ? 600 : undefined,
