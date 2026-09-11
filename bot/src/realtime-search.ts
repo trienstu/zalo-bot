@@ -146,7 +146,7 @@ const CATEGORY_FEEDS_REGISTRY: Record<string, FeedSource[]> = {
 
 export function detectNewsCategories(query: string): string[] {
   const cats: string[] = [];
-  if (/(?:bất động sản|nhà đất|chung cư|dự án|đất đai|căn hộ|quy hoạch|mặt bằng|bds|vinhomes|novaland)/i.test(query)) {
+  if (/(?:bất động sản|nhà đất|chung cư|dự án|đất đai|căn hộ|quy hoạch|mặt bằng|bds|shophouse|biệt thự|đất nền|khu đô thị|chủ đầu tư|mở bán|tiến độ|vinhomes|novaland|masterise|gamuda|eaton park|keppel|sun group|ecopark|nam long|đất xanh|hưng thịnh|khang điền)/i.test(query)) {
     cats.push("bat-dong-san");
   }
   if (/(?:kinh doanh|kinh tế|chứng khoán|cổ phiếu|ngân hàng|doanh nghiệp|tài chính|giá vàng|giá xăng|lãi suất|vn-index|thị trường tài chính|fed\b)/i.test(query)) {
