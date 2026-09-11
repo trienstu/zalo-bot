@@ -1064,6 +1064,15 @@ async function handleHistoryQA(
              AND text IS NOT NULL
              AND text != ''
              AND deleted_at IS NULL
+             AND is_self = 0
+             AND LOWER(display_name) NOT LIKE '%sen chúa%'
+             AND LOWER(display_name) NOT LIKE '%sen chua%'
+             AND LOWER(display_name) NOT LIKE '%mộc miên%'
+             AND LOWER(display_name) NOT LIKE '%moc mien%'
+             AND LOWER(display_name) NOT LIKE '%kevin%'
+             AND LOWER(display_name) NOT LIKE 'bot%'
+             AND LOWER(text) NOT LIKE '%sen chúa%'
+             AND LOWER(text) NOT LIKE '%sen chua%'
              AND text NOT LIKE '/%'
              AND text NOT LIKE '!%'
            ORDER BY ts DESC
@@ -1154,7 +1163,8 @@ async function handleHistoryQA(
       `   - [NGUYÊN TẮC 2 - ZALO RICH TEXT & MARKDOWN]: Thoải mái dùng Markdown (**in đậm** cho từ khóa/số liệu, [do]đỏ[/do], [xanh]xanh[/xanh], [cam]cam[/cam], gạch đầu dòng '-' hoặc '•') vì hệ thống tự động render màu sắc và kiểu chữ native trên Zalo. Tiết chế icon (tối đa 1-2 icon ở tiêu đề, cấm spam icon ở từng đầu gạch dòng). Bảng biểu dùng Khối thẻ (Card Layout).\n` +
       `   - [NGUYÊN TẮC 3 - ĐỘ DÀI THÍCH ỨNG]: Trả lời đúng trọng tâm câu hỏi quote. Đối soát rõ ràng, ngắn gọn nếu là câu hỏi kiểm tra đúng/sai; phân tích đầy đủ, sâu sắc nếu người dùng hỏi sâu quy trình hay giải thích chi tiết.\n` +
       `   - [NGUYÊN TẮC 4 - PHONG CÁCH SEN CHÚA]: Xưng 'em' hoặc 'Sen Chúa', gọi người hỏi là 'anh/chị/bác ${displayName}'. Duyên dáng, mặn mà, hóm hỉnh, tôn trọng nhưng cực kỳ uy tín về tri thức. Không xưng 'tôi', không gọi 'bạn'.\n` +
-      `   - [NGUYÊN TẮC 5 - CÔ LẬP DỮ LIỆU]: Không lôi chuyện phiếm nội bộ nhóm vào câu trả lời kiến thức chuyên môn; không chèn lan man tin tức không liên quan trừ khi được yêu cầu.`;
+      `   - [NGUYÊN TẮC 5 - CÔ LẬP DỮ LIỆU & ĐỘ ƯU TIÊN THỜI GIAN THỰC]: Dữ liệu thời gian thực tra cứu được (Live News, Web Search, Bách khoa toàn thư) CÓ ĐỘ ƯU TIÊN CAO NHẤT, ĐÈ LÊN MỌI LẬP LUẬN CŨ TRONG LỊCH SỬ CHAT VÀ DỮ LIỆU LỖI THỜI TRONG TRÍ NHỚ. Tuyệt đối không lặp lại số liệu cũ nếu có thông tin mới hơn!\n` +
+      `   - [CẬP NHẬT DỮ KIỆN THỜI GIAN THỰC & PHÁP LUẬT / HÀNH CHÍNH MỚI NHẤT]: BẮT BUỘC ưu tiên dữ liệu mới nhất từ phần 'DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT'. Khi câu hỏi liên quan đến dữ kiện thực tế có tính biến động (chính sách, luật pháp, đơn vị hành chính, giá cả, số liệu): TUYỆT ĐỐI KHÔNG bám vào số liệu cũ trong trí nhớ đã lỗi thời hay câu trả lời cũ trong lịch sử chat nếu dữ liệu tra cứu cung cấp văn bản, nghị quyết hoặc số liệu mới hơn. Phải giải thích rõ ràng và cập nhật số liệu mới nhất cho người hỏi!`;
 
     let quoteLiveNews = "";
     let isSearchNeeded = false;
@@ -1179,7 +1189,7 @@ async function handleHistoryQA(
     }
 
     const quoteLiveNewsSection = quoteLiveNews
-      ? `\n=== THÔNG TIN BÁO CHÍ TRA CỨU ĐƯỢC TỪ GOOGLE NEWS: ===\n${quoteLiveNews}\n`
+      ? `\n=== DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT: ===\n${quoteLiveNews}\n`
       : "";
 
     const quoteUserPrompt =
@@ -1188,7 +1198,7 @@ async function handleHistoryQA(
       `"${options.quote.text}"\n` +
       `${quoteDocSection}${quoteLiveNewsSection}\n` +
       `YÊU CẦU / CÂU HỎI TỪ ${displayName}: ${question || "Hãy giải thích ngắn gọn nội dung này giúp tôi."}\n\n` +
-      `HÃY TRẢ LỜI NGAY:`;
+      `HÃY TRẢ LỜI NGAY DỰA TRÊN DỮ LIỆU MỚI NHẤT ĐƯỢC CUNG CẤP:`;
 
     try {
       let answer = "";
