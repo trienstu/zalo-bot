@@ -2,7 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { config } from "../config.js";
+import { config, activeBotId, defaultBotName } from "../config.js";
 
 /**
  * Lớp truy cập DB. better-sqlite3 ĐỒNG BỘ (không async). 1 connection chia sẻ.
@@ -1971,7 +1971,7 @@ export function getGroupSettings(groupId: string): GroupSettings {
         `SELECT group_id as groupId, name, total_members as totalMembers, mode,
                 COALESCE(persona, 'humorous') as persona,
                 COALESCE(custom_prompt, '') as customPrompt,
-                COALESCE(bot_name, 'Sen Chúa') as botName,
+                COALESCE(bot_name, '${defaultBotName}') as botName,
                 COALESCE(welcome_msg, '') as welcomeMsg,
                 COALESCE(weather_auto, 0) as weatherAuto,
                 COALESCE(weather_time, '07:00') as weatherTime,
@@ -1991,7 +1991,10 @@ export function getGroupSettings(groupId: string): GroupSettings {
         mode: row.mode || "interactive",
         persona: row.persona || "humorous",
         customPrompt: row.customPrompt || "",
-        botName: row.botName || "Sen Chúa",
+        botName:
+          activeBotId === "bot-2" && (!row.botName || row.botName === "Sen Chúa")
+            ? defaultBotName
+            : (row.botName || defaultBotName),
         welcomeMsg: row.welcomeMsg || "",
         weatherAuto: Boolean(row.weatherAuto),
         weatherTime: row.weatherTime || "07:00",
@@ -2012,7 +2015,7 @@ export function getGroupSettings(groupId: string): GroupSettings {
     mode: "interactive",
     persona: "humorous",
     customPrompt: "",
-    botName: "Sen Chúa",
+    botName: defaultBotName,
     welcomeMsg: "",
     weatherAuto: false,
     weatherTime: "07:00",

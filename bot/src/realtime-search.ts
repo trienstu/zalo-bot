@@ -44,6 +44,7 @@ interface ParsedNewsItem {
   timeLabel: string;
   timestamp: number;
   ageHours: number;
+  url?: string;
 }
 
 export interface FeedSource {
@@ -92,6 +93,8 @@ const CATEGORY_FEEDS_REGISTRY: Record<string, FeedSource[]> = {
     { sourceName: "CoinDesk", url: "https://www.coindesk.com/arc/outboundfeeds/rss/", lang: "en" },
   ],
   "the-thao": [
+    { sourceName: "VietnamNet Thể Thao", url: "https://vietnamnet.vn/rss/the-thao.rss", lang: "vi" },
+    { sourceName: "VOV Thể Thao", url: "https://vov.vn/rss/the-thao.rss", lang: "vi" },
     { sourceName: "VnExpress Thể Thao", url: "https://vnexpress.net/rss/the-thao.rss", lang: "vi" },
     { sourceName: "Tuổi Trẻ Thể Thao", url: "https://tuoitre.vn/rss/the-thao.rss", lang: "vi" },
     { sourceName: "Thanh Niên Thể Thao", url: "https://thanhnien.vn/rss/the-thao.rss", lang: "vi" },
@@ -152,7 +155,7 @@ export function detectNewsCategories(query: string): string[] {
   if (/(?:công nghệ|ai\b|mô hình|gpt|gemini|bán dẫn|chip|apple|iphone|macbook|số hóa|deepseek|claude|nintendo|switch|phần mềm|sora|openai|nvidia)/i.test(query)) {
     cats.push("so-hoa");
   }
-  if (/(?:thể thao|bóng đá|đá banh|lịch thi đấu|kết quả bóng đá|tỉ số|ngoại hạng anh|cúp c1|champions league|la liga|serie a|bundesliga|v-league|u23|world cup|cầu thủ|trận đấu|bảng xếp hạng bóng đá|trận cầu|derby)/i.test(query)) {
+  if (/(?:thể thao|bóng đá|đá banh|trận banh|lịch thi đấu|kết quả bóng đá|tỉ số|ngoại hạng anh|cúp c1|champions league|la liga|serie a|bundesliga|v-league|u23|world cup|cầu thủ|trận đấu|bảng xếp hạng bóng đá|trận cầu|derby)/i.test(query)) {
     cats.push("the-thao");
   }
   if (/(?:ô tô|xe máy|xe hơi|xe điện|vinfast|toyota|honda|hyundai|kia\b|mazda|ford|mercedes|bmw|audi|porsche|tesla|byd|bằng lái|đăng kiểm|giá xe|phạt nguội|môtô|xe tải)/i.test(query)) {
@@ -279,8 +282,14 @@ async function fetchSingleRssFeed(source: FeedSource, timeoutMs = 2500): Promise
         }
       }
 
+      const linkMatch =
+        content.match(/<link[^>]*>([\s\S]*?)<\/link>/i) ||
+        content.match(/<link[^>]*href=["']([^"']+)["']/i);
+      const rawLink = linkMatch ? (linkMatch[1] || linkMatch[2] || "") : "";
+      const url = rawLink ? cleanStr(rawLink) : "";
+
       if (title) {
-        items.push({ title, snippet, timeLabel, timestamp, ageHours });
+        items.push({ title, snippet, timeLabel, timestamp, ageHours, url });
       }
     }
 
@@ -317,6 +326,9 @@ async function fetchMultiSourceRss(category: string, filterKeyword = ""): Promis
     ? filterKeyword.toLowerCase().split(/\s+/).filter((t) => t.length > 2)
     : [];
   const meaningfulTokens = rawTokens.filter((t) => !STOP_WORDS.has(t));
+  if (category === "the-thao" && /(?:banh|bóng đá|lịch thi đấu|trận|kết quả)/i.test(filterKeyword)) {
+    meaningfulTokens.push("bóng đá", "lịch thi đấu", "v-league", "ngoại hạng", "trực tiếp");
+  }
   const filterTokens = meaningfulTokens.length > 0 ? meaningfulTokens : rawTokens;
 
   if (filterTokens.length === 0) {
@@ -397,7 +409,10 @@ async function fetchGoogleNewsRss(keyword: string, lang: "vi" | "en" = "vi"): Pr
             timeLabel = rawDate;
           }
 
-          return { title, timeLabel, timestamp, ageHours };
+          const linkMatch = content.match(/<link>(.*?)<\/link>/i);
+          const url = linkMatch && linkMatch[1] ? linkMatch[1].trim() : "";
+
+          return { title, timeLabel, timestamp, ageHours, url };
         })
         .filter((it) => {
           if (it.title.length === 0) return false;
@@ -442,6 +457,46 @@ async function fetchWikipediaSummary(query: string): Promise<string> {
           return `📖 DỮ LIỆU TỪ BÁCH KHOA TOÀN THƯ WIKIPEDIA (${page.title}):\n"${page.extract.slice(0, 700)}"\n`;
         }
       }
+    }
+  } catch {}
+  return "";
+}
+
+/**
+ * Trích xuất bảng lịch thi đấu & kết quả bóng đá trực tiếp từ bài báo (VietNamNet, 24h, VOV...)
+ */
+async function fetchArticleScheduleTable(url: string): Promise<string> {
+  if (!url || !url.startsWith("http")) return "";
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)",
+      },
+      signal: AbortSignal.timeout(3500),
+    });
+    if (!res.ok) return "";
+    const html = await res.text();
+    const tables = [...html.matchAll(/<table[\s\S]*?<\/table>/gi)];
+    if (tables.length > 0) {
+      let out = "";
+      for (const t of tables) {
+        if (!/(?:trận đấu|v-league|ngoại hạng|la liga|serie a|bundesliga|vs\b|kênh trực tiếp|cúp|bóng đá)/i.test(t[0])) {
+          continue;
+        }
+        const text = t[0]
+          .replace(/<tr[^>]*>/gi, "\n")
+          .replace(/<t[dh][^>]*>/gi, " | ")
+          .replace(/<[^>]+>/g, "")
+          .replace(/&nbsp;/g, " ")
+          .replace(/\n\s*\|\s*\n/g, "\n")
+          .replace(/[ \t]+/g, " ")
+          .trim();
+        if (text.length > 30) {
+          out += text + "\n\n";
+          if (out.length > 1500) break;
+        }
+      }
+      return out.trim();
     }
   } catch {}
   return "";
@@ -605,8 +660,8 @@ export async function searchRealtimeNews(query: string): Promise<string> {
       secondaryQ = `${cleanQ} người chết mất tích thiệt hại`;
     } else if (/(?:giá|vàng|chứng khoán|usd|ngoại tệ|xăng|dầu|bitcoin|crypto|lãi suất|vn-index)/i.test(cleanQ)) {
       secondaryQ = `${cleanQ} giá biến động mới nhất`;
-    } else if (/(?:bóng đá|tỉ số|kết quả|lịch thi đấu|bảng xếp hạng|ngoại hạng anh|c1|champions league|v-league)/i.test(cleanQ)) {
-      secondaryQ = `${cleanQ} kết quả tỉ số bảng xếp hạng`;
+    } else if (/(?:bóng đá|đá banh|trận banh|trận đấu|tỉ số|kết quả|lịch thi đấu|lịch đấu|bảng xếp hạng|ngoại hạng anh|c1|champions league|v-league|la liga|serie a|bundesliga|ligue 1)/i.test(cleanQ)) {
+      secondaryQ = `${cleanQ} lịch thi đấu kết quả bóng đá trực tiếp hôm nay`;
     } else if (/(?:ô tô|xe máy|xe hơi|xe điện|vinfast|toyota|honda|giá xe|đăng kiểm)/i.test(cleanQ)) {
       secondaryQ = `${cleanQ} giá bán thông số đánh giá`;
     } else if (/(?:sức khỏe|y tế|bệnh|thuốc|dịch bệnh|cúm|sốt xuất huyết)/i.test(cleanQ)) {
@@ -824,6 +879,51 @@ export async function searchRealtimeNews(query: string): Promise<string> {
 
     const sections: string[] = [];
 
+    // 10.4. Nếu hỏi về bóng đá / lịch thi đấu, tự động trích xuất bảng lịch thi đấu chi tiết từ bài báo thể thao
+    const isAskingSportsSchedule =
+      categories.includes("the-thao") ||
+      /(?:lịch thi đấu|lịch đấu|trận banh|đá banh|bóng đá|trận đấu|kết quả bóng đá|tỉ số|ngoại hạng anh|v-league|cúp c1|la liga|serie a|bundesliga)/i.test(query);
+
+    if (isAskingSportsSchedule) {
+      const scheduleCandidates = mergedItems.filter(
+        (it) => it.url && /lịch thi đấu|lich-thi-dau|bóng đá hôm nay/i.test(it.title + " " + (it.url || ""))
+      );
+
+      scheduleCandidates.sort((a, b) => {
+        const aToday = /hôm nay|bóng đá hôm nay/i.test(a.title) ? 1 : 0;
+        const bToday = /hôm nay|bóng đá hôm nay/i.test(b.title) ? 1 : 0;
+        return bToday - aToday;
+      });
+
+      let scheduleTable = "";
+      for (const cand of scheduleCandidates) {
+        if (cand.url) {
+          scheduleTable = await fetchArticleScheduleTable(cand.url);
+          if (scheduleTable) {
+            sections.unshift(`⚽ LỊCH THI ĐẤU & CÁC CẶP ĐẤU BÓNG ĐÁ CHI TIẾT (Trích xuất từ ${cand.title}):\n${scheduleTable}`);
+            break;
+          }
+        }
+      }
+
+      if (!scheduleTable) {
+        try {
+          const vnNetFeed = await fetchSingleRssFeed({
+            sourceName: "VietnamNet Thể Thao",
+            url: "https://vietnamnet.vn/rss/the-thao.rss",
+            lang: "vi",
+          });
+          const vnNetSchedule = vnNetFeed.find((it) => /lịch thi đấu/i.test(it.title));
+          if (vnNetSchedule?.url) {
+            scheduleTable = await fetchArticleScheduleTable(vnNetSchedule.url);
+            if (scheduleTable) {
+              sections.unshift(`⚽ LỊCH THI ĐẤU & CÁC CẶP ĐẤU BÓNG ĐÁ CHI TIẾT (Trích xuất từ Báo Thể Thao):\n${scheduleTable}`);
+            }
+          }
+        } catch {}
+      }
+    }
+
     // 10.5. Nếu liên quan đến crypto / tài chính / tỷ giá, tiêm bảng giá trực tiếp Binance
     try {
       const marketSummary = await getFinancialMarketSummary(query);
@@ -837,8 +937,8 @@ export async function searchRealtimeNews(query: string): Promise<string> {
     if (wikiText) sections.push(wikiText);
     if (richSnippetsText) sections.push(richSnippetsText);
 
-    const isAskingNews = /(?:tin tức|tin mới|hôm nay|24h|nóng|thời sự|vừa xảy ra|diễn biến mới)/i.test(query);
-    if (mergedItems.length > 0 && (isAskingNews || !richSnippetsText)) {
+    const isAskingNews = /(?:tin tức|tin mới|hôm nay|24h|nóng|thời sự|vừa xảy ra|diễn biến mới|trận banh|đá banh|bóng đá|thể thao)/i.test(query);
+    if (mergedItems.length > 0 && (isAskingNews || categories.length > 0 || !richSnippetsText)) {
       const newsLines = mergedItems
         .slice(0, 10)
         .map((item, idx) => {

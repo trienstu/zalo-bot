@@ -77,6 +77,7 @@ export function getActiveBotId(): string {
 }
 
 export const activeBotId = getActiveBotId();
+export const defaultBotName = process.env.BOT_NAME?.trim() || (activeBotId === "bot-2" ? "Mộc Miên" : "Sen Chúa");
 
 // Xác định thư mục session và db theo botId một cách thông minh và linh hoạt
 function resolvePaths(bId: string) {

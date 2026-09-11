@@ -32,6 +32,7 @@ import { searchRealtimeNews } from "./realtime-search.js";
 import { refreshDynamicKnowledgeIfExpired, fetchGoogleContent, parseGoogleUrl } from "./google-sync.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
 import { planSearchQueries } from "./query-planner.js";
+import { defaultBotName } from "./config.js";
 
 export interface MemberMessageEvent {
   threadId: string;
@@ -964,7 +965,7 @@ async function handleHistoryQA(
   // để Gemini phản hồi tức thì trong 2-3 giây và không bị ảo giác bởi tài liệu cũ!
   if (mediaPart || fileTextContent) {
     const groupSettings = getGroupSettings(threadId);
-    const botName = groupSettings.botName || "Sen Chúa";
+    const botName = groupSettings.botName || defaultBotName;
 
     let personaIntro = "";
     switch (groupSettings.persona) {
@@ -1051,7 +1052,7 @@ async function handleHistoryQA(
   // để Gemini phản hồi tức thì trong 2-3 giây!
   if (options?.quote?.text && !options?.fileAttachment) {
     const groupSettings = getGroupSettings(threadId);
-    const botName = groupSettings.botName || "Sen Chúa";
+    const botName = groupSettings.botName || defaultBotName;
 
     // 0. Lấy 15 tin nhắn gần nhất trong nhóm để tái hiện trọn vẹn ngữ cảnh hội thoại đa lượt (multi-turn quote chain)
     let recentChatContext = "";
@@ -1532,7 +1533,7 @@ async function handleHistoryQA(
   }
 
   const groupSettings = getGroupSettings(threadId);
-  const botName = groupSettings.botName || "Sen Chúa";
+  const botName = groupSettings.botName || defaultBotName;
 
   let personaIntro = "";
   switch (groupSettings.persona) {
@@ -1630,7 +1631,14 @@ async function handleHistoryQA(
     `  + Nếu hỏi nhiều tài sản cùng lúc: BẮT BUỘC liệt kê đủ tất cả các tài sản được hỏi.\n` +
     `- KHI HỎI VỀ PHÁP LÝ / THỦ TỤC HÀNH CHÍNH (Đất đai, Thuế, Xe cộ, VNeID, Thủ tục):\n` +
     `  + Hướng dẫn dạng checklist từng bước (Bước 1, Bước 2, Bước 3), hồ sơ cần chuẩn bị, nơi nộp và mức phí/phạt quy định.\n` +
-    `- KHI HỎI VỀ THỂ THAO / BÓNG ĐÁ / KHOA HỌC / ĐỊNH NGHĨA: Nêu thông số chính xác, giải thích sinh động, chuẩn mực bách khoa toàn thư.\n`;
+    `- KHI HỎI VỀ BÓNG ĐÁ / THỂ THAO / LỊCH THI ĐẤU (V-League, Ngoại Hạng Anh, Cúp C1, La Liga, Serie A, Bundesliga, Ligue 1...):\n` +
+    `  + BẮT BUỘC liệt kê CHI TIẾT TỪNG CẶP ĐẤU: Định dạng rõ ràng: • [Đội A] vs [Đội B] ([Giờ đấu], [Kênh phát sóng/Truyền hình nếu có]).\n` +
+    `  + Phân mục mạch lạc theo giải đấu (1. Sân cỏ trong nước / 2. Sân cỏ châu Âu...).\n` +
+    `  + Kèm 1-2 câu nhận định điểm nhấn cho trận tâm điểm.\n` +
+    `  + TUYỆT ĐỐI KHÔNG chỉ nêu tên giải hoặc giờ đấu chung chung mà thiếu tên 2 đội bóng thi đấu!\n` +
+    `  + Trích dẫn nguồn (ví dụ: Nguồn: Lịch thi đấu VietNamNet, VOV cập nhật ngày DD/MM/YYYY).\n` +
+    `  + Kết bài bằng 1 câu gợi ý hóm hỉnh hỏi người dùng định theo dõi trận nào hoặc có kèo ruột nào chưa.\n` +
+    `- KHI HỎI VỀ KHOA HỌC / ĐỊNH NGHĨA: Nêu thông số chính xác, giải thích sinh động, chuẩn mực bách khoa toàn thư.\n`;
 
   const systemPrompt =
     `${getSystemTemporalPrompt()}\n\n` +
@@ -1822,7 +1830,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
 
   // 3. TUYỆT ĐỐI BỎ QUA tin nhắn từ tài khoản có tên trùng tên Bot hoặc Bot khác (Sen Chúa, Mộc Miên, Bot):
   const groupSettings = getGroupSettings(threadId);
-  const botName = (groupSettings.botName || "Sen Chúa").trim();
+  const botName = (groupSettings.botName || defaultBotName).trim();
   const lowerName = displayName.toLowerCase();
 
   if (
@@ -1985,7 +1993,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   ) {
     userCooldowns.set(sender, now);
     const groupSettings = getGroupSettings(threadId);
-    const botName = groupSettings.botName || "Sen Chúa";
+    const botName = groupSettings.botName || defaultBotName;
     const customTopic = rawText.replace(/^\/(?:tintuc|!tintuc|bantin|!bantin)\s*/i, "").trim();
     const topic = customTopic || groupSettings.newsTopic || "Trí tuệ nhân tạo (AI), công nghệ mới, mô hình AI mới trên X/Twitter";
 
@@ -2392,12 +2400,21 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   // 10. Lệnh /hoi [câu hỏi], Tag bot, Nhắc tên Sen Chúa, Chào hỏi, Lệnh đọc file/ảnh
   // QUY TẮC: BOT CHỈ TRẢ LỜI KHI THÀNH VIÊN THỰC SỰ GỌI TÊN HOẶC DÙNG LỆNH CỦA BOT.
   // Tránh việc thành viên chat bình thường/quote với nhau mà bot tự ý xen vào.
+  const lowerBotName = botName.toLowerCase();
   const mentionsBot =
     lower.includes("@sen chúa") ||
     lower.includes("@sen chua") ||
     lower.includes("sen chúa") ||
     lower.includes("sen chua") ||
     lower.includes("@senchua") ||
+    lower.includes("@mộc miên") ||
+    lower.includes("@moc mien") ||
+    lower.includes("mộc miên") ||
+    lower.includes("moc mien") ||
+    lower.includes("@kevin") ||
+    lower.includes("kevin") ||
+    lower.includes(`@${lowerBotName}`) ||
+    lower.includes(lowerBotName) ||
     lower.includes("@bot") ||
     lower.startsWith("bot ơi") ||
     lower.startsWith("bot oi") ||
@@ -2408,18 +2425,26 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     lower.startsWith("hello bot") ||
     lower.startsWith("sen ơi") ||
     lower.startsWith("sen oi") ||
+    lower.startsWith("miên ơi") ||
+    lower.startsWith("mien oi") ||
     lower.includes("bot ơi") ||
     lower.includes("bot oi") ||
     lower.includes("sen ơi") ||
     lower.includes("sen oi") ||
+    lower.includes("miên ơi") ||
+    lower.includes("mien oi") ||
     lower.includes("nhờ bot") ||
     lower.includes("nhờ sen") ||
+    lower.includes("nhờ miên") ||
     lower.includes("hỏi bot") ||
     lower.includes("hỏi sen") ||
+    lower.includes("hỏi miên") ||
     lower.includes("cho bot") ||
     lower.includes("cho sen") ||
+    lower.includes("cho miên") ||
     lower.startsWith("bot ") ||
-    lower.startsWith("sen ");
+    lower.startsWith("sen ") ||
+    lower.startsWith("miên ");
 
   const isDocCommand =
     lower.startsWith("/doc") ||
@@ -2601,7 +2626,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         directDocContent,
       });
       const groupSettings = getGroupSettings(threadId);
-      const botName = (groupSettings.botName || "Sen Chúa").trim();
+      const botName = (groupSettings.botName || defaultBotName).trim();
 
       // Chốt chặn an toàn cuối cùng: Không bao giờ gửi phản hồi cho chính tên Bot
       const lowerDisplay = displayName.toLowerCase();
