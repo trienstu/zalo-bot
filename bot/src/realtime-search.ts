@@ -58,6 +58,9 @@ const CATEGORY_FEEDS_REGISTRY: Record<string, FeedSource[]> = {
     { sourceName: "VnExpress", url: "https://vnexpress.net/rss/bat-dong-san.rss", lang: "vi" },
     { sourceName: "CafeF", url: "https://cafef.vn/bat-dong-san.rss", lang: "vi" },
     { sourceName: "VietnamNet", url: "https://vietnamnet.vn/rss/bat-dong-san.rss", lang: "vi" },
+    { sourceName: "VnEconomy BĐS", url: "https://vneconomy.vn/bat-dong-san.rss", lang: "vi" },
+    { sourceName: "Báo Đầu Tư BĐS", url: "https://baodautu.vn/bat-dong-san.rss", lang: "vi" },
+    { sourceName: "Reatimes (Tạp chí BĐS VN)", url: "https://reatimes.vn/rss", lang: "vi" },
   ],
   "kinh-doanh": [
     { sourceName: "VnExpress", url: "https://vnexpress.net/rss/kinh-doanh.rss", lang: "vi" },
@@ -526,6 +529,53 @@ async function fetchArticleScheduleTable(url: string): Promise<string> {
 }
 
 /**
+ * Quét thông tin mở từ Web Search RSS (Bing RSS) phục vụ các dự án BĐS mới, thực thể ngách chưa lên báo lớn
+ */
+async function fetchOpenWebRss(query: string, timeoutMs = 2500): Promise<ParsedNewsItem[]> {
+  try {
+    const bUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}&format=rss`;
+    const res = await fetch(bUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)",
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return [];
+    const xml = await res.text();
+    const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
+    const parsed: ParsedNewsItem[] = [];
+    for (const it of items.slice(0, 6)) {
+      const block = it[1] || "";
+      const tMatch = block.match(/<title>(.*?)<\/title>/i);
+      const dMatch = block.match(/<description>(.*?)<\/description>/i);
+      const lMatch = block.match(/<link>(.*?)<\/link>/i);
+      const title = tMatch && tMatch[1] ? decodeXmlAndHtml(tMatch[1].trim()) : "";
+      const desc = dMatch && dMatch[1] ? decodeXmlAndHtml(dMatch[1].trim().replace(/<[^>]+>/g, " ")) : "";
+      const link = lMatch && lMatch[1] ? lMatch[1].trim() : "";
+      if (title && link) {
+        let domain = "";
+        try {
+          domain = new URL(link).hostname.replace(/^www\./, "");
+        } catch {
+          domain = "Web";
+        }
+        parsed.push({
+          title: `[${domain}] ${title}`,
+          snippet: desc || title,
+          url: link,
+          timeLabel: "Mới nhất",
+          timestamp: Date.now(),
+          ageHours: 1,
+        });
+      }
+    }
+    return parsed;
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Thực hiện tìm kiếm tin tức qua RSS đa nguồn (VnExpress, Tuổi Trẻ, CafeF, Thanh Niên, VietnamNet, The Verge, BBC...) + Google News RSS
  */
 async function queryNewsPipeline(
@@ -566,6 +616,11 @@ async function queryNewsPipeline(
   if (needEnglishSearch && enQueryStr) {
     const enStr = timeFilter ? `${enQueryStr} ${timeFilter}` : enQueryStr;
     fetchPromises.push(fetchGoogleNewsRss(enStr, "en"));
+  }
+
+  // Quét thêm Web Search mở (Bing RSS) nếu là từ khóa cụ thể (đặc biệt hữu ích cho dự án BĐS ngách/mới chưa lên báo lớn)
+  if (!isGeneralCategory && cleanQ.trim().length > 3) {
+    fetchPromises.push(fetchOpenWebRss(cleanQ));
   }
 
   const allResults = (await Promise.all(fetchPromises)).flat();

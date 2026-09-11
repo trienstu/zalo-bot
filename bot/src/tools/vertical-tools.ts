@@ -18,7 +18,13 @@ export interface SearchResultItem {
 export async function webSearch(query: string, maxResults = 5): Promise<SearchResultItem[]> {
   const results: SearchResultItem[] = [];
 
-  const isRealtimeOrSports = /(?:hôm nay|tối nay|sáng nay|chiều nay|mới nhất|vừa xong|24h|lịch thi đấu|tỉ số|kết quả|giá|trực tiếp|bóng đá|thể thao|đá banh|v-league|ngoại hạng anh|c1|champions league|la liga|serie a)/i.test(query);
+  const queryTokens = query
+    .toLowerCase()
+    .replace(/@\S+/g, "")
+    .replace(/\b(?:dự án|bất động sản|nhà đất|chung cư|căn hộ|khu đô thị|thông tin|tin tức|ở đâu|giá bao nhiêu|mới nhất|hôm nay|sen chúa|sen chua|mộc miên|kevin|bot)\b/gi, " ")
+    .replace(/[?.,!/\\-]+/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 3);
 
   // 1.1. Tầng Google News RSS Search (Ưu tiên hàng đầu cho tin tức mới nhất, thể thao, lịch thi đấu, sự kiện thực tế - < 300ms)
   const fetchGoogleNews = async () => {
@@ -40,7 +46,10 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
           const lMatch = block.match(/<link>(.*?)<\/link>/i);
           const rawTitle = tMatch && tMatch[1] ? tMatch[1].trim() : "";
           const rawUrl = lMatch && lMatch[1] ? lMatch[1].trim() : "";
-          if (rawTitle && !results.some((r) => r.title === rawTitle)) {
+
+          // Kiểm tra độ liên quan: nếu có từ khóa định danh riêng, tiêu đề bắt buộc chứa ít nhất 1 từ
+          const isRelevant = queryTokens.length === 0 || queryTokens.some((tok) => rawTitle.toLowerCase().includes(tok));
+          if (rawTitle && isRelevant && !results.some((r) => r.title === rawTitle)) {
             results.push({
               title: rawTitle,
               snippet: rawTitle,
@@ -94,18 +103,45 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
     } catch {}
   };
 
-  if (isRealtimeOrSports) {
-    // Với câu hỏi tin tức/thời gian thực/thể thao: Quét Google News RSS trước, không để Wikipedia lấn át lịch đấu
-    await fetchGoogleNews();
-    if (results.length < maxResults) {
-      await fetchWikipedia();
-    }
-  } else {
-    // Với câu hỏi khái niệm/bách khoa/định nghĩa: Tra cứu Wikipedia trước
+  const fetchBingRss = async () => {
+    try {
+      const bUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}&format=rss`;
+      const bRes = await fetch(bUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)",
+        },
+        signal: AbortSignal.timeout(3000),
+      });
+      if (bRes.ok) {
+        const xml = await bRes.text();
+        const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
+        for (const it of items.slice(0, 5)) {
+          if (results.length >= maxResults) break;
+          const block = it[1] || "";
+          const tMatch = block.match(/<title>(.*?)<\/title>/i);
+          const dMatch = block.match(/<description>(.*?)<\/description>/i);
+          const lMatch = block.match(/<link>(.*?)<\/link>/i);
+          const rawTitle = tMatch && tMatch[1] ? tMatch[1].trim() : "";
+          const rawDesc = dMatch && dMatch[1] ? dMatch[1].trim().replace(/<[^>]+>/g, " ") : "";
+          const rawUrl = lMatch && lMatch[1] ? lMatch[1].trim() : "";
+          if (rawTitle && !results.some((r) => r.title === rawTitle)) {
+            results.push({
+              title: rawTitle,
+              snippet: rawDesc || rawTitle,
+              url: rawUrl,
+            });
+          }
+        }
+      }
+    } catch {}
+  };
+
+  await fetchGoogleNews();
+  if (results.length < maxResults) {
+    await fetchBingRss();
+  }
+  if (results.length < maxResults) {
     await fetchWikipedia();
-    if (results.length < maxResults) {
-      await fetchGoogleNews();
-    }
   }
 
   if (results.length >= maxResults) {
