@@ -108,7 +108,7 @@ export async function planSearchQueries(params: {
     })();
 
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("QUERY_PLANNER_TIMEOUT")), 3500)
+      setTimeout(() => reject(new Error("QUERY_PLANNER_TIMEOUT")), 6500)
     );
 
     const raw = (await Promise.race([plannerPromise, timeoutPromise])) as any;

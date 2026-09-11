@@ -1333,11 +1333,11 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `      + Nếu thông tin chưa có ngày tháng công bố chính thức hoặc chỉ là đồn đoán trên mạng: BẮT BUỘC ghi rõ là "chưa chốt / tin đồn" hoặc "chưa có thông cáo chính thức", tuyệt đối không tự bịa đặt mốc thời gian.\n` +
     `      + Luôn trích dẫn 2-3 nguồn tham khảo uy tín (tên nguồn hoặc link) ở cuối câu trả lời.\n` +
     `\n14. KỸ NĂNG XUẤT TÀI LIỆU THÀNH FILE THẬT (.DOCX, .XLSX, .MD, .TXT):\n` +
-    `    - Khi người dùng yêu cầu "xuất file", "tạo file", "tổng hợp thành file", "lập bảng tính", "soạn hợp đồng", "viết SOP thành file", "báo giá", hoặc muốn nhận tài liệu dạng file đính kèm:\n` +
-    `      + BẮT BUỘC GỌI CÔNG CỤ 'generate_file' để tạo file thực tế.\n` +
-    `      + Với báo cáo, SOP, đề xuất, hợp đồng, tài liệu dài: Chọn fileType="docx" hoặc "md", truyền đầy đủ nội dung chi tiết trong 'content'.\n` +
-    `      + Với bảng tính, báo giá, chấm công, số liệu: Chọn fileType="xlsx", cung cấp excelHeaders và excelRows (có thể chứa công thức tính như =SUM(...)).\n` +
-    `      + Sau khi gọi công cụ, hệ thống sẽ tự động gửi file đính kèm trực tiếp vào Zalo. Hãy viết lời nhắn xác nhận ngắn gọn và tóm tắt nội dung file cho người dùng.\n` +
+    `    - QUY TẮC CÔNG CỤ generate_file: CHỈ GỌI CÔNG CỤ 'generate_file' khi người dùng có YÊU CẦU CỤ THỂ VỀ NỘI DUNG để tạo/xuất file (ví dụ: "soạn cho anh hợp đồng...", "tạo file docx quy trình...", "xuất bảng tính chi phí ra excel...").\n` +
+    `    - TUYỆT ĐỐI CẤM TỰ Ý TẠO FILE khi người dùng chỉ hỏi thăm năng lực (ví dụ: "em biết tạo file docx không?", "bot có tạo file được không?"). Với câu hỏi hỏi thăm năng lực, CHỈ trả lời bằng lời nói giải thích năng lực và mời người dùng cung cấp nội dung cần tạo. Tuyệt đối cấm tạo file rỗng tự chế!\n` +
+    `    - Với báo cáo, SOP, đề xuất, hợp đồng, tài liệu dài: Chọn fileType="docx" hoặc "md", truyền đầy đủ nội dung chi tiết trong 'content'.\n` +
+    `    - Với bảng tính, báo giá, chấm công, số liệu: Chọn fileType="xlsx", cung cấp excelHeaders và excelRows (có thể chứa công thức tính như =SUM(...)).\n` +
+    `    - Sau khi gọi công cụ, hệ thống sẽ tự động gửi file đính kèm trực tiếp vào Zalo. Hãy viết lời nhắn xác nhận ngắn gọn và tóm tắt nội dung file cho người dùng.\n` +
     `\n15. TỐI ƯU TỐC ĐỘ PHẢN HỒI (AGENT SPEED OPTIMIZATION):\n` +
     `    - Nếu trong phần [DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT] hoặc context bên dưới đã có đầy đủ thông tin/tin tức/số liệu để trả lời câu hỏi, bạn PHẢI TẬP TRUNG TRẢ LỜI NGAY TRONG VÒNG ĐẦU TIÊN, TUYỆT ĐỐI KHÔNG GỌI THÊM CÔNG CỤ TÌM KIẾM (web_search) LẶP LẠI để tránh làm chậm thời gian phản hồi của người dùng!\n` +
     `    - Chỉ gọi công cụ (finance_market_lookup, web_search, generate_file, fetch_url) KHI dữ liệu cung cấp chưa có hoặc người dùng yêu cầu rõ việc tra cứu/tạo file.\n`;

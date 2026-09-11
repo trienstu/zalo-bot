@@ -559,7 +559,7 @@ const AGENT_TOOLS_DECLARATION = {
     },
     {
       name: "generate_file",
-      description: "Tạo và xuất file tài liệu thực tế (Word .docx, Excel .xlsx, Markdown .md, Text .txt, Code .py/.js/.sh) khi người dùng yêu cầu soạn thảo văn bản, báo cáo, SOP, hợp đồng, bảng tính, báo giá, hoặc tổng hợp thành file gửi vào Zalo.",
+      description: "Tạo và xuất file tài liệu thực tế (Word .docx, Excel .xlsx, Markdown .md, Text .txt, Code .py/.js/.sh) khi người dùng RA LỆNH VÀ CÓ NỘI DUNG CỤ THỂ để soạn thảo văn bản, báo cáo, SOP, hợp đồng, bảng tính, báo giá. LƯU Ý QUAN TRỌNG: TUYỆT ĐỐI KHÔNG ĐƯỢC GỌI công cụ này khi người dùng chỉ đang hỏi thăm năng lực/tính năng (ví dụ: 'em biết tạo file docx không?', 'bot có xuất được file excel không?'). Với câu hỏi hỏi thăm năng lực, CHỈ trả lời bình thường bằng văn bản để giải thích và hướng dẫn người dùng cung cấp đề bài.",
       parameters: {
         type: "OBJECT",
         properties: {
