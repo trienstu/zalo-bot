@@ -1043,7 +1043,7 @@ async function handleHistoryQA(
       return answer;
     } catch (e) {
       console.warn("[member-assistant] Fast-path Gemini QA error:", e);
-      return `Dạ em Sen Chúa có nhận được ảnh/file của bác ${displayName} rồi nè, nhưng vừa phân tích nửa chừng thì bị nghẽn mạng một nhịp 😄! Bác gõ lại câu hỏi hoặc gửi lại để em soi kỹ lại lần nữa nhé!`;
+      return `Dạ em ${botName} có nhận được ảnh/file của bác ${displayName} rồi nè, nhưng vừa phân tích nửa chừng thì bị nghẽn mạng một nhịp 😄! Bác gõ lại câu hỏi hoặc gửi lại để em soi kỹ lại lần nữa nhé!`;
     }
   }
 
@@ -1674,7 +1674,7 @@ async function handleHistoryQA(
     `1. NGUYÊN TẮC 1: DUAL GROUNDING ĐA LĨNH VỰC (STRICT FACT VS OPEN KNOWLEDGE)\n` +
     `   - [A. DỮ LIỆU ĐÓNG NỘI BỘ (File đính kèm, Link Google Doc/Sheet, Hợp đồng, Chính sách, SOP, Bảng biểu)]:\n` +
     `     + BẮT BUỘC 100% số liệu, điều khoản, tỷ lệ %, mốc thời gian PHẢI trích xuất chính xác từ văn bản được cung cấp.\n` +
-    `     + TUYỆT ĐỐI KHÔNG BỊA ĐẶT hay suy diễn ra ngoài văn bản. Nếu tài liệu không có: Trả lời thẳng thắn "Trong tài liệu hiện tại không đề cập nội dung này. Sen Chúa không tự đoán mò."\n` +
+    `     + TUYỆT ĐỐI KHÔNG BỊA ĐẶT hay suy diễn ra ngoài văn bản. Nếu tài liệu không có: Trả lời thẳng thắn "Trong tài liệu hiện tại không đề cập nội dung này. ${botName} không tự đoán mò."\n` +
     `     + Liệt kê đầy đủ các phương án trong tài liệu, không tự ý bỏ sót.\n` +
     `   - [B. DỮ LIỆU MỞ THỊ TRƯỜNG (Xe cộ, Công nghệ, Điện thoại, Chủ đầu tư/Doanh nghiệp, Tài chính, Pháp luật, Đời sống)]:\n` +
     `     + PHÂN CỤM THỰC THỂ CHUẨN XÁC: Phân định rõ ràng ranh giới thương hiệu, dòng sản phẩm, phiên bản/thế hệ (quy đúng các biến thể hoặc dự án con về đúng tập đoàn chủ quản; tuyệt đối không gán nhầm sang thương hiệu khác).\n` +
@@ -1689,8 +1689,8 @@ async function handleHistoryQA(
     `3. NGUYÊN TẮC 3: ĐỘ DÀI THÍCH ỨNG THEO NGỮ CẢNH (ADAPTIVE DEPTH & LENGTH)\n` +
     `   - Giao lưu, chào hỏi, tấu hài, thắc mắc đơn giản: Trả lời ngắn gọn, súc tích, duyên dáng trong 2-3 đoạn ngắn (300-500 ký tự) để đọc nhanh trên điện thoại.\n` +
     `   - Câu hỏi phân tích chuyên sâu, kỹ thuật, pháp lý, quy trình từng bước, tổng hợp tin tức nóng: Trình bày bài bản, sâu sắc, có cấu trúc rõ ràng từng phần. Hệ thống tự động phân tách mượt mà nếu vượt quá giới hạn ký tự.\n\n` +
-    `4. NGUYÊN TẮC 4: PHONG CÁCH SEN CHÚA & GIAO TIẾP TỰ NHIÊN (PERSONA & VOICE)\n` +
-    `   - Xưng 'em' hoặc 'Sen Chúa', gọi người hỏi là 'anh/chị/bác ${displayName}'.\n` +
+    `4. NGUYÊN TẮC 4: PHONG CÁCH ${botName.toUpperCase()} & GIAO TIẾP TỰ NHIÊN (PERSONA & VOICE)\n` +
+    `   - Xưng 'em' hoặc '${botName}', gọi người hỏi là 'anh/chị/bác ${displayName}'.\n` +
     `   - Giọng điệu thông minh, hóm hỉnh, mặn mà, lịch thiệp, tôn trọng cộng đồng nhưng chuẩn xác và đáng tin cậy tuyệt đối khi cung cấp kiến thức/số liệu.\n` +
     `   - CẤM xưng 'tôi', CẤM gọi người dùng là 'bạn', CẤM nói giọng robot hành chính khô khan.\n\n` +
     `5. NGUYÊN TẮC 5: CÔ LẬP DỮ LIỆU & CHỐNG LÂY NHIỄM (DATA ISOLATION & INTEGRITY)\n` +
@@ -1768,7 +1768,7 @@ async function handleHistoryQA(
     return answer;
   } catch (e) {
     console.warn("[member-assistant] Gemini QA error:", e);
-    return `Dạ câu hỏi của bác ${displayName} "hack não" quá làm em Sen Chúa bị đứng hình một nhịp 😄! Bác chờ em nạp thêm bình ắc quy hoặc anh em cao thủ trong nhóm ai có bí kíp gì vào chỉ giáo cho bác ${displayName} với nhé!`;
+    return `Dạ câu hỏi của bác ${displayName} "hack não" quá làm em ${botName} bị đứng hình một nhịp 😄! Bác chờ em nạp thêm bình ắc quy hoặc anh em cao thủ trong nhóm ai có bí kíp gì vào chỉ giáo cho bác ${displayName} với nhé!`;
   }
 }
 
@@ -2427,49 +2427,53 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   // 10. Lệnh /hoi [câu hỏi], Tag bot, Nhắc tên Bot, Chào hỏi, Lệnh đọc file/ảnh
   // QUY TẮC: BOT CHỈ TRẢ LỜI KHI THÀNH VIÊN THỰC SỰ GỌI TÊN HOẶC DÙNG LỆNH CỦA BOT.
   // Tránh việc thành viên chat bình thường/quote với nhau mà bot tự ý xen vào.
-  const lowerBotName = botName.toLowerCase();
-  const isThisBotSenChua = lowerBotName.includes("sen");
-  const isThisBotMocMien = lowerBotName.includes("miên") || lowerBotName.includes("kevin");
+  const lowerBotName = botName.toLowerCase().trim();
+  const unaccentedBotName = lowerBotName
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D");
 
-  const isExplicitlyCallingMocMien =
-    lower.includes("@mộc miên") ||
-    lower.includes("@moc mien") ||
-    lower.includes("@kevin") ||
-    lower.startsWith("mộc miên") ||
-    lower.startsWith("moc mien") ||
-    lower.startsWith("miên ơi") ||
-    lower.startsWith("mien oi") ||
-    lower.includes("nhờ miên") ||
-    lower.includes("hỏi miên");
-
-  const isExplicitlyCallingSenChua =
-    lower.includes("@sen chúa") ||
-    lower.includes("@sen chua") ||
-    lower.includes("@senchua") ||
-    lower.startsWith("sen chúa") ||
-    lower.startsWith("sen chua") ||
-    lower.startsWith("sen ơi") ||
-    lower.startsWith("sen oi") ||
-    lower.includes("nhờ sen") ||
-    lower.includes("hỏi sen");
-
-  // Nếu người dùng gọi đích danh Mộc Miên mà bot hiện tại là Sen Chúa -> Bỏ qua, nhường cho Mộc Miên!
-  if (isExplicitlyCallingMocMien && isThisBotSenChua) {
-    console.log(`[member-assistant] ⏭️ Nhường tin nhắn cho Mộc Miên (người dùng gọi đích danh @Mộc Miên)`);
-    return;
-  }
-
-  // Nếu người dùng gọi đích danh Sen Chúa mà bot hiện tại là Mộc Miên -> Bỏ qua, nhường cho Sen Chúa!
-  if (isExplicitlyCallingSenChua && isThisBotMocMien) {
-    console.log(`[member-assistant] ⏭️ Nhường tin nhắn cho Sen Chúa (người dùng gọi đích danh @Sen Chúa)`);
-    return;
-  }
+  // Các từ khóa gọi trực tiếp theo tên bot linh động được cấu hình
+  const botParts = lowerBotName.split(/\s+/).filter((p) => p.length >= 3);
+  const mentionsShortName = botParts.some((part) => {
+    const unacc = part
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/đ/g, "d")
+      .replace(/Đ/g, "D");
+    return (
+      lower.startsWith(`${part} ơi`) ||
+      lower.startsWith(`${unacc} oi`) ||
+      lower.includes(`${part} ơi`) ||
+      lower.includes(`${unacc} oi`) ||
+      lower.includes(`nhờ ${part}`) ||
+      lower.includes(`nhờ ${unacc}`) ||
+      lower.includes(`hỏi ${part}`) ||
+      lower.includes(`hỏi ${unacc}`) ||
+      lower.includes(`cho ${part}`) ||
+      lower.includes(`cho ${unacc}`) ||
+      lower.startsWith(`${part} `) ||
+      lower.startsWith(`${unacc} `)
+    );
+  });
 
   const mentionsThisBot =
     lower.includes(`@${lowerBotName}`) ||
+    lower.includes(`@${unaccentedBotName}`) ||
     lower.includes(lowerBotName) ||
-    (isThisBotSenChua && (lower.includes("@sen chúa") || lower.includes("@sen chua") || lower.includes("sen chúa") || lower.includes("sen chua") || lower.includes("@senchua") || lower.includes("sen ơi") || lower.includes("sen oi") || lower.includes("nhờ sen") || lower.includes("hỏi sen") || lower.includes("cho sen") || lower.startsWith("sen "))) ||
-    (isThisBotMocMien && (lower.includes("@mộc miên") || lower.includes("@moc mien") || lower.includes("mộc miên") || lower.includes("moc mien") || lower.includes("@kevin") || lower.includes("kevin") || lower.includes("miên ơi") || lower.includes("mien oi") || lower.includes("nhờ miên") || lower.includes("hỏi miên") || lower.includes("cho miên") || lower.startsWith("miên ")));
+    lower.includes(unaccentedBotName) ||
+    lower.startsWith(lowerBotName + " ") ||
+    lower.startsWith(unaccentedBotName + " ") ||
+    lower.includes(`${lowerBotName} ơi`) ||
+    lower.includes(`${unaccentedBotName} oi`) ||
+    lower.includes(`nhờ ${lowerBotName}`) ||
+    lower.includes(`nhờ ${unaccentedBotName}`) ||
+    lower.includes(`hỏi ${lowerBotName}`) ||
+    lower.includes(`hỏi ${unaccentedBotName}`) ||
+    lower.includes(`cho ${lowerBotName}`) ||
+    lower.includes(`cho ${unaccentedBotName}`) ||
+    mentionsShortName;
 
   const mentionsGenericBot =
     lower.includes("@bot") ||
@@ -2539,19 +2543,23 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       hasGoogleDocUrl ||
       /\b(?:theo doc|theo tài liệu|tra trong doc|tra trong tài liệu|tra cứu doc|trong doc có|trong tài liệu có|check doc|đối chiếu doc)\b/i.test(rawText);
 
+    const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const botNamePattern = new RegExp(`@?${escapeRegex(botName)}\\b`, "gi");
+    const unaccBotNamePattern = new RegExp(`@?${escapeRegex(unaccentedBotName)}\\b`, "gi");
+
     // Làm sạch câu hỏi
     let question = rawText
       .replace(/^\/(?:doc-strict|doc|docs|tailieu|strict|hoi|dich|docanh|docfile|file|anh)\s*/i, "")
       .replace(/^!(?:doc-strict|doc|docs|tailieu|strict|hoi|dich|docanh|docfile|file|anh)\s*/i, "")
-      .replace(/@(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot)\b/gi, "")
-      .replace(/(?:sen chúa|sen chua|mộc miên|moc mien|kevin)\s*(?:ơi|oi)?,?\s*/gi, "")
+      .replace(botNamePattern, "")
+      .replace(unaccBotNamePattern, "")
       .replace(/@bot\b/gi, "")
       .replace(/@[^\s,!?]+/g, "")
-      .replace(/^(?:bot|sen|admin)\s*(?:ơi|oi)?,?\s*/i, "")
-      .replace(/^(?:chào|chao|alo|hi|hello)\s+(?:bot|sen|em)?,?\s*/i, "")
+      .replace(new RegExp(`^(?:bot|${escapeRegex(lowerBotName)}|${escapeRegex(unaccentedBotName)})\\s*(?:ơi|oi)?,?\\s*`, "i"), "")
+      .replace(new RegExp(`^(?:chào|chao|alo|hi|hello)\\s+(?:bot|${escapeRegex(lowerBotName)}|${escapeRegex(unaccentedBotName)}|em)?,?\\s*`, "i"), "")
       .trim();
 
-    // Loại bỏ tiền tố /doc hoặc doc: còn sót sau khi gọi bot (ví dụ: "sen chúa /doc phương án...")
+    // Loại bỏ tiền tố /doc hoặc doc: còn sót sau khi gọi bot (ví dụ: "bot /doc phương án...")
     question = question.replace(/^\/?(?:doc-strict|doc|docs|tailieu|strict)[:\s]*/i, "").trim();
 
     // Hướng dẫn cú pháp nếu người dùng chỉ gõ /doc mà không có câu hỏi
@@ -2559,7 +2567,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       await sendGroupText(
         api,
         threadId,
-        `🤖 Sen Chúa hướng dẫn tra cứu tài liệu cho @${displayName}:\n\n` +
+        `🤖 ${botName} hướng dẫn tra cứu tài liệu cho @${displayName}:\n\n` +
         `👉 CÚ PHÁP TRA CỨU TÀI LIỆU CHUẨN XÁC 100% (STRICT DOC):\n` +
         `1. Tra cứu theo dự án đã có trong kho:\n` +
         `   /doc [tên_dự_án] [câu hỏi]\n` +
@@ -2567,7 +2575,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         `2. Tra cứu trực tiếp theo link Google Doc / Google Sheet:\n` +
         `   /doc [link] [câu hỏi]\n` +
         `   VD: /doc https://docs.google.com/document/d/... phương án đặc biệt thế nào?\n\n` +
-        `💡 Khi dùng lệnh /doc, Sen Chúa BẮT BUỘC trích xuất 100% từ tài liệu, tuyệt đối không bao giờ tự bịa đặt hay suy diễn ngoài văn bản!`,
+        `💡 Khi dùng lệnh /doc, ${botName} BẮT BUỘC trích xuất 100% từ tài liệu, tuyệt đối không bao giờ tự bịa đặt hay suy diễn ngoài văn bản!`,
       );
       return;
     }
@@ -2608,8 +2616,9 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     const qLower = question.toLowerCase().trim();
     const greetingWords = new Set([
       "alo", "hi", "hello", "chào", "chao", "ơi", "oi", "hey", "test",
-      "alo bot", "bot ơi", "sen ơi", "chào bot", "chào em", "chào bạn",
-      "sen chúa ơi", "sen chua oi", "chào sen", "chao sen", "hi bot", "hello bot"
+      "alo bot", "bot ơi", "chào bot", "chào em", "chào bạn",
+      `${lowerBotName} ơi`, `${unaccentedBotName} oi`, `chào ${lowerBotName}`, `chào ${unaccentedBotName}`,
+      "hi bot", "hello bot"
     ]);
 
     const isGreeting =
@@ -2622,7 +2631,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       await sendGroupText(
         api,
         threadId,
-        `🤖 Dạ Sen Chúa chào ${displayName || "bác"} ạ! Em sẵn sàng hỗ trợ tra cứu thông tin thảo luận trong nhóm, điểm tương tác, đọc hình ảnh, tài liệu (PDF, Word, Excel, Code), dịch thuật và ghi nhớ kiến thức. Bạn cần hỏi gì cứ gõ: /hoi [câu hỏi], gửi file/ảnh kèm câu lệnh hoặc tag @Sen Chúa nhé!`,
+        `🤖 Dạ ${botName} chào ${displayName || "bác"} ạ! Em sẵn sàng hỗ trợ tra cứu thông tin thảo luận trong nhóm, điểm tương tác, đọc hình ảnh, tài liệu (PDF, Word, Excel, Code), dịch thuật và ghi nhớ kiến thức. Bạn cần hỏi gì cứ gõ: /hoi [câu hỏi], gửi file/ảnh kèm câu lệnh hoặc tag @${botName} nhé!`,
       );
       console.log(`[member-assistant] ✅ Đã gửi lời chào cho ${displayName}`);
       return;
@@ -2696,8 +2705,8 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       console.error(`[member-assistant] ❌ Lỗi xử lý câu hỏi:`, err);
       const lowerDisplay = displayName.toLowerCase();
       if (
-        !lowerDisplay.includes("sen chúa") &&
-        !lowerDisplay.includes("mộc miên") &&
+        !lowerDisplay.includes(lowerBotName) &&
+        !lowerDisplay.includes(unaccentedBotName) &&
         lowerDisplay !== "bot"
       ) {
         await sendGroupReplyWithMention(
@@ -2706,7 +2715,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
           botName,
           displayName,
           sender,
-          `Dạ câu hỏi của bác hóc búa quá làm em Sen Chúa xém khét CPU 😄! Bác cho em xin vài giây thở oxy rồi hỏi lại thử xem nè!`,
+          `Dạ câu hỏi của bác hóc búa quá làm em ${botName} xém khét CPU 😄! Bác cho em xin vài giây thở oxy rồi hỏi lại thử xem nè!`,
           { jitter: false, quote: buildQuoteObject(event) },
         );
       }
