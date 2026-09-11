@@ -85,12 +85,17 @@ export async function planSearchQueries(params: {
     `NHIỆM VỤ:\n` +
     `1. Đọc câu hỏi của người dùng, nội dung được trích dẫn (nếu có), và lịch sử thảo luận gần đây (nếu có).\n` +
     `2. Xác định người dùng có cần tra cứu thông tin bên ngoài không (needsSearch: true/false).\n` +
+    `   - ĐẶC BIỆT LƯU Ý: Khi người dùng dùng các từ như "check", "kiểm tra", "nay", "hôm nay", "hiện nay", "thời điểm này", "mới nhất", "bây giờ", "có bao nhiêu", "thay đổi gì", "danh sách", hoặc hỏi về số liệu thực tế, sự kiện, chính sách, đơn vị hành chính, luật pháp, danh mục dự án/doanh nghiệp:\n` +
+    `     => BẮT BUỘC ĐẶT needsSearch: true!\n` +
+    `     Vì các dữ kiện thực tế luôn có thể có cập nhật mới (ví dụ: nghị quyết thành lập thành phố mới, sáp nhập tỉnh thành, quy hoạch mới, dự án mới).\n` +
     `3. Nếu cần tra cứu: BÓC TÁCH TỐI ĐA 2-3 TỪ KHÓA TÌM KIẾM CÔ ĐỌNG (queries) cho từng khía cạnh/sự kiện cụ thể.\n` +
+    `   - Ví dụ người dùng hỏi: "Sen chúa check xem nay ở Việt Nam Có bao nhiêu tỉnh thành":\n` +
+    `     => needsSearch: true, queries: ["số lượng tỉnh thành phố trực thuộc trung ương Việt Nam mới nhất", "Thành phố Huế trực thuộc trung ương"]\n` +
     `   - Ví dụ người dùng hỏi: "check tin thế giới hôm nay và kiểm tra xem Kevin nói Mỹ Iran, thuế Canada và giá vàng đúng chưa":\n` +
-    `     => queries: ["tin tức thế giới nóng nhất hôm nay", "quân sự Mỹ Iran CENTCOM tàu dầu", "giá vàng thế giới hôm nay"]\n` +
-    `   - Ví dụ người dùng quote câu trả lời về dự án Keppel và hỏi "em cho a thông tin chính xác đi":\n` +
-    `     => queries: ["danh sách các dự án Keppel Land tại Việt Nam", "tổng số dự án Keppel Land Việt Nam"]\n` +
-    `   - Từng query phải ngắn gọn, súc tích (dưới 10 từ), tập trung vào thực thể và hành động chính, loại bỏ hoàn toàn các từ rác (hãy, check, xem, giúp, sen chúa...).\n` +
+    `     => needsSearch: true, queries: ["tin tức thế giới nóng nhất hôm nay", "quân sự Mỹ Iran CENTCOM tàu dầu", "giá vàng thế giới hôm nay"]\n` +
+    `   - Ví dụ người dùng hỏi: "tổng hợp cho anh các dự án của Keppel, chỉ nêu đúng số lượng dự án và liệt kê tên các dự án":\n` +
+    `     => needsSearch: true, queries: ["danh sách các dự án Keppel Land tại Việt Nam", "Keppel Land Việt Nam"]\n` +
+    `   - Từng query phải ngắn gọn, súc tích (dưới 10 từ), tập trung vào thực thể và hành động chính, loại bỏ hoàn toàn các từ rác (hãy, check, xem, giúp, sen chúa, cho anh...).\n` +
     `4. Xuất định dạng JSON duy nhất:\n` +
     `{\n` +
     `  "needsSearch": boolean,\n` +

@@ -1558,19 +1558,33 @@ async function handleHistoryQA(
     customPromptSection = `\n=== CHỈ THỊ & NỘI QUY RIÊNG CỦA ADMIN CHO NHÓM NÀY (BẮT BUỘC TUÂN THỦ 100%): ===\n${groupSettings.customPrompt.trim()}\n`;
   }
 
-  // 2.0. Nhận diện câu hỏi cần tra cứu thông tin thời gian thực / lịch sử / bách khoa toàn thư đa lĩnh vực
-  const isRealTimeSearchQuery =
-    /\b\d{1,2}[\/\-\.]\d{1,2}(?:[\/\-\.]\d{2,4})?\b|(?:hôm nay|hiện nay|mới nhất|vừa ra mắt|sắp ra mắt|24h qua|24h|24 giờ|tin tức|tin mới|thời sự|bản tin|thời tiết|có gì mới|mới có gì|vừa xong|gần đây|\bgiá\b|\bcập nhật\b|tiền số|tiền ảo|\bcoin\b|\btoken\b|\bbtc\b|\beth\b|\bbnb\b|\bsol\b|\bxrp\b|\bdoge\b|\baltcoin\b|\bhiện tại\b|\bbây giờ\b|\bthời điểm này\b|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|cập nhật mới|tin nóng|vừa công bố|ra mắt gì|sự kiện|giá vàng|chứng khoán|thị trường|lũ quét|bão số|thiên tai|thế nào rồi|thảm họa|dự án|tổng quan dự án|thông tin về|cho tôi thông tin|tìm hiểu về|ở đâu|giá bao nhiêu|ai là\b|vụ việc\b|vụ án\b|scandal\b|lùm xùm\b|bê bối\b|tiểu sử\b|sự cố\b|nguyên nhân\b|đạo nhái\b|bản quyền\b|phốt\b|drama\b|tìm kiếm thêm|tra cứu|khi nào ra|bao giờ ra|khi nào có|bao giờ có|sắp ra|thời điểm ra mắt|ngày ra mắt|lộ trình|phát hành khi nào|ra chưa|bản mới|giá xăng|tỷ giá|ngoại tệ|lãi suất|vn-index|bitcoin|crypto|bóng đá|tỉ số|kết quả trận|lịch thi đấu|bảng xếp hạng|ngoại hạng anh|premier league|cúp c1|champions league|v-league|chuyển nhượng|luật đất đai|sổ đỏ|vneid|cccd|thủ tục|phạt nguội|thuế tncn|nghị định|thông tư|sân bay long thành|vành đai|cao tốc|quy hoạch|bảng giá đất|so sánh|đối chiếu|khác nhau|con nào hơn|nên dùng con nào|nên mua con nào|đánh giá|review|benchmark|gemini\b|gpt\b|claude\b|deepseek\b|grok\b|llama\b|mistral\b|sora\b|qwen\b|openai\b|anthropic\b|nvidia\b|apple\b|iphone\b|macbook\b|chip\b|bán dẫn\b|trump\b|biden\b|putin\b|harris\b|tập cận bình\b|xi jinping\b|zelensky\b|netanyahu\b|kim jong un\b|phát ngôn\b|phát biểu\b|tuyên bố\b|nói gì\b|chính trị\b|địa chính trị\b|thế giới\b|quốc tế\b|bầu cử\b|tranh cử\b|tổng thống\b|thủ tướng\b|ngoại trưởng\b|nhà trắng\b|white house\b|kremlin\b|lầu năm góc\b|quốc hội mỹ\b|thượng đỉnh\b|hội đàm\b|áp thuế\b|thuế quan\b|trừng phạt\b|cấm vận\b|chiến sự\b|xung đột\b|chiến tranh\b|đình chiến\b|ngừng bắn\b|ukraine\b|israel\b|gaza\b|hamas\b|hezbollah\b|iran\b|houthi\b|nato\b|brics\b|liên hợp quốc\b|là gì\b|là cái gì\b|là con gì\b|thế nào\b|như thế nào\b|ra sao\b|nghĩa là gì\b|astra\b|check|kiểm tra|kiểm chứng|xác thực|đối soát|chính xác chưa|có thật không|đúng không)/i.test(
-      question
-    );
-
+  // 2.0. Đọc hiểu ngữ nghĩa & Lập kế hoạch tra cứu bằng Gemini Flash-Lite (Semantic Query Planner)
   let liveNews = "";
-  if (isRealTimeSearchQuery) {
-    try {
-      liveNews = await searchRealtimeNews(question);
-    } catch (e) {
-      console.warn("[member-assistant] searchRealtimeNews lỗi:", e);
+
+  try {
+    const recentCtx =
+      relevantMessages.length > 0
+        ? relevantMessages
+            .slice(-5)
+            .map((m) => `${m.display_name}: ${m.text}`)
+            .join("\n")
+        : undefined;
+
+    const plan = await planSearchQueries({
+      question,
+      recentContext: recentCtx,
+      displayName,
+    });
+
+    if (plan.needsSearch && plan.queries.length > 0) {
+      console.log(`[member-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(plan.queries)}`);
+      const searchResults = await Promise.all(
+        plan.queries.slice(0, 3).map((q) => searchRealtimeNews(q).catch(() => ""))
+      );
+      liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
     }
+  } catch (e) {
+    console.warn("[member-assistant] planSearchQueries lỗi:", e);
   }
 
   const liveNewsSection = liveNews
@@ -1639,6 +1653,8 @@ async function handleHistoryQA(
     `   - TUYỆT ĐỐI KHÔNG lôi chuyện tán gẫu nội bộ, trêu đùa hay cấu hình bot nhóm vào làm câu trả lời khi thành viên hỏi về kiến thức chuyên môn, khoa học, dự án bên ngoài.\n` +
     `   - Chỉ nhắc đến các thành viên có mặt trong nhóm, tuyệt đối không bịa tên người lạ.\n\n` +
     `NHIỆM VỤ ĐẶC THÙ:\n` +
+    `- TUYỆT ĐỐI CẤM TỰ TIỆN BẺ LÁI SANG BẤT ĐỘNG SẢN HOẶC CHỦ ĐỀ KHÔNG LIÊN QUAN: Khi thành viên hỏi về địa lý, xã hội, khoa học, chính trị, thể thao, công nghệ, lịch sử, đời sống: PHẢI TRẢ LỜI ĐÚNG TRỌNG TÂM, CẤM tự ý suy diễn người hỏi đi du lịch/phượt hay lôi chuyện dự án bất động sản/mua bán nhà đất vào câu trả lời nếu người dùng không hề hỏi về BĐS!\n` +
+    `- KHI CÂU HỎI LÀ TRA CỨU SỰ KIỆN / SỐ LIỆU / DỮ KIỆN THỰC TẾ: Đi thẳng vào câu trả lời và số liệu rõ ràng, không mở bài bằng các câu chào hỏi hay cảm thán sáo rỗng dài dòng làm loãng thông tin.\n` +
     `- KHI HỎI VỀ QUY TRÌNH, HƯỚNG DẪN HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Trích dẫn và diễn giải chi tiết từng bước (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến từ lịch sử chat. Không chỉ đưa mỗi link tài liệu.\n` +
     `- KỸ NĂNG XUẤT TÀI LIỆU THÀNH FILE THẬT (.DOCX, .XLSX, .MD, .TXT): Khi người dùng yêu cầu "xuất file", "tạo file", "lập bảng tính", "soạn hợp đồng": BẮT BUỘC gọi công cụ 'generate_file' (chọn fileType="xlsx" cho bảng tính hoặc "docx"/"md" cho tài liệu). Hệ thống sẽ tự động gửi file đính kèm trực tiếp vào Zalo.\n` +
     `- TỐI ƯU TỐC ĐỘ PHẢN HỒI: Nếu trong dữ liệu thời gian thực hoặc context đã có đủ thông tin để trả lời, PHẢI TẬP TRUNG TRẢ LỜI NGAY, không gọi thêm công cụ tìm kiếm lặp lại để tránh làm chậm phản hồi.\n` +
