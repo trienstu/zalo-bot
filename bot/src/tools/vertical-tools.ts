@@ -18,15 +18,83 @@ export interface SearchResultItem {
 export async function webSearch(query: string, maxResults = 5): Promise<SearchResultItem[]> {
   const results: SearchResultItem[] = [];
 
-  const queryTokens = query
-    .toLowerCase()
-    .replace(/@\S+/g, "")
-    .replace(/\b(?:dự án|bất động sản|nhà đất|chung cư|căn hộ|khu đô thị|thông tin|tin tức|ở đâu|giá bao nhiêu|mới nhất|hôm nay|sen chúa|sen chua|mộc miên|kevin|bot)\b/gi, " ")
-    .replace(/[?.,!/\\-]+/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length >= 3);
+  const seenUrls = new Set<string>();
+  const seenTitles = new Set<string>();
 
-  // 1.1. Tầng Google News RSS Search (Ưu tiên hàng đầu cho tin tức mới nhất, thể thao, lịch thi đấu, sự kiện thực tế - < 300ms)
+  const addResult = (it: SearchResultItem) => {
+    const normTitle = it.title.toLowerCase().replace(/\s+/g, " ").slice(0, 40);
+    if (!seenTitles.has(normTitle) && (!it.url || !seenUrls.has(it.url))) {
+      seenTitles.add(normTitle);
+      if (it.url) seenUrls.add(it.url);
+      results.push(it);
+    }
+  };
+
+  // 1. DuckDuckGo HTML Search (Bóc tách trích đoạn thực tế và giải mã link nguồn gốc)
+  const fetchDuckDuckGo = async () => {
+    try {
+      const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+      const res = await fetch(ddgUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+        signal: AbortSignal.timeout(3000),
+      });
+      if (res.ok) {
+        const html = await res.text();
+        const resultSnippets = [...html.matchAll(/class=\"result__snippet[^\"]*\"[^>]*>([\s\S]*?)<\/(?:a|div)>/gi)];
+        const resultTitles = [...html.matchAll(/class=\"result__a\"[^>]*href=\"([^\"]+)\"[^>]*>([\s\S]*?)<\/a>/gi)];
+        for (let i = 0; i < Math.min(resultTitles.length, resultSnippets.length); i++) {
+          const tMatch = resultTitles[i];
+          const sMatch = resultSnippets[i];
+          if (!tMatch || !sMatch) continue;
+          const rawUrl = tMatch[1] || "";
+          const urlMatch = rawUrl.match(/uddg=([^&]+)/);
+          const realUrl = urlMatch && urlMatch[1] ? decodeURIComponent(urlMatch[1]) : rawUrl;
+          const title = (tMatch[2] || "").replace(/<[^>]+>/g, "").trim();
+          const snippet = (sMatch[1] || "").replace(/<[^>]+>/g, "").trim();
+          if (title && snippet) {
+            addResult({ title, snippet, url: realUrl });
+          }
+        }
+      }
+    } catch {}
+  };
+
+  // 2. Bing RSS Search (Trích xuất mô tả chi tiết từ thẻ description của RSS)
+  const fetchBingRss = async () => {
+    try {
+      const bUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}&format=rss`;
+      const bRes = await fetch(bUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)",
+        },
+        signal: AbortSignal.timeout(2500),
+      });
+      if (bRes.ok) {
+        const xml = await bRes.text();
+        const xmlItems = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
+        for (const it of xmlItems) {
+          const block = it[1] || "";
+          const tMatch = block.match(/<title>(.*?)<\/title>/i);
+          const dMatch = block.match(/<description>(.*?)<\/description>/i);
+          const lMatch = block.match(/<link>(.*?)<\/link>/i);
+          const rawTitle = tMatch && tMatch[1] ? tMatch[1].trim() : "";
+          const rawDesc = dMatch && dMatch[1] ? dMatch[1].trim().replace(/<[^>]+>/g, " ") : "";
+          const rawUrl = lMatch && lMatch[1] ? lMatch[1].trim() : "";
+          if (rawTitle && rawDesc) {
+            addResult({
+              title: rawTitle,
+              snippet: rawDesc,
+              url: rawUrl,
+            });
+          }
+        }
+      }
+    } catch {}
+  };
+
+  // 3. Google News RSS Search (Phục vụ bắt nhịp tiêu đề tin tức sự kiện nóng nhất)
   const fetchGoogleNews = async () => {
     try {
       const gUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=vi&gl=VN&ceid=VN:vi`;
@@ -34,23 +102,19 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
         headers: {
           "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)",
         },
-        signal: AbortSignal.timeout(3000),
+        signal: AbortSignal.timeout(2500),
       });
       if (gRes.ok) {
         const xml = await gRes.text();
-        const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
-        for (const it of items.slice(0, 8)) {
-          if (results.length >= maxResults) break;
+        const xmlItems = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
+        for (const it of xmlItems.slice(0, 6)) {
           const block = it[1] || "";
           const tMatch = block.match(/<title>(.*?)<\/title>/i);
           const lMatch = block.match(/<link>(.*?)<\/link>/i);
           const rawTitle = tMatch && tMatch[1] ? tMatch[1].trim() : "";
           const rawUrl = lMatch && lMatch[1] ? lMatch[1].trim() : "";
-
-          // Kiểm tra độ liên quan: nếu có từ khóa định danh riêng, tiêu đề bắt buộc chứa ít nhất 1 từ
-          const isRelevant = queryTokens.length === 0 || queryTokens.some((tok) => rawTitle.toLowerCase().includes(tok));
-          if (rawTitle && isRelevant && !results.some((r) => r.title === rawTitle)) {
-            results.push({
+          if (rawTitle) {
+            addResult({
               title: rawTitle,
               snippet: rawTitle,
               url: rawUrl,
@@ -61,6 +125,7 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
     } catch {}
   };
 
+  // 4. Wikipedia API Search (Khái niệm, nhân vật, hành chính, địa danh)
   const fetchWikipedia = async () => {
     try {
       let cleanWikiQ = query
@@ -83,7 +148,6 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
         const wData = (await wRes.json()) as any;
         const searchItems = wData?.query?.search || [];
         for (const it of searchItems.slice(0, 3)) {
-          if (results.length >= maxResults) break;
           const rawSnippet = String(it.snippet || "")
             .replace(/<[^>]+>/g, " ")
             .replace(/&quot;/g, '"')
@@ -91,8 +155,8 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
             .replace(/&amp;/g, "&")
             .replace(/\s+/g, " ")
             .trim();
-          if (rawSnippet && !results.some((r) => r.title === it.title)) {
-            results.push({
+          if (rawSnippet) {
+            addResult({
               title: it.title,
               snippet: rawSnippet,
               url: `https://vi.wikipedia.org/wiki/${encodeURIComponent(it.title)}`,
@@ -103,46 +167,20 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
     } catch {}
   };
 
-  const fetchBingRss = async () => {
-    try {
-      const bUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}&format=rss`;
-      const bRes = await fetch(bUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)",
-        },
-        signal: AbortSignal.timeout(3000),
-      });
-      if (bRes.ok) {
-        const xml = await bRes.text();
-        const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
-        for (const it of items.slice(0, 5)) {
-          if (results.length >= maxResults) break;
-          const block = it[1] || "";
-          const tMatch = block.match(/<title>(.*?)<\/title>/i);
-          const dMatch = block.match(/<description>(.*?)<\/description>/i);
-          const lMatch = block.match(/<link>(.*?)<\/link>/i);
-          const rawTitle = tMatch && tMatch[1] ? tMatch[1].trim() : "";
-          const rawDesc = dMatch && dMatch[1] ? dMatch[1].trim().replace(/<[^>]+>/g, " ") : "";
-          const rawUrl = lMatch && lMatch[1] ? lMatch[1].trim() : "";
-          if (rawTitle && !results.some((r) => r.title === rawTitle)) {
-            results.push({
-              title: rawTitle,
-              snippet: rawDesc || rawTitle,
-              url: rawUrl,
-            });
-          }
-        }
-      }
-    } catch {}
-  };
+  // Kích hoạt song song tất cả các kênh tìm kiếm đa nguồn
+  await Promise.allSettled([
+    fetchDuckDuckGo(),
+    fetchBingRss(),
+    fetchGoogleNews(),
+    fetchWikipedia(),
+  ]);
 
-  await fetchGoogleNews();
-  if (results.length < maxResults) {
-    await fetchBingRss();
-  }
-  if (results.length < maxResults) {
-    await fetchWikipedia();
-  }
+  // Sắp xếp thông minh: Ưu tiên mục có đoạn trích chi tiết (snippet khác title, > 25 ký tự)
+  results.sort((a, b) => {
+    const aRich = a.snippet && a.snippet !== a.title && a.snippet.length > 25 ? 1 : 0;
+    const bRich = b.snippet && b.snippet !== b.title && b.snippet.length > 25 ? 1 : 0;
+    return bRich - aRich;
+  });
 
   if (results.length >= maxResults) {
     return results.slice(0, maxResults);

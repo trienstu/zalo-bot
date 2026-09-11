@@ -6,7 +6,7 @@
  * Kết hợp DuckDuckGo Web Search Snippets để bóc tách phát ngôn nguyên văn trong ngoặc kép và bối cảnh sự kiện.
  */
 
-import { webSearch, SearchResultItem } from "./tools/vertical-tools.js";
+import { webSearch, fetchUrl, SearchResultItem } from "./tools/vertical-tools.js";
 import { getFinancialMarketSummary } from "./tools/finance-tools.js";
 
 function decodeXmlAndHtml(str: string): string {
@@ -627,18 +627,20 @@ async function queryNewsPipeline(
   return allResults;
 }
 
-export async function searchRealtimeNews(query: string): Promise<string> {
+export async function searchRealtimeNews(query: string | string[]): Promise<string> {
   try {
+    const rawQuery = Array.isArray(query) ? query.join(" ") : String(query || "");
+
     // 1. Phân loại nhu cầu thời gian từ câu hỏi
     const is24hStrict = /(?:hôm nay|24h|24 giờ|vừa xong|vừa ra mắt|vừa công bố|vừa phát ngôn|vừa tuyên bố|tin nóng|ngay lúc này|trong ngày|sáng nay|trưa nay|chiều nay|tối nay|tỉ số đêm qua|kết quả đêm qua)/i.test(
-      query
+      rawQuery
     );
     const is7dRecent = /(?:gần đây|mới nhất|tuần qua|tuần này|mới đây|dạo này|mới có|mới|tiến độ|diễn biến|hiện tại|thế nào rồi|khi nào ra|bao giờ ra|sắp ra|lộ trình|phát ngôn|phát biểu|tuyên bố|nói gì)/i.test(
-      query
+      rawQuery
     );
 
     // 2. Làm sạch từ khóa tìm kiếm (bảo vệ ranh giới từ để không cắt xén các từ như bitcoin, coin)
-    let cleanQ = (" " + query + " ")
+    let cleanQ = (" " + rawQuery + " ")
       .replace(/@[^\s,!?]+/g, " ")
       .replace(/(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot ơi|bot oi|bot|admin|ad ơi|ad oi|ad|trợ lý|tro ly)/gi, " ")
       .replace(/(?:là gì thế|là gì vậy|là gì nè|là gì|là cái gì|là con gì|thế nào|như thế nào|ra sao|nghĩa là gì|là sao)/gi, " ");
@@ -664,7 +666,7 @@ export async function searchRealtimeNews(query: string): Promise<string> {
 
     // 3. Nhận diện nền tảng mạng xã hội hoặc nhân vật công nghệ
     const isSocialX =
-      /\b(?:trên x|mạng xã hội x|trên twitter|x\.com|twitter)\b/i.test(query) ||
+      /\b(?:trên x|mạng xã hội x|trên twitter|x\.com|twitter)\b/i.test(rawQuery) ||
       /\bx\b/i.test(cleanQ);
 
     if (isSocialX) {
@@ -673,14 +675,14 @@ export async function searchRealtimeNews(query: string): Promise<string> {
     }
 
     // 4. Nhận diện các lĩnh vực đa ngành (AI/Công nghệ, Chính trị/Địa chính trị thế giới, Tài chính, Thể thao, Xe cộ, Khoa học, Pháp lý...)
-    const categories = detectNewsCategories(query);
+    const categories = detectNewsCategories(rawQuery);
 
     const isTechAI = /(?:ai\b|mô hình|gpt|gemini|deepseek|claude|grok|llama|mistral|sora|qwen|openai|anthropic|công nghệ|nvidia|apple|iphone|macbook|chip|bán dẫn|elon musk)/i.test(
-      query
+      rawQuery
     );
 
     const isWorldPolitics = /(?:trump\b|biden\b|putin\b|harris\b|tập cận bình\b|xi jinping\b|zelensky\b|netanyahu\b|macron\b|scholz\b|kim jong un\b|chính trị\b|địa chính trị\b|thế giới\b|quốc tế\b|nhà trắng\b|white house\b|kremlin\b|lầu năm góc\b|pentagon\b|quốc hội mỹ\b|thượng đỉnh\b|bầu cử\b|tranh cử\b|tổng thống\b|thủ tướng\b|ngoại trưởng\b|chiến sự\b|xung đột\b|chiến tranh\b|đình chiến\b|ngừng bắn\b|thuế quan\b|áp thuế\b|trừng phạt\b|cấm vận\b|ukraine\b|nga\b|israel\b|gaza\b|hamas\b|hezbollah\b|iran\b|biển đỏ\b|houthi\b|nato\b|brics\b|liên hợp quốc\b|un\b|g7\b|g20\b|phát ngôn\b|tuyên bố\b|phát biểu\b)/i.test(
-      query
+      rawQuery
     );
 
     const needEnglishSearch =
@@ -787,7 +789,7 @@ export async function searchRealtimeNews(query: string): Promise<string> {
     let wikiText = "";
     try {
       const isEncyclopedia = /(?:ai là|là ai|tiểu sử|nguồn gốc|lịch sử|năm nào|định nghĩa|khái niệm|nguyên lý|hiện tượng|tại sao lại|ý nghĩa của|chiến dịch|nhà văn|tác giả|diễn viên|tỉnh thành|thành phố|trung ương|đơn vị hành chính)/i.test(
-        query
+        rawQuery
       );
       if (isEncyclopedia) {
         wikiText = await fetchWikipediaSummary(cleanQ);
@@ -960,7 +962,7 @@ export async function searchRealtimeNews(query: string): Promise<string> {
     // 10.4. Nếu hỏi về bóng đá / lịch thi đấu, tự động trích xuất bảng lịch thi đấu chi tiết từ bài báo thể thao
     const isAskingSportsSchedule =
       categories.includes("the-thao") ||
-      /(?:lịch thi đấu|lịch đấu|trận banh|đá banh|bóng đá|trận đấu|kết quả bóng đá|tỉ số|ngoại hạng anh|v-league|cúp c1|la liga|serie a|bundesliga)/i.test(query);
+      /(?:lịch thi đấu|lịch đấu|trận banh|đá banh|bóng đá|trận đấu|kết quả bóng đá|tỉ số|ngoại hạng anh|v-league|cúp c1|la liga|serie a|bundesliga)/i.test(rawQuery);
 
     if (isAskingSportsSchedule) {
       const scheduleCandidates = mergedItems.filter(
@@ -968,6 +970,12 @@ export async function searchRealtimeNews(query: string): Promise<string> {
       );
 
       scheduleCandidates.sort((a, b) => {
+        // Ưu tiên bài báo khớp từ khóa cụ thể trong câu hỏi (ví dụ: đội tuyển, việt nam, u23, chelsea, mu...)
+        const qWords = rawQuery.toLowerCase().split(/\s+/).filter((w) => w.length >= 3);
+        const aScore = qWords.filter((w) => a.title.toLowerCase().includes(w)).length;
+        const bScore = qWords.filter((w) => b.title.toLowerCase().includes(w)).length;
+        if (bScore !== aScore) return bScore - aScore;
+
         const aToday = /hôm nay|bóng đá hôm nay/i.test(a.title) ? 1 : 0;
         const bToday = /hôm nay|bóng đá hôm nay/i.test(b.title) ? 1 : 0;
         return bToday - aToday;
@@ -977,6 +985,15 @@ export async function searchRealtimeNews(query: string): Promise<string> {
       for (const cand of scheduleCandidates) {
         if (cand.url) {
           scheduleTable = await fetchArticleScheduleTable(cand.url);
+          if (!scheduleTable && /đội tuyển|quốc gia|asean|world cup|asian cup|u23|lịch thi đấu/i.test(cand.title)) {
+            // Nếu bài viết về đội tuyển/giải đấu không có thẻ <table>, trích xuất đoạn bài viết chi tiết
+            try {
+              const art = await fetchUrl(cand.url, 2500);
+              if (art?.content && art.content.length > 100) {
+                scheduleTable = art.content.slice(0, 1500).replace(/\s+/g, " ").trim();
+              }
+            } catch {}
+          }
           if (scheduleTable) {
             sections.unshift(`⚽ LỊCH THI ĐẤU & CÁC CẶP ĐẤU BÓNG ĐÁ CHI TIẾT (Trích xuất từ ${cand.title}):\n${scheduleTable}`);
             break;
@@ -1004,7 +1021,7 @@ export async function searchRealtimeNews(query: string): Promise<string> {
 
     // 10.5. Nếu liên quan đến crypto / tài chính / tỷ giá, tiêm bảng giá trực tiếp Binance
     try {
-      const marketSummary = await getFinancialMarketSummary(query);
+      const marketSummary = await getFinancialMarketSummary(cleanQ);
       if (marketSummary) {
         sections.push(marketSummary);
       }
@@ -1015,7 +1032,7 @@ export async function searchRealtimeNews(query: string): Promise<string> {
     if (wikiText) sections.push(wikiText);
     if (richSnippetsText) sections.push(richSnippetsText);
 
-    const isAskingNews = /(?:tin tức|tin mới|hôm nay|24h|nóng|thời sự|vừa xảy ra|diễn biến mới|trận banh|đá banh|bóng đá|thể thao)/i.test(query);
+    const isAskingNews = /(?:tin tức|tin mới|hôm nay|24h|nóng|thời sự|vừa xảy ra|diễn biến mới|trận banh|đá banh|bóng đá|thể thao)/i.test(rawQuery);
     if (mergedItems.length > 0 && (isAskingNews || categories.length > 0 || !richSnippetsText)) {
       const newsLines = mergedItems
         .slice(0, 10)
