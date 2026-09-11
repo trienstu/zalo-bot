@@ -160,12 +160,7 @@ async function sendGroupReplyWithMention(
     ];
   }
 
-  if (options?.jitter !== false) {
-    // Jitter delay giả lập người thật: từ 0.8s đến 2.0s tùy độ dài câu trả lời
-    const delay = Math.min(2000, Math.max(800, Math.floor(content.length * 4) + Math.floor(Math.random() * 400)));
-    await sleep(delay);
-  }
-
+  // Bỏ hoàn toàn Jitter delay để gửi tin phản hồi tức thì, không làm mất thời gian người dùng
   // Gửi phần đầu tiên kèm @mention, quote và styles
   await sendGroupText(api, threadId, firstChunk.msg, {
     mentions,
@@ -176,7 +171,7 @@ async function sendGroupReplyWithMention(
   // Gửi các phần tiếp theo nếu nội dung phân tích dài (mỗi phần mang styles độc lập)
   for (let i = 1; i < chunks.length; i++) {
     const nextChunk = chunks[i]!;
-    await sleep(800);
+    await sleep(200);
     await sendGroupText(api, threadId, nextChunk.msg, {
       styles: nextChunk.styles,
     });
@@ -1162,7 +1157,7 @@ async function handleHistoryQA(
       `     + Với dữ liệu đóng nội bộ (file đính kèm, link Google Doc/Sheet, hợp đồng, chính sách, tài liệu): 100% số liệu phải lấy từ văn bản, zero-hallucination. Không tự bịa số liệu hay phương án. Thiếu thì báo thẳng.\n` +
       `     + Với thực thể/thị trường mở (xe cộ, đồ công nghệ, điện thoại, tài chính, dự án, pháp luật, người nổi tiếng): Phân cụm thực thể chuẩn xác, không đánh đồng hay nhầm lẫn chéo giữa các thương hiệu/hãng. Tận dụng dữ liệu báo chí/tìm kiếm để giải đáp toàn diện, không từ chối trả lời.\n` +
       `   - [NGUYÊN TẮC 2 - ZALO RICH TEXT & MARKDOWN]: Thoải mái dùng Markdown (**in đậm** cho từ khóa/số liệu, [do]đỏ[/do], [xanh]xanh[/xanh], [cam]cam[/cam], gạch đầu dòng '-' hoặc '•') vì hệ thống tự động render màu sắc và kiểu chữ native trên Zalo. Tiết chế icon (tối đa 1-2 icon ở tiêu đề, cấm spam icon ở từng đầu gạch dòng). Bảng biểu dùng Khối thẻ (Card Layout).\n` +
-      `   - [NGUYÊN TẮC 3 - ĐỘ DÀI THÍCH ỨNG]: Trả lời đúng trọng tâm câu hỏi quote. Đối soát rõ ràng, ngắn gọn nếu là câu hỏi kiểm tra đúng/sai; phân tích đầy đủ, sâu sắc nếu người dùng hỏi sâu quy trình hay giải thích chi tiết.\n` +
+      `   - [NGUYÊN TẮC 3 - TRẢ LỜI TRỰC TIẾP & GỢI MỞ]: Đi thẳng vào đáp án/kết quả trọng tâm mà người dùng hỏi. TUYỆT ĐỐI KHÔNG thêm thông tin bên lề hay bối cảnh thừa thãi làm dài câu trả lời. Sau khi trả lời trực tiếp xong, BẮT BUỘC kết thúc bằng 1 câu hỏi gợi mở ngắn gọn xem người dùng có muốn hỏi thêm gì nữa không (Ví dụ: "Bác ${displayName} có cần em hỗ trợ thêm chi tiết nào nữa không ạ?").\n` +
       `   - [NGUYÊN TẮC 4 - PHONG CÁCH ${botName.toUpperCase()}]: Xưng 'em' hoặc '${botName}', gọi người hỏi là 'anh/chị/bác ${displayName}'. Duyên dáng, mặn mà, hóm hỉnh, tôn trọng nhưng cực kỳ uy tín về tri thức. Không xưng 'tôi', không gọi 'bạn'.\n` +
       `   - [NGUYÊN TẮC 5 - CÔ LẬP DỮ LIỆU & ĐỘ ƯU TIÊN THỜI GIAN THỰC]: Dữ liệu thời gian thực tra cứu được (Live News, Web Search, Bách khoa toàn thư) CÓ ĐỘ ƯU TIÊN CAO NHẤT, ĐÈ LÊN MỌI LẬP LUẬN CŨ TRONG LỊCH SỬ CHAT VÀ DỮ LIỆU LỖI THỜI TRONG TRÍ NHỚ. Tuyệt đối không lặp lại số liệu cũ nếu có thông tin mới hơn!\n` +
       `   - [CẬP NHẬT DỮ KIỆN THỜI GIAN THỰC & PHÁP LUẬT / HÀNH CHÍNH MỚI NHẤT]: BẮT BUỘC ưu tiên dữ liệu mới nhất từ phần 'DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT'. Khi câu hỏi liên quan đến dữ kiện thực tế có tính biến động (chính sách, luật pháp, đơn vị hành chính, giá cả, số liệu): TUYỆT ĐỐI KHÔNG bám vào số liệu cũ trong trí nhớ đã lỗi thời hay câu trả lời cũ trong lịch sử chat nếu dữ liệu tra cứu cung cấp văn bản, nghị quyết hoặc số liệu mới hơn. Phải giải thích rõ ràng và cập nhật số liệu mới nhất cho người hỏi!\n` +
@@ -1633,39 +1628,19 @@ async function handleHistoryQA(
     `- NGUỒN DỮ LIỆU THỜI GIAN THỰC CÓ ĐỘ ƯU TIÊN CAO NHẤT, đè lên mọi lập luận cũ trong lịch sử chat.\n` +
     `- TUYỆT ĐỐI KHÔNG BỊA ĐẶT HOẶC ĐOÁN MÒ SỐ LIỆU TÀI CHÍNH / GIÁ CẢ / TIN TỨC!\n`;
 
-  const encyclopediaInstruction =
-    `\n=== CHUẨN ĐỊNH DẠNG BÁCH KHOA TOÀN THƯ & CHUYÊN GIA PHÂN TÍCH ===\n` +
-    `- KHI HỎI VỀ THỊ TRƯỜNG / DỰ ÁN / KINH TẾ / TIN TỨC SỰ KIỆN NÓNG:\n` +
-    `  + Trình bày đủ: [TIÊU ĐỀ RÕ RÀNG] kèm [TÓM TẮT DIỄN BIẾN 2-3 CÂU].\n` +
-    `  + Định dạng chuẩn: - **Tên sự kiện / Chủ thể**: [Tóm tắt rõ bản chất: Việc gì đang diễn ra? Tổ chức/doanh nghiệp nào liên quan? Ở đâu? Quy mô/thông số/giá cụ thể? Tác động ra sao?].\n` +
-    `  + CẤM viết lửng lơ, mập mờ thiếu nội dung. Người đọc phải hiểu ngay bản chất mà không cần tìm đọc lại báo!\n` +
-    `- KHI HỎI VỀ CHÍNH TRỊ / THẾ GIỚI / PHÁT NGÔN LÃNH ĐẠO:\n` +
-    `  + Trích xuất phát ngôn/diễn biến mới nhất trong 24h - 7 ngày qua. Đặt câu nói then chốt trong ngoặc kép "..." .\n` +
-    `  + Nêu rõ bối cảnh (họp báo, mạng xã hội X, Truth Social, phát biểu thượng đỉnh, sắc lệnh) và ngày tháng cụ thể.\n` +
-    `  + Trích dẫn nguồn tin ở cuối câu (ví dụ: Nguồn tổng hợp: Reuters, AP, VnExpress, Tuổi Trẻ cập nhật ngày DD/MM/YYYY).\n` +
-    `  + Chủ động kết bài bằng 1 câu hỏi mở gợi ý đào sâu góc nhìn liên quan.\n` +
-    `- KHI HỎI VỀ SẢN PHẨM / CÔNG NGHỆ / TIẾN ĐỘ RA MẮT / THIẾT BỊ / XE CỘ:\n` +
-    `  + Nêu rõ tiến độ & thời điểm phát hành thực tế (bản thử nghiệm/chính thức).\n` +
-    `  + Nếu so sánh đối thủ: Trình bày đa chiều tinh gọn. Mỗi đối thủ gồm 3 ý: - Điểm mạnh nhất | - So sánh tương quan | - Điểm trừ / Lưu ý.\n` +
-    `  + Kết bài luôn có [Tóm lại & Lời khuyên thực chiến].\n` +
-    `- KHI HỎI VỀ TÀI CHÍNH / GIÁ CẢ THỊ TRƯỜNG (Vàng, Xăng, Ngoại tệ, Lãi suất, Crypto, Cổ phiếu):\n` +
-    `  + BẮT BUỘC trích xuất con số niêm yết mới nhất (kèm mốc ngày giờ, đơn vị rõ ràng).\n` +
-    `  + Nêu rõ nguồn niêm yết (SJC, DOJI, Kitco, Binance, CoinGecko, Vietcombank, Petrolimex...).\n` +
-    `  + FACT-GROUNDING TUYỆT ĐỐI: Dùng đúng con số thực tế. Nếu không có số liệu niêm yết, thông báo rõ "hiện chưa có dữ liệu niêm yết trực tiếp", tuyệt đối cấm bịa giá.\n` +
-    `  + Nếu hỏi nhiều tài sản cùng lúc: BẮT BUỘC liệt kê đủ tất cả các tài sản được hỏi.\n` +
-    `- KHI HỎI VỀ PHÁP LÝ / THỦ TỤC HÀNH CHÍNH (Đất đai, Thuế, Xe cộ, VNeID, Thủ tục):\n` +
-    `  + Hướng dẫn dạng checklist từng bước (Bước 1, Bước 2, Bước 3), hồ sơ cần chuẩn bị, nơi nộp và mức phí/phạt quy định.\n` +
-    `- KHI HỎI VỀ BÓNG ĐÁ / THỂ THAO / LỊCH THI ĐẤU (V-League, Ngoại Hạng Anh, Cúp C1, La Liga, Serie A, Bundesliga, Ligue 1...):\n` +
-    `  + BẮT BUỘC liệt kê CHI TIẾT TỪNG CẶP ĐẤU: Định dạng rõ ràng: • [Đội A] vs [Đội B] ([Giờ đấu], [Kênh phát sóng/Truyền hình nếu có]).\n` +
-    `  + Phân mục mạch lạc theo giải đấu (1. Sân cỏ trong nước / 2. Sân cỏ châu Âu...).\n` +
-    `  + Kèm 1-2 câu nhận định điểm nhấn cho trận tâm điểm.\n` +
-    `  + TUYỆT ĐỐI KHÔNG chỉ nêu tên giải hoặc giờ đấu chung chung mà thiếu tên 2 đội bóng thi đấu!\n` +
-    `  + Trích dẫn nguồn (ví dụ: Nguồn: Lịch thi đấu VietNamNet, VOV cập nhật ngày DD/MM/YYYY).\n` +
-    `  + Kết bài bằng 1 câu gợi ý hóm hỉnh hỏi người dùng định theo dõi trận nào hoặc có kèo ruột nào chưa.\n` +
-    `- KHI YÊU CẦU TẠO / XUẤT FILE TÀI LIỆU (Word .docx, Excel .xlsx, Markdown .md, Text .txt, Code):\n` +
-    `  + BẮT BUỘC PHẢI GỌI CÔNG CỤ (TOOL) 'generate_file' với đầy đủ tham số (fileType, fileName, title, content) để hệ thống tạo và gửi file thật lên nhóm Zalo!\n` +
-    `  + TUYỆT ĐỐI CẤM TỰ Ý VIẾT TIN NHẮN GIẢ MẠO rằng "em đã xuất xong file", "anh có thể bấm tải file ngay phía trên", "đã đóng gói hoàn tất" khi CHƯA THỰC SỰ GỌI TOOL generate_file!\n` +
-    `- KHI HỎI VỀ KHOA HỌC / ĐỊNH NGHĨA: Nêu thông số chính xác, giải thích sinh động, chuẩn mực bách khoa toàn thư.\n`;
+  const directAnswerInstruction =
+    `\n=== QUY TẮC CƠ CẤU TRẢ LỜI: TRỰC TIẾP & GỢI MỞ (DIRECT & OPEN-ENDED) ===\n` +
+    `1. TRẢ LỜI TRỰC TIẾP VÀO TRỌNG TÂM:\n` +
+    `   - Đi thẳng vào đáp án, kết quả, con số hoặc thông tin cốt lõi mà người dùng hỏi mà không mở bài dài dòng.\n` +
+    `   - TUYỆT ĐỐI KHÔNG thêm phần "Thông tin bổ trợ", bối cảnh bên lề hay diễn giải lan man không được hỏi, tránh làm dài câu trả lời và làm tốn thời gian người đọc.\n` +
+    `   - Dùng gạch đầu dòng rõ ràng, **in đậm** số liệu hoặc từ khóa then chốt.\n` +
+    `2. KẾT BÀI BẰNG CÂU HỎI GỢI MỞ:\n` +
+    `   - Ngay sau khi trả lời trực tiếp xong, BẮT BUỘC kết thúc bằng 1 câu hỏi gợi mở ngắn gọn, tự nhiên để xem người dùng có muốn hỏi thêm gì nữa không (Ví dụ: "Bác ${displayName} có cần em kiểm tra thêm chi tiết nào nữa không ạ?").\n` +
+    `3. ĐẶC THÙ MỘT SỐ DẠNG CÂU HỎI:\n` +
+    `   - Khi hỏi lịch thi đấu bóng đá: Liệt kê đúng các cặp đấu kèm giờ đấu (Ví dụ: • [Đội A] vs [Đội B] - 22:00), không viết thêm bài văn bình luận dài dòng.\n` +
+    `   - Khi hỏi giá cả/tài chính: Nêu thẳng con số giá niêm yết hiện tại kèm đơn vị rõ ràng.\n` +
+    `   - Khi hỏi pháp lý/thủ tục: Nêu đúng các bước thực hiện súc tích hoặc mức phạt/quy định cụ thể.\n` +
+    `   - Khi yêu cầu tạo/xuất file (Word .docx, Excel .xlsx...): BẮT BUỘC gọi tool 'generate_file'. Tuyệt đối cấm viết tin nhắn giả mạo khi chưa gọi tool!\n`;
 
   const systemPrompt =
     `${getSystemTemporalPrompt()}\n\n` +
@@ -1686,9 +1661,10 @@ async function handleHistoryQA(
     `     + Dùng gạch đầu dòng '- ' cho cấp 1, '• ' cho cấp 2. Số thứ tự '1. ', '2. ' được tự động làm nổi bật.\n` +
     `   - BẢNG BIỂU & SO SÁNH: Zalo không hỗ trợ bảng kẻ viền (table). BẮT BUỘC trình bày dạng KHỐI THẺ (Card Layout) từng đối tượng hoặc danh sách so sánh rút gọn (dưới 40 ký tự/dòng). Gợi ý người dùng "yêu cầu xuất file excel" nếu cần bảng số liệu đầy đủ.\n` +
     `   - TIẾT CHẾ ICON / EMOJI: Tối đa 1-2 icon ở tiêu đề chính. CẤM spam icon vào từng đầu gạch dòng (tránh '- 🔍', '- ⭐' lặp lại).\n\n` +
-    `3. NGUYÊN TẮC 3: ĐỘ DÀI THÍCH ỨNG THEO NGỮ CẢNH (ADAPTIVE DEPTH & LENGTH)\n` +
-    `   - Giao lưu, chào hỏi, tấu hài, thắc mắc đơn giản: Trả lời ngắn gọn, súc tích, duyên dáng trong 2-3 đoạn ngắn (300-500 ký tự) để đọc nhanh trên điện thoại.\n` +
-    `   - Câu hỏi phân tích chuyên sâu, kỹ thuật, pháp lý, quy trình từng bước, tổng hợp tin tức nóng: Trình bày bài bản, sâu sắc, có cấu trúc rõ ràng từng phần. Hệ thống tự động phân tách mượt mà nếu vượt quá giới hạn ký tự.\n\n` +
+    `3. NGUYÊN TẮC 3: TRẢ LỜI TRỰC TIẾP & GỢI MỞ (DIRECT & ENGAGING)\n` +
+    `   - Đi thẳng vào đáp án/kết quả trọng tâm, súc tích, ngắn gọn, dễ đọc trên điện thoại.\n` +
+    `   - TUYỆT ĐỐI KHÔNG thêm thông tin bổ trợ bên lề thừa thãi làm loãng câu trả lời.\n` +
+    `   - Sau khi trả lời trực tiếp xong, BẮT BUỘC kết thúc bằng 1 câu hỏi gợi mở ngắn gọn xem người dùng có muốn hỏi thêm gì không.\n\n` +
     `4. NGUYÊN TẮC 4: PHONG CÁCH ${botName.toUpperCase()} & GIAO TIẾP TỰ NHIÊN (PERSONA & VOICE)\n` +
     `   - Xưng 'em' hoặc '${botName}', gọi người hỏi là 'anh/chị/bác ${displayName}'.\n` +
     `   - Giọng điệu thông minh, hóm hỉnh, mặn mà, lịch thiệp, tôn trọng cộng đồng nhưng chuẩn xác và đáng tin cậy tuyệt đối khi cung cấp kiến thức/số liệu.\n` +
@@ -1699,13 +1675,13 @@ async function handleHistoryQA(
     `   - Chỉ nhắc đến các thành viên có mặt trong nhóm, tuyệt đối không bịa tên người lạ.\n\n` +
     `NHIỆM VỤ ĐẶC THÙ:\n` +
     `- TUYỆT ĐỐI CẤM TỰ TIỆN BẺ LÁI SANG BẤT ĐỘNG SẢN HOẶC CHỦ ĐỀ KHÔNG LIÊN QUAN: Khi thành viên hỏi về địa lý, xã hội, khoa học, chính trị, thể thao, công nghệ, lịch sử, đời sống: PHẢI TRẢ LỜI ĐÚNG TRỌNG TÂM, CẤM tự ý suy diễn người hỏi đi du lịch/phượt hay lôi chuyện dự án bất động sản/mua bán nhà đất vào câu trả lời nếu người dùng không hề hỏi về BĐS!\n` +
-    `- KHI CÂU HỎI LÀ TRA CỨU SỰ KIỆN / SỐ LIỆU / DỮ KIỆN THỰC TẾ: Đi thẳng vào câu trả lời và số liệu rõ ràng, không mở bài bằng các câu chào hỏi hay cảm thán sáo rỗng dài dòng làm loãng thông tin.\n` +
+    `- KHI CÂU HỎI LÀ TRA CỨU SỰ KIỆN / SỐ LIỆU / DỮ KIỆN THỰC TẾ: Đi thẳng vào câu trả lời và số liệu rõ ràng, không mở bài bằng các câu chào hỏi hay cảm thán sáo rỗng dài dòng làm loãng thông tin, KHÔNG chèn thông tin bổ trợ bên lề.\n` +
     `- CẬP NHẬT DỮ KIỆN THỜI GIAN THỰC & PHÁP LUẬT / HÀNH CHÍNH MỚI NHẤT: BẮT BUỘC ưu tiên dữ liệu mới nhất từ phần 'DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT'. Khi câu hỏi liên quan đến dữ kiện thực tế có tính biến động (chính sách, luật pháp, đơn vị hành chính, giá cả, số liệu): TUYỆT ĐỐI KHÔNG bám vào số liệu cũ trong trí nhớ đã lỗi thời nếu dữ liệu tra cứu cung cấp văn bản, nghị quyết hoặc số liệu mới hơn. Phải giải thích rõ ràng và cập nhật số liệu mới nhất cho người hỏi!\n` +
     `- KHI HỎI VỀ QUY TRÌNH, HƯỚNG DẪN HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Trích dẫn và diễn giải chi tiết từng bước (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến từ lịch sử chat. Không chỉ đưa mỗi link tài liệu.\n` +
     `- QUY TẮC CÔNG CỤ XUẤT FILE (generate_file): CHỈ gọi công cụ 'generate_file' khi người dùng có YÊU CẦU CỤ THỂ VỀ NỘI DUNG để tạo/xuất file (ví dụ: "soạn cho anh hợp đồng...", "tạo file docx quy trình...", "xuất bảng tính chi phí ra excel..."). TUYỆT ĐỐI CẤM TỰ Ý TẠO FILE khi người dùng chỉ hỏi thăm năng lực (ví dụ: "em biết tạo file docx không?", "bot có tạo file được không?"). Với câu hỏi hỏi thăm năng lực, CHỈ trả lời bằng lời nói giải thích năng lực và mời người dùng cung cấp nội dung cần tạo. Tuyệt đối cấm tạo file rỗng tự chế!\n` +
     `- TỐI ƯU TỐC ĐỘ PHẢN HỒI: Nếu trong dữ liệu thời gian thực hoặc context đã có đủ thông tin để trả lời, PHẢI TẬP TRUNG TRẢ LỜI NGAY, không gọi thêm công cụ tìm kiếm lặp lại để tránh làm chậm phản hồi.\n` +
     searchInstruction +
-    encyclopediaInstruction;
+    directAnswerInstruction;
 
   const userPrompt =
     `${quotePromptSection}\n${fileContentSection}${liveNewsSection}\n` +
@@ -2695,9 +2671,9 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         return;
       }
 
-      // Tính năng 4 & 5: Gửi câu trả lời có gắn @Mention thật, Quote tin nhắn gốc & Jitter delay chống spam
+      // Gửi câu trả lời tức thì kèm @Mention thật và Quote tin nhắn gốc
       await sendGroupReplyWithMention(api, threadId, botName, displayName, sender, answer, {
-        jitter: true,
+        jitter: false,
         quote: buildQuoteObject(event),
       });
       console.log(`[member-assistant] ✅ Đã gửi câu trả lời thành công vào nhóm`);
