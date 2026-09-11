@@ -81,7 +81,7 @@ export async function planSearchQueries(params: {
     `3. Khi needsSearch: true -> Bóc tách 1-3 cụm từ tìm kiếm (queries) tối ưu:\n` +
     `   - Bóc tách đúng THỰC THỂ CHÍNH (Entities) và MỤC TIÊU CẦN TÌM (Target attribute/action).\n` +
     `   - LOẠI BỎ TOÀN BỘ từ rác, xưng hô, mệnh lệnh (check, kiểm tra, xem, giúp, cho anh, sen chúa, kevin, bot ơi, nhé, nha, ạ...).\n` +
-    `   - TUYỆT ĐỐI KHÔNG TỰ BỊA ĐẶT hay ghim kết quả con cụ thể vào query (Ví dụ: hỏi về tỉnh thành thì query là "số lượng đơn vị hành chính cấp tỉnh Việt Nam hiện nay", KHÔNG tự nhét tên một tỉnh/thành phố cụ thể nào nếu người dùng không hỏi).\n` +
+    `   - BẮT BUỘC giữ nguyên dấu tiếng Việt chuẩn xác (TUYỆT ĐỐI KHÔNG viết không dấu vì tiếng Việt không dấu sẽ làm sai lệch hoàn toàn kết quả tra cứu báo chí và văn bản pháp luật).\n` +
     `   - Giữ query ngắn gọn, tự nhiên, mang tính tra cứu thông tin khách quan.\n\n` +
     `4. Xuất định dạng JSON duy nhất:\n` +
     `{\n` +
