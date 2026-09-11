@@ -19,6 +19,7 @@ import {
   getFearAndGreedIndex,
   getFinancialMarketSummary,
 } from "./tools/finance-tools.js";
+import { fetchWeatherData } from "./weather.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
 
 /**
@@ -609,11 +610,36 @@ const AGENT_TOOLS_DECLARATION = {
         required: ["symbol"],
       },
     },
+    {
+      name: "weather_forecast",
+      description: "Tra cứu dự báo thời tiết, nhiệt độ, độ ẩm, khả năng mưa, gió, chỉ số UV và chất lượng không khí (AQI/PM2.5) cho hôm nay, ngày mai hoặc các ngày tiếp theo tại bất kỳ tỉnh thành/khu vực nào ở Việt Nam hoặc quốc tế.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          location: {
+            type: "STRING",
+            description: "Tên thành phố hoặc tỉnh thành (ví dụ: 'Hồ Chí Minh', 'Hà Nội', 'Đà Lạt', 'Đà Nẵng', 'Hải Phòng'...)",
+          },
+          date: {
+            type: "STRING",
+            description: "Thời điểm cần tra cứu: 'today' (hôm nay), 'tomorrow' (ngày mai), 'ngày mai', hoặc ngày cụ thể định dạng DD/MM/YYYY hoặc YYYY-MM-DD",
+          },
+        },
+        required: ["location"],
+      },
+    },
   ],
 };
 
 async function executeAgentTool(name: string, args: Record<string, any>): Promise<any> {
   switch (name) {
+    case "weather_forecast": {
+      const loc = String(args?.location || "Hồ Chí Minh").trim();
+      const targetDate = args?.date ? String(args.date).trim() : undefined;
+      const data = await fetchWeatherData(loc, targetDate);
+      if (!data) return { message: `Hiện chưa lấy được dữ liệu thời tiết cho khu vực ${loc}.` };
+      return data;
+    }
     case "finance_market_lookup": {
       const sym = String(args?.symbol || "market").trim();
       if (

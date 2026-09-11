@@ -21,7 +21,7 @@ import { callGemini, callGeminiAgentLoop, downloadFileContent, type GeminiMediaP
 import { getSystemTemporalPrompt } from "./temporal.js";
 import type { MemberMessageEvent } from "./member-assistant.js";
 import { getWeatherReport } from "./weather.js";
-import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam } from "./reminder.js";
+import { handleSetReminder, handleListReminders, handleCancelReminder } from "./reminder.js";
 import { getDailyAiNewsBriefing } from "./ai-news.js";
 import { searchRealtimeNews } from "./realtime-search.js";
 import { planSearchQueries } from "./query-planner.js";
@@ -435,34 +435,6 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     return;
   }
 
-  // 2.6. Tự động nhận diện câu nhắc lịch tự nhiên (ví dụ: "16h45 nhắc anh đi lấy nước nhé", "Nhắc tôi 20 phút nữa...", "15:30 chiều nay...")
-  const isReminderIntent =
-    lower.includes("nhắc") ||
-    lower.includes("nhac") ||
-    lower.includes("hẹn") ||
-    lower.includes("hen") ||
-    lower.includes("báo thức") ||
-    lower.includes("bao thuc") ||
-    /(?:phút|phut|tiếng|tieng|\b\d+\s*h\b|\b\d+h\d*\b|giờ|gio|mai|hôm nay)/i.test(rawText);
-
-  if (isReminderIntent) {
-    const parsed = parseNaturalTimeVietnam(rawText);
-    if (parsed) {
-      const reply = handleSetReminder(sender, true, sender, displayName, rawText);
-      await sendDirectText(api, sender, reply);
-      return;
-    }
-  }
-
-  // 2.7. Tự động nhận diện câu hỏi thời tiết tự nhiên (ví dụ: "Thời tiết hôm nay thế nào", "Thời tiết Hà Nội có mưa không")
-  if (/(?:thời tiết|thoi tiet|dự báo thời tiết|du bao thoi tiet)/i.test(rawText) && !hasFile && !hasImage) {
-    const cityMatch = rawText.match(/(?:tại|ở|khu vực|tỉnh|thành phố)\s+([A-ZÀ-Ỹa-zà-ỹ\s]+)/i);
-    const candidateCity = cityMatch?.[1]?.trim() || "Hồ Chí Minh";
-    const weatherMsg = await getWeatherReport(candidateCity);
-    await sendDirectText(api, sender, weatherMsg);
-    return;
-  }
-
   // 2.8. Lệnh xem danh sách Kho Tri Thức Vĩnh Viễn: /kienthuc hoặc /dskienthuc
   if (lower === "/kienthuc" || lower === "/dskienthuc" || lower === "!kienthuc" || lower === "!dskienthuc" || lower === "kienthuc") {
     if (!isAdmin) {
@@ -580,13 +552,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     lower.startsWith("/learn ") ||
     lower.startsWith("!learn ");
 
-  const isLearnNaturalIntent =
-    isAdmin &&
-    (/(?:học|nạp|lưu|ghi nhớ)\s+(?:tài liệu|dữ liệu|thông tin|kiến thức|dự án|chính sách|bảng giá|quy trình)/i.test(rawText) ||
-      /(?:lưu|nạp)\s+(?:vào|vô)\s+(?:kho|bộ nhớ|tri thức)/i.test(rawText) ||
-      /(?:kết nối|liên kết)\s+(?:sheet|bảng tính|doc|docs|google)/i.test(rawText));
-
-  if (isAdmin && (isSheetCommand || isDocCommand || isLearnCommand || isLearnNaturalIntent)) {
+  if (isAdmin && (isSheetCommand || isDocCommand || isLearnCommand)) {
     const combinedText = `${rawText} ${event.quote?.text || ""}`;
     const googleMatch = combinedText.match(/https?:\/\/docs\.google\.com\/(?:spreadsheets|document)\/d\/[a-zA-Z0-9-_]+[^\s]*/i);
 
@@ -1238,11 +1204,6 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   }
 
   // 2.0. Đọc hiểu ngữ nghĩa & Lập kế hoạch tra cứu bằng Gemini Flash-Lite (Semantic Query Planner)
-  const isRealTimeSearchQuery =
-    /\b\d{1,2}[\/\-\.]\d{1,2}(?:[\/\-\.]\d{2,4})?\b|(?:tin tức|tin mới|mới nhất|hôm nay|hiện nay|vừa ra mắt|sắp ra mắt|24h qua|24h|24 giờ|có gì mới|mới có gì|vừa xong|gần đây|\bgiá\b|\bcập nhật\b|tiền số|tiền ảo|\bcoin\b|\btoken\b|\bbtc\b|\beth\b|\bbnb\b|\bsol\b|\bxrp\b|\bdoge\b|\baltcoin\b|\bhiện tại\b|\bbây giờ\b|\bthời điểm này\b|trên x\b|trên twitter\b|trend ai|tin ai|ai mới|cập nhật mới|tin nóng|thời sự|bản tin|thời tiết|vừa công bố|ra mắt gì|sự kiện|giá vàng|chứng khoán|thị trường|lũ quét|bão số|thiên tai|thế nào rồi|thảm họa|dự án|tổng quan dự án|thông tin về|cho tôi thông tin|tìm hiểu về|ở đâu|giá bao nhiêu|ai là\b|vụ việc\b|vụ án\b|scandal\b|lùm xùm\b|bê bối\b|tiểu sử\b|sự cố\b|nguyên nhân\b|đạo nhái\b|bản quyền\b|phốt\b|drama\b|tìm kiếm thêm|tra cứu|khi nào ra|bao giờ ra|khi nào có|bao giờ có|sắp ra|thời điểm ra mắt|ngày ra mắt|lộ trình|phát hành khi nào|giá xăng|tỷ giá|ngoại tệ|lãi suất|vn-index|bitcoin|crypto|bóng đá|tỉ số|kết quả trận|lịch thi đấu|bảng xếp hạng|ngoại hạng anh|premier league|cúp c1|champions league|v-league|chuyển nhượng|luật đất đai|sổ đỏ|vneid|cccd|thủ tục|phạt nguội|thuế tncn|nghị định|thông tư|sân bay long thành|vành đai|cao tốc|quy hoạch|bảng giá đất|so sánh|đối chiếu|khác nhau|con nào hơn|nên dùng con nào|nên mua con nào|đánh giá|review|benchmark|gemini\b|gpt\b|claude\b|deepseek\b|grok\b|llama\b|mistral\b|sora\b|qwen\b|openai\b|anthropic\b|nvidia\b|apple\b|iphone\b|macbook\b|chip\b|bán dẫn\b|trump\b|biden\b|putin\b|harris\b|tập cận bình\b|xi jinping\b|zelensky\b|netanyahu\b|kim jong un\b|phát ngôn\b|phát biểu\b|tuyên bố\b|nói gì\b|chính trị\b|địa chính trị\b|thế giới\b|quốc tế\b|bầu cử\b|tranh cử\b|tổng thống\b|thủ tướng\b|ngoại trưởng\b|nhà trắng\b|white house\b|kremlin\b|lầu năm góc\b|quốc hội mỹ\b|thượng đỉnh\b|hội đàm\b|áp thuế\b|thuế quan\b|trừng phạt\b|cấm vận\b|chiến sự\b|xung đột\b|chiến tranh\b|đình chiến\b|ngừng bắn\b|ukraine\b|israel\b|gaza\b|hamas\b|hezbollah\b|iran\b|houthi\b|nato\b|brics\b|liên hợp quốc\b|là gì\b|là cái gì\b|là con gì\b|thế nào\b|như thế nào\b|ra sao\b|nghĩa là gì\b|astra\b|check|kiểm tra|kiểm chứng|xác thực|đúng không)/i.test(
-      rawText
-    );
-
   let liveNews = "";
   try {
     const plan = await planSearchQueries({
@@ -1257,25 +1218,16 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         plan.queries.slice(0, 3).map((q) => searchRealtimeNews(q).catch(() => ""))
       );
       liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
-    } else if (isRealTimeSearchQuery) {
-      liveNews = await searchRealtimeNews(rawText);
     }
   } catch (e) {
     console.warn("[admin-assistant] planSearchQueries lỗi:", e);
-    if (isRealTimeSearchQuery) {
-      try {
-        liveNews = await searchRealtimeNews(rawText);
-      } catch (err) {
-        console.warn("[admin-assistant] searchRealtimeNews fallback lỗi:", err);
-      }
-    }
   }
 
   const liveNewsSection = liveNews
     ? `\n=== DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT: ===\n${liveNews}\n`
     : "";
 
-  const searchInstruction = (liveNews || isRealTimeSearchQuery)
+  const searchInstruction = liveNews
     ? `\n8. TỔNG HỢP THÔNG TIN THỜI GIAN THỰC & SỰ KIỆN / PHÁP LUẬT MỚI:\n` +
       `- Câu hỏi này liên quan đến tin tức, sự kiện, thời điểm ra mắt, đơn vị hành chính hoặc số liệu thực tế.\n` +
       `- BẮT BUỘC ĐỌC KỸ và TRÍCH XUẤT CHÍNH XÁC các thông tin, con số mới nhất từ danh sách bản tin / Wikipedia / nguồn dữ liệu bên dưới.\n` +

@@ -16,45 +16,21 @@ export interface QueryPlanResult {
 }
 
 /**
- * Trích xuất từ khóa dự phòng bằng heuristic regex khi AI Planner gặp sự cố hoặc timeout
+ * Kế hoạch dự phòng an toàn khi AI Planner gặp sự cố mạng hoặc timeout (không dùng regex khoá cứng)
  */
-function fallbackRegexPlanner(question: string, quoteText = ""): QueryPlanResult {
-  const needsSearch =
-    /(?:tìm kiếm|tra cứu|tin tức|tin mới|thông tin mới|thông tin thêm|xem có|là ai\b|vụ gì\b|sự việc gì\b|bản quyền|đạo nhái|phốt|drama|tiểu sử|vụ việc|giá|bao nhiêu|mấy\b|ở đâu|mua ở đâu|bán ở đâu|chỗ nào|nơi nào|link|web|shop|mua|check|kiểm tra|xác thực|đối soát|có thật không|đúng không|thực hư|chuẩn chưa|chính xác chưa|sai không|đúng hay sai|soi lại|check lại|ngáo|xem lại|bịa|hư cấu|ai là|chủ tịch|thủ tướng|bộ trưởng|tổng bí thư|ceo|lãnh đạo|hlv|huấn luyện viên|vô địch|bảng xếp hạng|tỉ số|kết quả|tỉnh thành|đơn vị hành chính|sáp nhập|quận|huyện|xã|phường|dân số|gdp|lãi suất|tỷ giá|vàng|xăng|bitcoin|crypto|dự án|mô hình ai|mới nhất|hiện nay|hiện tại|bây giờ)/i.test(
-      question
-    );
-
-  if (!needsSearch) {
-    return {
-      needsSearch: false,
-      intent: "knowledge",
-      queries: [],
-    };
-  }
-
+function fallbackSafePlanner(question: string, quoteText = ""): QueryPlanResult {
   const cleanQ = question
     .replace(/@\S+/g, "")
-    .replace(/\b(?:sen chúa|mộc miên|kevin|bot)\b/gi, "")
-    .replace(/\b(?:hãy|vui lòng|giúp|check|kiểm tra|xem|nội dung|trên này|có chính xác chưa|chính xác chưa|báo rõ ra|đúng không|có thật không|nhé|nha|ạ|em|anh|bác)\b/gi, "")
+    .replace(/\b(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot)\b/gi, "")
     .replace(/[\/?.!,]+/g, " ")
     .trim();
 
-  let subject = "";
-  if (quoteText) {
-    const cleanQuote = quoteText
-      .replace(/^[🤖\s]*[^\n]*?(?:trả lời|chào|bản tin)[^\n]*\n*/gi, "")
-      .replace(/Chào anh[^.!\n]+[.!\n]*/gi, "")
-      .replace(/[\/?.!,]+/g, " ")
-      .trim();
-    subject = cleanQuote.slice(0, 80);
-  }
-
-  const query = cleanQ.length >= 6 ? cleanQ : subject || question.slice(0, 60);
+  const query = cleanQ.length >= 4 ? cleanQ : (quoteText || question).slice(0, 80);
   return {
     needsSearch: true,
-    intent: "fact_check",
+    intent: "realtime_news",
     queries: [query.slice(0, 80)],
-    summaryIntent: "Fallback regex heuristic",
+    summaryIntent: "Fallback safe planner",
   };
 }
 
@@ -157,6 +133,6 @@ export async function planSearchQueries(params: {
     console.warn(`[query-planner] AI Planner fallback (${err?.message || err})`);
   }
 
-  // Graceful fallback: Sử dụng heuristic regex
-  return fallbackRegexPlanner(question, quoteText);
+  // Graceful fallback: Kế hoạch an toàn không khoá cứng
+  return fallbackSafePlanner(question, quoteText);
 }
