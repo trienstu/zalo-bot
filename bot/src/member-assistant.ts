@@ -1168,7 +1168,6 @@ async function handleHistoryQA(
       `       * TUYỆT ĐỐI CẤM TỰ Ý BỊA ĐẶT TIN NHẮN GIẢ MẠO rằng "em đã xuất xong file", "anh có thể bấm tải file ngay phía trên", "đã đóng gói hoàn tất" khi CHƯA THỰC SỰ GỌI TOOL generate_file! Mọi hành vi tự viết tin nhắn giả vờ đã gửi file mà không gọi tool là hành vi BỊ NGHIÊM CẤM HOÀN TOÀN!`;
 
     let quoteLiveNews = "";
-    let isSearchNeeded = false;
     try {
       const plan = await planSearchQueries({
         question,
@@ -1177,7 +1176,6 @@ async function handleHistoryQA(
         displayName,
       });
 
-      isSearchNeeded = plan.needsSearch;
       if (plan.needsSearch && plan.queries.length > 0) {
         // Chạy song song tối đa 3 truy vấn chuyên biệt bóc tách từ ngữ nghĩa người dùng
         const searchResults = await Promise.all(
@@ -1206,12 +1204,15 @@ async function handleHistoryQA(
       /(?:file|tệp)\s*(?:word|excel|docx|xlsx)/i.test(question) ||
       /(?:tạo|xuất|làm)\s*(?:file|tệp)/i.test(question);
 
+    let answer = "";
+    const isGreetingQuote =
+      /^(?:chào|hi|hello|alo|ê|cảm ơn|thanks|ok)\b/i.test(question.trim()) && question.trim().length < 25;
     try {
-      let answer = "";
-      const isGreetingQuote =
-        /^(?:chào|hi|hello|alo|ê|cảm ơn|thanks|ok)\b/i.test(question.trim()) && question.trim().length < 25;
-      if ((isSearchNeeded || Boolean(quoteLiveNews) || isFileGenerationQuery) && !isGreetingQuote) {
+      const needsAgentLoop = isFileGenerationQuery || /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(question);
+      if (needsAgentLoop && !isGreetingQuote) {
         answer = await callGeminiAgentLoop(quoteSystemPrompt, quoteUserPrompt, {
+          model: "gemini-3.1-flash-lite-preview",
+          maxTurns: 2,
           mediaParts: mediaPart ? [mediaPart] : undefined,
           onFileGenerated: async (file) => {
             try {
@@ -1230,6 +1231,7 @@ async function handleHistoryQA(
         });
       } else {
         answer = await callGemini(quoteSystemPrompt, quoteUserPrompt, {
+          model: "gemini-3.1-flash-lite-preview",
           mediaParts: mediaPart ? [mediaPart] : undefined,
           enableSearch: false,
         });

@@ -297,7 +297,7 @@ export async function callGemini(
   }
 
   let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-3.1-flash-lite-preview";
-  if (!primaryModel || primaryModel.includes("3.7") || primaryModel.includes("3.8") || primaryModel.includes("2.0") || primaryModel.includes("2.5") || (primaryModel.includes("3.5") && !primaryModel.includes("lite"))) {
+  if (!primaryModel || !primaryModel.includes("lite")) {
     primaryModel = "gemini-3.1-flash-lite-preview";
   }
 
@@ -740,7 +740,7 @@ export async function callGeminiAgentLoop(
   }
 
   let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-3.1-flash-lite-preview";
-  if (!primaryModel || primaryModel.includes("3.7") || primaryModel.includes("3.8") || primaryModel.includes("2.0") || primaryModel.includes("2.5") || (primaryModel.includes("3.5") && !primaryModel.includes("lite"))) {
+  if (!primaryModel || !primaryModel.includes("lite")) {
     primaryModel = "gemini-3.1-flash-lite-preview";
   }
   const maxTurns = options?.maxTurns || 2;
