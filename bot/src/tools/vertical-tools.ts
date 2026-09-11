@@ -12,112 +12,67 @@ export interface SearchResultItem {
 }
 
 /**
- * 1. Web Search via DuckDuckGo HTML endpoint with Automatic Google News RSS Fallback.
- * Tự động chuyển đổi mượt mà sang Google News RSS nếu DuckDuckGo bị chặn CAPTCHA / 202.
+ * 1. Web Search siêu tốc kết hợp Wikipedia Search API + Google News RSS.
+ * Hoàn toàn loại bỏ cào DuckDuckGo HTML để tránh nghẽn timeout 6 giây và lỗi Captcha Status 202 trên VPS.
  */
 export async function webSearch(query: string, maxResults = 5): Promise<SearchResultItem[]> {
   const results: SearchResultItem[] = [];
 
-  // 1.1. Thử cào qua DuckDuckGo HTML
+  // 1.1. Tầng 1: Wikipedia Search API (Bách khoa toàn thư, khái niệm, địa danh, quy định, tổ chức - Không bao giờ bị Captcha, < 200ms)
   try {
-    const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(query), {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      },
-      signal: AbortSignal.timeout(6000),
+    const wikiUrl = `https://vi.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json`;
+    const wRes = await fetch(wikiUrl, {
+      headers: { "User-Agent": "ZaloBot/2.0 (contact@bahub.vn)" },
+      signal: AbortSignal.timeout(2500),
     });
-
-    if (res.ok) {
-      const html = await res.text();
-      // Nếu dính trang anomaly / CAPTCHA của DuckDuckGo thì bỏ qua để xuống tầng fallback
-      if (!html.includes("anomaly-modal") && !html.includes("challenge-form")) {
-        const blocks = html.split('<div class="result results_links');
-        for (const block of blocks.slice(1)) {
-          if (results.length >= maxResults) break;
-
-          const urlMatch =
-            block.match(/href="([^"]+uddg=([^"&]+)[^"]*)"/i) ||
-            block.match(/<a class="result__url"[^>]*href="([^"]+)"/i);
-          const snippetMatch = block.match(/<a class="result__snippet"[^>]*>([\s\S]*?)<\/a>/i);
-
-          let rawUrl = "";
-          if (urlMatch) {
-            if (urlMatch[2]) {
-              try {
-                rawUrl = decodeURIComponent(urlMatch[2]);
-              } catch {
-                rawUrl = urlMatch[2] || "";
-              }
-            } else {
-              rawUrl = urlMatch[1] || "";
-            }
-          }
-
-          const cleanText = (str: string) =>
-            str
-              .replace(/<[^>]+>/g, " ")
-              .replace(/&quot;/g, '"')
-              .replace(/&#x27;/g, "'")
-              .replace(/&apos;/g, "'")
-              .replace(/&#39;/g, "'")
-              .replace(/&amp;/g, "&")
-              .replace(/&lt;/g, "<")
-              .replace(/&gt;/g, ">")
-              .replace(/&nbsp;/g, " ")
-              .replace(/\s+/g, " ")
-              .trim();
-
-          const snippet = snippetMatch && snippetMatch[1] ? cleanText(snippetMatch[1]) : "";
-          const titleMatch2 =
-            block.match(/<a class="result__snippet"[^>]*title="([^"]+)"/i) ||
-            block.match(/<h2[^>]*>[\s\S]*?<a[^>]*>([\s\S]*?)<\/a>/i);
-          const title = titleMatch2 && titleMatch2[1] ? cleanText(titleMatch2[1]) : cleanText(snippet.slice(0, 60));
-
-          if (snippet && rawUrl && !rawUrl.includes("duckduckgo.com")) {
-            results.push({
-              title: title || rawUrl,
-              snippet,
-              url: rawUrl,
-            });
-          }
+    if (wRes.ok) {
+      const wData = (await wRes.json()) as any;
+      const searchItems = wData?.query?.search || [];
+      for (const it of searchItems.slice(0, 3)) {
+        if (results.length >= maxResults) break;
+        const rawSnippet = String(it.snippet || "")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/&amp;/g, "&")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (rawSnippet && !results.some((r) => r.title === it.title)) {
+          results.push({
+            title: it.title,
+            snippet: rawSnippet,
+            url: `https://vi.wikipedia.org/wiki/${encodeURIComponent(it.title)}`,
+          });
         }
       }
     }
-  } catch {
-    // DuckDuckGo timeout hoặc lỗi mạng
-  }
+  } catch {}
 
-  // 1.2. Nếu DuckDuckGo có đủ kết quả, trả về ngay
-  if (results.length >= 2) {
-    return results.slice(0, maxResults);
-  }
-
-  // 1.25. Fallback qua Wikipedia Search API nếu DuckDuckGo bị chặn hoặc chưa đủ kết quả
+  // 1.2. Tầng 2: Google News RSS Search (Tin tức mới nhất, diễn biến thực tế từ hàng trăm báo lớn - < 300ms)
   if (results.length < maxResults) {
     try {
-      const wikiUrl = `https://vi.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json`;
-      const wRes = await fetch(wikiUrl, {
-        headers: { "User-Agent": "ZaloBot/2.0 (contact@bahub.vn)" },
-        signal: AbortSignal.timeout(3500),
+      const gUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=vi&gl=VN&ceid=VN:vi`;
+      const gRes = await fetch(gUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)",
+        },
+        signal: AbortSignal.timeout(3000),
       });
-      if (wRes.ok) {
-        const wData = (await wRes.json()) as any;
-        const searchItems = wData?.query?.search || [];
-        for (const it of searchItems.slice(0, maxResults - results.length)) {
-          const rawSnippet = String(it.snippet || "")
-            .replace(/<[^>]+>/g, " ")
-            .replace(/&quot;/g, '"')
-            .replace(/&#39;/g, "'")
-            .replace(/&amp;/g, "&")
-            .replace(/\s+/g, " ")
-            .trim();
-          if (rawSnippet && !results.some((r) => r.title === it.title)) {
+      if (gRes.ok) {
+        const xml = await gRes.text();
+        const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
+        for (const it of items.slice(0, 8)) {
+          if (results.length >= maxResults) break;
+          const block = it[1] || "";
+          const tMatch = block.match(/<title>(.*?)<\/title>/i);
+          const lMatch = block.match(/<link>(.*?)<\/link>/i);
+          const rawTitle = tMatch && tMatch[1] ? tMatch[1].trim() : "";
+          const rawUrl = lMatch && lMatch[1] ? lMatch[1].trim() : "";
+          if (rawTitle && !results.some((r) => r.title === rawTitle)) {
             results.push({
-              title: it.title,
-              snippet: rawSnippet,
-              url: `https://vi.wikipedia.org/wiki/${encodeURIComponent(it.title)}`,
+              title: rawTitle,
+              snippet: rawTitle,
+              url: rawUrl,
             });
           }
         }
