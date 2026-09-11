@@ -20,14 +20,14 @@ export interface QueryPlanResult {
  */
 function fallbackRegexPlanner(question: string, quoteText = ""): QueryPlanResult {
   const needsSearch =
-    /(?:tìm kiếm|tra cứu|tin tức|tin mới|thông tin mới|thông tin thêm|xem có|là ai\b|vụ gì\b|sự việc gì\b|bản quyền|đạo nhái|phốt|drama|tiểu sử|vụ việc|giá|bao nhiêu|ở đâu|mua ở đâu|bán ở đâu|chỗ nào|nơi nào|link|web|shop|mua|check|kiểm tra|xác thực|đối soát|có thật không|đúng không|thực hư|chuẩn chưa|chính xác chưa|sai không|đúng hay sai|soi lại|check lại|ngáo|xem lại|bịa|hư cấu)/i.test(
+    /(?:tìm kiếm|tra cứu|tin tức|tin mới|thông tin mới|thông tin thêm|xem có|là ai\b|vụ gì\b|sự việc gì\b|bản quyền|đạo nhái|phốt|drama|tiểu sử|vụ việc|giá|bao nhiêu|mấy\b|ở đâu|mua ở đâu|bán ở đâu|chỗ nào|nơi nào|link|web|shop|mua|check|kiểm tra|xác thực|đối soát|có thật không|đúng không|thực hư|chuẩn chưa|chính xác chưa|sai không|đúng hay sai|soi lại|check lại|ngáo|xem lại|bịa|hư cấu|ai là|chủ tịch|thủ tướng|bộ trưởng|tổng bí thư|ceo|lãnh đạo|hlv|huấn luyện viên|vô địch|bảng xếp hạng|tỉ số|kết quả|tỉnh thành|đơn vị hành chính|sáp nhập|quận|huyện|xã|phường|dân số|gdp|lãi suất|tỷ giá|vàng|xăng|bitcoin|crypto|dự án|mô hình ai|mới nhất|hiện nay|hiện tại|bây giờ)/i.test(
       question
     );
 
   if (!needsSearch) {
     return {
       needsSearch: false,
-      intent: "chat",
+      intent: "knowledge",
       queries: [],
     };
   }
@@ -84,21 +84,29 @@ export async function planSearchQueries(params: {
     `Bạn là Bộ Điều Hướng Ngữ Nghĩa & Lập Kế Hoạch Tra Cứu (Semantic Router & Query Planner) chuyên bóc tách ý định người dùng.\n` +
     `NHIỆM VỤ:\n` +
     `1. Đọc kỹ câu hỏi của người dùng, nội dung trích dẫn (nếu có) và lịch sử thảo luận gần đây (nếu có).\n` +
-    `2. Phân loại câu hỏi thành 2 nhóm rõ rệt:\n` +
-    `   a) NHÓM TRI THỨC NỀN TẢNG / TƯ DUY / CHAT (needsSearch: false):\n` +
-    `      - Câu hỏi về lý thuyết, khoa học nền tảng, định lý, toán học, vật lý, triết học, lập trình/code, viết lách, dịch thuật, giải thích khái niệm bất biến, tư vấn logic, hoặc chào hỏi tán gẫu thông thường.\n` +
-    `      - Những câu hỏi này KHÔNG cần tìm kiếm bên ngoài vì bộ não tri thức có sẵn của mô hình đã đủ để trả lời xuất sắc.\n` +
-    `      => needsSearch: false, intent: "knowledge" hoặc "chat", queries: []\n\n` +
-    `   b) NHÓM DỮ LIỆU THỰC TẾ BIẾN ĐỘNG / THỜI GIAN THỰC (needsSearch: true):\n` +
-    `      - Câu hỏi về tin tức thời sự, sự kiện nóng, biến động 24h-7 ngày qua, thể thao, giá cả/thị trường, thời tiết, phát ngôn mới.\n` +
-    `        => needsSearch: true, intent: "realtime_news"\n` +
-    `      - Câu hỏi về pháp lý, luật mới, nghị quyết, quy định, đơn vị hành chính/tỉnh thành, số liệu thực tế, hồ sơ nhân vật/doanh nghiệp, tiến độ dự án có khả năng đã thay đổi ngoài đời thực.\n` +
-    `        => needsSearch: true, intent: "fact_check"\n\n` +
+    `2. Phân loại câu hỏi thành 2 nhóm rõ rệt:\n\n` +
+    `   A) NHÓM TRI THỨC NỀN TẢNG / TƯ DUY / CHAT (needsSearch: false):\n` +
+    `      - Khoa học tự nhiên, toán học, định lý, vật lý, hóa học, sinh học, giải phẫu.\n` +
+    `      - Kỹ thuật, lập trình/code, cú pháp, thuật toán, viết regex, kiến trúc phần mềm.\n` +
+    `      - Lịch sử cổ - trung đại đã cố định (các cuộc chiến lịch sử, triều đại phong kiến, năm diễn ra sự kiện lịch sử cố định hàng chục/trăm năm trước).\n` +
+    `      - Văn hóa, nghệ thuật, triết học, giải thích khái niệm trừu tượng, sáng tác, dịch thuật, soạn email.\n` +
+    `      - Chào hỏi xã giao, khen ngợi, đùa vui thông thường.\n` +
+    `      => KHÔNG tìm kiếm bên ngoài, dùng 100% bộ não tri thức có sẵn: needsSearch: false, intent: "knowledge" hoặc "chat", queries: []\n\n` +
+    `   B) 8 MẢNG DỮ LIỆU THỰC TẾ BIẾN ĐỘNG (BẮT BUỘC needsSearch: true - KỂ CẢ KHI CÂU HỎI KHÔNG CÓ TỪ 'CHECK' HAY 'HIỆN NAY'):\n` +
+    `      1. Thể chế, Địa giới & Hạ tầng quốc gia: Số lượng/cơ cấu tỉnh, thành phố, đặc khu, quận, huyện, xã, phường, sáp nhập, quy hoạch cao tốc, sân bay, vành đai...\n` +
+    `      2. Nhân sự Lãnh đạo & Chức danh: Ai là Chủ tịch nước, Thủ tướng, Tổng Bí thư, Bộ trưởng, Bí thư/Chủ tịch tỉnh, CEO tập đoàn lớn (OpenAI, Apple, Google, Vingroup...), HLV trưởng thể thao...\n` +
+    `      3. Pháp lý, Thuế, Lệ phí & Thủ tục: Biểu thuế TNCN, Luật Đất đai, bảng giá đất, thủ tục sổ đỏ, mức phạt giao thông, nồng độ cồn, định danh VNeID, hộ chiếu...\n` +
+    `      4. Tài chính, Lãi suất & Giá cả: Lãi suất tiết kiệm/cho vay ngân hàng, giá vàng SJC/nhẫn, giá xăng dầu, tỷ giá ngoại tệ, giá Bitcoin/crypto, VN-Index...\n` +
+    `      5. Công nghệ, Dòng sản phẩm & Mô hình AI: Phiên bản iPhone/smartphone mới nhất, GPU/chip mới, model AI mới (DeepSeek, Claude, GPT, Gemini...), tính năng mới mở bán...\n` +
+    `      6. Doanh nghiệp, Bất động sản & M&A: Danh mục dự án của tập đoàn (Keppel Land, Vinhomes, Masterise...), tình trạng mở bán, thâu tóm/sáp nhập, chủ sở hữu...\n` +
+    `      7. Thể thao, Đương kim vô địch & Chuyển nhượng: Đội vô địch giải đấu (Cúp C1, Ngoại hạng Anh, World Cup, V-League), CLB hiện tại của cầu thủ, bảng xếp hạng...\n` +
+    `      8. Thống kê Kinh tế - Xã hội & Kỷ lục: Dân số Việt Nam/thế giới, GDP, người giàu nhất thế giới, tòa nhà cao nhất...\n` +
+    `      => BẮT BUỘC needsSearch: true! Phân loại intent: "realtime_news" (với tin nóng, thể thao, biến động 24h-7d) hoặc "fact_check" (với hành chính, pháp lý, lãnh đạo, hồ sơ, số liệu).\n\n` +
     `3. Khi needsSearch: true -> Bóc tách 1-3 cụm từ tìm kiếm (queries) tối ưu:\n` +
     `   - Bóc tách đúng THỰC THỂ CHÍNH (Entities) và MỤC TIÊU CẦN TÌM (Target attribute/action).\n` +
-    `   - LOẠI BỎ TOÀN BỘ từ rác, từ xưng hô, mệnh lệnh (như: check, kiểm tra, xem, giúp, cho anh, sen chúa, kevin, bot ơi, nhé, nha, ạ...).\n` +
-    `   - TUYỆT ĐỐI KHÔNG TỰ BỊA ĐẶT hay đoán trước kết quả con vào query (Ví dụ: hỏi về tỉnh thành thì query là "số lượng đơn vị hành chính cấp tỉnh Việt Nam hiện nay", KHÔNG tự ý nhét tên một tỉnh/thành phố cụ thể nào vào query nếu người dùng không nhắc tới).\n` +
-    `   - Giữ query súc tích, tự nhiên, mang tính tra cứu thông tin khách quan.\n\n` +
+    `   - LOẠI BỎ TOÀN BỘ từ rác, xưng hô, mệnh lệnh (check, kiểm tra, xem, giúp, cho anh, sen chúa, kevin, bot ơi, nhé, nha, ạ...).\n` +
+    `   - TUYỆT ĐỐI KHÔNG TỰ BỊA ĐẶT hay ghim kết quả con cụ thể vào query (Ví dụ: hỏi về tỉnh thành thì query là "số lượng đơn vị hành chính cấp tỉnh Việt Nam hiện nay", KHÔNG tự nhét tên một tỉnh/thành phố cụ thể nào nếu người dùng không hỏi).\n` +
+    `   - Giữ query ngắn gọn, tự nhiên, mang tính tra cứu thông tin khách quan.\n\n` +
     `4. Xuất định dạng JSON duy nhất:\n` +
     `{\n` +
     `  "needsSearch": boolean,\n` +
@@ -124,7 +132,7 @@ export async function planSearchQueries(params: {
     })();
 
     const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("QUERY_PLANNER_TIMEOUT")), 2500)
+      setTimeout(() => reject(new Error("QUERY_PLANNER_TIMEOUT")), 3500)
     );
 
     const raw = (await Promise.race([plannerPromise, timeoutPromise])) as any;
