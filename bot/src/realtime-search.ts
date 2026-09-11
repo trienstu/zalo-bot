@@ -433,16 +433,39 @@ async function fetchGoogleNewsRss(keyword: string, lang: "vi" | "en" = "vi"): Pr
  */
 async function fetchWikipediaSummary(query: string): Promise<string> {
   try {
-    const searchUrl = `https://vi.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json`;
+    let cleanWikiQ = query
+      .replace(/@\S+/g, "")
+      .replace(/\b(?:check|kiểm tra|xem|tra cứu|hỏi|nhờ|cho anh|cho em|nay|hiện nay|ở|tại|có|bao nhiêu|những|các|là gì|như thế nào|thế nào|sen chúa|sen chua|mộc miên|moc mien|kevin|bot)\b/gi, " ")
+      .replace(/[?.,!/\\-]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    // Tối ưu hóa từ khóa thực thể bách khoa toàn thư
+    if (/(?:tỉnh thành|tỉnh|thành phố).*?(?:việt nam|nước ta)|(?:việt nam|nước ta).*?(?:tỉnh thành|tỉnh|thành phố)/i.test(query)) {
+      cleanWikiQ = "tỉnh thành Việt Nam";
+    }
+
+    const searchUrl = `https://vi.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanWikiQ || query)}&utf8=&format=json`;
     const res = await fetch(searchUrl, {
       headers: { "User-Agent": "ZaloBotEncyclopedia/1.0 (contact@bahub.vn)" },
       signal: AbortSignal.timeout(3000),
     });
     if (!res.ok) return "";
     const data = (await res.json()) as any;
-    const searchItems = data?.query?.search || [];
+    const searchItems = (data?.query?.search || []) as Array<{ title: string; snippet: string }>;
     if (searchItems.length > 0) {
-      const topTitle = String(searchItems[0].title);
+      // Ưu tiên bài viết mang tính tổng quan / danh sách / phân cấp hành chính
+      const preferred =
+        searchItems.find((it) =>
+          it.title.startsWith("Đơn vị hành chính") ||
+          it.title.startsWith("Phân cấp hành chính") ||
+          it.title.startsWith("Tỉnh (Việt Nam)") ||
+          it.title.includes("Sáp nhập") ||
+          it.title.startsWith("Danh sách")
+        ) || searchItems[0];
+
+      if (!preferred) return "";
+      const topTitle = String(preferred.title);
       const summaryUrl = `https://vi.wikipedia.org/w/api.php?action=query&prop=extracts&exintro=true&explaintext=true&titles=${encodeURIComponent(topTitle)}&format=json`;
       const sRes = await fetch(summaryUrl, {
         headers: { "User-Agent": "ZaloBotEncyclopedia/1.0 (contact@bahub.vn)" },
@@ -454,7 +477,7 @@ async function fetchWikipediaSummary(query: string): Promise<string> {
       if (pages) {
         const page = Object.values(pages)[0] as any;
         if (page?.extract) {
-          return `📖 DỮ LIỆU TỪ BÁCH KHOA TOÀN THƯ WIKIPEDIA (${page.title}):\n"${page.extract.slice(0, 700)}"\n`;
+          return `📖 DỮ LIỆU TỪ BÁCH KHOA TOÀN THƯ WIKIPEDIA (${page.title}):\n"${page.extract.slice(0, 1000)}"\n`;
         }
       }
     }

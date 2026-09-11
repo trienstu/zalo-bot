@@ -54,7 +54,18 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
 
   const fetchWikipedia = async () => {
     try {
-      const wikiUrl = `https://vi.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json`;
+      let cleanWikiQ = query
+        .replace(/@\S+/g, "")
+        .replace(/\b(?:check|kiểm tra|xem|tra cứu|hỏi|nhờ|cho anh|cho em|nay|hiện nay|ở|tại|có|bao nhiêu|những|các|là gì|như thế nào|thế nào|sen chúa|sen chua|mộc miên|moc mien|kevin|bot)\b/gi, " ")
+        .replace(/[?.,!/\\-]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      if (/(?:tỉnh thành|tỉnh|thành phố).*?(?:việt nam|nước ta)|(?:việt nam|nước ta).*?(?:tỉnh thành|tỉnh|thành phố)/i.test(query)) {
+        cleanWikiQ = "tỉnh thành Việt Nam";
+      }
+
+      const wikiUrl = `https://vi.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanWikiQ || query)}&utf8=&format=json`;
       const wRes = await fetch(wikiUrl, {
         headers: { "User-Agent": "ZaloBot/2.0 (contact@bahub.vn)" },
         signal: AbortSignal.timeout(2500),
