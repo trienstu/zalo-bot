@@ -18,38 +18,10 @@ export interface SearchResultItem {
 export async function webSearch(query: string, maxResults = 5): Promise<SearchResultItem[]> {
   const results: SearchResultItem[] = [];
 
-  // 1.1. Tầng 1: Wikipedia Search API (Bách khoa toàn thư, khái niệm, địa danh, quy định, tổ chức - Không bao giờ bị Captcha, < 200ms)
-  try {
-    const wikiUrl = `https://vi.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json`;
-    const wRes = await fetch(wikiUrl, {
-      headers: { "User-Agent": "ZaloBot/2.0 (contact@bahub.vn)" },
-      signal: AbortSignal.timeout(2500),
-    });
-    if (wRes.ok) {
-      const wData = (await wRes.json()) as any;
-      const searchItems = wData?.query?.search || [];
-      for (const it of searchItems.slice(0, 3)) {
-        if (results.length >= maxResults) break;
-        const rawSnippet = String(it.snippet || "")
-          .replace(/<[^>]+>/g, " ")
-          .replace(/&quot;/g, '"')
-          .replace(/&#39;/g, "'")
-          .replace(/&amp;/g, "&")
-          .replace(/\s+/g, " ")
-          .trim();
-        if (rawSnippet && !results.some((r) => r.title === it.title)) {
-          results.push({
-            title: it.title,
-            snippet: rawSnippet,
-            url: `https://vi.wikipedia.org/wiki/${encodeURIComponent(it.title)}`,
-          });
-        }
-      }
-    }
-  } catch {}
+  const isRealtimeOrSports = /(?:hôm nay|tối nay|sáng nay|chiều nay|mới nhất|vừa xong|24h|lịch thi đấu|tỉ số|kết quả|giá|trực tiếp|bóng đá|thể thao|đá banh|v-league|ngoại hạng anh|c1|champions league|la liga|serie a)/i.test(query);
 
-  // 1.2. Tầng 2: Google News RSS Search (Tin tức mới nhất, diễn biến thực tế từ hàng trăm báo lớn - < 300ms)
-  if (results.length < maxResults) {
+  // 1.1. Tầng Google News RSS Search (Ưu tiên hàng đầu cho tin tức mới nhất, thể thao, lịch thi đấu, sự kiện thực tế - < 300ms)
+  const fetchGoogleNews = async () => {
     try {
       const gUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=vi&gl=VN&ceid=VN:vi`;
       const gRes = await fetch(gUrl, {
@@ -78,6 +50,51 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
         }
       }
     } catch {}
+  };
+
+  const fetchWikipedia = async () => {
+    try {
+      const wikiUrl = `https://vi.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&utf8=&format=json`;
+      const wRes = await fetch(wikiUrl, {
+        headers: { "User-Agent": "ZaloBot/2.0 (contact@bahub.vn)" },
+        signal: AbortSignal.timeout(2500),
+      });
+      if (wRes.ok) {
+        const wData = (await wRes.json()) as any;
+        const searchItems = wData?.query?.search || [];
+        for (const it of searchItems.slice(0, 3)) {
+          if (results.length >= maxResults) break;
+          const rawSnippet = String(it.snippet || "")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/&amp;/g, "&")
+            .replace(/\s+/g, " ")
+            .trim();
+          if (rawSnippet && !results.some((r) => r.title === it.title)) {
+            results.push({
+              title: it.title,
+              snippet: rawSnippet,
+              url: `https://vi.wikipedia.org/wiki/${encodeURIComponent(it.title)}`,
+            });
+          }
+        }
+      }
+    } catch {}
+  };
+
+  if (isRealtimeOrSports) {
+    // Với câu hỏi tin tức/thời gian thực/thể thao: Quét Google News RSS trước, không để Wikipedia lấn át lịch đấu
+    await fetchGoogleNews();
+    if (results.length < maxResults) {
+      await fetchWikipedia();
+    }
+  } else {
+    // Với câu hỏi khái niệm/bách khoa/định nghĩa: Tra cứu Wikipedia trước
+    await fetchWikipedia();
+    if (results.length < maxResults) {
+      await fetchGoogleNews();
+    }
   }
 
   if (results.length >= maxResults) {

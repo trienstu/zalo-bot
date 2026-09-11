@@ -86,6 +86,12 @@ const CATEGORY_FEEDS_REGISTRY: Record<string, FeedSource[]> = {
   "crypto": [
     { sourceName: "CoinDesk", url: "https://www.coindesk.com/arc/outboundfeeds/rss/", lang: "en" },
   ],
+  "the-thao": [
+    { sourceName: "VnExpress Thể Thao", url: "https://vnexpress.net/rss/the-thao.rss", lang: "vi" },
+    { sourceName: "Tuổi Trẻ Thể Thao", url: "https://tuoitre.vn/rss/the-thao.rss", lang: "vi" },
+    { sourceName: "Thanh Niên Thể Thao", url: "https://thanhnien.vn/rss/the-thao.rss", lang: "vi" },
+    { sourceName: "24h Bóng Đá", url: "https://www.24h.com.vn/upload/rss/bongda.rss", lang: "vi" },
+  ],
   "tin-moi-nhat": [
     { sourceName: "VnExpress", url: "https://vnexpress.net/rss/tin-moi-nhat.rss", lang: "vi" },
     { sourceName: "Tuổi Trẻ", url: "https://tuoitre.vn/rss/tin-moi-nhat.rss", lang: "vi" },
@@ -102,6 +108,9 @@ export function detectNewsCategories(query: string): string[] {
   }
   if (/(?:công nghệ|ai\b|mô hình|gpt|gemini|bán dẫn|chip|apple|iphone|macbook|số hóa|deepseek|claude|nintendo|switch)/i.test(query)) {
     cats.push("so-hoa");
+  }
+  if (/(?:thể thao|bóng đá|đá banh|lịch thi đấu|kết quả bóng đá|tỉ số|ngoại hạng anh|cúp c1|champions league|la liga|serie a|bundesliga|v-league|u23|world cup|cầu thủ|trận đấu|bảng xếp hạng bóng đá|trận cầu|derby)/i.test(query)) {
+    cats.push("the-thao");
   }
   const isVnQuery = /(?:việt nam|tỉnh thành|hành chính|thành phố|thừa thiên|huế|hà nội|đà nẵng|tp\.?\s*hcm|hồ chí minh|sài gòn|cần thơ|hải phòng|bắc ninh|quảng ninh|đồng nai)/i.test(query);
   if (!isVnQuery && /\b(?:thế giới|quốc tế|chiến sự|nước nga|ukraine|nước mỹ|hoa kỳ|trung quốc|israel|iran|bầu cử|trump|putin|zelensky|nước đức|nước pháp|nhật bản|hàn quốc|triều tiên|trung đông|centcom)\b/i.test(query)) {
@@ -589,6 +598,12 @@ export async function searchRealtimeNews(query: string): Promise<string> {
       candidates = candidates.filter((it) => {
         if (it.snippet && it.snippet.length > 25) return true;
         return techRegex.test(it.title);
+      });
+    } else if (categories.includes("the-thao")) {
+      const sportRegex = /(?:thể thao|bóng đá|đá banh|lịch thi đấu|kết quả|tỉ số|trận|v-league|ngoại hạng anh|cúp|champions league|la liga|serie a|bundesliga|clb|đội tuyển|huấn luyện viên|cầu thủ)/i;
+      candidates = candidates.filter((it) => {
+        if (it.snippet && it.snippet.length > 25) return true;
+        return sportRegex.test(it.title);
       });
     }
 
