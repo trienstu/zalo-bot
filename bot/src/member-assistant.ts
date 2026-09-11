@@ -17,7 +17,7 @@ import {
   getRecentGroupImage,
   getMediaByMessageId,
 } from "./db/index.js";
-import { sendGroupText, sendGroupFile, sendReaction, sendTyping, Reactions, sleep } from "./zalo/client.js";
+import { sendGroupText, sendGroupFile, sendReaction, sendTyping, Reactions, sleep, cleanZaloText } from "./zalo/client.js";
 import { formatAndChunkZaloMarkdown, pickSmartReaction } from "./zalo-formatter.js";
 import {
   callGemini,
@@ -161,20 +161,34 @@ async function sendGroupReplyWithMention(
   }
 
   // Bỏ hoàn toàn Jitter delay để gửi tin phản hồi tức thì, không làm mất thời gian người dùng
-  // Gửi phần đầu tiên kèm @mention, quote và styles
-  await sendGroupText(api, threadId, firstChunk.msg, {
-    mentions,
-    quote: options?.quote,
-    styles: firstChunk.styles,
-  });
+  // Gửi phần đầu tiên kèm @mention, quote và styles (với cơ chế tự phục hồi đa tầng chống kẹt tin nhắn)
+  try {
+    await sendGroupText(api, threadId, firstChunk.msg, {
+      mentions,
+      quote: options?.quote,
+      styles: firstChunk.styles,
+    });
+  } catch (err) {
+    console.warn("[sendGroupReplyWithMention] Gửi kèm quote/styles lỗi, thử gửi kèm mentions:", err);
+    try {
+      await sendGroupText(api, threadId, firstChunk.msg, { mentions });
+    } catch (err2) {
+      console.warn("[sendGroupReplyWithMention] Gửi kèm mentions cũng lỗi, fallback gửi text thuần:", err2);
+      await sendGroupText(api, threadId, cleanZaloText(firstChunk.msg));
+    }
+  }
 
   // Gửi các phần tiếp theo nếu nội dung phân tích dài (mỗi phần mang styles độc lập)
   for (let i = 1; i < chunks.length; i++) {
     const nextChunk = chunks[i]!;
     await sleep(200);
-    await sendGroupText(api, threadId, nextChunk.msg, {
-      styles: nextChunk.styles,
-    });
+    try {
+      await sendGroupText(api, threadId, nextChunk.msg, {
+        styles: nextChunk.styles,
+      });
+    } catch {
+      await sendGroupText(api, threadId, cleanZaloText(nextChunk.msg)).catch(() => {});
+    }
   }
 }
 
@@ -2663,18 +2677,14 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       const groupSettings = getGroupSettings(threadId);
       const botName = (groupSettings.botName || defaultBotName).trim();
 
-      // Chốt chặn an toàn cuối cùng: Không bao giờ gửi phản hồi cho chính tên Bot
-      const lowerDisplay = displayName.toLowerCase();
+      // Chốt chặn an toàn cuối cùng: Không bao giờ gửi phản hồi cho chính tài khoản Bot
+      const ownId = typeof api?.getOwnId === "function" ? String(api.getOwnId()).trim() : "";
+      const lowerDisplay = displayName.toLowerCase().trim();
       if (
-        lowerDisplay === botName.toLowerCase() ||
-        lowerDisplay === "sen chúa" ||
-        lowerDisplay === "sen chua" ||
-        lowerDisplay === "mộc miên" ||
-        lowerDisplay === "moc mien" ||
-        lowerDisplay.startsWith("bot ") ||
-        lowerDisplay === "bot"
+        (ownId && sender === ownId) ||
+        (lowerDisplay && lowerDisplay === botName.toLowerCase())
       ) {
-        console.warn(`[member-assistant] ⛔ Chặn gửi phản hồi vì tên người nhận (${displayName}) trùng tên Bot (${botName})`);
+        console.warn(`[member-assistant] ⛔ Chặn gửi phản hồi vì người nhận (${displayName} / ${sender}) là chính Bot (${botName})`);
         return;
       }
 
