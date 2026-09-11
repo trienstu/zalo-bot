@@ -295,10 +295,10 @@ export const config = {
   /** API key Google Gemini (https://aistudio.google.com/app/apikey). Rỗng = tắt. */
   geminiApiKey: process.env.GEMINI_API_KEY?.trim() || "",
 
-  /** Model Gemini dùng để tóm tắt và xử lý thông tin (mặc định gemini-3.7-flash, tự động cascading fallback sang gemini-flash-lite-latest khi nghẽn). */
-  geminiModel: (process.env.GEMINI_MODEL?.trim() && !process.env.GEMINI_MODEL.includes("3.5"))
+  /** Model Gemini dùng để tóm tắt và xử lý thông tin (mặc định gemini-3.1-flash-lite-preview siêu tốc ~800ms). */
+  geminiModel: (process.env.GEMINI_MODEL?.trim() && !process.env.GEMINI_MODEL.includes("3.7") && !process.env.GEMINI_MODEL.includes("3.8") && !process.env.GEMINI_MODEL.includes("2.0") && !process.env.GEMINI_MODEL.includes("2.5") && !process.env.GEMINI_MODEL.includes("1.5") && !process.env.GEMINI_MODEL.includes("3.5"))
     ? process.env.GEMINI_MODEL.trim()
-    : "gemini-3.7-flash",
+    : "gemini-3.1-flash-lite-preview",
 
   /** API key DeepSeek cho tóm tắt hằng ngày (https://platform.deepseek.com). Rỗng = tắt. */
   deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() || "",

@@ -1380,10 +1380,10 @@ export async function runListener(): Promise<void> {
       console.warn(`[listener] checkMorningWeatherBriefingLoop error: ${String(e)}`);
     }
   }
-  setInterval(() => void checkMorningWeatherBriefingLoop(), 30000);
+  setInterval(() => void checkMorningWeatherBriefingLoop(), 60000);
 
   // =========================================================================
-  // VÒNG LẶP GỬI BẢN TIN AI & CÔNG NGHỆ SÁNG TỰ ĐỘNG (MỖI 30 GIÂY)
+  // VÒNG LẶP GỬI BẢN TIN AI & CÔNG NGHỆ SÁNG TỰ ĐỘNG (MỖI 60 GIÂY)
   // =========================================================================
   const newsSentLog = new Map<string, string>(); // groupId -> 'YYYY-MM-DD'
   async function checkDailyAiNewsBriefingLoop(): Promise<void> {
@@ -1416,10 +1416,10 @@ export async function runListener(): Promise<void> {
       console.warn(`[listener] checkDailyAiNewsBriefingLoop error: ${String(e)}`);
     }
   }
-  setInterval(() => void checkDailyAiNewsBriefingLoop(), 30000);
+  setInterval(() => void checkDailyAiNewsBriefingLoop(), 60000);
 
   // =========================================================================
-  // VÒNG LẶP QUÉT & TỰ ĐỘNG CHẤP NHẬN LỜI MỜI KẾT BẠN (MỖI 30 GIÂY)
+  // VÒNG LẶP QUÉT & TỰ ĐỘNG CHẤP NHẬN LỜI MỜI KẾT BẠN (MỖI 2 PHÚT)
   // =========================================================================
   const failedFriendAttempts = new Map<string, { attempts: number; lastTried: number }>();
 
@@ -1497,9 +1497,9 @@ export async function runListener(): Promise<void> {
     }
   }
 
-  // Quét ngay lần đầu sau 3 giây, sau đó lặp lại mỗi 30 giây (an toàn cho tài khoản Zalo, giả lập tự nhiên)
+  // Quét ngay lần đầu sau 3 giây, sau đó lặp lại mỗi 2 phút (tiết kiệm socket Zalo, an toàn tuyệt đối)
   setTimeout(() => void checkAutoAcceptFriendsLoop(), 3000);
-  setInterval(() => void checkAutoAcceptFriendsLoop(), 30000);
+  setInterval(() => void checkAutoAcceptFriendsLoop(), 120000);
 }
 
 

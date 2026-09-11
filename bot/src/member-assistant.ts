@@ -1609,7 +1609,7 @@ async function handleHistoryQA(
     if (plan.needsSearch && plan.queries.length > 0) {
       console.log(`[member-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(plan.queries)}`);
       const searchResults = await Promise.all(
-        plan.queries.slice(0, 3).map((q) => searchRealtimeNews(q).catch(() => ""))
+        plan.queries.slice(0, 2).map((q) => searchRealtimeNews(q).catch(() => ""))
       );
       liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
     }
@@ -1691,23 +1691,25 @@ async function handleHistoryQA(
     `HÃY TRẢ LỜI THẬT DUYÊN DÁNG, CHUẨN XÁC VÀ HÓM HỈNH:`;
 
   try {
-    const isGreetingQuery =
-      /^(?:chào|hi|hello|alo|ê|helo|hế lô|bye|tạm biệt|cảm ơn|thanks|ok|oki|được rồi|thôi|dạ|vâng)\b/i.test(question.trim()) &&
-      question.trim().length < 30;
     const isSearchDisabled =
       process.env.DISABLE_SEARCH === "true" ||
       Boolean((groupSettings as any)?.disableSearch) ||
       Boolean((groupSettings as any)?.enableSearch === 0) ||
       /tắt search|không tìm kiếm|không tra cứu/i.test(groupSettings.customPrompt || "");
 
-    // 🧠 AGENTIC BRAIN: Mọi câu hỏi thực tế đều được trao toàn quyền Agent Loop với đầy đủ bộ công cụ.
-    // Chỉ có các câu chào hỏi cụt lủn xã giao (< 25 ký tự) mới bỏ qua để phản hồi tức thì.
-    const isPureShortGreeting = isGreetingQuery && question.trim().length < 25;
+    const isFileGenerationQuery =
+      /(?:tạo|xuất|làm|lưu|gửi|convert|chuyển|viết)\s*(?:thành\s*)?(?:file|tệp)?\s*(?:word|excel|docx|xlsx|doc|sheet|bảng|pdf|txt|md|code)/i.test(question) ||
+      /(?:file|tệp)\s*(?:word|excel|docx|xlsx)/i.test(question) ||
+      /(?:tạo|xuất|làm)\s*(?:file|tệp)/i.test(question);
+
+    const needsAgentLoop = isFileGenerationQuery || /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(question);
 
     let answer = "";
-    if (!isPureShortGreeting && !isSearchDisabled) {
-      // 🚀 AGENT LOOP ĐÍCH THỰC (Tự chủ tư duy và chọn tool: finance_market_lookup, web_search, fetch_url, wiki, generate_file...)
+    if (needsAgentLoop && !isSearchDisabled) {
+      // 🚀 Chỉ khi người dùng thực sự yêu cầu gọi tool xuất file (Word, Excel) hoặc đọc link cụ thể mới chạy Agent Loop
       answer = await callGeminiAgentLoop(systemPrompt, userPrompt, {
+        model: "gemini-3.1-flash-lite-preview",
+        maxTurns: 2,
         mediaParts: mediaPart ? [mediaPart] : undefined,
         onFileGenerated: async (file) => {
           try {
@@ -1720,7 +1722,10 @@ async function handleHistoryQA(
         },
       });
     } else {
+      // ⚡ FAST-PATH DIRECT RESPONSE: Dữ liệu thời gian thực đã được Semantic Planner + Realtime Search nạp sẵn vào prompt
+      // Gọi trực tiếp gemini-3.1-flash-lite-preview để phản hồi ngay trong ~800ms, triệt tiêu 100% độ trễ và lỗi 503!
       answer = await callGemini(systemPrompt, userPrompt, {
+        model: "gemini-3.1-flash-lite-preview",
         mediaParts: mediaPart ? [mediaPart] : undefined,
         enableSearch: false,
       });

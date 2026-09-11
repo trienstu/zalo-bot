@@ -100,7 +100,7 @@ export async function planSearchQueries(params: {
   try {
     const plannerPromise = (async () => {
       const text = await callGemini(system, user, {
-        model: "gemini-flash-lite-latest",
+        model: "gemini-3.1-flash-lite-preview",
         maxTokens: 500,
         json: true,
       });

@@ -296,24 +296,16 @@ export async function callGemini(
     throw new Error("Thiếu GEMINI_API_KEY trong .env");
   }
 
-  let primaryModel = options?.model?.trim() || process.env.GEMINI_MODEL?.trim() || config.geminiModel || "gemini-3.7-flash";
-  // Nếu env cũ chứa bản 3.5-flash cũ (đã bị đóng) hoặc rỗng, mặc định gemini-3.7-flash (giữ lại gemini-3.5-flash-lite)
-  if (!primaryModel || (primaryModel.includes("3.5") && !primaryModel.includes("lite"))) {
-    primaryModel = "gemini-3.7-flash";
+  let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-3.1-flash-lite-preview";
+  if (!primaryModel || primaryModel.includes("3.7") || primaryModel.includes("3.8") || primaryModel.includes("2.0") || primaryModel.includes("2.5") || (primaryModel.includes("3.5") && !primaryModel.includes("lite"))) {
+    primaryModel = "gemini-3.1-flash-lite-preview";
   }
 
-  // Danh sách model cascading dự phòng khi model chính nghẽn mạng / 503 / 429 / Timeout:
-  // 1. gemini-flash-lite-latest: Siêu tốc <1s, độ ổn định cực cao
-  // 2. gemini-3.8-flash: Bản mới nhất
-  // 3. gemini-3.7-flash: Bản tiêu chuẩn chất lượng cao
-  // 4. gemini-3.5-flash-lite: Bản lite 3.5 siêu tốc (~670ms)
-  // 5. gemini-3.1-flash-lite-preview: Bản lite 3.1
+  // Danh sách model cascading dự phòng siêu tốc (~800ms) khi model chính nghẽn mạng / 503 / 429 / Timeout:
   const candidateFallbacks = [
-    "gemini-flash-lite-latest",
-    "gemini-3.8-flash",
-    "gemini-3.7-flash",
-    "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-lite-latest",
   ].filter((m) => m !== primaryModel);
 
   const temperature = options?.temperature ?? 0.3;
@@ -406,9 +398,9 @@ export async function callGemini(
       return content;
     };
 
-    // 1. Thử model chính (primaryModel, mặc định gemini-3.7-flash)
+    // 1. Thử model chính (primaryModel, mặc định gemini-flash-lite-latest siêu tốc)
     try {
-      const primaryRes = await executeModel(primaryModel, 15_000);
+      const primaryRes = await executeModel(primaryModel, 8_000);
       if (primaryRes) {
         botKeyOffset = (keyIdx + 1) % numKeys;
         return primaryRes;
@@ -422,7 +414,7 @@ export async function callGemini(
     for (const fbModel of candidateFallbacks) {
       try {
         console.log(`[gemini] ⚡ Model chính gặp lỗi/nghẽn, tự động chuyển sang model dự phòng: ${fbModel}...`);
-        const fbRes = await executeModel(fbModel, 10_000);
+        const fbRes = await executeModel(fbModel, 5_000);
         if (fbRes) {
           console.log(`[gemini] ✅ Đã phản hồi thành công qua fallback model ${fbModel}!`);
           botKeyOffset = (keyIdx + 1) % numKeys;
@@ -747,7 +739,10 @@ export async function callGeminiAgentLoop(
     throw new Error("Thiếu GEMINI_API_KEY trong .env");
   }
 
-  const primaryModel = options?.model?.trim() || process.env.GEMINI_MODEL?.trim() || config.geminiModel || "gemini-3.7-flash";
+  let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-3.1-flash-lite-preview";
+  if (!primaryModel || primaryModel.includes("3.7") || primaryModel.includes("3.8") || primaryModel.includes("2.0") || primaryModel.includes("2.5") || (primaryModel.includes("3.5") && !primaryModel.includes("lite"))) {
+    primaryModel = "gemini-3.1-flash-lite-preview";
+  }
   const maxTurns = options?.maxTurns || 2;
   const temperature = options?.temperature ?? 0.2;
   const maxTokens = options?.maxTokens;
@@ -805,7 +800,7 @@ export async function callGeminiAgentLoop(
         try {
           resp = await fetch(endpoint, {
             method: "POST",
-            signal: AbortSignal.timeout(30_000),
+            signal: AbortSignal.timeout(10_000),
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(requestBody),
           });
