@@ -2144,11 +2144,11 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         );
       }
     } catch (imgErr: any) {
-      console.error(`[member-assistant] ❌ Lỗi sinh ảnh FLUX.1:`, imgErr);
+      console.error(`[member-assistant] ❌ Lỗi sinh/gửi ảnh FLUX.1:`, imgErr);
       await sendGroupText(
         api,
         threadId,
-        `⚠️ Rất tiếc @${displayName}, đã có lỗi xảy ra khi tạo ảnh. Vui lòng thử lại sau.`,
+        `⚠️ Rất tiếc @${displayName}, đã có lỗi xảy ra khi tạo/gửi ảnh: ${imgErr?.message || String(imgErr)}`,
       );
     }
     return;

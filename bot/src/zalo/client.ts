@@ -348,12 +348,76 @@ export function writeLoginReadyStatus(): void {
   writeLoginStatus("ready");
 }
 
+function getImageDimensions(buf: Buffer): { width: number; height: number } {
+  try {
+    if (buf.length >= 24 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+      const width = buf.readUInt32BE(16);
+      const height = buf.readUInt32BE(20);
+      if (width > 0 && height > 0) return { width, height };
+    }
+    if (buf.length >= 4 && buf[0] === 0xff && buf[1] === 0xd8) {
+      let offset = 2;
+      while (offset < buf.length - 8) {
+        if (buf[offset] !== 0xff) { offset++; continue; }
+        const marker = buf[offset + 1];
+        if (marker === undefined) break;
+        if ((marker >= 0xc0 && marker <= 0xc3) || (marker >= 0xc9 && marker <= 0xcb)) {
+          const height = buf.readUInt16BE(offset + 5);
+          const width = buf.readUInt16BE(offset + 7);
+          if (width > 0 && height > 0) return { width, height };
+        }
+        const len = buf.readUInt16BE(offset + 2);
+        offset += 2 + len;
+      }
+    }
+  } catch {}
+  return { width: 1024, height: 1024 };
+}
+
+function prepareAttachment(filePath: string): any {
+  const ext = path.extname(filePath).toLowerCase();
+  const isImage = [".png", ".jpg", ".jpeg", ".webp"].includes(ext);
+  if (isImage && fs.existsSync(filePath)) {
+    try {
+      const buf = fs.readFileSync(filePath);
+      const dims = getImageDimensions(buf);
+      return {
+        data: buf,
+        filename: path.basename(filePath),
+        metadata: {
+          totalSize: buf.length,
+          width: dims.width,
+          height: dims.height,
+        },
+      };
+    } catch {
+      return filePath;
+    }
+  }
+  return filePath;
+}
+
 /**
  * Đăng nhập, ƯU TIÊN tái dùng session đã lưu (KHÔNG login lặp — login dồn dập dễ bị
  * khoá tài khoản). Chỉ hiện QR khi chưa có session hoặc session hỏng.
  */
 export async function login(): Promise<ZaloApi> {
-  const zalo = new Zalo({ selfListen: config.zaloSelfListen });
+  const zalo = new Zalo({
+    selfListen: config.zaloSelfListen,
+    imageMetadataGetter: async (imgFilePath: string) => {
+      try {
+        const buf = await fs.promises.readFile(imgFilePath);
+        const dims = getImageDimensions(buf);
+        return {
+          size: buf.length,
+          width: dims.width,
+          height: dims.height,
+        };
+      } catch {
+        return { size: 100000, width: 1024, height: 1024 };
+      }
+    },
+  });
   const saved = loadCredentials();
 
   if (saved) {
@@ -1057,9 +1121,10 @@ export async function sendGroupFile(
     throw new Error("zca-js runtime không có api.sendMessage");
   }
   const threadIdStr = String(groupId).trim();
+  const attachment = prepareAttachment(filePath);
   const payload: any = {
     msg: caption || "",
-    attachments: [filePath],
+    attachments: [attachment],
   };
 
   console.log(`[sendGroupFile] 📎 Đang gửi file [${path.basename(filePath)}] vào nhóm [${threadIdStr}]...`);
@@ -1089,9 +1154,10 @@ export async function sendDirectFile(
     throw new Error("zca-js runtime không có api.sendMessage");
   }
   const targetId = String(userId).trim();
+  const attachment = prepareAttachment(filePath);
   const payload: any = {
     msg: caption || "",
-    attachments: [filePath],
+    attachments: [attachment],
   };
 
   console.log(`[sendDirectFile] 📎 Đang gửi file 1:1 [${path.basename(filePath)}] đến [${targetId}]...`);
