@@ -24,6 +24,18 @@ test("câu tổng quan sản phẩm là knowledge khi không hỏi dữ kiện b
   assert.equal(plan.intent, "knowledge");
 });
 
+test("câu review hoặc đánh giá tổng quan không bị khóa fact_check nếu không hỏi dữ kiện biến động", () => {
+  const cases = [
+    "đánh giá tổng quan VinFast VF 3",
+    "review laptop Acme Book 14",
+    "thông tin thương hiệu Acme",
+  ];
+
+  for (const question of cases) {
+    assert.equal(normalizeQueryPlanIntent(factPlan(), question).intent, "knowledge", question);
+  }
+});
+
 test("câu dự án hỏi giá, pháp lý, tiến độ hoặc chủ đầu tư vẫn giữ fact_check", () => {
   const cases = [
     "giá dự án Gladia Heights hiện nay",
@@ -35,4 +47,39 @@ test("câu dự án hỏi giá, pháp lý, tiến độ hoặc chủ đầu tư 
   for (const question of cases) {
     assert.equal(normalizeQueryPlanIntent(factPlan(), question).intent, "fact_check", question);
   }
+});
+
+test("câu y tế về thuốc, liều dùng hoặc điều trị luôn cần fact_check", () => {
+  const base: QueryPlanResult = {
+    needsSearch: false,
+    intent: "knowledge",
+    queries: [],
+    summaryIntent: "test",
+  };
+  const cases = [
+    "liều dùng paracetamol cho trẻ em",
+    "nên uống thuốc gì khi đau dạ dày",
+    "thuốc điều trị cúm A hiện nay",
+  ];
+
+  for (const question of cases) {
+    const plan = normalizeQueryPlanIntent(base, question);
+    assert.equal(plan.needsSearch, true, question);
+    assert.equal(plan.intent, "fact_check", question);
+    assert.ok(plan.queries.length > 0, question);
+  }
+});
+
+test("câu y tế mô tả triệu chứng chung không bị ép fact_check", () => {
+  const base: QueryPlanResult = {
+    needsSearch: false,
+    intent: "knowledge",
+    queries: [],
+    summaryIntent: "test",
+  };
+
+  const plan = normalizeQueryPlanIntent(base, "triệu chứng sốt xuất huyết ở trẻ em");
+
+  assert.equal(plan.needsSearch, false);
+  assert.equal(plan.intent, "knowledge");
 });

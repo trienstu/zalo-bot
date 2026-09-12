@@ -43,14 +43,34 @@ function normalizePlannerText(value: string): string {
 }
 
 export function normalizeQueryPlanIntent(plan: QueryPlanResult, question: string, quoteText = ""): QueryPlanResult {
+  const text = normalizePlannerText(`${question} ${quoteText}`);
+  const fallbackQuery = question
+    .replace(/@\S+/g, "")
+    .replace(/[\/?.!,]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 100);
+  const asksMedicalAction = /\b(?:thuoc|lieu dung|lieu luong|dieu tri|vac xin|vaccine|phac do|uong thuoc|nen uong|ke don|tac dung phu|chong chi dinh|tuong tac thuoc)\b/i.test(text);
+  if (asksMedicalAction) {
+    return {
+      ...plan,
+      needsSearch: true,
+      intent: "fact_check",
+      queries: plan.queries.length > 0 ? plan.queries : [fallbackQuery].filter(Boolean),
+    };
+  }
+
   if (!plan.needsSearch || plan.intent !== "fact_check") return plan;
 
-  const text = normalizePlannerText(`${question} ${quoteText}`);
   const asksOverview =
-    /\b(?:tong quan|gioi thieu|thong tin|review|danh gia|overview|introduction|about|profile)\b/i.test(text) &&
-    /\b(?:du an|san pham|khu do thi|can ho|chung cu|biet thu|nha pho|resort|cong ty|thuong hieu|project|product|company)\b/i.test(text);
+    /\b(?:tong quan|gioi thieu|thong tin|review|danh gia|overview|introduction|about|profile)\b/i.test(text);
+  const textWithoutReviewPhrase = text.replace(/\bdanh gia\b/g, " ");
+  const asksPrice =
+    /\b(?:gia ban|bang gia|muc gia|don gia|bao gia|gia vang|gia xang|gia dau|gia du an|gia xe|gia nha|gia can ho|gia chung cu)\b/i.test(text) ||
+    /\bgia\b/i.test(textWithoutReviewPhrase);
   const asksStrictFact =
-    /\b(?:hien nay|hien tai|moi nhat|hom nay|dang|con|gia|bang gia|phap ly|so hong|giay phep|tien do|mo ban|ban giao|chu dau tu|so huu|ai|bao nhieu|khi nao|ngay nao|dung khong|kiem tra|check|xac minh|fact check)\b/i.test(text);
+    asksPrice ||
+    /\b(?:hien nay|hien tai|moi nhat|hom nay|dang|con|phap ly|so hong|giay phep|tien do|mo ban|ban giao|chu dau tu|so huu|ai|bao nhieu|khi nao|ngay nao|dung khong|kiem tra|check|xac minh|fact check)\b/i.test(text);
 
   if (asksOverview && !asksStrictFact) {
     return { ...plan, intent: "knowledge" };
