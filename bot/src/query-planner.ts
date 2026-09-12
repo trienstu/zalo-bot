@@ -42,6 +42,60 @@ function normalizePlannerText(value: string): string {
     .toLowerCase();
 }
 
+function uniqQueries(queries: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const query of queries) {
+    const compact = String(query || "").replace(/\s+/g, " ").trim();
+    const key = normalizePlannerText(compact);
+    if (compact && !seen.has(key)) {
+      seen.add(key);
+      out.push(compact);
+    }
+  }
+  return out.slice(0, 4);
+}
+
+function extractDeveloperEntity(question: string, plan: QueryPlanResult): string {
+  const raw = `${question} ${plan.queries.join(" ")}`;
+  const properMatches = [...raw.matchAll(/\b([A-Z0-9]{2,}(?:\s+(?:Group|Land|Homes|Corp|Corporation|JSC|Holdings|Capital|Properties|Realty))?|[A-Z][A-Za-z0-9&.-]*(?:\s+(?:Group|Land|Homes|Corp|Corporation|JSC|Holdings|Capital|Properties|Realty)))\b/g)]
+    .map((match) => match[1]?.trim() || "")
+    .filter((value) => value && !/^(?:TP|HCM|AI|CEO)$/i.test(value));
+  const withSuffix = properMatches.find((value) => /\b(?:Group|Land|Homes|Corp|Corporation|JSC|Holdings|Capital|Properties|Realty)\b/i.test(value));
+  if (withSuffix) return withSuffix;
+
+  const ofMatch = raw.match(/(?:của|cua)\s+([^,?.!\n]{2,80})/i);
+  const fromOf = ofMatch?.[1]
+    ?.replace(/\b(?:dự án|du an|bất động sản|bat dong san|đang triển khai|dang trien khai|mới nhất|moi nhat|năm|nam|20\d{2}|cho anh|cho a|giúp anh|giup anh|nhé|nha|ạ|sen chúa|sen chua|mộc miên|moc mien|kevin|bot)\b.*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (fromOf && /[A-ZÀ-Ỹ0-9]/.test(fromOf)) return fromOf;
+
+  return properMatches[0] || "";
+}
+
+function augmentDeveloperProjectQueries(plan: QueryPlanResult, question: string): QueryPlanResult {
+  const text = normalizePlannerText(`${question} ${plan.summaryIntent || ""} ${plan.queries.join(" ")}`);
+  const asksRealEstateDeveloperProjects =
+    /\b(?:du an|bat dong san|bds|chung cu|can ho|khu do thi)\b/i.test(text) &&
+    /\b(?:moi nhat|dang trien khai|danh muc|khai cong|ra mat|mo ban|chu dau tu|tap doan|developer)\b/i.test(text);
+
+  if (!plan.needsSearch || !asksRealEstateDeveloperProjects) return plan;
+
+  const entity = extractDeveloperEntity(question, plan);
+  if (!entity) return plan;
+
+  const currentYear = new Date().getFullYear();
+  return {
+    ...plan,
+    queries: uniqQueries([
+      `${entity} khởi công dự án ${currentYear}`,
+      `${entity} ra mắt dự án mới ${currentYear}`,
+      ...plan.queries,
+    ]),
+  };
+}
+
 export function normalizeQueryPlanIntent(plan: QueryPlanResult, question: string, quoteText = ""): QueryPlanResult {
   const text = normalizePlannerText(`${question} ${quoteText}`);
   const fallbackQuery = question
@@ -73,9 +127,9 @@ export function normalizeQueryPlanIntent(plan: QueryPlanResult, question: string
     /\b(?:hien nay|hien tai|moi nhat|hom nay|dang|con|phap ly|so hong|giay phep|tien do|mo ban|ban giao|chu dau tu|so huu|ai|bao nhieu|khi nao|ngay nao|dung khong|kiem tra|check|xac minh|fact check)\b/i.test(text);
 
   if (asksOverview && !asksStrictFact) {
-    return { ...plan, intent: "knowledge" };
+    return augmentDeveloperProjectQueries({ ...plan, intent: "knowledge" }, question);
   }
-  return plan;
+  return augmentDeveloperProjectQueries(plan, question);
 }
 
 /**

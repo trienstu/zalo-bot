@@ -47,6 +47,21 @@ test("bóc các trường hồ sơ dự án phổ biến từ nội dung trang",
   assert.match(byKey.get("progress") || "", /Q4\/2028/);
 });
 
+test("làm sạch HTML entity và đoạn marketing bị kéo dính vào số liệu dự án", () => {
+  const facts = extractRealEstateProjectFactsFromText(`
+    Quy mô đất: gần 5ha nhưng mật độ xây dựng khối thấp chỉ chiếm 28%, phần lớn không gian được MIK Group hợp tác cùng đơn vị thiết kế cao cấp.
+    Mật độ xây dựng: 30,5%.
+    Sản phẩm: 922 căn hộ từ 1-3PN và 93 nhà phố, biệt thự, dự án mang triết lý sống &#8220;chuẩn mới&#8221;.
+    Tiện ích nổi bật: Hồ bơi tràn bờ, Công viên Green Park, Clubhouse, Kids Zone&#8230;
+  `, "Trang Imperia mẫu");
+
+  const byKey = new Map(facts.map((fact) => [fact.key, fact.value]));
+  assert.equal(byKey.get("landArea"), "gần 5ha");
+  assert.equal(byKey.get("density"), "30,5%");
+  assert.doesNotMatch(byKey.get("productCount") || "", /&#8220|triết lý sống|chuẩn mới/i);
+  assert.doesNotMatch(byKey.get("amenities") || "", /&#8230/);
+});
+
 test("format câu trả lời hồ sơ dự án trực tiếp từ schema, không để LLM tự suy diễn", () => {
   const answer = formatRealEstateProjectProfileAnswer(`
 🏗️ HỒ SƠ DỰ ÁN BẤT ĐỘNG SẢN ĐÃ MỞ TRANG VÀ TRÍCH XUẤT THEO SCHEMA:

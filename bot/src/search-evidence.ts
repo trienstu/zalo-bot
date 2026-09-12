@@ -32,6 +32,21 @@ const BROAD_QUERY_WORDS = new Set([
   "news", "tin", "tuc", "thoi", "su", "today", "hom", "nay", "latest", "moi", "nhat", "update", "cap", "nhat",
 ]);
 
+const ENTITY_ANCHOR_STOP_WORDS = new Set([
+  ...RELEVANCE_STOP_WORDS,
+  "2024", "2025", "2026", "2027", "2028",
+  "an", "ban", "bang", "bat", "biet", "block", "bo", "bong", "can", "cao", "cap", "cdt", "chu",
+  "chung", "cong", "cu", "cung", "danh", "dat", "dau", "dia", "dien", "dong", "doi", "du",
+  "gia", "giam", "giao", "giai", "giay", "goi", "group", "hang", "hau", "hinh", "hoi", "huan",
+  "huyen", "khu", "kiem", "khai", "khi", "khoi", "lich", "linh", "luat", "luyen", "mat", "muc",
+  "nguoi", "nha", "nhan", "phap", "pho", "phong", "phuong", "quan", "quy", "san", "so", "tai",
+  "tap", "thanh", "thao", "thi", "thong", "thu", "tich", "tien", "tong", "tinh", "trien", "truong",
+  "tu", "van", "vien", "xay", "xac",
+  "apartment", "breaking", "chair", "chairman", "chief", "city", "coach", "company", "current",
+  "developer", "estate", "football", "latest", "legal", "market", "minister", "new", "official",
+  "president", "price", "project", "real", "review", "team", "tower",
+]);
+
 export function normalizeSearchText(value: string): string {
   return String(value || "")
     .normalize("NFD")
@@ -48,6 +63,41 @@ function queryTokens(query: string): string[] {
     .split(" ")
     .filter((token) => token.length >= 2 && !RELEVANCE_STOP_WORDS.has(token));
   return [...new Set(tokens)];
+}
+
+function normalizedTokenSet(value: string): Set<string> {
+  return new Set(normalizeSearchText(value).split(" ").filter(Boolean));
+}
+
+function normalizedContainsPhrase(normalizedText: string, tokens: string[]): boolean {
+  if (tokens.length === 0) return false;
+  return ` ${normalizedText} `.includes(` ${tokens.join(" ")} `);
+}
+
+function entityAnchorTokens(query: string): string[] {
+  const tokens = queryTokens(query)
+    .filter((token) =>
+      token.length >= 3 &&
+      !ENTITY_ANCHOR_STOP_WORDS.has(token) &&
+      !/^\d{4}$/.test(token)
+    );
+  return [...new Set(tokens)].slice(0, 6);
+}
+
+function countEntityAnchorHits(item: SearchEvidence, query: string): number {
+  const anchors = entityAnchorTokens(query);
+  if (anchors.length === 0) return 0;
+  const normalized = normalizeSearchText(`${item.title} ${item.snippet} ${item.sourceName || ""} ${hostnameOf(item.url)} ${item.url}`);
+  const tokens = new Set(normalized.split(" ").filter(Boolean));
+  return anchors.filter((anchor) => tokens.has(anchor) || (anchor.length >= 5 && normalized.includes(anchor))).length;
+}
+
+function meetsEntityAnchorRequirement(item: SearchEvidence, query: string, intent: SearchIntent): boolean {
+  if (intent !== "fact_check") return true;
+  const anchors = entityAnchorTokens(query);
+  if (anchors.length === 0) return true;
+  const requiredHits = anchors.length >= 2 ? 2 : 1;
+  return countEntityAnchorHits(item, query) >= requiredHits;
 }
 
 function hostnameOf(url: string): string {
@@ -122,11 +172,13 @@ export function scoreEvidence(
   const tokens = queryTokens(query);
   const haystack = normalizeSearchText(`${item.title} ${item.snippet}`);
   const title = normalizeSearchText(item.title);
-  const matched = tokens.filter((token) => haystack.includes(token));
-  const titleMatched = tokens.filter((token) => title.includes(token));
+  const haystackTokens = normalizedTokenSet(`${item.title} ${item.snippet}`);
+  const titleTokens = normalizedTokenSet(item.title);
+  const matched = tokens.filter((token) => haystackTokens.has(token));
+  const titleMatched = tokens.filter((token) => titleTokens.has(token));
   const coverage = tokens.length > 0 ? matched.length / tokens.length : 0;
   const titleCoverage = tokens.length > 0 ? titleMatched.length / tokens.length : 0;
-  const phrase = tokens.length >= 2 && haystack.includes(tokens.join(" ")) ? 1 : 0;
+  const phrase = tokens.length >= 2 && normalizedContainsPhrase(haystack, tokens) ? 1 : 0;
   const queryText = normalizeSearchText(query);
   const disambiguatingModifiers = ["pho", "deputy", "vice", "acting", "interim", "former", "cuu"];
   const hasUnrequestedModifier = disambiguatingModifiers.some((modifier) =>
@@ -181,6 +233,7 @@ export function rankEvidence(
 
   return [...deduped.values()]
     .map((item) => scoreEvidence(item, query, intent, now))
+    .filter((item) => meetsEntityAnchorRequirement(item, query, intent))
     .filter((item) => meetsRelevanceThreshold(item, query))
     .sort((a, b) =>
       b.totalScore - a.totalScore ||

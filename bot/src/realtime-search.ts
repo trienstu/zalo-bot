@@ -944,7 +944,7 @@ export async function searchRealtimeNews(query: string | string[], options: Sear
     const collectedSnippets: SearchResultItem[] = [];
     try {
       const snippetQueries: string[] = [cleanQ];
-      const shouldBuildRealEstateProfile = categories.includes("bat-dong-san") && isRealEstateProjectProfileQuery(rawQuery);
+      const shouldBuildRealEstateProfile = isRealEstateProjectProfileQuery(rawQuery);
       if (shouldBuildRealEstateProfile) {
         snippetQueries.push(...buildRealEstateProjectSearchQueries(cleanQ).slice(0, 2));
       }
@@ -1013,7 +1013,7 @@ export async function searchRealtimeNews(query: string | string[], options: Sear
 
     let realEstateProfileText = "";
     try {
-      if (categories.includes("bat-dong-san") && isRealEstateProjectProfileQuery(rawQuery)) {
+      if (isRealEstateProjectProfileQuery(rawQuery)) {
         realEstateProfileText = await buildRealEstateProjectProfileContext(cleanQ, [
           ...collectedSnippets,
           ...mergedItems.map((item) => ({

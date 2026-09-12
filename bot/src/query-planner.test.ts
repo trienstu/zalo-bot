@@ -49,6 +49,23 @@ test("câu dự án hỏi giá, pháp lý, tiến độ hoặc chủ đầu tư 
   }
 });
 
+test("câu hỏi danh mục dự án chủ đầu tư được bổ sung query hành động để tránh nguồn thị trường chung", () => {
+  const base: QueryPlanResult = {
+    needsSearch: true,
+    intent: "fact_check",
+    queries: [
+      "dự án bất động sản mới nhất MIK Group 2026",
+      "danh mục dự án MIK Group đang triển khai",
+    ],
+    summaryIntent: "Tra cứu dự án bất động sản mới nhất của MIK Group",
+  };
+
+  const plan = normalizeQueryPlanIntent(base, "tổng quan dự án mới nhất của MIK");
+
+  assert.match(plan.queries[0] || "", /MIK.*khởi công dự án/i);
+  assert.match(plan.queries[1] || "", /MIK.*ra mắt dự án mới/i);
+});
+
 test("câu y tế về thuốc, liều dùng hoặc điều trị luôn cần fact_check", () => {
   const base: QueryPlanResult = {
     needsSearch: false,

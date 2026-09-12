@@ -1185,6 +1185,7 @@ async function handleHistoryQA(
       `       * TUYỆT ĐỐI CẤM TỰ Ý BỊA ĐẶT TIN NHẮN GIẢ MẠO rằng "em đã xuất xong file", "anh có thể bấm tải file ngay phía trên", "đã đóng gói hoàn tất" khi CHƯA THỰC SỰ GỌI TOOL generate_file! Mọi hành vi tự viết tin nhắn giả vờ đã gửi file mà không gọi tool là hành vi BỊ NGHIÊM CẤM HOÀN TOÀN!`;
 
     let quoteLiveNews = "";
+    let quoteEvidenceRequired = false;
     try {
       const plan = await planSearchQueries({
         question,
@@ -1194,9 +1195,13 @@ async function handleHistoryQA(
       });
 
       if (plan.needsSearch && plan.queries.length > 0) {
+        quoteEvidenceRequired = plan.intent === "fact_check";
         // Chạy song song tối đa 3 truy vấn chuyên biệt bóc tách từ ngữ nghĩa người dùng
         const searchResults = await Promise.all(
-          plan.queries.slice(0, 3).map((q) => searchRealtimeNews(q).catch(() => ""))
+          plan.queries.slice(0, 3).map((q) => searchRealtimeNews(q, {
+            intent: plan.intent,
+            requireEvidence: quoteEvidenceRequired,
+          }).catch(() => ""))
         );
         quoteLiveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
       }
@@ -1207,6 +1212,14 @@ async function handleHistoryQA(
     const quoteLiveNewsSection = quoteLiveNews
       ? `\n=== DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT: ===\n${quoteLiveNews}\n`
       : "";
+
+    const quoteRealEstateProfileAnswer = formatRealEstateProjectProfileAnswer(
+      quoteLiveNews,
+      `${question} ${options.quote.text || ""}`,
+    );
+    if (quoteRealEstateProfileAnswer) {
+      return quoteRealEstateProfileAnswer;
+    }
 
     const quoteUserPrompt =
       `${recentChatContext}\n` +
@@ -1253,7 +1266,7 @@ async function handleHistoryQA(
           enableSearch: false,
         });
       }
-      return answer;
+      return finalizeGroundedAnswer(answer, quoteLiveNews, quoteEvidenceRequired);
     } catch (e) {
       console.warn("[member-assistant] Fast-path Quote QA error:", e);
     }

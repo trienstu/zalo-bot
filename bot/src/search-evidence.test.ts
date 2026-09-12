@@ -122,6 +122,47 @@ test("một token chung không đủ cho câu hỏi tài chính hoặc y tế c�
   assert.equal(health.length, 0);
 });
 
+test("fact-check phải bám đúng thực thể chính, không nhận nguồn nhiễu cùng chủ đề rộng", () => {
+  const ranked = rankEvidence([
+    evidence({
+      title: "MIK Group ra mắt ba dòng bất động sản mới năm 2026",
+      url: "https://vnexpress.net/mik-group-projects",
+      sourceName: "VnExpress",
+      publishedAt: Date.UTC(2025, 10, 5),
+    }),
+    evidence({
+      title: "MIK Group và cách tiếp cận mới trong phát triển bất động sản hạng sang",
+      url: "https://dantri.com.vn/mik-group",
+      sourceName: "Dân trí",
+      publishedAt: Date.UTC(2026, 2, 13),
+    }),
+    evidence({
+      title: "Thị trường bất động sản 2026: dự báo xu hướng giá mới",
+      url: "https://vov.example/market",
+      sourceName: "VOV Giao thông",
+      publishedAt: Date.UTC(2026, 8, 8),
+    }),
+    evidence({
+      title: "MEYGROUP xây nền tảng bất động sản tinh khiết",
+      url: "https://reatimes.vn/meygroup",
+      sourceName: "Reatimes",
+      publishedAt: Date.UTC(2026, 8, 11),
+    }),
+    evidence({
+      title: "Charmora City do Sun Group kiến tạo được triển khai",
+      url: "https://vnexpress.net/charmora-city",
+      sourceName: "VnExpress",
+      publishedAt: Date.UTC(2026, 8, 10),
+    }),
+  ], "dự án bất động sản mới nhất của MIK Group 2026", "fact_check", NOW);
+
+  assert.deepEqual(
+    new Set(ranked.map((item) => item.url)),
+    new Set(["https://dantri.com.vn/mik-group", "https://vnexpress.net/mik-group-projects"]),
+  );
+  assert.equal(assessEvidenceSufficiency(ranked, "fact_check").sufficient, true);
+});
+
 test("thứ tự đầu vào không làm thay đổi thứ tự xếp hạng", () => {
   const query = "phiên bản hệ điều hành Acme mới nhất";
   const items = [

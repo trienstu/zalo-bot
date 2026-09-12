@@ -27,6 +27,7 @@ const FIELD_LABELS: Record<string, string> = {
   developer: "Chủ đầu tư / đơn vị phát triển",
   location: "Vị trí",
   landArea: "Quy mô đất",
+  density: "Mật độ xây dựng",
   towers: "Số block/tháp",
   floors: "Số tầng",
   basement: "Tầng hầm / khối đế",
@@ -50,22 +51,88 @@ function normalizeVi(value: string): string {
     .toLowerCase();
 }
 
-function compactText(value: string): string {
+function decodeHtmlEntities(value: string): string {
+  const named: Record<string, string> = {
+    amp: "&",
+    apos: "'",
+    hellip: "…",
+    ldquo: "“",
+    lsquo: "‘",
+    nbsp: " ",
+    quot: "\"",
+    rdquo: "”",
+    rsquo: "’",
+  };
+
   return String(value || "")
+    .replace(/&#x([0-9a-f]+);?/gi, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);?/g, (_, dec) => String.fromCodePoint(Number.parseInt(dec, 10)))
+    .replace(/&([a-z]+);/gi, (match, name) => named[String(name).toLowerCase()] ?? match);
+}
+
+function compactText(value: string): string {
+  return decodeHtmlEntities(value)
     .replace(/\s+/g, " ")
+    .replace(/\bP\.\s*/g, "Phường ")
+    .replace(/\bQ\.\s*/g, "Quận ")
     .replace(/\s+([,.;:])/g, "$1")
     .trim();
 }
 
+const NEXT_FACT_LABEL_PATTERN =
+  /(?:Loại hình|Loai hinh|Kiến trúc|Kien truc|Cảnh quan|Canh quan|Tổng thầu|Tong thau|Khởi công|Khoi cong|Mật độ xây dựng|Mat do xay dung|Tổng quan|Tong quan|Mở bộ|Mo bo|Xem layout|Tiến độ thi công|Tien do thi cong|Hình ảnh|Hinh anh|Cập nhật|Cap nhat|Bảng giá|Bang gia|Nhà mẫu|Nha mau|Sales Gallery|Hotline|Email)\b/i;
+
 function cleanFactValue(value: string): string {
   return compactText(value)
     .replace(/^[\s:：,;\-–—|]+/, "")
+    .replace(/\s*,?\s*(?:dự án|du an)\s+(?:mang|sở hữu|so huu|được|duoc|tọa|toa|nằm|nam|có|co)\b.*$/i, "")
+    .replace(new RegExp(`\\s+${NEXT_FACT_LABEL_PATTERN.source}.*$`, "i"), "")
     .replace(/\s*(?:xem thêm|chi tiết|liên hệ|hotline|website).*$/i, "")
     .replace(/\s*(?:CHÍNH SÁCH|Chính sách|SIÊU HẤP DẪN|Họ tên|Điện thoại).*$/i, "")
     .replace(/\s+[–—-]?\s*(?:Chủ đầu tư|Chu dau tu|Vị trí|Vi tri|Quy mô|Quy mo|Số lượng|So luong|Tiện ích|Tien ich|Pháp lý|Phap ly|Tiến độ|Tien do|Bảng giá|Bang gia)\s*[:：].*$/i, "")
     .replace(/\s{2,}/g, " ")
     .slice(0, 220)
     .trim();
+}
+
+function normalizeFactValueForKey(key: string, value: string): string {
+  if (key === "landArea") {
+    const match = value.match(/\b(?:khoảng|gần|rộng)?\s*\d{1,4}(?:[.,]\d{1,4})?\s*(?:ha|m2|m²|hecta)\b/i);
+    if (match?.[0]) return compactText(match[0]);
+  }
+  if (key === "density") {
+    const match = value.match(/\b\d{1,2}(?:[.,]\d+)?\s*%/);
+    if (match?.[0]) return compactText(match[0]);
+  }
+  if (key === "productCount") {
+    const highRise = value.match(/(?:căn hộ|can ho)\s*(\d{2,5})\s*căn/i)?.[1];
+    const lowRise = value.match(/(?:thấp tầng|thap tang)\s*(\d{2,5})\s*căn/i)?.[1];
+    if (highRise || lowRise) {
+      return [
+        highRise ? `${highRise} căn hộ` : "",
+        lowRise ? `${lowRise} căn thấp tầng` : "",
+      ].filter(Boolean).join(" / ");
+    }
+    return compactText(value)
+      .replace(/\s*,?\s*(?:dự án|du an)\s+.*$/i, "")
+      .replace(/\s+[–—-]\s*(?:Loại hình|Loai hinh|Diện tích|Dien tich)\s*:.*$/i, "")
+      .trim();
+  }
+  if (key === "unitArea") {
+    const match = value.match(/\b\d{1,3}(?:[.,]\d+)?\s*[-–]\s*\d{1,3}(?:[.,]\d+)?\s*(?:m2|m²)\b/i);
+    if (match?.[0]) return compactText(match[0]);
+  }
+  if (key === "price") {
+    const match = value.match(/\b\d{1,4}(?:[.,]\d+)?(?:\s*[-–]\s*\d{1,4}(?:[.,]\d+)?)?\s*(?:triệu|trieu|tỷ|ty|tỉ)\s*(?:đồng|dong)?(?:\s*\/\s*m2|\s*\/\s*m²|\/m2|\/m²)?\b/i);
+    if (match?.[0]) return compactText(match[0]);
+  }
+  if (key === "amenities") {
+    return compactText(value)
+      .replace(/\s+(?:Hành lang căn hộ|Hanh lang can ho|Mặt tiền|Mat tien|Sales Gallery)\b.*$/i, "")
+      .slice(0, 180)
+      .trim();
+  }
+  return value;
 }
 
 function hostnameOf(url: string): string {
@@ -85,11 +152,19 @@ function sourceNameOf(candidate: RealEstateSourceCandidate): string {
 
 function projectTokens(query: string): string[] {
   const normalized = normalizeVi(query)
-    .replace(/\b(?:tong quan|gioi thieu|thong tin|review|danh gia|du an|chung cu|can ho|khu do thi|bat dong san|nha dat|gia ban|bang gia|phap ly|tien do|chu dau tu|vi tri|mat bang|ban giao|mo ban|sen chua|bot|cho anh|giup anh|giup toi)\b/g, " ")
+    .replace(/\b(?:tong quan|gioi thieu|thong tin|review|danh gia|du an|chung cu|can ho|khu do thi|bat dong san|nha dat|gia ban|bang gia|phap ly|tien do|chu dau tu|vi tri|mat bang|ban giao|mo ban|tap doan|group|sen chua|bot|cho anh|giup anh|giup toi)\b/g, " ")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
   return normalized.split(/\s+/).filter((token) => token.length >= 3).slice(0, 6);
+}
+
+function normalizedTokenSet(value: string): Set<string> {
+  return new Set(normalizeVi(value).replace(/[^a-z0-9]+/g, " ").split(/\s+/).filter(Boolean));
+}
+
+function hasProjectToken(normalizedText: string, tokenSet: Set<string>, token: string): boolean {
+  return tokenSet.has(token) || (token.length >= 5 && normalizedText.includes(token));
 }
 
 function inferSourceTier(source: RealEstateSourceCandidate, query: string): RealEstateSource["tier"] {
@@ -97,10 +172,11 @@ function inferSourceTier(source: RealEstateSourceCandidate, query: string): Real
   const title = normalizeVi(source.title || "");
   const sourceName = normalizeVi(source.sourceName || "");
   const haystack = `${host} ${title} ${sourceName}`;
+  const sourceIdentity = `${host} ${sourceName}`;
   const tokens = projectTokens(query);
 
   if (tokens.length > 0 && tokens.some((token) => host.includes(token))) return "primary";
-  if (/(?:chu dau tu|official|chinh thuc|website du an|tap doan|corp|jsc|land|group)/i.test(haystack)) return "primary";
+  if (/(?:chu dau tu|official|chinh thuc|website du an|tap doan|corp|jsc|land|group)/i.test(sourceIdentity)) return "primary";
   if (/(?:vnexpress|cafef|cafeland|vneconomy|baodautu|reatimes|vietnamnet|tuoitre|thanhnien|dantri|nguoi lao dong|batdongsan\.com\.vn)/i.test(haystack)) return "news";
   if (/(?:batdongsan|nhadat|property|land|realty|realestate|investment|canho|chungcu|apartment|residence|riverside|heights)/i.test(haystack)) return "market";
   return "web";
@@ -133,10 +209,11 @@ function isValidFactValue(key: string, value: string): boolean {
     return /\b(?:duong|mat tien|phuong|quan|tp|thanh pho|tinh|huyen|khu|xa|vo chi cong|vinh phu|lai thieu|thu duc|binh trung|binh duong|dong nai|ha noi|ho chi minh|sai gon)\b/i.test(normalized);
   }
   if (key === "landArea") return /\d/.test(value) && /(?:m2|m²|ha|hecta)/i.test(value);
+  if (key === "density") return /\d/.test(value) && /%/.test(value) && value.length <= 60;
   if (key === "towers") return /\d/.test(value) && /(?:block|thap|tháp|toa|tòa|tower)/i.test(value) && value.length <= 80 && !/[A-ZÀ-Ỹ]{3,}\s+\d/i.test(value);
-  if (key === "floors") return /\d/.test(value) && /tầng/i.test(value) && value.length <= 90;
+  if (key === "floors") return /\d/.test(value) && /tầng/i.test(value) && !/(?:sản phẩm|san pham|căn hộ|can ho|studio|duplex|penthouse|shophouse)/i.test(value) && value.length <= 90;
   if (key === "basement") return /\d/.test(value) && /(?:hầm|ham|khối đế|khoi de|thương mại|thuong mai)/i.test(value) && value.length <= 90;
-  if (key === "productCount") return /\d/.test(value) && /(?:sản phẩm|san pham|căn hộ|can ho|căn|can|unit|shophouse|officetel)/i.test(value) && value.length <= 130;
+  if (key === "productCount") return /\d/.test(value) && /(?:sản phẩm|san pham|căn hộ|can ho|căn|can|unit|shophouse|officetel|thấp tầng|thap tang|nhà phố|nha pho|biệt thự|biet thu)/i.test(value) && !/(?:block|tầng nổi|tang noi|tầng hầm|tang ham)/i.test(value) && value.length <= 130;
   if (key === "unitArea") return /\d/.test(value) && /(?:m2|m²)/i.test(value) && value.length <= 130;
   if (key === "legalStatus") return /(?:pháp lý|phap ly|sổ|so |giấy phép|giay phep|quy hoạch|quy hoach|sở hữu|so huu|lâu dài|lau dai|quyết định|quyet dinh)/i.test(value) && !/(?:thanh toán|thanh toan|ưu đãi|uu dai|đặt cọc|dat coc)/i.test(normalized) && value.length <= 120;
   if (key === "progress") return /(?:bàn giao|ban giao|cất nóc|cat noc|khởi công|khoi cong|mở bán|mo ban|kickoff|quý|quy|q[1-4]|tháng|thang|20\d{2})/i.test(value) && !/(?:quà tặng|qua tang|chiết khấu|chiet khau|họ tên|ho ten|điện thoại|dien thoai)/i.test(normalized) && value.length <= 130;
@@ -177,7 +254,7 @@ export function buildRealEstateProjectSearchQueries(query: string): string[] {
 }
 
 function addFact(facts: RealEstateFact[], key: string, value: string, source: RealEstateSource): void {
-  const cleaned = cleanFactValue(value);
+  const cleaned = normalizeFactValueForKey(key, cleanFactValue(value));
   if (!cleaned || cleaned.length < 3) return;
   if (!isValidFactValue(key, cleaned)) return;
   const normalized = normalizeVi(cleaned).replace(/[^a-z0-9]+/g, " ").trim();
@@ -212,8 +289,9 @@ function extractLabelFacts(text: string, source: RealEstateSource): RealEstateFa
     ["developer", /(?:chủ đầu tư|chu dau tu|cđt|cdt|đơn vị phát triển|don vi phat trien|nhà phát triển|nha phat trien)\s*[:：\-–—]?\s*([^.;|\n]{3,150})/gi],
     ["location", /(?:vị trí|vi tri|địa chỉ|dia chi|tọa lạc|toa lac|nằm tại|nam tai)\s*[:：\-–—]?\s*((?:TP\.HCM|Tp\.HCM|tp\.hcm|TP\. Hồ Chí Minh|[^.;|\n]){3,180})/gi],
     ["landArea", /(?:quy mô đất|quy mo dat|diện tích đất|dien tich dat|tổng diện tích|tong dien tich|diện tích khu đất|dien tich khu dat)\s*[:：\-–—]?\s*([^.;|\n]{3,120})/gi],
+    ["density", /(?:mật độ xây dựng|mat do xay dung|mđxd|mdxd)\s*[:：\-–—]?\s*([^.;|\n]{2,80})/gi],
     ["towers", /(?:số block|so block|block|tháp|thap|tower)\s*[:：\-–—]?\s*([^.;|\n]{3,120})/gi],
-    ["floors", /(?:số tầng|so tang|cao)\s*[:：\-–—]?\s*([^.;|\n]{3,120})/gi],
+    ["floors", /(?:số tầng|so tang|chiều cao|chieu cao|cao\s+(?=\d))\s*[:：\-–—]?\s*([^.;|\n]{3,120})/gi],
     ["productCount", /(?:số lượng sản phẩm|so luong san pham|sản phẩm|san pham|số căn|so can|căn hộ|can ho)\s*[:：\-–—]?\s*([^.;|\n]{3,140})/gi],
     ["unitArea", /(?:diện tích căn|dien tich can|diện tích|dien tich)\s*[:：\-–—]?\s*([^.;|\n]{3,120})/gi],
     ["legalStatus", /(?:pháp lý|phap ly|sổ hồng|so hong|giấy phép|giay phep|quy hoạch|quy hoach)\s*[:：\-–—]?\s*([^.;|\n]{3,160})/gi],
@@ -246,6 +324,12 @@ function extractLabelFacts(text: string, source: RealEstateSource): RealEstateFa
 
   const productMatches = compact.match(/\b\d{2,5}\s*(?:sản phẩm|san pham|căn hộ|can ho|căn|can|unit|shophouse|officetel)\b/gi) || [];
   for (const value of productMatches.slice(0, 5)) addFact(facts, "productCount", value, source);
+
+  const lowRiseMatches = compact.match(/\b\d{2,5}\s*(?:thấp tầng|thap tang|nhà phố|nha pho|biệt thự|biet thu|shophouse)\b/gi) || [];
+  for (const value of lowRiseMatches.slice(0, 3)) addFact(facts, "productCount", value, source);
+
+  const densityMatches = compact.match(/\b(?:mật độ xây dựng|mat do xay dung|mđxd|mdxd)\s*(?:chỉ|khoảng|là|:)?\s*\d{1,2}(?:[.,]\d+)?\s*%/gi) || [];
+  for (const value of densityMatches.slice(0, 2)) addFact(facts, "density", value, source);
 
   const towerMatches = compact.match(/\b\d{1,2}\s*(?:block|tháp|thap|tòa|toa|tower)\b/gi) || [];
   for (const value of towerMatches.slice(0, 3)) addFact(facts, "towers", value, source);
@@ -335,11 +419,15 @@ function factQualityScore(fact: RealEstateFact): number {
 
 function candidateScore(candidate: RealEstateSourceCandidate, query: string): number {
   const haystack = normalizeVi(`${candidate.title} ${candidate.snippet || ""} ${hostnameOf(candidate.url || "")}`);
+  const haystackTokens = normalizedTokenSet(`${candidate.title} ${candidate.snippet || ""} ${hostnameOf(candidate.url || "")}`);
   const tokens = projectTokens(query);
-  const tokenScore = tokens.reduce((score, token) => score + (haystack.includes(token) ? 2 : 0), 0);
+  const tokenScore = tokens.reduce((score, token) => score + (hasProjectToken(haystack, haystackTokens, token) ? 2 : 0), 0);
   const tierScore = tierRank(inferSourceTier(candidate, query));
   const detailScore = /\b(?:chu dau tu|vi tri|quy mo|phap ly|tien do|bang gia|gia ban|so can|mat bang|ban giao|can ho|block|tower)\b/i.test(haystack) ? 2 : 0;
-  return tokenScore + tierScore + detailScore;
+  const host = normalizeVi(hostnameOf(candidate.url || ""));
+  const officialHostBonus = tokens.length > 0 && tokens.filter((token) => host.includes(token)).length >= Math.min(2, tokens.length) ? 6 : 0;
+  const aggregatorPenalty = /^(?:news\.google\.com|www\.google\.com|google\.com)$/i.test(host) ? 6 : 0;
+  return tokenScore + tierScore + detailScore + officialHostBonus - aggregatorPenalty;
 }
 
 function dedupeCandidates(candidates: RealEstateSourceCandidate[], query: string): RealEstateSourceCandidate[] {
@@ -363,11 +451,52 @@ function dedupeCandidates(candidates: RealEstateSourceCandidate[], query: string
     .slice(0, 5);
 }
 
+function buildLikelyProjectWebsiteCandidates(query: string): RealEstateSourceCandidate[] {
+  const projectName = extractProjectNameFromQuery(query);
+  const tokens = normalizeVi(projectName)
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length >= 3 && !/(?:du|an|can|ho|chung|cu|khu|do|thi|bat|dong|san|project|apartment|residence)$/.test(token));
+
+  if (tokens.length < 2) return [];
+
+  const joined = tokens.join("");
+  const hyphenated = tokens.join("-");
+  const variants: string[] = [];
+
+  if (tokens.length >= 3) {
+    variants.push(`${tokens[0]}-${tokens.slice(1).join("")}`);
+    variants.push(tokens.slice(1).join(""));
+    variants.push(joined);
+    variants.push(hyphenated);
+    variants.push(tokens.slice(1).join("-"));
+  } else {
+    variants.push(joined);
+    variants.push(hyphenated);
+  }
+
+  const suffixes = ["vn", "com.vn", "com"];
+  const candidates: RealEstateSourceCandidate[] = [];
+  for (const variant of [...new Set(variants)]) {
+    for (const suffix of suffixes) {
+      const host = `${variant}.${suffix}`;
+      candidates.push({
+        title: `${projectName} website dự án`,
+        snippet: `Website/landing page có khả năng thuộc dự án ${projectName}`,
+        url: `https://${host}/`,
+        sourceName: host,
+      });
+    }
+  }
+  return candidates.slice(0, 12);
+}
+
 function sourceMatchesProject(source: RealEstateSource, query: string): boolean {
   const tokens = projectTokens(query);
   if (tokens.length === 0) return true;
   const haystack = normalizeVi(`${source.url} ${source.title} ${source.text}`);
-  const hits = tokens.filter((token) => haystack.includes(token)).length;
+  const haystackTokens = normalizedTokenSet(`${source.url} ${source.title} ${source.text}`);
+  const hits = tokens.filter((token) => hasProjectToken(haystack, haystackTokens, token)).length;
   return hits >= Math.min(2, tokens.length);
 }
 
@@ -385,7 +514,7 @@ function formatProfileContext(facts: RealEstateFact[], sources: RealEstateSource
   for (const key of Object.keys(FIELD_LABELS)) {
     const list = grouped.get(key);
     if (!list || list.length === 0) continue;
-    const maxValues = key === "unitTypes" ? 2 : 1;
+    const maxValues = key === "unitTypes" || key === "productCount" ? 2 : 1;
     const primary = list
       .sort((a, b) => factQualityScore(b) - factQualityScore(a))
       .slice(0, maxValues)
@@ -416,10 +545,17 @@ function extractProjectNameFromQuery(query: string): string {
 }
 
 function simplifyProfileValue(value: string): string {
-  return compactText(value)
+  let cleaned = compactText(value)
     .replace(/\s*\(Nguồn:\s*[^)]+\)/gi, "")
     .replace(/\s*\/\s*/g, " / ")
+    .replace(/\s+(?:Chủ đầu tư|Chu dau tu|Mở bộ|Mo bo|Xem layout|Tiến độ thi công|Tien do thi cong|Hình ảnh|Hinh anh|Cập nhật|Cap nhat|Sảnh & thang máy|Sanh & thang may|Hành lang căn hộ|Hanh lang can ho).*$/i, "")
+    .replace(/\s*[,:]\s*$/, "")
     .trim();
+
+  cleaned = cleaned.replace(/\s*\/\s*(\d{2,5})\s+sản phẩm\b/gi, (match, count) =>
+    new RegExp(`\\b${count}\\s+căn\\s+thấp\\s+tầng\\b`, "i").test(cleaned) ? "" : match
+  );
+  return cleaned.trim();
 }
 
 function sourceLineFromProfile(profileContext: string): string {
@@ -498,7 +634,11 @@ export async function buildRealEstateProjectProfileContext(
   const queries = buildRealEstateProjectSearchQueries(query);
   const searchSettled = await Promise.allSettled(queries.map((q) => webSearch(q, 5)));
   const searchCandidates = searchSettled.flatMap((res) => (res.status === "fulfilled" ? res.value : []));
-  const candidates = dedupeCandidates([...seedCandidates, ...searchCandidates], query);
+  const candidates = dedupeCandidates([
+    ...seedCandidates,
+    ...searchCandidates,
+    ...buildLikelyProjectWebsiteCandidates(query),
+  ], query);
   if (candidates.length === 0) return "";
 
   const fetchedSettled = await Promise.allSettled(
