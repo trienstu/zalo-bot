@@ -35,6 +35,7 @@ import { planSearchQueries } from "./query-planner.js";
 import { defaultBotName } from "./config.js";
 import { finalizeGroundedAnswer } from "./search-evidence.js";
 import { generateCloudflareImage, isCloudflareConfigured } from "./cloudflare-ai.js";
+import { formatRealEstateProjectProfileAnswer } from "./real-estate-profile.js";
 
 export interface MemberMessageEvent {
   threadId: string;
@@ -1644,6 +1645,11 @@ async function handleHistoryQA(
     ? `\n=== DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT: ===\n${liveNews}\n`
     : "";
 
+  const realEstateProfileAnswer = formatRealEstateProjectProfileAnswer(liveNews, question);
+  if (realEstateProfileAnswer) {
+    return realEstateProfileAnswer;
+  }
+
   const searchInstruction =
     `\n=== TỔNG HỢP DỮ LIỆU THỜI GIAN THỰC & CÔNG CỤ TÌM KIẾM (REAL-TIME DATA) ===\n` +
     `- Câu hỏi liên quan đến tin tức, sự kiện, thời điểm ra mắt, giá cả, tỷ giá, thể thao, thời sự mới nhất:\n` +
@@ -2830,4 +2836,3 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 }
-

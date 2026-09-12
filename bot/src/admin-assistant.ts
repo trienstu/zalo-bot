@@ -26,6 +26,7 @@ import { getDailyAiNewsBriefing } from "./ai-news.js";
 import { searchRealtimeNews } from "./realtime-search.js";
 import { planSearchQueries } from "./query-planner.js";
 import { finalizeGroundedAnswer } from "./search-evidence.js";
+import { formatRealEstateProjectProfileAnswer } from "./real-estate-profile.js";
 import {
   parseGoogleUrl,
   fetchGoogleContent,
@@ -1232,6 +1233,15 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   const liveNewsSection = liveNews
     ? `\n=== DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT: ===\n${liveNews}\n`
     : "";
+
+  const realEstateProfileAnswer = formatRealEstateProjectProfileAnswer(liveNews, rawText);
+  if (realEstateProfileAnswer) {
+    appendAdminHistory(sender, "user", rawText || `[Gửi file: ${fileName || "hình ảnh"}]`);
+    appendAdminHistory(sender, "model", realEstateProfileAnswer);
+    await sendDirectText(api, sender, realEstateProfileAnswer);
+    console.log(`[admin-assistant] ✅ Đã phản hồi hồ sơ BĐS deterministic cho ${isAdmin ? "Admin" : "User"} ${displayName}`);
+    return;
+  }
 
   const searchInstruction = liveNews
     ? `\n8. TỔNG HỢP THÔNG TIN THỜI GIAN THỰC & SỰ KIỆN / PHÁP LUẬT MỚI:\n` +

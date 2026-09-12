@@ -62,6 +62,7 @@ function cleanFactValue(value: string): string {
     .replace(/^[\s:：,;\-–—|]+/, "")
     .replace(/\s*(?:xem thêm|chi tiết|liên hệ|hotline|website).*$/i, "")
     .replace(/\s*(?:CHÍNH SÁCH|Chính sách|SIÊU HẤP DẪN|Họ tên|Điện thoại).*$/i, "")
+    .replace(/\s+[–—-]?\s*(?:Chủ đầu tư|Chu dau tu|Vị trí|Vi tri|Quy mô|Quy mo|Số lượng|So luong|Tiện ích|Tien ich|Pháp lý|Phap ly|Tiến độ|Tien do|Bảng giá|Bang gia)\s*[:：].*$/i, "")
     .replace(/\s{2,}/g, " ")
     .slice(0, 220)
     .trim();
@@ -209,7 +210,7 @@ function extractLabelFacts(text: string, source: RealEstateSource): RealEstateFa
   const normalizedText = compactText(text);
   const labelPatterns: Array<[string, RegExp]> = [
     ["developer", /(?:chủ đầu tư|chu dau tu|cđt|cdt|đơn vị phát triển|don vi phat trien|nhà phát triển|nha phat trien)\s*[:：\-–—]?\s*([^.;|\n]{3,150})/gi],
-    ["location", /(?:vị trí|vi tri|địa chỉ|dia chi|tọa lạc|toa lac|nằm tại|nam tai)\s*[:：\-–—]?\s*([^.;|\n]{3,180})/gi],
+    ["location", /(?:vị trí|vi tri|địa chỉ|dia chi|tọa lạc|toa lac|nằm tại|nam tai)\s*[:：\-–—]?\s*((?:TP\.HCM|Tp\.HCM|tp\.hcm|TP\. Hồ Chí Minh|[^.;|\n]){3,180})/gi],
     ["landArea", /(?:quy mô đất|quy mo dat|diện tích đất|dien tich dat|tổng diện tích|tong dien tich|diện tích khu đất|dien tich khu dat)\s*[:：\-–—]?\s*([^.;|\n]{3,120})/gi],
     ["towers", /(?:số block|so block|block|tháp|thap|tower)\s*[:：\-–—]?\s*([^.;|\n]{3,120})/gi],
     ["floors", /(?:số tầng|so tang|cao)\s*[:：\-–—]?\s*([^.;|\n]{3,120})/gi],
@@ -401,6 +402,85 @@ function formatProfileContext(facts: RealEstateFact[], sources: RealEstateSource
     `Nguồn đã mở: ${sourceNames.join(", ")}`,
     "Quy tắc trả lời: ưu tiên dữ liệu trong hồ sơ này; không tự điền trường còn thiếu; giá/chính sách/pháp lý nếu lấy từ landing page hoặc sàn môi giới thì nói là tham khảo và nên xác nhận lại từ chủ đầu tư/tài liệu chính thức.",
   ].join("\n");
+}
+
+function extractProjectNameFromQuery(query: string): string {
+  const cleaned = compactText(query)
+    .replace(/@[^\s,!?]+/g, " ")
+    .replace(/\b(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot ơi|bot oi|bot|admin|ad ơi|ad oi)\b/gi, " ")
+    .replace(/\b(?:cho\s+(?:anh|a|tôi|toi|mình|minh)|giúp\s+(?:anh|a|tôi|toi|mình|minh)|với|nhé|nha|ạ)\b/gi, " ")
+    .replace(/\b(?:tổng quan|tong quan|giới thiệu|gioi thieu|thông tin|thong tin|review|đánh giá|danh gia|dự án|du an|chung cư|chung cu|căn hộ|can ho)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || "dự án";
+}
+
+function simplifyProfileValue(value: string): string {
+  return compactText(value)
+    .replace(/\s*\(Nguồn:\s*[^)]+\)/gi, "")
+    .replace(/\s*\/\s*/g, " / ")
+    .trim();
+}
+
+function sourceLineFromProfile(profileContext: string): string {
+  const match = profileContext.match(/^Nguồn đã mở:\s*(.+)$/im);
+  if (!match?.[1]) return "";
+  const sources = match[1]
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 4);
+  return sources.length > 0 ? `Nguồn tham khảo: ${sources.join(", ")}.` : "";
+}
+
+export function formatRealEstateProjectProfileAnswer(profileContext: string, query: string): string {
+  if (!/HỒ SƠ DỰ ÁN BẤT ĐỘNG SẢN ĐÃ MỞ TRANG VÀ TRÍCH XUẤT THEO SCHEMA/i.test(profileContext || "")) {
+    return "";
+  }
+
+  const block = String(profileContext).split(/\n\n🔥|\n🔥/)[0] || "";
+  const factLines = block
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^-\s+[^:]+:\s+.+/.test(line));
+
+  if (factLines.length < 3) return "";
+
+  const labelMap: Record<string, string> = {
+    "Chủ đầu tư / đơn vị phát triển": "Chủ đầu tư",
+    "Số block/tháp": "Quy mô xây dựng",
+    "Số tầng": "Chiều cao",
+    "Tầng hầm / khối đế": "Tầng hầm/khối đế",
+    "Số lượng sản phẩm": "Sản phẩm",
+    "Loại sản phẩm": "Loại hình",
+    "Diện tích căn": "Diện tích căn",
+    "Tiến độ / thời điểm bàn giao": "Tiến độ/bàn giao",
+  };
+
+  const renderedFacts = factLines
+    .map((line) => {
+      const match = line.match(/^-\s+([^:]+):\s+(.+)$/);
+      if (!match?.[1] || !match?.[2]) return "";
+      const label = labelMap[match[1].trim()] || match[1].trim();
+      const value = simplifyProfileValue(match[2]);
+      if (!value) return "";
+      return `- ${label}: ${value}`;
+    })
+    .filter(Boolean)
+    .slice(0, 12);
+
+  if (renderedFacts.length < 3) return "";
+
+  const projectName = extractProjectNameFromQuery(query);
+  const sourceLine = sourceLineFromProfile(profileContext);
+  return [
+    `TỔNG QUAN DỰ ÁN ${projectName.toUpperCase()}`,
+    "",
+    ...renderedFacts,
+    "",
+    sourceLine,
+    "Lưu ý: Những mục chưa có trong hồ sơ nguồn thì em không tự điền thêm; giá/pháp lý/chính sách bán hàng nên xác nhận lại từ chủ đầu tư hoặc tài liệu chính thức.",
+  ].filter((line) => line !== "").join("\n");
 }
 
 export async function buildRealEstateProjectProfileContext(

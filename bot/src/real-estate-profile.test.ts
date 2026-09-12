@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildRealEstateProjectSearchQueries,
   extractRealEstateProjectFactsFromText,
+  formatRealEstateProjectProfileAnswer,
   isRealEstateProjectProfileQuery,
 } from "./real-estate-profile.js";
 
@@ -44,4 +45,25 @@ test("bóc các trường hồ sơ dự án phổ biến từ nội dung trang",
   assert.match(byKey.get("unitTypes") || "", /officetel/);
   assert.match(byKey.get("price") || "", /55 - 60 triệu/);
   assert.match(byKey.get("progress") || "", /Q4\/2028/);
+});
+
+test("format câu trả lời hồ sơ dự án trực tiếp từ schema, không để LLM tự suy diễn", () => {
+  const answer = formatRealEstateProjectProfileAnswer(`
+🏗️ HỒ SƠ DỰ ÁN BẤT ĐỘNG SẢN ĐÃ MỞ TRANG VÀ TRÍCH XUẤT THEO SCHEMA:
+- Chủ đầu tư / đơn vị phát triển: Công ty CP Đầu tư Đạt Phước (Nguồn: serenariversides.com, serenariverside.vn)
+- Vị trí: Đường Vĩnh Phú 29, Phường Lái Thiêu, TP (Nguồn: serenariversides.com)
+- Quy mô đất: 5.691,6 m² (Nguồn: serenariversides.com, serenariverside.vn)
+- Số block/tháp: 2 Block (Nguồn: serenariversides.com, serenariverside.vn)
+- Số tầng: 25 – 30 tầng và 1 hầm (Nguồn: serenariversides.com, serenariverside.vn)
+- Số lượng sản phẩm: 622 căn (Nguồn: serenariversides.com)
+Nguồn đã mở: serenariversides.com, serenariverside.com.vn, serenariverside.vn
+`, "sen chúa cho a tổng quan dự án serena riverside");
+
+  assert.match(answer, /SERENA RIVERSIDE/i);
+  assert.match(answer, /Công ty CP Đầu tư Đạt Phước/);
+  assert.match(answer, /5\.691,6 m²/);
+  assert.match(answer, /2 Block/);
+  assert.match(answer, /622 căn/);
+  assert.doesNotMatch(answer, /Palm City|Palm River|21 tòa|500 căn|1,5 tỷ/i);
+  assert.match(answer, /Nguồn tham khảo: serenariversides\.com/);
 });
