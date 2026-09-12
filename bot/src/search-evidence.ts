@@ -255,6 +255,22 @@ export function extractEvidenceUrls(context: string): string[] {
   return [...new Set(urls)];
 }
 
+export function extractEvidenceSources(context: string): string[] {
+  const sources = [...String(context || "").matchAll(/^Nguồn:\s*(.+?)\s*$/gim)]
+    .map((match) => match[1]?.trim() || "")
+    .filter(Boolean);
+  return [...new Set(sources)].slice(0, 3);
+}
+
+function stripTrailingSourceBlock(answer: string): string {
+  const lines = String(answer || "").split("\n");
+  const sourceHeaderIndex = lines.findIndex((line) =>
+    /^\s*[(*_]*\s*(?:nguồn(?:\s+kiểm\s+chứng|\s+tổng\s+hợp)?|source)\s*:/i.test(line)
+  );
+  if (sourceHeaderIndex < 0) return lines.join("\n").trim();
+  return lines.slice(0, sourceHeaderIndex).join("\n").trim();
+}
+
 export function finalizeGroundedAnswer(answer: string, evidenceContext: string, evidenceRequired: boolean): string {
   if (!evidenceRequired) return answer;
   const hasSufficientEvidence = /^EVIDENCE_STATUS:\s*SUFFICIENT/im.test(evidenceContext);
@@ -262,16 +278,11 @@ export function finalizeGroundedAnswer(answer: string, evidenceContext: string, 
     return "Em chưa đủ bằng chứng đáng tin cậy và cập nhật để khẳng định câu trả lời này. Anh/chị vui lòng cho em kiểm tra lại khi có thêm nguồn chính thức hoặc nguồn độc lập xác nhận.";
   }
 
-  const allowedUrls = extractEvidenceUrls(evidenceContext).slice(0, 3);
-  if (allowedUrls.length === 0) {
+  const allowedSources = extractEvidenceSources(evidenceContext);
+  if (allowedSources.length === 0) {
     return "Em chưa đủ bằng chứng có thể dẫn nguồn để khẳng định câu trả lời này.";
   }
 
-  const cleaned = String(answer || "")
-    .split("\n")
-    .filter((line) => !/^\s*[(*_]*\s*(?:nguồn(?:\s+tổng\s+hợp)?|source)\s*:/i.test(line))
-    .join("\n")
-    .trim();
-  const sources = allowedUrls.map((url) => `- ${url}`).join("\n");
-  return `${cleaned}\n\nNguồn kiểm chứng:\n${sources}`.trim();
+  const cleaned = stripTrailingSourceBlock(answer);
+  return `${cleaned}\n\nNguồn kiểm chứng: ${allowedSources.join(", ")}.`.trim();
 }

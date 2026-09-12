@@ -191,12 +191,13 @@ test("fact-check từ chối một nguồn yếu hoặc không liên quan", () =
   assert.equal(assessEvidenceSufficiency(ranked, "fact_check").sufficient, false);
 });
 
-test("context fact-check ưu tiên nguồn có ngày thật và citation cuối chỉ dùng URL evidence", () => {
+test("context fact-check ưu tiên nguồn có ngày thật và citation cuối chỉ ghi tên nguồn ngắn", () => {
   const ranked = rankEvidence([
     evidence({
       title: "Đội Orion bổ nhiệm huấn luyện viên trưởng",
       url: "https://orion.example/coach",
       sourceType: "primary",
+      sourceName: "orion.example",
       publishedAt: Date.UTC(2026, 8, 1),
     }),
     evidence({ title: "Huấn luyện viên trưởng đội Orion", url: "https://news.example/orion" }),
@@ -210,13 +211,15 @@ test("context fact-check ưu tiên nguồn có ngày thật và citation cuối 
   assert.doesNotMatch(context, /Không rõ ngày công bố/);
 
   const answer = finalizeGroundedAnswer(
-    "Đội Orion đã có huấn luyện viên mới.\n*(Nguồn: Cơ quan tưởng tượng, 09/2026).*",
+    "Đội Orion đã có huấn luyện viên mới.\n\nNguồn kiểm chứng:\n- [E1] Cơ quan tưởng tượng (09/2026)\n- https://outside.example/very-long-url",
     context,
     true,
   );
   assert.doesNotMatch(answer, /Cơ quan tưởng tượng/);
-  assert.match(answer, /https:\/\/orion\.example\/coach/);
+  assert.match(answer, /Nguồn kiểm chứng: orion\.example\./);
+  assert.doesNotMatch(answer, /https:\/\/orion\.example\/coach/);
   assert.doesNotMatch(answer, /https:\/\/outside\.example/);
+  assert.equal((answer.match(/Nguồn kiểm chứng:/g) || []).length, 1);
 });
 
 test("context fact-check bỏ nguồn cũ không ngày và nguồn cấp phó khi đã có bằng chứng chính", () => {
