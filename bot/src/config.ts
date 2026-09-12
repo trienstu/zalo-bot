@@ -319,6 +319,13 @@ export const config = {
   fbImageApiKey: process.env.FB_IMAGE_API_KEY?.trim() || "",
   fbImageModel: process.env.FB_IMAGE_MODEL?.trim() || "",
 
+  /** Cloudflare Workers AI (REST API) - 3 vệ tinh: LLM Fallback, Voice-to-Text Whisper, Image Gen FLUX.1 */
+  cloudflareAccountId: process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || "",
+  cloudflareApiToken: process.env.CLOUDFLARE_API_TOKEN?.trim() || "",
+  cloudflareLlmModel: process.env.CLOUDFLARE_LLM_MODEL?.trim() || "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+  cloudflareImageModel: process.env.CLOUDFLARE_IMAGE_MODEL?.trim() || "@cf/black-forest-labs/flux-1-schnell",
+  cloudflareWhisperModel: process.env.CLOUDFLARE_WHISPER_MODEL?.trim() || "@cf/openai/whisper",
+
   /**
    * Thư mục ảnh bản tin công khai (bản WebP nhẹ) để nginx serve thẳng cho
    * bahub.vn/ban-tin. Mặc định ./data/public/bt — trên VPS `data` là symlink

@@ -80,6 +80,7 @@ import {
 } from "./telegram-forward.js";
 import { handleAdminDirectInteraction } from "./admin-assistant.js";
 import { ThreadType } from "zca-js";
+import { transcribeCloudflareAudio, isCloudflareConfigured } from "./cloudflare-ai.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -770,7 +771,7 @@ export async function runListener(): Promise<void> {
   writeHealth("startup");
 
   /** Ghi 1 tương tác (message/reaction) real-time vào DB. */
-  function record(payload: any, type: "message" | "reaction"): void {
+  async function record(payload: any, type: "message" | "reaction"): Promise<void> {
     const threadId = String(
       payload?.threadId ??
       payload?.data?.groupId ??
@@ -792,8 +793,29 @@ export async function runListener(): Promise<void> {
       !isGroup;
 
     if (type === "message" && isDirectUserMessage) {
+      let text = extractText(payload) || "";
+      const media = extractMediaSummary(payload);
+      const mediaUrl = media ? extractMediaUrl(payload) : null;
+
+      // VỆ TINH 2: Bóc băng tin nhắn thoại 1:1 qua Whisper
+      if (!text && media?.type === "voice" && mediaUrl && isCloudflareConfigured()) {
+        try {
+          console.log(`[listener] 🎙️ Nhận voice 1:1 từ [${payload?.data?.dName ?? "Admin"}], đang tải và bóc băng qua Whisper...`);
+          const vRes = await fetch(mediaUrl, { signal: AbortSignal.timeout(15_000) });
+          if (vRes.ok) {
+            const vBuf = await vRes.arrayBuffer();
+            const wRes = await transcribeCloudflareAudio(vBuf);
+            if (wRes.success && wRes.text) {
+              text = wRes.text;
+              console.log(`[listener] 🎙️ Đã bóc băng voice 1:1 thành công: "${text}"`);
+            }
+          }
+        } catch (vErr) {
+          console.warn(`[listener] Bóc băng voice 1:1 lỗi:`, vErr);
+        }
+      }
+
       // TUYỆT ĐỐI BỎ QUA TIN NHẮN TỰ PHÁT HOẶC ECHO CỦA CHÍNH TÀI KHOẢN BOT (CHỐNG LẶP VÔ TẬN)
-      const text = extractText(payload) || "";
       if (payload?.isSelf && !text.startsWith("/") && !text.startsWith("!")) {
         return;
       }
@@ -807,8 +829,6 @@ export async function runListener(): Promise<void> {
         ""
       ).trim();
       const displayName = String(payload?.data?.dName ?? "Admin");
-      const media = extractMediaSummary(payload);
-      const mediaUrl = media ? extractMediaUrl(payload) : null;
       const quote = extractQuote(payload);
       const fileAttachment = extractFileAttachment(payload);
 
@@ -847,9 +867,29 @@ export async function runListener(): Promise<void> {
     if (!sender) return;
     const ts = extractTs(payload, Date.now());
     if (type === "message") {
-      const text = extractText(payload);
+      let text = extractText(payload);
       const media = extractMediaSummary(payload);
       const displayName = String(payload?.data?.dName ?? "");
+      const mediaUrl = media ? extractMediaUrl(payload) : null;
+
+      // VỆ TINH 2: Bóc băng voice note trong nhóm qua Cloudflare Whisper
+      if (!text && media?.type === "voice" && mediaUrl && isCloudflareConfigured()) {
+        try {
+          console.log(`[listener] 🎙️ Nhận voice note từ [${displayName || sender}] trong nhóm [${threadId}], đang tải và bóc băng qua Whisper...`);
+          const vRes = await fetch(mediaUrl, { signal: AbortSignal.timeout(15_000) });
+          if (vRes.ok) {
+            const vBuf = await vRes.arrayBuffer();
+            const wRes = await transcribeCloudflareAudio(vBuf);
+            if (wRes.success && wRes.text) {
+              text = wRes.text;
+              console.log(`[listener] 🎙️ Đã bóc băng voice note thành công: "${text}"`);
+            }
+          }
+        } catch (vErr) {
+          console.warn(`[listener] Bóc băng voice note thất bại:`, vErr);
+        }
+      }
+
       if (text) {
         console.log(`[listener] 📩 Tin nhắn từ [${displayName || sender}] trong nhóm [${threadId}]: "${text}"`);
         upsertMember({ zaloUserId: sender, displayName, groupId: threadId, now: Date.now() });
@@ -877,7 +917,6 @@ export async function runListener(): Promise<void> {
           }).catch((e) => console.warn(`[moderation] lỗi không bắt được: ${String(e)}`));
         }
 
-        const mediaUrl = media ? extractMediaUrl(payload) : null;
         const quote = extractQuote(payload);
         const fileAttachment = extractFileAttachment(payload);
 
@@ -908,8 +947,7 @@ export async function runListener(): Promise<void> {
           }).catch((e) => console.warn(`[member-assistant] lỗi: ${String(e)}`));
         }
       }
-      const mediaUrl = media ? extractMediaUrl(payload) : null;
-      if (media) {
+      if (media && (media.type === "image" || media.type === "video")) {
         const mediaMessageId = extractMessageId(payload, sender, ts, `${media.type}:${media.count}`);
         upsertMember({ zaloUserId: sender, displayName, groupId: threadId, now: Date.now() });
         saveGroupMediaEvent({
@@ -937,12 +975,15 @@ export async function runListener(): Promise<void> {
         }
       }
       if (isTelegramForwardConfigured()) {
+        const tfMedia = (media && (media.type === "image" || media.type === "video"))
+          ? { type: media.type, count: media.count, url: mediaUrl }
+          : null;
         enqueueTelegramForward({
           senderId: sender,
           displayName,
           text,
           msgType: String(payload?.data?.msgType ?? ""),
-          media: media ? { ...media, url: mediaUrl } : null,
+          media: tfMedia,
           ts,
           threadId,
           // Cùng cách sinh id với bản ghi trong kho → thu hồi tra ngược được.
@@ -993,19 +1034,15 @@ export async function runListener(): Promise<void> {
   }
 
   api.listener.on("message", (msg: any) => {
-    try {
-      record(msg, "message");
-    } catch (e) {
+    void record(msg, "message").catch((e) => {
       console.warn(`[listener] lỗi xử lý message: ${String(e)}`);
-    }
+    });
   });
 
   api.listener.on("reaction", (rc: any) => {
-    try {
-      record(rc, "reaction");
-    } catch (e) {
+    void record(rc, "reaction").catch((e) => {
       console.warn(`[listener] lỗi xử lý reaction: ${String(e)}`);
-    }
+    });
   });
 
   /**

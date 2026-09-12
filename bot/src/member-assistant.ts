@@ -34,6 +34,7 @@ import { getSystemTemporalPrompt } from "./temporal.js";
 import { planSearchQueries } from "./query-planner.js";
 import { defaultBotName } from "./config.js";
 import { finalizeGroundedAnswer } from "./search-evidence.js";
+import { generateCloudflareImage, isCloudflareConfigured } from "./cloudflare-ai.js";
 
 export interface MemberMessageEvent {
   threadId: string;
@@ -188,7 +189,7 @@ async function sendGroupReplyWithMention(
         styles: nextChunk.styles,
       });
     } catch {
-      await sendGroupText(api, threadId, cleanZaloText(nextChunk.msg)).catch(() => {});
+      await sendGroupText(api, threadId, cleanZaloText(nextChunk.msg)).catch(() => { });
     }
   }
 }
@@ -229,7 +230,7 @@ function handleRankCommand(sender: string, displayName: string, threadId: string
       fromTable = "group_members";
       groupFilter = "m.group_id = @threadId";
     }
-  } catch {}
+  } catch { }
 
   // Lấy danh sách thành viên active và xếp hạng theo đúng thread_id nhóm
   const members = db
@@ -310,7 +311,7 @@ function handleTopCommand(threadId: string): string {
       fromTable = "group_members";
       groupFilter = "m.group_id = @threadId";
     }
-  } catch {}
+  } catch { }
 
   const topRows = db
     .prepare(
@@ -838,7 +839,7 @@ function handleInactiveCommand(threadId: string): string {
       groupFilter = "m.group_id = @threadId";
       totalFilter = "group_id = ?";
     }
-  } catch {}
+  } catch { }
 
   const inactiveMembers = db
     .prepare(
@@ -1261,7 +1262,7 @@ async function handleHistoryQA(
   let memorizedDocs: any[] = [];
   try {
     memorizedDocs = searchGroupKnowledge(threadId, question, 5);
-  } catch {}
+  } catch { }
 
   // 2.1. Phân loại ý định câu hỏi: hỏi quy trình/kinh nghiệm/thảo luận hay chỉ xin link tải
   const isDiscussionOrProcessQuery =
@@ -1332,7 +1333,7 @@ async function handleHistoryQA(
       )
       .all(threadId) as any[];
     relevantMessages.reverse();
-  } catch {}
+  } catch { }
 
   // 4. Lấy tóm tắt 3 ngày gần nhất (CHỈ lấy khi câu hỏi thực sự hỏi về diễn biến các ngày qua)
   let pastSummaries: { day_label: string; summary_text: string }[] = [];
@@ -1371,7 +1372,7 @@ async function handleHistoryQA(
             LIMIT 5`,
         )
         .all({ threadId }) as any[];
-    } catch {}
+    } catch { }
   }
 
   // 6. Thống kê thành viên chưa từng nhắn tin (chỉ lấy khi câu hỏi hỏi về tàu ngầm / nằm vùng)
@@ -1408,7 +1409,7 @@ async function handleHistoryQA(
           `SELECT COUNT(*) AS total FROM ${fromTable} WHERE ${totalFilter} AND is_active = 1 AND LOWER(display_name) NOT LIKE '%sen chúa%'`,
         )
         .get(threadId) as { total: number } | undefined;
-    } catch {}
+    } catch { }
   }
 
   // Dựng ngữ cảnh dữ liệu lịch sử
@@ -1485,8 +1486,8 @@ async function handleHistoryQA(
             : "";
       contextLines.push(
         `[Chủ đề / Dự án: ${pk.topic.toUpperCase()}${typeLabel} - Nguồn: ${pk.title}]:\n` +
-          (pk.summary ? `Tóm tắt cốt lõi:\n${pk.summary}\n` : "") +
-          (pk.contentText ? `Nội dung chi tiết tài liệu thời gian thực:\n${pk.contentText.slice(0, 30000)}\n` : ""),
+        (pk.summary ? `Tóm tắt cốt lõi:\n${pk.summary}\n` : "") +
+        (pk.contentText ? `Nội dung chi tiết tài liệu thời gian thực:\n${pk.contentText.slice(0, 30000)}\n` : ""),
       );
     }
     contextLines.push(
@@ -1613,9 +1614,9 @@ async function handleHistoryQA(
     const recentCtx =
       relevantMessages.length > 0
         ? relevantMessages
-            .slice(-5)
-            .map((m) => `${m.display_name}: ${m.text}`)
-            .join("\n")
+          .slice(-5)
+          .map((m) => `${m.display_name}: ${m.text}`)
+          .join("\n")
         : undefined;
 
     const plan = await planSearchQueries({
@@ -1794,7 +1795,7 @@ function isGroupAdminOrSuperAdmin(threadId: string, userId: string): boolean {
       .prepare(`SELECT role FROM members WHERE zalo_user_id = ?`)
       .get(userId) as { role: string } | undefined;
     if (globalMember && (globalMember.role === "admin" || globalMember.role === "owner")) return true;
-  } catch {}
+  } catch { }
   return false;
 }
 
@@ -1816,7 +1817,56 @@ function findMemberInGroup(threadId: string, query: string): { zalo_user_id: str
       .prepare(`SELECT zalo_user_id, display_name FROM members WHERE group_id = ? AND LOWER(display_name) LIKE ? LIMIT 1`)
       .get(threadId, `%${q}%`) as any;
     if (byGeneral) return byGeneral;
-  } catch {}
+  } catch { }
+  return null;
+}
+
+/**
+ * Trích xuất prompt tạo ảnh từ lệnh hoặc ngôn ngữ tự nhiên
+ * Hỗ trợ:
+ * - /taoanh [mô tả], !taoanh [mô tả], /veanh, /draw, /image
+ * - "tạo cho tôi bức ảnh hoàng hôn trên biển"
+ * - "vẽ giúp anh một chiếc xe vinfast điện"
+ * - "hãy vẽ một bức tranh sơn dầu..."
+ * - "bot vẽ cho em tấm hình cô gái anime..."
+ */
+export function extractImagePromptFromText(rawText: string, botName = ""): string | null {
+  const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const botPart = botName ? `|${escapeRegex(botName.toLowerCase())}` : "";
+  let clean = rawText
+    .replace(/@[^\s,!?]+/g, " ")
+    .replace(new RegExp(`\\b(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot${botPart})\\b`, "gi"), " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  function cleanExtractedPrompt(p: string): string {
+    return p
+      .replace(/^(?:về|với|cảnh|chủ đề|hình ảnh|bức ảnh|tấm ảnh)\s*[:\s]*/i, "")
+      .replace(/^(?:một|vài|những)\s+/i, "")
+      .replace(/^(?:con|cái|chiếc|bức|tấm|hình|ảnh)\s+/i, "")
+      .trim();
+  }
+
+  // 1. Cú pháp lệnh: /taoanh, !taoanh, /veanh, /draw, /image, /sinhdan
+  const cmdMatch = clean.match(/^[/!](?:taoanh|veanh|sinhdan|draw|imagine|image)\s*(?:[:\s-]\s*)?(.+)$/i);
+  if (cmdMatch && cmdMatch[1]?.trim()) {
+    return cleanExtractedPrompt(cmdMatch[1]);
+  }
+
+  // 2. Ngôn ngữ tự nhiên có từ khóa ảnh/hình/tranh/họa:
+  const naturalPhotoPattern = /^(?:hãy\s+|nhờ\s+|cho\s+)?(?:tạo|vẽ|sinh|làm)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:giúp\s+)?(?:một\s+)?(?:bức\s+|tấm\s+|cái\s+|chiếc\s+)?(?:ảnh|hình|tranh|họa)\s*(?:về|với|cảnh|chủ đề|một)?\s*[:\s]*(.+)$/i;
+  const photoMatch = clean.match(naturalPhotoPattern);
+  if (photoMatch && photoMatch[1]?.trim()) {
+    return cleanExtractedPrompt(photoMatch[1]);
+  }
+
+  // 3. "vẽ giúp anh một...", "vẽ cho em con...", "hãy vẽ..."
+  const directDrawPattern = /^(?:hãy\s+|nhờ\s+|cho\s+)?(?:vẽ)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:giúp\s+)?(?:một\s+|con\s+|cái\s+|chiếc\s+|bức\s+|tấm\s+)?(.+)$/i;
+  const drawMatch = clean.match(directDrawPattern);
+  if (drawMatch && drawMatch[1]?.trim()) {
+    return cleanExtractedPrompt(drawMatch[1]);
+  }
+
   return null;
 }
 
@@ -2044,6 +2094,56 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     } catch (err: any) {
       console.error(`[member-assistant] ❌ Lỗi tra cứu bản tin:`, err);
       await sendGroupText(api, threadId, `⚠️ Không thể lấy bản tin lúc này. Vui lòng thử lại sau ít phút.`);
+    }
+    return;
+  }
+
+  // 6.2. Vệ Tinh 3: Lệnh /taoanh hoặc Yêu cầu vẽ ảnh bằng ngôn ngữ tự nhiên ("tạo cho tôi bức ảnh...", "vẽ giúp anh một...")
+  const imagePrompt = extractImagePromptFromText(rawText, botName);
+  if (imagePrompt && imagePrompt.length >= 3) {
+    userCooldowns.set(sender, now);
+    void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.HEART);
+    void sendTyping(api, threadId);
+
+    if (!isCloudflareConfigured()) {
+      await sendGroupText(
+        api,
+        threadId,
+        `⚠️ @${displayName} Tính năng vẽ ảnh AI (FLUX.1-schnell) chưa được cấu hình trên máy chủ (thiếu CLOUDFLARE_ACCOUNT_ID hoặc CLOUDFLARE_API_TOKEN trong file .env). Vui lòng liên hệ Quản trị viên để kích hoạt nhé!`,
+      );
+      return;
+    }
+
+    await sendGroupText(
+      api,
+      threadId,
+      `🎨 ${botName} đang vẽ ảnh: "${imagePrompt}"... Bác chờ em khoảng 2 giây nhé!`,
+    );
+
+    try {
+      const imgRes = await generateCloudflareImage(imagePrompt);
+      if (imgRes.success && imgRes.filePath) {
+        await sendGroupFile(
+          api,
+          threadId,
+          imgRes.filePath,
+          `🎨 Ảnh của bác @${displayName} đây ạ!\n✨ Chủ đề: "${imagePrompt}"`,
+        );
+        console.log(`[member-assistant] ✅ Đã gửi ảnh FLUX.1 thành công cho ${displayName} ("${imagePrompt}")`);
+      } else {
+        await sendGroupText(
+          api,
+          threadId,
+          `⚠️ Rất tiếc @${displayName}, quá trình vẽ ảnh gặp sự cố: ${imgRes.error || "Lỗi máy chủ"}. Bác thử lại sau ít phút nhé!`,
+        );
+      }
+    } catch (imgErr: any) {
+      console.error(`[member-assistant] ❌ Lỗi sinh ảnh FLUX.1:`, imgErr);
+      await sendGroupText(
+        api,
+        threadId,
+        `⚠️ Rất tiếc @${displayName}, đã có lỗi xảy ra khi tạo ảnh. Vui lòng thử lại sau.`,
+      );
     }
     return;
   }

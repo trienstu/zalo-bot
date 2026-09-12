@@ -21,6 +21,7 @@ import {
 } from "./tools/finance-tools.js";
 import { fetchWeatherData } from "./weather.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
+import { callCloudflareLlm, isCloudflareConfigured } from "./cloudflare-ai.js";
 
 /**
  * Lớp gọi Google Gemini API dùng chung (Tóm tắt hội thoại Zalo, bóc tách dữ liệu).
@@ -453,6 +454,29 @@ export async function callGemini(
       }
     } catch (dsErr) {
       console.warn("[gemini] Fallback DeepSeek thất bại:", dsErr);
+    }
+  }
+
+  // VỆ TINH 1: Fallback sang Cloudflare Workers AI sau khi đã xoay hết 100% key Gemini (và DeepSeek)
+  if (isCloudflareConfigured()) {
+    try {
+      console.log("[gemini] 🛰️ Toàn bộ key Gemini (và DeepSeek) đã xoay hết vòng hoặc lỗi, kích hoạt Vệ Tinh 1: Cloudflare Workers AI...");
+      const cfReply = await callCloudflareLlm(
+        [
+          { role: "system", content: effectiveSystem },
+          { role: "user", content: user },
+        ],
+        {
+          temperature,
+          maxTokens: maxTokens || 1500,
+        },
+      );
+      if (cfReply) {
+        console.log("[gemini] ✅ Vệ tinh 1: Cloudflare Workers AI phản hồi thành công!");
+        return cfReply;
+      }
+    } catch (cfErr) {
+      console.warn("[gemini] Vệ tinh Cloudflare Workers AI thất bại:", cfErr);
     }
   }
 

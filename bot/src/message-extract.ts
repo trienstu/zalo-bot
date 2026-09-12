@@ -26,7 +26,7 @@ function positiveInt(raw: unknown): number | null {
   return Math.max(1, Math.trunc(n));
 }
 
-export function extractMediaSummary(payload: any): { type: "image" | "video"; count: number } | null {
+export function extractMediaSummary(payload: any): { type: "image" | "video" | "voice"; count: number } | null {
   const data = payload?.data ?? {};
   const msgType = String(data?.msgType ?? "").toLowerCase();
   const content = parseObjectMaybe(data?.content);
@@ -49,6 +49,14 @@ export function extractMediaSummary(payload: any): { type: "image" | "video"; co
     contentType.includes("image")
   ) {
     return { type: "image", count: rawCount ?? 1 };
+  }
+  if (
+    msgType.includes("voice") ||
+    msgType.includes("audio") ||
+    contentType.includes("voice") ||
+    contentType.includes("audio")
+  ) {
+    return { type: "voice", count: rawCount ?? 1 };
   }
   return null;
 }
