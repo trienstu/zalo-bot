@@ -33,6 +33,7 @@ import { refreshDynamicKnowledgeIfExpired, fetchGoogleContent, parseGoogleUrl } 
 import { getSystemTemporalPrompt } from "./temporal.js";
 import { planSearchQueries } from "./query-planner.js";
 import { defaultBotName } from "./config.js";
+import { finalizeGroundedAnswer } from "./search-evidence.js";
 
 export interface MemberMessageEvent {
   threadId: string;
@@ -1606,6 +1607,7 @@ async function handleHistoryQA(
 
   // 2.0. Đọc hiểu ngữ nghĩa & Lập kế hoạch tra cứu bằng Gemini Flash-Lite (Semantic Query Planner)
   let liveNews = "";
+  let evidenceRequired = false;
 
   try {
     const recentCtx =
@@ -1623,9 +1625,13 @@ async function handleHistoryQA(
     });
 
     if (plan.needsSearch && plan.queries.length > 0) {
+      evidenceRequired = plan.intent === "fact_check";
       console.log(`[member-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(plan.queries)}`);
       const searchResults = await Promise.all(
-        plan.queries.slice(0, 2).map((q) => searchRealtimeNews(q).catch(() => ""))
+        plan.queries.slice(0, 2).map((q) => searchRealtimeNews(q, {
+          intent: plan.intent,
+          requireEvidence: evidenceRequired,
+        }).catch(() => ""))
       );
       liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
     }
@@ -1656,11 +1662,11 @@ async function handleHistoryQA(
     `   - Văn bản pháp quy / Hành chính / Thủ tục: Nêu rõ tên văn bản (Luật, Nghị quyết, Nghị định, Thông tư), số hiệu, thời điểm có hiệu lực và nội dung điều khoản áp dụng.\n` +
     `   - Thông tin liên quan có giá trị gia tăng (nếu có): Chỉ ghi chú ngắn gọn, khiêm tốn ở phần phụ: "*(Ngoài ra, nếu anh/chị quan tâm đến [...], thì [...])*".\n` +
     `   - Khi yêu cầu tạo/xuất file (Word .docx, Excel .xlsx...): BẮT BUỘC gọi tool 'generate_file'. Tuyệt đối cấm viết tin nhắn giả mạo khi chưa gọi tool!\n` +
-    `3. BẮT BUỘC GHI DÒNG NGUỒN CHUẨN MỰC Ở CUỐI CÂU (GROUNDING CITATION CHO MỌI LĨNH VỰC):\n` +
+    `3. DẪN NGUỒN THEO BẰNG CHỨNG ĐƯỢC CUNG CẤP (GROUNDING CITATION CHO MỌI LĨNH VỰC):\n` +
     `   - Khi câu trả lời sử dụng dữ liệu thời gian thực (tin tức, thể thao, văn bản pháp luật, đơn vị hành chính, giá cả thị trường, nghiên cứu khoa học):\n` +
-    `     + BẮT BUỘC kết thúc câu trả lời bằng 1 dòng nguồn uy tín, trang trọng được đặt trong dấu ngoặc đơn và in nghiêng ở cuối cùng:\n` +
-    `       *(Nguồn: [Tên cơ quan ban hành / Tổ chức / Nguồn tin uy tín], [thời điểm công bố nếu có]).*\n` +
-    `     + TUYỆT ĐỐI KHÔNG lồng tên các nguồn báo/trang web vào giữa văn xuôi để phân trần hay chống chế.\n` +
+    `     + Chỉ sử dụng các bản ghi [E#], URL và ngày công bố xuất hiện trong phần bằng chứng. Không tự thêm tên cơ quan, ngày hoặc URL.\n` +
+    `     + Nếu EVIDENCE_STATUS là INSUFFICIENT, phải nói rõ chưa đủ bằng chứng và không được đoán đáp án.\n` +
+    `     + Giữ nguyên ngày của từng nguồn; thời điểm hệ thống hiện tại không phải ngày công bố của nguồn.\n` +
     `4. KẾT BÀI GỢI MỞ HOẶC LỜI CHÚC LỊCH THIỆP:\n` +
     `   - Có thể để lại 1 câu hỏi gợi mở ngắn gọn hoặc câu chúc tự nhiên, tinh tế (nếu phù hợp).\n`;
 
@@ -1752,6 +1758,8 @@ async function handleHistoryQA(
         enableSearch: false,
       });
     }
+
+    answer = finalizeGroundedAnswer(answer, liveNews, evidenceRequired);
 
     // 🧠 TỰ ĐỘNG GHI NHỚ VÀO BỘ NHỚ DÀI HẠN NẾU ĐÂY LÀ TÀI LIỆU/FILE PHÂN TÍCH
     if (targetUrl && fileName) {
@@ -2722,5 +2730,4 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 }
-
 

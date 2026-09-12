@@ -25,6 +25,7 @@ import { handleSetReminder, handleListReminders, handleCancelReminder } from "./
 import { getDailyAiNewsBriefing } from "./ai-news.js";
 import { searchRealtimeNews } from "./realtime-search.js";
 import { planSearchQueries } from "./query-planner.js";
+import { finalizeGroundedAnswer } from "./search-evidence.js";
 import {
   parseGoogleUrl,
   fetchGoogleContent,
@@ -1205,6 +1206,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
   // 2.0. Đọc hiểu ngữ nghĩa & Lập kế hoạch tra cứu bằng Gemini Flash-Lite (Semantic Query Planner)
   let liveNews = "";
+  let evidenceRequired = false;
   try {
     const plan = await planSearchQueries({
       question: rawText,
@@ -1213,9 +1215,13 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     });
 
     if (plan.needsSearch && plan.queries.length > 0) {
+      evidenceRequired = plan.intent === "fact_check";
       console.log(`[admin-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(plan.queries)}`);
       const searchResults = await Promise.all(
-        plan.queries.slice(0, 3).map((q) => searchRealtimeNews(q).catch(() => ""))
+        plan.queries.slice(0, 3).map((q) => searchRealtimeNews(q, {
+          intent: plan.intent,
+          requireEvidence: evidenceRequired,
+        }).catch(() => ""))
       );
       liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
     }
@@ -1306,7 +1312,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `      + TRÍCH DẪN NGUYÊN VĂN: BẮT BUỘC đặt các phát ngôn, tuyên bố then chốt trong ngoặc kép "..." (ví dụ: "Sản phẩm của họ không đủ tốt!", "chuyện nhỏ").\n` +
     `      + NÊU RÕ NỀN TẢNG & BỐI CẢNH CỤ THỂ: Nêu rõ phát biểu được đưa ra ở đâu (bài đăng trên mạng xã hội Truth Social, trả lời họp báo tại Nhà Trắng, mạng xã hội X, phỏng vấn báo chí, sắc lệnh ban hành).\n` +
     `      + NÊU RÕ THỜI ĐIỂM CỤ THỂ: Ghi rõ ngày tháng diễn ra (ví dụ: ngày 07/09/2026, ngày 04/09/2026).\n` +
-    `      + NGUỒN TỔNG HỢP: Ghi rõ nguồn tin báo chí trong nước và quốc tế ở cuối câu trả lời dạng: (Nguồn tổng hợp: Báo Tuổi Trẻ, VnEconomy, VnExpress, Reuters, AP, Bloomberg, BBC cập nhật ngày DD/MM/YYYY).\n` +
+    `      + NGUỒN KIỂM CHỨNG: Chỉ dùng URL và ngày có trong các bản ghi [E#] được cung cấp; không tự thêm tên nguồn hoặc mốc ngày.\n` +
     `      + CHỦ ĐỘNG GỢI Ý CÂU HỎI MỞ: Luôn kết thúc bằng một câu hỏi tương tác tinh tế, gợi mở đào sâu các mảng liên quan (ví dụ: "Anh/Sếp đang theo dõi cụ thể phát ngôn của ông ấy về mảng kinh tế thương mại hay chiến sự Trung Đông để em tìm sâu hơn ạ?").\n` +
     `      + ĐỊNH DẠNG: Tuyệt đối KHÔNG dùng dấu ** in đậm, KHÔNG spam icon ở từng dòng; dùng gạch đầu dòng '-' hoặc '*' hoặc '•' rõ ràng, mạch lạc.\n` +
     `    - KHI HỎI VỀ SẢN PHẨM / CÔNG NGHỆ / TIẾN ĐỘ RA MẮT:\n` +
@@ -1329,9 +1335,9 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   const claimGroundingInstruction =
     `\n13. NGUYÊN TẮC NEO DỮ KIỆN & LỌC SỰ THẬT CÓ NGÀY THÁNG (CLAIM GROUNDING WITH DATES):\n` +
     `    - KHI TRẢ LỜI VỀ TIN TỨC, CÔNG NGHỆ, MÔ HÌNH AI, SỰ KIỆN, PHÁT HÀNH, GIÁ CẢ:\n` +
-    `      + BẮT BUỘC chỉ khẳng định những dữ kiện có NGÀY THÁNG RÕ RÀNG + SỐ LIỆU + NGUỒN XÁC THỰC từ các công cụ (web_search, wiki_lookup, hn_search, arxiv_search, github_search).\n` +
-    `      + Nếu thông tin chưa có ngày tháng công bố chính thức hoặc chỉ là đồn đoán trên mạng: BẮT BUỘC ghi rõ là "chưa chốt / tin đồn" hoặc "chưa có thông cáo chính thức", tuyệt đối không tự bịa đặt mốc thời gian.\n` +
-    `      + Luôn trích dẫn 2-3 nguồn tham khảo uy tín (tên nguồn hoặc link) ở cuối câu trả lời.\n` +
+    `      + Chỉ khẳng định dữ kiện có trong bản ghi [E#] đã được hệ thống chấp nhận; giữ nguyên ngày và URL của bản ghi.\n` +
+    `      + Nếu EVIDENCE_STATUS là INSUFFICIENT hoặc thông tin chỉ là đồn đoán: nói rõ chưa đủ xác nhận, tuyệt đối không đoán hoặc tự bịa mốc thời gian.\n` +
+    `      + Tuyệt đối không tạo tên nguồn, ngày hoặc URL không có trong dữ liệu bằng chứng.\n` +
     `\n14. KỸ NĂNG XUẤT TÀI LIỆU THÀNH FILE THẬT (.DOCX, .XLSX, .MD, .TXT):\n` +
     `    - QUY TẮC CÔNG CỤ generate_file: CHỈ GỌI CÔNG CỤ 'generate_file' khi người dùng có YÊU CẦU CỤ THỂ VỀ NỘI DUNG để tạo/xuất file (ví dụ: "soạn cho anh hợp đồng...", "tạo file docx quy trình...", "xuất bảng tính chi phí ra excel...").\n` +
     `    - TUYỆT ĐỐI CẤM TỰ Ý TẠO FILE khi người dùng chỉ hỏi thăm năng lực (ví dụ: "em biết tạo file docx không?", "bot có tạo file được không?"). Với câu hỏi hỏi thăm năng lực, CHỈ trả lời bằng lời nói giải thích năng lực và mời người dùng cung cấp nội dung cần tạo. Tuyệt đối cấm tạo file rỗng tự chế!\n` +
@@ -1393,6 +1399,8 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         enableSearch: false,
       });
     }
+
+    answer = finalizeGroundedAnswer(answer, liveNews, evidenceRequired);
 
     // Kiểm tra và thực thi thẻ hành động [ACTION:SEND_GROUP target="..."]...[/ACTION] CHỈ DÀNH CHO ADMIN
     let finalAnswer = answer;

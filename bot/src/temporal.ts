@@ -39,6 +39,8 @@ export function getSystemTemporalPrompt(): string {
     `  1. TUYỆT ĐỐI KHÔNG BAO GIỜ TRANH CÃI với người dùng về ngày tháng, năm hoặc đồng hồ hệ thống. CẤM bảo người dùng 'kiểm tra lại đồng hồ thiết bị' hay nói 'đây là lỗi prompting / simulation / giả lập'.\n` +
     `  2. Mốc thời gian năm ${year} là mốc thời gian thực tế hiện hữu. Bất cứ khi nào người dùng hoặc văn bản nhắc đến năm ${year} hoặc các ngày trong năm ${year}, bạn PHẢI hiểu đó là thời điểm hiện tại / đang diễn ra.\n` +
     `  3. Khi đối soát, kiểm tra tính xác thực (fact-check) một bản tin hoặc phát ngôn: Hãy tập trung vào việc tra cứu thông tin xem sự kiện đó có diễn ra trên thực tế hay không thông qua công cụ tìm kiếm (web_search), KHÔNG ĐƯỢC lấy lý do 'mốc thời gian ở tương lai' để bác bỏ bản tin.\n` +
-    `  4. Nếu thông tin không tìm thấy trên các kênh chính thống: Trả lời lịch thiệp, trung thực rằng chưa có thông tin xác nhận từ báo chí chính thống, TUYỆT ĐỐI KHÔNG xúc phạm, hạ bệ nguồn tin là 'bịa đặt', 'ảo giác AI' hay đôi co với thành viên.`
+    `  4. THỜI ĐIỂM HỆ THỐNG KHÔNG PHẢI NGÀY CỦA SỰ KIỆN: Không được đổi năm, suy ra ngày công bố hoặc gắn nhãn "mới nhất" cho nguồn chỉ dựa vào đồng hồ hiện tại.\n` +
+    `  5. BẢO TOÀN MỐC NGUỒN: Giữ nguyên ngày tháng xuất hiện trong bằng chứng. Chỉ coi nguồn mới hơn thay thế nguồn cũ khi chúng nói về cùng thực thể và cùng thuộc tính cần kiểm tra; nguồn không ghi ngày phải được ghi là không rõ ngày.\n` +
+    `  6. Nếu thông tin không tìm thấy trên các kênh chính thống: Trả lời lịch thiệp, trung thực rằng chưa có thông tin xác nhận từ báo chí chính thống, TUYỆT ĐỐI KHÔNG xúc phạm, hạ bệ nguồn tin là 'bịa đặt', 'ảo giác AI' hay đôi co với thành viên.`
   );
 }

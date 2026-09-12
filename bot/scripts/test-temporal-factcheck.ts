@@ -40,7 +40,7 @@ async function runTest() {
   if (hasTimeError) {
     console.error("❌ CẢNH BÁO: Bot vẫn còn nhắc đến tương lai / đồng hồ / simulation!");
   } else {
-    console.log("✅ XÁC NHẬN THÀNH CÔNG: Bot đã hoàn toàn chấp nhận mốc thời gian thực và không còn đôi co / bảo người dùng kiểm tra đồng hồ!");
+    console.log("✅ Kiểm tra ngôn ngữ thời gian đạt: phản hồi không đôi co về đồng hồ. Lưu ý: phép kiểm tra này không chứng minh dữ kiện trong câu trả lời là chính xác.");
   }
 }
 

@@ -8,6 +8,13 @@
 
 import { webSearch, fetchUrl, SearchResultItem } from "./tools/vertical-tools.js";
 import { getFinancialMarketSummary } from "./tools/finance-tools.js";
+import {
+  formatEvidenceContext,
+  rankEvidence,
+  type EvidenceSourceType,
+  type SearchEvidence,
+  type SearchIntent,
+} from "./search-evidence.js";
 
 function decodeXmlAndHtml(str: string): string {
   return str
@@ -38,13 +45,20 @@ function decodeXmlAndHtml(str: string): string {
     .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
 }
 
-interface ParsedNewsItem {
+export interface ParsedNewsItem {
   title: string;
   snippet?: string;
   timeLabel: string;
   timestamp: number;
   ageHours: number;
   url?: string;
+  sourceName?: string;
+  sourceType?: EvidenceSourceType;
+}
+
+export interface SearchRealtimeOptions {
+  intent?: SearchIntent;
+  requireEvidence?: boolean;
 }
 
 export interface FeedSource {
@@ -385,7 +399,9 @@ async function fetchGoogleNewsRss(keyword: string, lang: "vi" | "en" = "vi"): Pr
           const content = block[1] || "";
           const titleMatch = content.match(/<title>(.*?)<\/title>/i);
           const pubDateMatch = content.match(/<pubDate>(.*?)<\/pubDate>/i);
-          const title = titleMatch && titleMatch[1] ? decodeXmlAndHtml(titleMatch[1].trim()) : "";
+          const rawTitle = titleMatch && titleMatch[1] ? decodeXmlAndHtml(titleMatch[1].trim()) : "";
+          const publisher = rawTitle.split(/\s+-\s+/).at(-1)?.trim() || "Google News";
+          const title = rawTitle;
           const rawDate = pubDateMatch && pubDateMatch[1] ? pubDateMatch[1].trim() : "";
           const dateObj = new Date(rawDate);
           const timestamp = !isNaN(dateObj.getTime()) ? dateObj.getTime() : 0;
@@ -415,13 +431,14 @@ async function fetchGoogleNewsRss(keyword: string, lang: "vi" | "en" = "vi"): Pr
           const linkMatch = content.match(/<link>(.*?)<\/link>/i);
           const url = linkMatch && linkMatch[1] ? linkMatch[1].trim() : "";
 
-          return { title, timeLabel, timestamp, ageHours, url };
+          return { title, timeLabel, timestamp, ageHours, url, sourceName: publisher, sourceType: "news" as const };
         })
         .filter((it) => {
           if (it.title.length === 0) return false;
           if (filterTokens.length === 0) return true;
           const full = it.title.toLowerCase();
-          return filterTokens.some((tok) => full.includes(tok));
+          const matchCount = filterTokens.filter((tok) => full.includes(tok)).length;
+          return matchCount >= Math.max(1, Math.ceil(filterTokens.length * 0.5));
         });
     } catch {
       if (attempt === 0) continue;
@@ -458,14 +475,29 @@ async function fetchWikipediaSummary(query: string): Promise<string> {
     const searchItems = (data?.query?.search || []) as Array<{ title: string; snippet: string }>;
     if (searchItems.length > 0) {
       // Ưu tiên bài viết mang tính tổng quan / danh sách / phân cấp hành chính
-      const preferred =
+      const preferredByType =
         searchItems.find((it) =>
           it.title.startsWith("Đơn vị hành chính") ||
           it.title.startsWith("Phân cấp hành chính") ||
           it.title.startsWith("Tỉnh (Việt Nam)") ||
           it.title.includes("Sáp nhập") ||
           it.title.startsWith("Danh sách")
-        ) || searchItems[0];
+        );
+      const rankedWiki = rankEvidence(
+        searchItems.map((it) => ({
+          title: it.title,
+          snippet: String(it.snippet || "").replace(/<[^>]+>/g, " "),
+          url: `https://vi.wikipedia.org/wiki/${encodeURIComponent(it.title)}`,
+          sourceName: "Wikipedia",
+          sourceType: "encyclopedia" as const,
+          publishedAt: null,
+        })),
+        cleanWikiQ || query,
+        "knowledge",
+      );
+      const preferred = preferredByType && rankedWiki.some((item) => item.title === preferredByType.title)
+        ? preferredByType
+        : rankedWiki[0];
 
       if (!preferred) return "";
       const topTitle = String(preferred.title);
@@ -480,7 +512,7 @@ async function fetchWikipediaSummary(query: string): Promise<string> {
       if (pages) {
         const page = Object.values(pages)[0] as any;
         if (page?.extract) {
-          return `📖 DỮ LIỆU TỪ BÁCH KHOA TOÀN THƯ WIKIPEDIA (${page.title}):\n"${page.extract.slice(0, 1000)}"\n`;
+          return `📖 DỮ LIỆU TỪ BÁCH KHOA TOÀN THƯ WIKIPEDIA (${page.title}):\n"${page.extract.slice(0, 1000)}"\nURL: https://vi.wikipedia.org/wiki/${encodeURIComponent(topTitle)}`;
         }
       }
     }
@@ -531,6 +563,48 @@ async function fetchArticleScheduleTable(url: string): Promise<string> {
 /**
  * Quét thông tin mở từ Web Search RSS (Bing RSS) phục vụ các dự án BĐS mới, thực thể ngách chưa lên báo lớn
  */
+export function parseOpenWebRssItems(xml: string, now = Date.now()): ParsedNewsItem[] {
+  const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
+  const parsed: ParsedNewsItem[] = [];
+  for (const it of items.slice(0, 6)) {
+    const block = it[1] || "";
+    const tMatch = block.match(/<title>(.*?)<\/title>/i);
+    const dMatch = block.match(/<description>(.*?)<\/description>/i);
+    const lMatch = block.match(/<link>(.*?)<\/link>/i);
+    const pMatch = block.match(/<pubDate>(.*?)<\/pubDate>/i);
+    const title = tMatch && tMatch[1] ? decodeXmlAndHtml(tMatch[1].trim()) : "";
+    const desc = dMatch && dMatch[1] ? decodeXmlAndHtml(dMatch[1].trim().replace(/<[^>]+>/g, " ")) : "";
+    const link = lMatch && lMatch[1] ? lMatch[1].trim() : "";
+    const parsedDate = pMatch && pMatch[1] ? Date.parse(pMatch[1]) : NaN;
+    const timestamp = Number.isFinite(parsedDate) ? parsedDate : 0;
+    const ageHours = timestamp > 0 ? Math.max(0, (now - timestamp) / (60 * 60 * 1000)) : Number.POSITIVE_INFINITY;
+    if (title && link) {
+      let domain = "Web";
+      try {
+        domain = new URL(link).hostname.replace(/^www\./, "");
+      } catch {}
+      parsed.push({
+        title: `[${domain}] ${title}`,
+        snippet: desc || title,
+        url: link,
+        timeLabel: timestamp > 0
+          ? `Bài đăng ngày ${new Intl.DateTimeFormat("vi-VN", {
+              timeZone: "Asia/Ho_Chi_Minh",
+              day: "2-digit",
+              month: "2-digit",
+              year: "numeric",
+            }).format(new Date(timestamp))}`
+          : "Không rõ ngày công bố",
+        timestamp,
+        ageHours,
+        sourceName: domain,
+        sourceType: "web",
+      });
+    }
+  }
+  return parsed;
+}
+
 async function fetchOpenWebRss(query: string, timeoutMs = 2500): Promise<ParsedNewsItem[]> {
   try {
     const bUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}&format=rss`;
@@ -542,34 +616,7 @@ async function fetchOpenWebRss(query: string, timeoutMs = 2500): Promise<ParsedN
     });
     if (!res.ok) return [];
     const xml = await res.text();
-    const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
-    const parsed: ParsedNewsItem[] = [];
-    for (const it of items.slice(0, 6)) {
-      const block = it[1] || "";
-      const tMatch = block.match(/<title>(.*?)<\/title>/i);
-      const dMatch = block.match(/<description>(.*?)<\/description>/i);
-      const lMatch = block.match(/<link>(.*?)<\/link>/i);
-      const title = tMatch && tMatch[1] ? decodeXmlAndHtml(tMatch[1].trim()) : "";
-      const desc = dMatch && dMatch[1] ? decodeXmlAndHtml(dMatch[1].trim().replace(/<[^>]+>/g, " ")) : "";
-      const link = lMatch && lMatch[1] ? lMatch[1].trim() : "";
-      if (title && link) {
-        let domain = "";
-        try {
-          domain = new URL(link).hostname.replace(/^www\./, "");
-        } catch {
-          domain = "Web";
-        }
-        parsed.push({
-          title: `[${domain}] ${title}`,
-          snippet: desc || title,
-          url: link,
-          timeLabel: "Mới nhất",
-          timestamp: Date.now(),
-          ageHours: 1,
-        });
-      }
-    }
-    return parsed;
+    return parseOpenWebRssItems(xml);
   } catch {
     return [];
   }
@@ -627,9 +674,10 @@ async function queryNewsPipeline(
   return allResults;
 }
 
-export async function searchRealtimeNews(query: string | string[]): Promise<string> {
+export async function searchRealtimeNews(query: string | string[], options: SearchRealtimeOptions = {}): Promise<string> {
   try {
     const rawQuery = Array.isArray(query) ? query.join(" ") : String(query || "");
+    const intent: SearchIntent = options.intent || (/\b(?:hiện nay|hiện tại|mới nhất|current|latest)\b/i.test(rawQuery) ? "fact_check" : "realtime_news");
 
     // 1. Phân loại nhu cầu thời gian từ câu hỏi
     const is24hStrict = /(?:hôm nay|24h|24 giờ|vừa xong|vừa ra mắt|vừa công bố|vừa phát ngôn|vừa tuyên bố|tin nóng|ngay lúc này|trong ngày|sáng nay|trưa nay|chiều nay|tối nay|tỉ số đêm qua|kết quả đêm qua)/i.test(
@@ -888,11 +936,12 @@ export async function searchRealtimeNews(query: string | string[]): Promise<stri
 
     // 10. Luôn luôn trích xuất dữ liệu web chuyên sâu & bách khoa qua DuckDuckGo Web Search Snippets
     let richSnippetsText = "";
+    const collectedSnippets: SearchResultItem[] = [];
     try {
       const snippetQueries: string[] = [cleanQ];
 
       if (isWorldPolitics) {
-        snippetQueries.push(`${cleanQ} phát ngôn tuyên bố mới nhất 2026`);
+        snippetQueries.push(`${cleanQ} phát ngôn tuyên bố mới nhất ${new Date().getFullYear()}`);
       }
 
       // Query tiếng Anh nếu cần thiết cho mảng thế giới / AI công nghệ
@@ -912,10 +961,9 @@ export async function searchRealtimeNews(query: string | string[]): Promise<stri
       }
 
       const snippetResults = await Promise.allSettled(
-        snippetQueries.map((q) => webSearch(q, 4))
+        snippetQueries.map((q) => webSearch(q, intent === "fact_check" ? 8 : 4))
       );
 
-      const collectedSnippets: SearchResultItem[] = [];
       const seenSnippets = new Set<string>();
 
       for (const res of snippetResults) {
@@ -954,8 +1002,33 @@ export async function searchRealtimeNews(query: string | string[]): Promise<stri
       console.warn("[realtime-search] Lỗi bóc tách snippet:", err);
     }
 
-    // Nếu cả Wikipedia, DuckDuckGo snippets và tin tức đều không có gì: trả về rỗng
-    if (!wikiText && !richSnippetsText && mergedItems.length === 0) return "";
+    const evidenceCandidates: SearchEvidence[] = [
+      ...mergedItems
+        .filter((item) => Boolean(item.url))
+        .map((item) => ({
+          title: item.title,
+          snippet: item.snippet || item.title,
+          url: item.url || "",
+          sourceName: item.sourceName,
+          sourceType: item.sourceType || "news",
+          publishedAt: item.timestamp > 0 ? item.timestamp : null,
+        })),
+      ...collectedSnippets.map((item) => ({
+        title: item.title,
+        snippet: item.snippet,
+        url: item.url,
+        sourceName: item.sourceName,
+        sourceType: item.sourceType || "web",
+        publishedAt: item.publishedAt || null,
+      })),
+    ];
+    const rankedEvidence = rankEvidence(evidenceCandidates, cleanQ, intent).slice(0, 10);
+    const evidenceContext = formatEvidenceContext(rankedEvidence, intent);
+
+    // Nếu mọi kênh đều không có dữ liệu, trả trạng thái thiếu bằng chứng cho fact-check và rỗng cho tin tổng hợp.
+    if (!wikiText && !richSnippetsText && mergedItems.length === 0) {
+      return intent === "fact_check" || options.requireEvidence ? evidenceContext : "";
+    }
 
     const sections: string[] = [];
 
@@ -1029,11 +1102,15 @@ export async function searchRealtimeNews(query: string | string[]): Promise<stri
       console.warn("[realtime-search] Lỗi lấy market summary:", mErr);
     }
 
-    if (wikiText) sections.push(wikiText);
-    if (richSnippetsText) sections.push(richSnippetsText);
+    if (intent === "fact_check" || options.requireEvidence) {
+      sections.push(`🔎 BẰNG CHỨNG ĐÃ XẾP HẠNG VÀ KIỂM TRA:\n${evidenceContext}`);
+    } else {
+      if (wikiText) sections.push(wikiText);
+      if (richSnippetsText) sections.push(richSnippetsText);
+    }
 
     const isAskingNews = /(?:tin tức|tin mới|hôm nay|24h|nóng|thời sự|vừa xảy ra|diễn biến mới|trận banh|đá banh|bóng đá|thể thao)/i.test(rawQuery);
-    if (mergedItems.length > 0 && (isAskingNews || categories.length > 0 || !richSnippetsText)) {
+    if (intent !== "fact_check" && !options.requireEvidence && mergedItems.length > 0 && (isAskingNews || categories.length > 0 || !richSnippetsText)) {
       const newsLines = mergedItems
         .slice(0, 10)
         .map((item, idx) => {

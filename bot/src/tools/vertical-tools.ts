@@ -1,3 +1,5 @@
+import { rankEvidence, type EvidenceSourceType, type SearchIntent } from "../search-evidence.js";
+
 /**
  * Vertical Tools for Zalo Bot Agent Loop.
  * Pure Node.js standard library (fetch, regex) - zero new npm dependencies.
@@ -9,6 +11,17 @@ export interface SearchResultItem {
   snippet: string;
   url: string;
   date?: string;
+  publishedAt?: number | null;
+  retrievedAt?: number;
+  sourceType?: EvidenceSourceType;
+  sourceName?: string;
+}
+
+function rankSearchResults(items: SearchResultItem[], query: string): SearchResultItem[] {
+  const intent: SearchIntent = /\b(?:hiện nay|hiện tại|mới nhất|hôm nay|current|latest|today)\b/i.test(query)
+    ? "fact_check"
+    : "knowledge";
+  return rankEvidence(items, query, intent).map(({ relevanceScore, authorityScore, totalScore, ...item }) => item);
 }
 
 /**
@@ -31,7 +44,8 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
   };
 
   // 1. DuckDuckGo HTML Search (Bóc tách trích đoạn thực tế và giải mã link nguồn gốc)
-  const fetchDuckDuckGo = async () => {
+  const fetchDuckDuckGo = async (): Promise<SearchResultItem[]> => {
+    const sourceResults: SearchResultItem[] = [];
     try {
       const ddgUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
       const res = await fetch(ddgUrl, {
@@ -54,15 +68,17 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
           const title = (tMatch[2] || "").replace(/<[^>]+>/g, "").trim();
           const snippet = (sMatch[1] || "").replace(/<[^>]+>/g, "").trim();
           if (title && snippet) {
-            addResult({ title, snippet, url: realUrl });
+            sourceResults.push({ title, snippet, url: realUrl, sourceType: "web", sourceName: "DuckDuckGo" });
           }
         }
       }
     } catch {}
+    return sourceResults;
   };
 
   // 2. Bing RSS Search (Trích xuất mô tả chi tiết từ thẻ description của RSS)
-  const fetchBingRss = async () => {
+  const fetchBingRss = async (): Promise<SearchResultItem[]> => {
+    const sourceResults: SearchResultItem[] = [];
     try {
       const bUrl = `https://www.bing.com/search?q=${encodeURIComponent(query)}&format=rss`;
       const bRes = await fetch(bUrl, {
@@ -79,23 +95,30 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
           const tMatch = block.match(/<title>(.*?)<\/title>/i);
           const dMatch = block.match(/<description>(.*?)<\/description>/i);
           const lMatch = block.match(/<link>(.*?)<\/link>/i);
+          const pMatch = block.match(/<pubDate>(.*?)<\/pubDate>/i);
           const rawTitle = tMatch && tMatch[1] ? tMatch[1].trim() : "";
           const rawDesc = dMatch && dMatch[1] ? dMatch[1].trim().replace(/<[^>]+>/g, " ") : "";
           const rawUrl = lMatch && lMatch[1] ? lMatch[1].trim() : "";
+          const publishedAt = pMatch && pMatch[1] ? Date.parse(pMatch[1]) : NaN;
           if (rawTitle && rawDesc) {
-            addResult({
+            sourceResults.push({
               title: rawTitle,
               snippet: rawDesc,
               url: rawUrl,
+              publishedAt: Number.isFinite(publishedAt) ? publishedAt : null,
+              sourceType: "web",
+              sourceName: "Bing",
             });
           }
         }
       }
     } catch {}
+    return sourceResults;
   };
 
   // 3. Google News RSS Search (Phục vụ bắt nhịp tiêu đề tin tức sự kiện nóng nhất)
-  const fetchGoogleNews = async () => {
+  const fetchGoogleNews = async (): Promise<SearchResultItem[]> => {
+    const sourceResults: SearchResultItem[] = [];
     try {
       const gUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=vi&gl=VN&ceid=VN:vi`;
       const gRes = await fetch(gUrl, {
@@ -111,22 +134,30 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
           const block = it[1] || "";
           const tMatch = block.match(/<title>(.*?)<\/title>/i);
           const lMatch = block.match(/<link>(.*?)<\/link>/i);
+          const pMatch = block.match(/<pubDate>(.*?)<\/pubDate>/i);
           const rawTitle = tMatch && tMatch[1] ? tMatch[1].trim() : "";
           const rawUrl = lMatch && lMatch[1] ? lMatch[1].trim() : "";
+          const publishedAt = pMatch && pMatch[1] ? Date.parse(pMatch[1]) : NaN;
+          const publisher = rawTitle.split(/\s+-\s+/).at(-1)?.trim() || "Google News";
           if (rawTitle) {
-            addResult({
+            sourceResults.push({
               title: rawTitle,
               snippet: rawTitle,
               url: rawUrl,
+              publishedAt: Number.isFinite(publishedAt) ? publishedAt : null,
+              sourceType: "news",
+              sourceName: publisher,
             });
           }
         }
       }
     } catch {}
+    return sourceResults;
   };
 
   // 4. Wikipedia API Search (Khái niệm, nhân vật, hành chính, địa danh)
-  const fetchWikipedia = async () => {
+  const fetchWikipedia = async (): Promise<SearchResultItem[]> => {
+    const sourceResults: SearchResultItem[] = [];
     try {
       let cleanWikiQ = query
         .replace(/@\S+/g, "")
@@ -156,31 +187,34 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
             .replace(/\s+/g, " ")
             .trim();
           if (rawSnippet) {
-            addResult({
+            sourceResults.push({
               title: it.title,
               snippet: rawSnippet,
               url: `https://vi.wikipedia.org/wiki/${encodeURIComponent(it.title)}`,
+              publishedAt: null,
+              sourceType: "encyclopedia",
+              sourceName: "Wikipedia",
             });
           }
         }
       }
     } catch {}
+    return sourceResults;
   };
 
   // Kích hoạt song song tất cả các kênh tìm kiếm đa nguồn
-  await Promise.allSettled([
+  const initialBatches = await Promise.allSettled([
     fetchDuckDuckGo(),
     fetchBingRss(),
     fetchGoogleNews(),
     fetchWikipedia(),
   ]);
+  for (const batch of initialBatches) {
+    if (batch.status === "fulfilled") batch.value.forEach(addResult);
+  }
 
-  // Sắp xếp thông minh: Ưu tiên mục có đoạn trích chi tiết (snippet khác title, > 25 ký tự)
-  results.sort((a, b) => {
-    const aRich = a.snippet && a.snippet !== a.title && a.snippet.length > 25 ? 1 : 0;
-    const bRich = b.snippet && b.snippet !== b.title && b.snippet.length > 25 ? 1 : 0;
-    return bRich - aRich;
-  });
+  const initiallyRanked = rankSearchResults(results, query);
+  results.splice(0, results.length, ...initiallyRanked);
 
   if (results.length >= maxResults) {
     return results.slice(0, maxResults);
@@ -266,6 +300,9 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
             snippet: snippet || (dateStr ? `[Tin ngày ${dateStr}] ${title}` : title),
             url,
             date: dateStr,
+            publishedAt: pMatch && pMatch[1] && Number.isFinite(Date.parse(pMatch[1])) ? Date.parse(pMatch[1]) : null,
+            sourceType: "news",
+            sourceName: "VnExpress",
           });
         }
       }
@@ -316,6 +353,9 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
               snippet: dateStr ? `[Tin ngày ${dateStr}] ${title}` : title,
               url: lMatch && lMatch[1] ? lMatch[1].trim() : "",
               date: dateStr,
+              publishedAt: dMatch && dMatch[1] && Number.isFinite(Date.parse(dMatch[1])) ? Date.parse(dMatch[1]) : null,
+              sourceType: "news",
+              sourceName: title.split(/\s+-\s+/).at(-1)?.trim() || "Google News",
             });
           }
         }
@@ -325,7 +365,7 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
     }
   }
 
-  return results.slice(0, maxResults);
+  return rankSearchResults(results, query).slice(0, maxResults);
 }
 
 /**
