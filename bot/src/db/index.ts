@@ -92,6 +92,8 @@ function runColumnMigrations(database: Database.Database): void {
     ["permanent_knowledge", "source_url", "TEXT NOT NULL DEFAULT ''"],
     ["permanent_knowledge", "source_type", "TEXT NOT NULL DEFAULT 'static'"],
     ["permanent_knowledge", "last_synced_at", "INTEGER NOT NULL DEFAULT 0"],
+    // Phân quyền bạn bè Zalo: đánh dấu người bị Admin chủ động gạt tắt thủ công trên Dashboard
+    ["bot_friends", "manually_disabled", "INTEGER NOT NULL DEFAULT 0"],
   ];
 
   for (const [table, column, definition] of additions) {
@@ -2989,6 +2991,7 @@ export interface BotFriend {
   displayName: string;
   avatar: string;
   allowDirect: boolean;
+  manuallyDisabled?: boolean;
   updatedAt: number;
 }
 
@@ -2999,22 +3002,54 @@ export function upsertBotFriend(params: {
   userId: string;
   displayName: string;
   avatar?: string;
+  allowDirect?: boolean;
   now?: number;
 }): void {
   try {
     const db = getDb();
     const now = params.now ?? Date.now();
+    const initialAllow = params.allowDirect ? 1 : 0;
     db.prepare(
-      `INSERT INTO bot_friends (user_id, display_name, avatar, allow_direct, updated_at)
-       VALUES (?, ?, ?, 0, ?)
+      `INSERT INTO bot_friends (user_id, display_name, avatar, allow_direct, manually_disabled, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?)
        ON CONFLICT(user_id) DO UPDATE SET
          display_name = excluded.display_name,
          avatar = CASE WHEN excluded.avatar != '' THEN excluded.avatar ELSE bot_friends.avatar END,
          updated_at = excluded.updated_at`
-    ).run(params.userId, params.displayName, params.avatar || "", now);
+    ).run(params.userId, params.displayName, params.avatar || "", initialAllow, now);
   } catch (e) {
     console.error("[db] upsertBotFriend error:", e);
   }
+}
+
+/**
+ * Lấy thông tin 1 bạn bè theo userId từ bot_friends.
+ */
+export function getBotFriend(userId: string): BotFriend | null {
+  try {
+    const db = getDb();
+    const row = db
+      .prepare(
+        `SELECT user_id as userId, display_name as displayName, avatar,
+                allow_direct as allowDirect, manually_disabled as manuallyDisabled,
+                updated_at as updatedAt
+         FROM bot_friends WHERE user_id = ?`
+      )
+      .get(userId) as any;
+    if (row) {
+      return {
+        userId: row.userId,
+        displayName: row.displayName,
+        avatar: row.avatar,
+        allowDirect: Boolean(row.allowDirect),
+        manuallyDisabled: Boolean(row.manuallyDisabled),
+        updatedAt: row.updatedAt,
+      };
+    }
+  } catch (e) {
+    console.error("[db] getBotFriend error:", e);
+  }
+  return null;
 }
 
 /**
@@ -3042,7 +3077,8 @@ export function listBotFriends(): BotFriend[] {
     const rows = db
       .prepare(
         `SELECT user_id as userId, display_name as displayName, avatar,
-                allow_direct as allowDirect, updated_at as updatedAt
+                allow_direct as allowDirect, manually_disabled as manuallyDisabled,
+                updated_at as updatedAt
          FROM bot_friends
          ORDER BY allow_direct DESC, display_name ASC`
       )
@@ -3052,6 +3088,7 @@ export function listBotFriends(): BotFriend[] {
       displayName: r.displayName,
       avatar: r.avatar,
       allowDirect: Boolean(r.allowDirect),
+      manuallyDisabled: Boolean(r.manuallyDisabled),
       updatedAt: r.updatedAt,
     }));
   } catch (e) {
@@ -3062,13 +3099,20 @@ export function listBotFriends(): BotFriend[] {
 
 /**
  * Bật/tắt quyền tương tác 1:1 cho một bạn bè.
+ * isManual = true nếu Admin chủ động bật/tắt từ Dashboard.
  */
-export function setFriendAllowDirect(userId: string, allow: boolean): boolean {
+export function setFriendAllowDirect(userId: string, allow: boolean, isManual = false): boolean {
   try {
     const db = getDb();
-    const res = db
-      .prepare("UPDATE bot_friends SET allow_direct = ?, updated_at = ? WHERE user_id = ?")
-      .run(allow ? 1 : 0, Date.now(), userId);
+    const res = isManual
+      ? db
+          .prepare(
+            "UPDATE bot_friends SET allow_direct = ?, manually_disabled = ?, updated_at = ? WHERE user_id = ?"
+          )
+          .run(allow ? 1 : 0, allow ? 0 : 1, Date.now(), userId)
+      : db
+          .prepare("UPDATE bot_friends SET allow_direct = ?, updated_at = ? WHERE user_id = ?")
+          .run(allow ? 1 : 0, Date.now(), userId);
     return res.changes > 0;
   } catch (e) {
     console.error("[db] setFriendAllowDirect error:", e);

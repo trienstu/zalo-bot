@@ -22,6 +22,7 @@ export interface FriendItem {
   displayName: string;
   avatar: string;
   allowDirect: boolean;
+  manuallyDisabled?: boolean;
   updatedAt: number;
 }
 

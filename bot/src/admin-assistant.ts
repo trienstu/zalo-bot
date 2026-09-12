@@ -15,6 +15,7 @@ import {
   getAutoFriendSettings,
   upsertBotFriend,
   setFriendAllowDirect,
+  getBotFriend,
 } from "./db/index.js";
 import { sendDirectText, sendDirectFile, sendGroupText } from "./zalo/client.js";
 import { callGemini, callGeminiAgentLoop, downloadFileContent, type GeminiMediaPart } from "./gemini.js";
@@ -294,56 +295,120 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     }
   }
 
-  // Kiểm tra quyền tương tác 1:1: Admin hoặc Bạn bè được cấp quyền qua Dashboard
-  let isAllowedFriend = isUserAllowedDirectChat(sender);
-
-  // Nếu người nhắn tin không phải là Admin và chưa có quyền:
-  if (!isAdmin && !isAllowedFriend) {
-    // Nếu chế độ tự động kết bạn đang BẬT: thử đồng ý kết bạn ngay (người dùng vừa bấm kết bạn rồi nhắn tin 1:1)
+  // =========================================================================
+  // 1.1. PHÂN QUYỀN TƯƠNG TÁC 1:1 (ADMIN & BẠN BÈ ĐƯỢC PHÉP)
+  // =========================================================================
+  if (!isAdmin) {
     const autoSettings = getAutoFriendSettings();
-    if (autoSettings.autoAccept && typeof (api as any).acceptFriendRequest === "function") {
-      try {
-        await (api as any).acceptFriendRequest(sender);
-        console.log(`[admin-assistant] ✅ Đã tự động chấp nhận kết bạn khi ${displayName} (${sender}) nhắn tin 1:1!`);
 
-        upsertBotFriend({
-          userId: sender,
-          displayName,
-          now: Date.now(),
-        });
-        setFriendAllowDirect(sender, true);
-        isAllowedFriend = true;
+    // [QUY TẮC 1]: KHI CHẾ ĐỘ TỰ ĐỘNG KẾT BẠN ĐANG TẮT
+    // Chỉ có bạn bè nào được Admin BẬT chế độ 1:1 trên Dashboard mới có thể tương tác với bot.
+    // Còn lại bot IM LẶNG HOÀN TOÀN trong mọi trường hợp dù có kết bạn hay chưa (kể cả người lạ).
+    if (!autoSettings.autoAccept) {
+      const isAllowedFriend = isUserAllowedDirectChat(sender);
+      if (!isAllowedFriend) {
+        // Giữ im lặng tuyệt đối — không phản hồi, không gửi tin nhắn hướng dẫn kết bạn
+        return;
+      }
+    } else {
+      // [QUY TẮC 2]: KHI CHẾ ĐỘ TỰ ĐỘNG KẾT BẠN ĐANG BẬT
+      let friendRecord = getBotFriend(sender);
+      let isZaloFriend = Boolean(friendRecord);
+      let hasPendingRequest = false;
 
-        // Gửi tin nhắn chào mừng
-        if (autoSettings.welcomeMessage && autoSettings.welcomeMessage.trim()) {
-          await sendDirectText(api, sender, autoSettings.welcomeMessage.trim());
+      // Nếu chưa có trong DB bot_friends, kiểm tra thời gian thực với Zalo API
+      if (!friendRecord && typeof (api as any).getFriendRequestStatus === "function") {
+        try {
+          const reqStatus = await (api as any).getFriendRequestStatus(sender);
+          if (reqStatus && Number(reqStatus.is_friend) === 1) {
+            isZaloFriend = true;
+            upsertBotFriend({
+              userId: sender,
+              displayName,
+              avatar: "",
+              now: Date.now(),
+            });
+            friendRecord = getBotFriend(sender);
+          } else if (reqStatus && Number(reqStatus.is_requested) === 1) {
+            hasPendingRequest = true;
+          }
+        } catch (e) {
+          console.warn(`[admin-assistant] getFriendRequestStatus(${sender}) error: ${String(e)}`);
         }
-      } catch (e) {
-        // Chưa gửi lời mời kết bạn hoặc không thể accept
       }
-    }
-  }
 
-  // Nếu sau khi thử vẫn không có quyền -> nhắc nhở kết bạn
-  if (!isAdmin && !isAllowedFriend) {
-    const strangerKey = `stranger_prompt_${sender}`;
-    const lastPromptStr = getBotState(strangerKey);
-    const lastPrompt = lastPromptStr ? parseInt(lastPromptStr, 10) : 0;
-    const now = Date.now();
-    // Giới hạn nhắc 1 lần trong 24 giờ (24 * 60 * 60 * 1000 ms)
-    if (now - lastPrompt > 24 * 60 * 60 * 1000) {
-      setBotState(strangerKey, String(now), now);
-      const promptMsg =
-        `Xin chào ${displayName}! 👋\n\n` +
-        `Để có thể trò chuyện và sử dụng các tính năng trợ lý AI của mình, bạn vui lòng nhấn nút **"Kết bạn"** với tài khoản Zalo này nhé!\n\n` +
-        `Sau khi kết bạn, mình sẽ sẵn sàng hỗ trợ bạn ngay lập tức. Cảm ơn bạn! ✨`;
-      try {
-        await sendDirectText(api, sender, promptMsg);
-      } catch (e) {
-        console.warn(`[admin-assistant] Gửi lời nhắc kết bạn cho ${sender} thất bại: ${String(e)}`);
+      // Nếu có lời mời kết bạn đang chờ: tự động chấp nhận ngay lập tức
+      if (hasPendingRequest && typeof (api as any).acceptFriendRequest === "function") {
+        try {
+          await (api as any).acceptFriendRequest(sender);
+          console.log(`[admin-assistant] ✅ Đã tự động chấp nhận kết bạn với ${displayName} (${sender}) khi nhắn tin 1:1!`);
+
+          upsertBotFriend({
+            userId: sender,
+            displayName,
+            avatar: "",
+            now: Date.now(),
+          });
+          setFriendAllowDirect(sender, true, false);
+          friendRecord = getBotFriend(sender);
+          isZaloFriend = true;
+
+          // Gửi tin nhắn chào mừng tùy chỉnh
+          if (autoSettings.welcomeMessage && autoSettings.welcomeMessage.trim()) {
+            await sendDirectText(api, sender, autoSettings.welcomeMessage.trim());
+          }
+        } catch (err) {
+          console.warn(`[admin-assistant] acceptFriendRequest(${sender}) error: ${String(err)}`);
+        }
+      }
+
+      // Xác định quyền tương tác 1:1
+      let isAllowed = false;
+
+      if (friendRecord) {
+        if (friendRecord.allowDirect) {
+          isAllowed = true;
+        } else if (!friendRecord.manuallyDisabled) {
+          // Là bạn bè Zalo và chưa bị Admin chủ động tắt thủ công trên Dashboard:
+          // Vì chế độ tự động kết bạn đang BẬT -> Tự động kích hoạt quyền 1:1!
+          setFriendAllowDirect(sender, true, false);
+          isAllowed = true;
+          console.log(`[admin-assistant] ✅ Tự động kích hoạt quyền 1:1 cho bạn bè Zalo: ${displayName} (${sender})`);
+        }
+      } else if (isZaloFriend) {
+        setFriendAllowDirect(sender, true, false);
+        isAllowed = true;
+      }
+
+      // Nếu không có quyền:
+      if (!isAllowed) {
+        if (isZaloFriend || friendRecord) {
+          // Bạn bè Zalo đã bị Admin chủ động gạt TẮT: Bot IM LẶNG, tuyệt đối không gửi tin đòi kết bạn
+          console.log(`[admin-assistant] 🔇 Bạn bè Zalo ${displayName} (${sender}) đã bị Admin tắt quyền 1:1. Bot giữ im lặng.`);
+          return;
+        }
+
+        // Là NGƯỜI LẠ THỰC SỰ (chưa kết bạn Zalo với bot):
+        // Vì autoAccept đang BẬT, gửi tin nhắn hướng dẫn nhấn nút "Kết bạn" (giới hạn 1 lần / 24h)
+        const strangerKey = `stranger_prompt_${sender}`;
+        const lastPromptStr = getBotState(strangerKey);
+        const lastPrompt = lastPromptStr ? parseInt(lastPromptStr, 10) : 0;
+        const now = Date.now();
+        if (now - lastPrompt > 24 * 60 * 60 * 1000) {
+          setBotState(strangerKey, String(now), now);
+          const promptMsg =
+            `Xin chào ${displayName}! 👋\n\n` +
+            `Để có thể trò chuyện và sử dụng các tính năng trợ lý AI của mình, bạn vui lòng nhấn nút **"Kết bạn"** với tài khoản Zalo này nhé!\n\n` +
+            `Sau khi kết bạn, mình sẽ sẵn sàng hỗ trợ bạn ngay lập tức. Cảm ơn bạn! ✨`;
+          try {
+            await sendDirectText(api, sender, promptMsg);
+          } catch (e) {
+            console.warn(`[admin-assistant] Gửi lời nhắc kết bạn cho ${sender} thất bại: ${String(e)}`);
+          }
+        }
+        return;
       }
     }
-    return;
   }
 
   // =========================================================================

@@ -248,14 +248,19 @@ function ensureWebSchema(database: Database.Database): void {
     );
 
     CREATE TABLE IF NOT EXISTS bot_friends (
-      user_id        TEXT PRIMARY KEY,
-      display_name   TEXT NOT NULL DEFAULT '',
-      avatar         TEXT NOT NULL DEFAULT '',
-      allow_direct   INTEGER NOT NULL DEFAULT 0,
-      updated_at     INTEGER NOT NULL
+      user_id           TEXT PRIMARY KEY,
+      display_name      TEXT NOT NULL DEFAULT '',
+      avatar            TEXT NOT NULL DEFAULT '',
+      allow_direct      INTEGER NOT NULL DEFAULT 0,
+      manually_disabled INTEGER NOT NULL DEFAULT 0,
+      updated_at        INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_bot_friends_allow ON bot_friends(allow_direct);
   `);
+
+  try {
+    database.exec("ALTER TABLE bot_friends ADD COLUMN manually_disabled INTEGER NOT NULL DEFAULT 0");
+  } catch (_) {}
 }
 
 import { getBotInfo } from "./bot-registry";
@@ -1655,6 +1660,7 @@ export interface BotFriendRow {
   displayName: string;
   avatar: string;
   allowDirect: boolean;
+  manuallyDisabled?: boolean;
   updatedAt: number;
 }
 
@@ -1664,7 +1670,7 @@ export function listBotFriends(botId = "bot-1"): BotFriendRow[] {
     const rows = getDb(botId)
       .prepare(
         `SELECT user_id as userId, display_name as displayName, avatar,
-                allow_direct as allowDirect, updated_at as updatedAt
+                allow_direct as allowDirect, manually_disabled as manuallyDisabled, updated_at as updatedAt
          FROM bot_friends
          ORDER BY allow_direct DESC, display_name COLLATE NOCASE ASC`
       )
@@ -1674,6 +1680,7 @@ export function listBotFriends(botId = "bot-1"): BotFriendRow[] {
       displayName: r.displayName,
       avatar: r.avatar,
       allowDirect: Boolean(r.allowDirect),
+      manuallyDisabled: Boolean(r.manuallyDisabled),
       updatedAt: r.updatedAt,
     }));
   } catch (e) {
@@ -1686,8 +1693,8 @@ export function setFriendAllowDirect(userId: string, allow: boolean, botId = "bo
   try {
     if (!tableExists("bot_friends")) return false;
     const res = getDb(botId)
-      .prepare(`UPDATE bot_friends SET allow_direct = ?, updated_at = ? WHERE user_id = ?`)
-      .run(allow ? 1 : 0, Date.now(), userId);
+      .prepare(`UPDATE bot_friends SET allow_direct = ?, manually_disabled = ?, updated_at = ? WHERE user_id = ?`)
+      .run(allow ? 1 : 0, allow ? 0 : 1, Date.now(), userId);
     return res.changes > 0;
   } catch (e) {
     console.error("[web/db] setFriendAllowDirect error:", e);

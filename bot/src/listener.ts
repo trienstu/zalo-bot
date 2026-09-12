@@ -1225,6 +1225,13 @@ export async function runListener(): Promise<void> {
     lastSocketError = null;
     writeHealth("connected");
     console.log("[listener] WebSocket connected.");
+
+    // Tự động đồng bộ danh bạ bạn bè Zalo khi khởi động để làm ấm dữ liệu bot_friends
+    setTimeout(() => {
+      void syncFriends(api)
+        .then((res) => console.log(`[listener] 🚀 Tự động đồng bộ bạn bè Zalo khi khởi động thành công: ${res.total} bạn bè.`))
+        .catch((err) => console.warn(`[listener] Tự động đồng bộ bạn bè khi khởi động thất bại: ${String(err)}`));
+    }, 3500);
   });
 
   api.listener.on("disconnected", (code: number, reason: string) => {
