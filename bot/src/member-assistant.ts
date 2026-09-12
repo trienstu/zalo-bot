@@ -2162,7 +2162,62 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   // 6.2. Vệ Tinh 3: Lệnh /taoanh hoặc Yêu cầu vẽ ảnh bằng ngôn ngữ tự nhiên ("tạo cho tôi bức ảnh...", "vẽ giúp anh một...")
   const imageReq = parseImagePromptAndRatio(rawText, botName);
   if (imageReq && imageReq.prompt.length >= 3) {
-    const { prompt: imagePrompt, aspectRatio } = imageReq;
+    const isExplicitCommand = /^[/!](?:taoanh|veanh|sinhdan|draw|imagine|image)\b/i.test(rawText.trim());
+
+    if (!isExplicitCommand) {
+      // Trong nhóm: Nếu không phải lệnh /taoanh rõ ràng thì BẮT BUỘC người dùng phải gọi tên Bot hoặc tag Bot
+      const lowerRaw = rawText.toLowerCase();
+      const lowerBot = botName.toLowerCase().trim();
+      const unaccentedBot = lowerBot.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
+
+      // Nếu thành viên tag người khác (ví dụ @Kevin, @Nam...) thì tuyệt đối không xen vào
+      const hasOtherMention = /@[^\s,!?]+/g.test(rawText) &&
+        !lowerRaw.includes(`@${lowerBot}`) &&
+        !lowerRaw.includes(`@${unaccentedBot}`) &&
+        !lowerRaw.includes("@bot") &&
+        !lowerRaw.includes("@sen chúa") &&
+        !lowerRaw.includes("@sen chua") &&
+        !lowerRaw.includes("@mộc miên") &&
+        !lowerRaw.includes("@moc mien");
+
+      if (hasOtherMention) {
+        // Người dùng đang tag người khác trong nhóm, bot tuyệt đối không xen vào
+        // Bỏ qua để tin nhắn tiếp tục chạy xuống luồng xử lý khác
+      } else {
+        // Kiểm tra có gọi tên bot không
+        const isBotCalled =
+          lowerRaw.includes(lowerBot) ||
+          lowerRaw.includes(unaccentedBot) ||
+          lowerRaw.includes("sen chúa") ||
+          lowerRaw.includes("sen chua") ||
+          lowerRaw.includes("mộc miên") ||
+          lowerRaw.includes("moc mien") ||
+          lowerRaw.includes("bot ơi") ||
+          lowerRaw.includes("bot oi") ||
+          lowerRaw.includes("nhờ bot") ||
+          lowerRaw.includes("hỏi bot") ||
+          lowerRaw.includes("cho bot") ||
+          lowerRaw.startsWith("bot ") ||
+          lowerRaw.startsWith("chào bot") ||
+          lowerRaw.includes("@bot");
+
+        if (!isBotCalled) {
+          // Trong nhóm nếu không gọi tên bot thì không tự tiện tạo ảnh
+        } else {
+          // Đủ điều kiện tạo ảnh bằng ngôn ngữ tự nhiên
+          await executeGroupImageGen();
+          return;
+        }
+      }
+    } else {
+      // Có lệnh rõ ràng (/taoanh, !veanh...)
+      await executeGroupImageGen();
+      return;
+    }
+  }
+
+  async function executeGroupImageGen(): Promise<void> {
+    const { prompt: imagePrompt, aspectRatio } = imageReq!;
     userCooldowns.set(sender, now);
     void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.HEART);
     void sendTyping(api, threadId);
