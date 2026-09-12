@@ -34,6 +34,30 @@ function fallbackSafePlanner(question: string, quoteText = ""): QueryPlanResult 
   };
 }
 
+function normalizePlannerText(value: string): string {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/gi, (char) => (char === "Đ" ? "D" : "d"))
+    .toLowerCase();
+}
+
+export function normalizeQueryPlanIntent(plan: QueryPlanResult, question: string, quoteText = ""): QueryPlanResult {
+  if (!plan.needsSearch || plan.intent !== "fact_check") return plan;
+
+  const text = normalizePlannerText(`${question} ${quoteText}`);
+  const asksOverview =
+    /\b(?:tong quan|gioi thieu|thong tin|review|danh gia|overview|introduction|about|profile)\b/i.test(text) &&
+    /\b(?:du an|san pham|khu do thi|can ho|chung cu|biet thu|nha pho|resort|cong ty|thuong hieu|project|product|company)\b/i.test(text);
+  const asksStrictFact =
+    /\b(?:hien nay|hien tai|moi nhat|hom nay|dang|con|gia|bang gia|phap ly|so hong|giay phep|tien do|mo ban|ban giao|chu dau tu|so huu|ai|bao nhieu|khi nao|ngay nao|dung khong|kiem tra|check|xac minh|fact check)\b/i.test(text);
+
+  if (asksOverview && !asksStrictFact) {
+    return { ...plan, intent: "knowledge" };
+  }
+  return plan;
+}
+
 /**
  * Phân tích câu hỏi và trích dẫn bằng mô hình AI siêu tốc để lập kế hoạch tìm kiếm đa luồng
  */
@@ -122,12 +146,12 @@ export async function planSearchQueries(params: {
         ? raw.intent
         : "chat";
 
-      return {
+      return normalizeQueryPlanIntent({
         needsSearch: needsSearch || queries.length > 0,
         intent,
         queries,
         summaryIntent: String(raw.summaryIntent || ""),
-      };
+      }, question, quoteText);
     }
   } catch (err: any) {
     console.warn(`[query-planner] AI Planner fallback (${err?.message || err})`);

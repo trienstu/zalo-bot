@@ -1110,7 +1110,12 @@ export async function searchRealtimeNews(query: string | string[], options: Sear
     }
 
     const isAskingNews = /(?:tin tức|tin mới|hôm nay|24h|nóng|thời sự|vừa xảy ra|diễn biến mới|trận banh|đá banh|bóng đá|thể thao)/i.test(rawQuery);
-    if (intent !== "fact_check" && !options.requireEvidence && mergedItems.length > 0 && (isAskingNews || categories.length > 0 || !richSnippetsText)) {
+    if (
+      intent !== "fact_check" &&
+      !options.requireEvidence &&
+      mergedItems.length > 0 &&
+      (isAskingNews || intent === "realtime_news" || !richSnippetsText)
+    ) {
       const newsLines = mergedItems
         .slice(0, 10)
         .map((item, idx) => {
