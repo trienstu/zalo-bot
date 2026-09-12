@@ -8,6 +8,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import sharp from "sharp";
 import { config } from "./config.js";
 
 const GENERATED_IMAGES_DIR = path.resolve(process.cwd(), "data", "generated-images");
@@ -106,6 +107,8 @@ export async function callCloudflareLlm(
   return String(reply).trim();
 }
 
+export type AspectRatioOption = "16:9" | "9:16" | "4:3" | "3:4" | "1:1";
+
 /**
  * 2. VỆ TINH 3: Sinh ảnh nghệ thuật siêu tốc với FLUX.1-schnell (1 - 2 giây)
  */
@@ -115,6 +118,7 @@ export async function generateCloudflareImage(
     model?: string;
     steps?: number;
     timeoutMs?: number;
+    aspectRatio?: AspectRatioOption;
   },
 ): Promise<CloudflareImageResult> {
   if (!isCloudflareConfigured()) {
@@ -131,6 +135,7 @@ export async function generateCloudflareImage(
   const apiToken = config.cloudflareApiToken.trim();
   const model = options?.model?.trim() || config.cloudflareImageModel || "@cf/black-forest-labs/flux-1-schnell";
   const timeoutMs = options?.timeoutMs || 35_000;
+  const ratio: AspectRatioOption = options?.aspectRatio || "1:1";
 
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${model}`;
 
@@ -141,14 +146,49 @@ export async function generateCloudflareImage(
     const fileName = `flux_${timestamp}_${randStr}.png`;
     const targetPath = path.join(GENERATED_IMAGES_DIR, fileName);
 
+    let finalPrompt = prompt.trim();
+    const hasVietnamese = /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(finalPrompt);
+
+    if (hasVietnamese) {
+      try {
+        let ratioInstruction = "";
+        if (ratio === "16:9") ratioInstruction = "Widescreen 16:9 horizontal framing, expansive landscape view.";
+        else if (ratio === "9:16") ratioInstruction = "Vertical 9:16 portrait framing, tall full-length view.";
+        else if (ratio === "4:3") ratioInstruction = "Classic 4:3 horizontal framing.";
+        else if (ratio === "3:4") ratioInstruction = "Vertical 3:4 portrait framing.";
+
+        const systemPrompt =
+          `You are an expert AI visual prompt engineer for FLUX.1 text-to-image models.\n` +
+          `Convert the user's Vietnamese request into a vivid, highly detailed English text-to-image prompt (35 to 55 words).\n` +
+          `Strict rules:\n` +
+          `1. SUBJECT DETAILS: Clearly describe the main subjects first (who they are, realistic facial expressions, natural posture, actions, and clothes). Never omit people if mentioned!\n` +
+          `2. ENVIRONMENT & AMBIANCE: Richly detail the scene, background, props, and cozy authentic atmosphere.\n` +
+          `3. LIGHTING & COMPOSITION: Cinematic lighting, soft shadows, shallow depth of field, medium eye-level shot, 8k resolution, photorealistic masterpiece. ${ratioInstruction}\n` +
+          `4. NEGATIVE CONTROLS: Strictly end with: "candid photograph, authentic, no text, no watermark, no gibberish, no signs, highly detailed".\n` +
+          `5. Output ONLY the plain English prompt text. Do not wrap in quotes or markdown.`;
+
+        const enhancedPrompt = await callCloudflareLlm([
+          { role: "system", content: systemPrompt },
+          { role: "user", content: finalPrompt },
+        ], { timeoutMs: 10_000 });
+
+        if (enhancedPrompt && enhancedPrompt.length > 10) {
+          console.log(`[cloudflare-ai] 🌐 Đã tối ưu prompt sang tiếng Anh chuẩn FLUX: "${enhancedPrompt.slice(0, 120)}"`);
+          finalPrompt = enhancedPrompt.replace(/^["']|["']$/g, "").trim();
+        }
+      } catch (tErr) {
+        console.warn(`[cloudflare-ai] Dịch prompt ảnh sang tiếng Anh không thành công, tiếp tục dùng prompt gốc:`, tErr);
+      }
+    }
+
     const body: Record<string, any> = {
-      prompt: prompt.trim(),
+      prompt: finalPrompt,
     };
     if (options?.steps) {
       body.steps = options.steps;
     }
 
-    console.log(`[cloudflare-ai] 🎨 Đang gửi prompt vẽ ảnh tới ${model}: "${prompt.slice(0, 80)}"...`);
+    console.log(`[cloudflare-ai] 🎨 Đang gửi prompt vẽ ảnh tới ${model} (tỉ lệ ${ratio}): "${finalPrompt.slice(0, 80)}"...`);
 
     const res = await fetch(url, {
       method: "POST",
@@ -166,38 +206,58 @@ export async function generateCloudflareImage(
     }
 
     const contentType = res.headers.get("content-type") || "";
+    let rawBuffer: Buffer | null = null;
 
     if (contentType.includes("image/")) {
       const arrayBuf = await res.arrayBuffer();
-      const buffer = Buffer.from(arrayBuf);
-      fs.writeFileSync(targetPath, buffer);
-
-      console.log(`[cloudflare-ai] ✅ Đã lưu ảnh thành công: ${targetPath} (${buffer.length} bytes)`);
-      return {
-        success: true,
-        filePath: targetPath,
-        fileName,
-        fileSize: buffer.length,
-      };
+      rawBuffer = Buffer.from(arrayBuf);
+    } else {
+      const data = (await res.json()) as any;
+      const base64Data = data?.result?.image || data?.image;
+      if (base64Data) {
+        rawBuffer = Buffer.from(base64Data, "base64");
+      } else {
+        throw new Error(`Cloudflare AI không trả về dữ liệu ảnh hợp lệ: ${JSON.stringify(data).slice(0, 200)}`);
+      }
     }
 
-    // Nếu trả về JSON kèm base64
-    const data = (await res.json()) as any;
-    const base64Data = data?.result?.image || data?.image;
-
-    if (base64Data) {
-      const buffer = Buffer.from(base64Data, "base64");
-      fs.writeFileSync(targetPath, buffer);
-      console.log(`[cloudflare-ai] ✅ Đã lưu ảnh base64 thành công: ${targetPath} (${buffer.length} bytes)`);
-      return {
-        success: true,
-        filePath: targetPath,
-        fileName,
-        fileSize: buffer.length,
-      };
+    // Xử lý Cắt / Resize ảnh theo đúng Tỉ Lệ (Aspect Ratio) người dùng yêu cầu
+    let finalBuffer = rawBuffer;
+    try {
+      if (ratio === "16:9") {
+        finalBuffer = await sharp(rawBuffer)
+          .resize(1024, 576, { fit: "cover", position: "centre" })
+          .png()
+          .toBuffer();
+      } else if (ratio === "9:16") {
+        finalBuffer = await sharp(rawBuffer)
+          .resize(576, 1024, { fit: "cover", position: "centre" })
+          .png()
+          .toBuffer();
+      } else if (ratio === "4:3") {
+        finalBuffer = await sharp(rawBuffer)
+          .resize(1024, 768, { fit: "cover", position: "centre" })
+          .png()
+          .toBuffer();
+      } else if (ratio === "3:4") {
+        finalBuffer = await sharp(rawBuffer)
+          .resize(768, 1024, { fit: "cover", position: "centre" })
+          .png()
+          .toBuffer();
+      }
+    } catch (resizeErr) {
+      console.warn(`[cloudflare-ai] Resize tỉ lệ ${ratio} thất bại, dùng ảnh gốc:`, resizeErr);
     }
 
-    throw new Error(`Cloudflare AI không trả về dữ liệu ảnh hợp lệ: ${JSON.stringify(data).slice(0, 200)}`);
+    fs.writeFileSync(targetPath, finalBuffer);
+    console.log(`[cloudflare-ai] ✅ Đã lưu ảnh thành công: ${targetPath} (${finalBuffer.length} bytes, ratio: ${ratio})`);
+
+    return {
+      success: true,
+      filePath: targetPath,
+      fileName,
+      fileSize: finalBuffer.length,
+    };
   } catch (err: any) {
     console.error("[cloudflare-ai] ❌ Lỗi tạo ảnh:", err);
     return {

@@ -45,6 +45,30 @@ test("extractImagePromptFromText KHÔNG bắt nhầm các yêu cầu tạo văn 
   assert.equal(extractImagePromptFromText("tóm tắt tin tức giúp tôi"), null);
 });
 
+test("parseImagePromptAndRatio bóc tách sạch sẽ prompt và tỉ lệ 16:9, 9:16, 4:3, 1:1", async () => {
+  const { parseImagePromptAndRatio } = await import("./member-assistant.js");
+
+  const r1 = parseImagePromptAndRatio("tạo ảnh 2 người đang ngồi trong quán cafe, tỉ lệ ảnh 9:16 sen chúa");
+  assert.equal(r1?.prompt, "2 người đang ngồi trong quán cafe");
+  assert.equal(r1?.aspectRatio, "9:16");
+
+  const r2 = parseImagePromptAndRatio("tạo ảnh 2 người đang ngồi trong quán cafe, tỉ lệ ảnh 16:9 sen chúa");
+  assert.equal(r2?.prompt, "2 người đang ngồi trong quán cafe");
+  assert.equal(r2?.aspectRatio, "16:9");
+
+  const r3 = parseImagePromptAndRatio("vẽ chú mèo phi hành gia khổ dọc");
+  assert.equal(r3?.prompt, "chú mèo phi hành gia");
+  assert.equal(r3?.aspectRatio, "9:16");
+
+  const r4 = parseImagePromptAndRatio("vẽ siêu xe Ferrari tỉ lệ 4:3");
+  assert.equal(r4?.prompt, "siêu xe Ferrari");
+  assert.equal(r4?.aspectRatio, "4:3");
+
+  const r5 = parseImagePromptAndRatio("tạo ảnh 2 người đang ngồi trong quán cafe sen chúa");
+  assert.equal(r5?.prompt, "2 người đang ngồi trong quán cafe");
+  assert.equal(r5?.aspectRatio, "1:1");
+});
+
 test("isCloudflareConfigured hoạt động không crash", () => {
   const configured = isCloudflareConfigured();
   assert.equal(typeof configured, "boolean");

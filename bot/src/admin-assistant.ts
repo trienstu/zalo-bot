@@ -19,7 +19,8 @@ import {
 import { sendDirectText, sendDirectFile, sendGroupText } from "./zalo/client.js";
 import { callGemini, callGeminiAgentLoop, downloadFileContent, type GeminiMediaPart } from "./gemini.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
-import type { MemberMessageEvent } from "./member-assistant.js";
+import { type MemberMessageEvent, parseImagePromptAndRatio } from "./member-assistant.js";
+import { generateCloudflareImage, isCloudflareConfigured } from "./cloudflare-ai.js";
 import { getWeatherReport } from "./weather.js";
 import { handleSetReminder, handleListReminders, handleCancelReminder } from "./reminder.js";
 import { getDailyAiNewsBriefing } from "./ai-news.js";
@@ -348,6 +349,55 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   // =========================================================================
   // 2. TRỢ LÝ ĐIỀU KHIỂN & RA LỆNH 1:1
   // =========================================================================
+
+  // 2.0. YÊU CẦU TẠO ẢNH NGHỆ THUẬT SIÊU TỐC (FLUX.1 QUA CLOUDFLARE AI)
+  const imageReq = parseImagePromptAndRatio(rawText, "sen chúa");
+  if (imageReq && imageReq.prompt.length >= 3) {
+    const { prompt: imagePrompt, aspectRatio } = imageReq;
+    if (!isCloudflareConfigured()) {
+      await sendDirectText(
+        api,
+        sender,
+        `⚠️ Dạ Sếp ơi, tính năng tạo ảnh AI (FLUX.1) chưa được cấu hình key Cloudflare trong file .env!\n\n` +
+        `👉 Sếp vui lòng kiểm tra CLOUDFLARE_ACCOUNT_ID và CLOUDFLARE_API_TOKEN nhé!`
+      );
+      return;
+    }
+
+    const ratioTag = aspectRatio !== "1:1" ? ` (tỉ lệ ${aspectRatio})` : "";
+    await sendDirectText(
+      api,
+      sender,
+      `🎨 Dạ Sếp đợi em vài giây, em đang vẽ và tạo ảnh: "${imagePrompt}"${ratioTag}...`
+    );
+
+    const imgResult = await generateCloudflareImage(imagePrompt, { aspectRatio });
+    if (imgResult.success && imgResult.filePath) {
+      try {
+        await sendDirectFile(
+          api,
+          sender,
+          imgResult.filePath,
+          `🖼️ Tác phẩm của Sếp: "${imagePrompt}"${ratioTag}`
+        );
+      } catch (err) {
+        console.warn(`[admin-assistant] Gửi file ảnh tạo thất bại:`, err);
+        await sendDirectText(
+          api,
+          sender,
+          `⚠️ Em đã tạo ảnh thành công nhưng gặp sự cố khi gửi file ảnh qua Zalo: ${String(err)}`
+        );
+      }
+    } else {
+      await sendDirectText(
+        api,
+        sender,
+        `❌ Rất tiếc, quá trình tạo ảnh thất bại: ${imgResult.error || "Lỗi không xác định"}\n` +
+        `👉 Sếp thử lại với mô tả khác xem sao nhé!`
+      );
+    }
+    return;
+  }
 
   // 2.1. Lệnh /help hoặc /menu
   if (lower === "/help" || lower === "help" || lower === "!help" || lower === "/menu" || lower === "menu") {

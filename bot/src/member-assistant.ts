@@ -1876,6 +1876,61 @@ export function extractImagePromptFromText(rawText: string, botName = ""): strin
   return null;
 }
 
+export type AspectRatioType = "16:9" | "9:16" | "4:3" | "3:4" | "1:1";
+
+export interface ParsedImageRequest {
+  prompt: string;
+  aspectRatio: AspectRatioType;
+}
+
+/**
+ * Phân tích yêu cầu tạo ảnh: tách prompt sạch và tỉ lệ khung hình (16:9, 9:16, 4:3, 3:4, 1:1)
+ */
+export function parseImagePromptAndRatio(rawText: string, botName = ""): ParsedImageRequest | null {
+  const extracted = extractImagePromptFromText(rawText, botName);
+  if (!extracted) return null;
+
+  let cleaned = extracted;
+  let ratio: AspectRatioType = "1:1";
+
+  // Nhận diện 16:9 (ngang)
+  if (/(?:tỉ\s*lệ|tỷ\s*lệ|size|khung|khổ)?\s*(?:ảnh\s*)?(?:16\s*[:/]\s*9|ngang|khổ\s*ngang|nằm\s*ngang|landscape|widescreen)\b/i.test(cleaned)) {
+    ratio = "16:9";
+    cleaned = cleaned.replace(/(?:tỉ\s*lệ|tỷ\s*lệ|size|khung|khổ)?\s*(?:ảnh\s*)?(?:16\s*[:/]\s*9|ngang|khổ\s*ngang|nằm\s*ngang|landscape|widescreen)/gi, " ");
+  }
+  // Nhận diện 9:16 (dọc)
+  else if (/(?:tỉ\s*lệ|tỷ\s*lệ|size|khung|khổ)?\s*(?:ảnh\s*)?(?:9\s*[:/]\s*16|dọc|khổ\s*dọc|đứng|chiều\s*dọc|portrait|story|tiktok)\b/i.test(cleaned)) {
+    ratio = "9:16";
+    cleaned = cleaned.replace(/(?:tỉ\s*lệ|tỷ\s*lệ|size|khung|khổ)?\s*(?:ảnh\s*)?(?:9\s*[:/]\s*16|dọc|khổ\s*dọc|đứng|chiều\s*dọc|portrait|story|tiktok)/gi, " ");
+  }
+  // Nhận diện 4:3
+  else if (/(?:tỉ\s*lệ|tỷ\s*lệ|size|khung|khổ)?\s*(?:ảnh\s*)?(?:4\s*[:/]\s*3)\b/i.test(cleaned)) {
+    ratio = "4:3";
+    cleaned = cleaned.replace(/(?:tỉ\s*lệ|tỷ\s*lệ|size|khung|khổ)?\s*(?:ảnh\s*)?(?:4\s*[:/]\s*3)/gi, " ");
+  }
+  // Nhận diện 3:4
+  else if (/(?:tỉ\s*lệ|tỷ\s*lệ|size|khung|khổ)?\s*(?:ảnh\s*)?(?:3\s*[:/]\s*4)\b/i.test(cleaned)) {
+    ratio = "3:4";
+    cleaned = cleaned.replace(/(?:tỉ\s*lệ|tỷ\s*lệ|size|khung|khổ)?\s*(?:ảnh\s*)?(?:3\s*[:/]\s*4)/gi, " ");
+  }
+  // Nhận diện 1:1 (vuông)
+  else if (/(?:tỉ\s*lệ|tỷ\s*lệ|size|khung|khổ)?\s*(?:ảnh\s*)?(?:1\s*[:/]\s*1|vuông|khổ\s*vuông|square)\b/i.test(cleaned)) {
+    ratio = "1:1";
+    cleaned = cleaned.replace(/(?:tỉ\s*lệ|tỷ\s*lệ|size|khung|khổ)?\s*(?:ảnh\s*)?(?:1\s*[:/]\s*1|vuông|khổ\s*vuông|square)/gi, " ");
+  }
+
+  cleaned = cleaned
+    .replace(/^[,;:\s-]+|[,;:\s-]+$/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/\s*(?:đi\s+nhé|đi\s+nha|đi\s+nào|đi|nhé|nha|với|giúp|giùm|nào|coi|xem)[.!?\s]*$/i, "")
+    .trim();
+
+  return {
+    prompt: cleaned || extracted,
+    aspectRatio: ratio,
+  };
+}
+
 /**
  * Xử lý tin nhắn đến từ thành viên: kiểm tra lệnh hoặc câu hỏi.
  */
@@ -2105,8 +2160,9 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   }
 
   // 6.2. Vệ Tinh 3: Lệnh /taoanh hoặc Yêu cầu vẽ ảnh bằng ngôn ngữ tự nhiên ("tạo cho tôi bức ảnh...", "vẽ giúp anh một...")
-  const imagePrompt = extractImagePromptFromText(rawText, botName);
-  if (imagePrompt && imagePrompt.length >= 3) {
+  const imageReq = parseImagePromptAndRatio(rawText, botName);
+  if (imageReq && imageReq.prompt.length >= 3) {
+    const { prompt: imagePrompt, aspectRatio } = imageReq;
     userCooldowns.set(sender, now);
     void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.HEART);
     void sendTyping(api, threadId);
@@ -2120,22 +2176,23 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       return;
     }
 
+    const ratioTag = aspectRatio !== "1:1" ? ` (tỉ lệ ${aspectRatio})` : "";
     await sendGroupText(
       api,
       threadId,
-      `🎨 ${botName} đang vẽ ảnh: "${imagePrompt}"... Bác chờ em khoảng 2 giây nhé!`,
+      `🎨 ${botName} đang vẽ ảnh: "${imagePrompt}"${ratioTag}... Bác chờ em khoảng 2 giây nhé!`,
     );
 
     try {
-      const imgRes = await generateCloudflareImage(imagePrompt);
+      const imgRes = await generateCloudflareImage(imagePrompt, { aspectRatio });
       if (imgRes.success && imgRes.filePath) {
         await sendGroupFile(
           api,
           threadId,
           imgRes.filePath,
-          `🎨 Ảnh của bác @${displayName} đây ạ!\n✨ Chủ đề: "${imagePrompt}"`,
+          `🎨 Ảnh của bác @${displayName} đây ạ!\n✨ Chủ đề: "${imagePrompt}"${ratioTag}`,
         );
-        console.log(`[member-assistant] ✅ Đã gửi ảnh FLUX.1 thành công cho ${displayName} ("${imagePrompt}")`);
+        console.log(`[member-assistant] ✅ Đã gửi ảnh FLUX.1 thành công cho ${displayName} ("${imagePrompt}", ratio: ${aspectRatio})`);
       } else {
         await sendGroupText(
           api,
