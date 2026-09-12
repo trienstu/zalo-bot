@@ -15,6 +15,11 @@ import {
   type SearchEvidence,
   type SearchIntent,
 } from "./search-evidence.js";
+import {
+  buildRealEstateProjectProfileContext,
+  buildRealEstateProjectSearchQueries,
+  isRealEstateProjectProfileQuery,
+} from "./real-estate-profile.js";
 
 function decodeXmlAndHtml(str: string): string {
   return str
@@ -939,6 +944,10 @@ export async function searchRealtimeNews(query: string | string[], options: Sear
     const collectedSnippets: SearchResultItem[] = [];
     try {
       const snippetQueries: string[] = [cleanQ];
+      const shouldBuildRealEstateProfile = categories.includes("bat-dong-san") && isRealEstateProjectProfileQuery(rawQuery);
+      if (shouldBuildRealEstateProfile) {
+        snippetQueries.push(...buildRealEstateProjectSearchQueries(cleanQ).slice(0, 2));
+      }
 
       if (isWorldPolitics) {
         snippetQueries.push(`${cleanQ} phát ngôn tuyên bố mới nhất ${new Date().getFullYear()}`);
@@ -1000,6 +1009,23 @@ export async function searchRealtimeNews(query: string | string[], options: Sear
       }
     } catch (err) {
       console.warn("[realtime-search] Lỗi bóc tách snippet:", err);
+    }
+
+    let realEstateProfileText = "";
+    try {
+      if (categories.includes("bat-dong-san") && isRealEstateProjectProfileQuery(rawQuery)) {
+        realEstateProfileText = await buildRealEstateProjectProfileContext(cleanQ, [
+          ...collectedSnippets,
+          ...mergedItems.map((item) => ({
+            title: item.title,
+            snippet: item.snippet || item.title,
+            url: item.url,
+            sourceName: item.sourceName,
+          })),
+        ]);
+      }
+    } catch (err) {
+      console.warn("[realtime-search] Lỗi trích xuất hồ sơ dự án BĐS:", err);
     }
 
     const evidenceCandidates: SearchEvidence[] = [
@@ -1101,6 +1127,8 @@ export async function searchRealtimeNews(query: string | string[], options: Sear
     } catch (mErr) {
       console.warn("[realtime-search] Lỗi lấy market summary:", mErr);
     }
+
+    if (realEstateProfileText) sections.push(realEstateProfileText);
 
     if (intent === "fact_check" || options.requireEvidence) {
       sections.push(`🔎 BẰNG CHỨNG ĐÃ XẾP HẠNG VÀ KIỂM TRA:\n${evidenceContext}`);
