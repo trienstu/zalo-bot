@@ -1008,23 +1008,65 @@ function isMediaOrDocUrl(url?: string | null): boolean {
  * Theo quy tắc nghiệp vụ: Tuyệt đối không chia sẻ hoặc tóm tắt thông tin nhóm khác trong nhóm Zalo (dù là Admin hay thành viên).
  * Việc tóm tắt các nhóm khác CHỈ được thực hiện qua tương tác 1:1 trực tiếp giữa Admin và Bot.
  */
-function isExplicitCrossGroupRequest(question: string): boolean {
+function isExplicitCrossGroupRequest(question: string, currentGroupName?: string): boolean {
   const clean = question.trim().toLowerCase();
   if (!clean) return false;
 
-  // Nếu nói về nhóm mình, nhóm này, ở đây -> KHÔNG phải nhóm khác
-  if (/(?:nhóm|group|gr)\s*(?:mình|này|ta|của\s*mình|ở\s*đây|nội\s*bộ)/i.test(clean)) {
-    return false;
+  // 1. Nếu hỏi rõ ràng về các nhóm khác chung chung:
+  // VD: "nhóm khác", "các nhóm khác", "toàn bộ nhóm", "mọi nhóm", "các gr khác"
+  const isGenericCrossGroup =
+    /(?:nhóm|group|gr)\s+(?:khác|kia|bên\s+ngoài)\b/i.test(clean) ||
+    /(?:toàn\s+bộ|tất\s+cả|các|mọi)\s+(?:nhóm|group|gr)\b/i.test(clean);
+
+  const hasInquiryAction =
+    /(?:tóm\s*tắt|báo\s*cáo|tình\s*hình|cập\s*nhật|nội\s*dung|diễn\s*biến|xem\s*tin|có\s+gì|nhắn\s+gì|bàn\s+gì|thảo\s+luận\s+gì)/i.test(clean);
+
+  if (isGenericCrossGroup && hasInquiryAction) {
+    return true;
   }
 
-  // Bắt các mẫu câu có ý định tóm tắt / báo cáo nhóm khác rõ ràng:
-  // VD: "tóm tắt nhóm khác", "tóm tắt bên nhóm B", "tình hình các nhóm khác", "bên nhóm khác có gì mới"
-  const isCrossIntent =
-    /^(?:tóm\s*tắt|báo\s*cáo|tình\s*hình|xem\s*tin)\s+(?:ở\s+|bên\s+|của\s+)?(?:nhóm\s+khác|các\s+nhóm|toàn\s+bộ\s+nhóm|mọi\s+nhóm)\b/i.test(clean) ||
-    /^(?:bên\s+|ở\s+)?(?:nhóm\s+khác|các\s+nhóm)\s+(?:có\s+gì|dạo\s+này|thế\s+nào|nhắn\s+gì|bàn\s+gì)\b/i.test(clean) ||
-    /^(?:tóm\s*tắt|báo\s*cáo|tình\s*hình)\s+(?:ở\s+|bên\s+|của\s+)?(?:nhóm|group|gr)\s+[a-zA-Z0-9\u00C0-\u1EF9]+/i.test(clean);
+  // 2. Kiểm tra nếu có nhắc đến từ khóa nhóm cụ thể:
+  // Regex 1: "tóm tắt / báo cáo / tình hình ... [trong/ở/bên/tại/của] [nhóm/group/gr] <tên_nhóm>"
+  // Hỗ trợ từ ngữ linh hoạt ở giữa (VD: "tóm tắt thảo luận trong nhóm group thảo luận ai công nghệ")
+  const match1 = clean.match(/(?:tóm\s*tắt|báo\s*cáo|tình\s*hình|cập\s*nhật|nội\s*dung|diễn\s*biến|xem\s*tin).*?\b(?:trong\s+|ở\s+|bên\s+|tại\s+|của\s+)?(?:nhóm|group|gr)\s+([^,?.!\n]+)/i);
+  // Regex 2: "[bên/ở/tại] [nhóm/group/gr] <tên_nhóm> [có gì/dạo này/thế nào...]"
+  const match2 = clean.match(/(?:bên\s+|ở\s+|tại\s+)(?:nhóm|group|gr)\s+([^,?.!\n]+?)\s+(?:có\s+gì|dạo\s+này|thế\s+nào|nhắn\s+gì|bàn\s+gì|thảo\s+luận\s+gì|nói\s+gì)/i);
 
-  return isCrossIntent;
+  const rawCandidate = match1 ? match1[1] : match2 ? match2[1] : null;
+
+  if (rawCandidate) {
+    let candidate = rawCandidate.trim();
+    // Bỏ các từ đệm: "group", "nhóm", "gr" ở đầu candidate nếu có (ví dụ "group thảo luận ai..." -> "thảo luận ai...")
+    candidate = candidate.replace(/^(?:nhóm|group|gr)\s+/i, "").trim();
+
+    // Loại trừ các từ chỉ nhóm hiện tại
+    if (/^(?:mình|này|ta|của\s*mình|ở\s*đây|nội\s*bộ|hiện\s*tại)$/i.test(candidate)) {
+      return false;
+    }
+
+    // Loại trừ các từ chỉ mốc thời gian hoặc phạm vi thảo luận thông thường trong nhóm
+    const isTimeOrTopicOnly = /^(?:hôm\s*nay|hôm\s*qua|tuần\s*(?:này|trước|qua)|tháng\s*(?:này|trước)|vừa\s*rồi|gần\s*đây|sáng\s*(?:nay|qua)|chiều\s*(?:nay|qua)|tối\s*(?:nay|qua)|\d+\s*ngày\s*qua|\d+\s*giờ\s*qua|mới\s*nhất|về\s+|liên\s*quan)/i.test(candidate);
+    if (isTimeOrTopicOnly) {
+      return false;
+    }
+
+    // Nếu có currentGroupName: so sánh xem candidate có trùng với currentGroupName không
+    if (currentGroupName) {
+      const curClean = currentGroupName.trim().toLowerCase();
+      // Nếu tên nhóm hiện tại chứa candidate hoặc candidate chứa tên nhóm hiện tại
+      // (ví dụ candidate = "ae test bot" và currentGroupName = "AE Test Bot")
+      if (curClean === candidate || curClean.includes(candidate) || candidate.includes(curClean)) {
+        return false; // Chính là nhóm hiện tại!
+      }
+    }
+
+    // Nếu candidate có độ dài hợp lý (ít nhất 2 ký tự) và không phải là nhóm hiện tại -> Đây là hỏi nhóm khác!
+    if (candidate.length >= 2) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 async function handleHistoryQA(
@@ -1045,11 +1087,13 @@ async function handleHistoryQA(
 ): Promise<string> {
   const db = getDb();
   const isSuperAdmin = options?.isSuperAdmin ?? (options?.sender ? isUserAdmin(options.sender) : false);
+  const groupSettings = getGroupSettings(threadId);
+  const currentGroupName = (groupSettings.name && groupSettings.name.trim()) || "nhóm này";
 
   // 0. Chặn tra cứu chéo nhóm (Cross-Group Privacy Guard):
   // Tuyệt đối không cho phép lấy thông tin nhóm A đưa vào nhóm B trong group chat (kể cả khi Admin yêu cầu).
   // Chỉ khi chat 1:1 trực tiếp với bot thì Admin mới có thể tra cứu tình hình các nhóm.
-  if (isExplicitCrossGroupRequest(question)) {
+  if (isExplicitCrossGroupRequest(question, currentGroupName)) {
     if (isSuperAdmin) {
       return `Dạ Sếp, để đảm bảo tính riêng tư và bảo mật giữa các cộng đồng, em không tóm tắt hay chia sẻ dữ liệu nhóm khác tại nhóm này ạ.\n\n👉 Sếp vui lòng nhắn tin riêng 1:1 trực tiếp với em, em sẽ báo cáo chi tiết đầy đủ tình hình các nhóm cho Sếp ngay nhé! 🙏`;
     }
@@ -1272,6 +1316,7 @@ async function handleHistoryQA(
 
     const quoteSystemPrompt =
       `${getSystemTemporalPrompt()}\n\n` +
+      `BẠN ĐANG TƯƠNG TÁC TRỰC TIẾP TRONG NHÓM: "${currentGroupName}" (ID: ${threadId}).\n` +
       `${personaIntro}\n${customPromptSection}\n` +
       `NHIỆM VỤ:\n` +
       `1. Thành viên đang trích dẫn (quote) một tin nhắn hoặc nội dung thảo luận trước đó và đặt câu hỏi tiếp theo.\n` +
@@ -1336,6 +1381,7 @@ async function handleHistoryQA(
     }
 
     const quoteUserPrompt =
+      `BẠN ĐANG TƯƠNG TÁC TẠI NHÓM "${currentGroupName}".\n` +
       `${recentChatContext}\n` +
       `=== NỘI DUNG ĐƯỢC TRÍCH DẪN (TỪ ${options.quote.senderName || "THÀNH VIÊN"}): ===\n` +
       `"${options.quote.text}"\n` +
@@ -1697,7 +1743,6 @@ async function handleHistoryQA(
     fileContentSection = `\n=== NỘI DUNG TÀI LIỆU ĐÍNH KÈM (${fileName || "File"}): ===\n${fileTextContent.slice(0, 40000)}\n`;
   }
 
-  const groupSettings = getGroupSettings(threadId);
   const botName = groupSettings.botName || defaultBotName;
 
   let personaIntro = "";
@@ -1806,6 +1851,7 @@ async function handleHistoryQA(
 
   const systemPrompt =
     `${getSystemTemporalPrompt()}\n\n` +
+    `BẠN ĐANG TƯƠNG TÁC TRỰC TIẾP TRONG NHÓM: "${currentGroupName}" (ID: ${threadId}).\n` +
     `${personaIntro}\n${customPromptSection}\n` +
     `=== 5 NGUYÊN TẮC VÀNG HOẠT ĐỘNG TOÀN NĂNG (UNIVERSAL GOLDEN RULES) ===\n\n` +
     `1. NGUYÊN TẮC 1: DUAL GROUNDING ĐA LĨNH VỰC (STRICT FACT VS OPEN KNOWLEDGE)\n` +
@@ -1838,7 +1884,16 @@ async function handleHistoryQA(
         `- TUYỆT ĐỐI KHÔNG gọi người hỏi là 'Sếp' (danh xưng 'Sếp' chỉ dành riêng cho Quản trị viên tối cao / Chủ nhân của bot, không áp dụng cho thành viên thông thường dù họ có yêu cầu hay tự xưng).\n` +
         `- Giọng điệu thông minh, hóm hỉnh, mặn mà, lịch thiệp, tôn trọng cộng đồng nhưng chuẩn xác và đáng tin cậy tuyệt đối khi cung cấp kiến thức/số liệu.\n` +
         `- CẤM xưng 'tôi', CẤM gọi người dùng là 'bạn', CẤM nói giọng robot hành chính khô khan.\n\n`) +
-    `5. NGUYÊN TẮC 5: CÔ LẬP DỮ LIỆU & CHỐNG LÂY NHIỄM (DATA ISOLATION & INTEGRITY)\n` +
+    `5. NGUYÊN TẮC 5: CÔ LẬP DỮ LIỆU & BẢO MẬT LIÊN NHÓM (DATA ISOLATION & CROSS-GROUP PRIVACY)\n` +
+    `   - ĐỊNH DANH NHÓM HIỆN TẠI: Bạn đang hoạt động trực tiếp trong nhóm "${currentGroupName}".\n` +
+    `   - Dữ liệu lịch sử chat (<chat_history>) CHỈ LÀ LỊCH SỬ THẢO LUẬN NỘI BỘ CỦA CHÍNH NHÓM "${currentGroupName}".\n` +
+    `   - TUYỆT ĐỐI CẤM lấy dữ liệu của nhóm "${currentGroupName}" rồi gán nhãn thành tên một nhóm khác, hoặc tự nhận dữ liệu này là của nhóm khác mà người dùng hỏi tới!\n` +
+    `   - NGUYÊN TẮC BẢO MẬT LIÊN NHÓM: Bạn TUYỆT ĐỐI KHÔNG chia sẻ, tóm tắt hoặc mang thảo luận của nhóm khác vào không gian nhóm "${currentGroupName}" (kể cả khi người hỏi là Sếp hay thành viên).\n` +
+    `   - XỬ LÝ KHI ĐƯỢC HỎI VỀ NHÓM KHÁC:\n` +
+    `     + Nếu người dùng yêu cầu tóm tắt, xem tin hoặc hỏi diễn biến của một nhóm khác không phải là "${currentGroupName}": BẮT BUỘC từ chối lịch sự, nêu rõ bạn chỉ có dữ liệu nội bộ của nhóm "${currentGroupName}".\n` +
+    (isSuperAdmin
+      ? `     + Với Sếp (${displayName}): Báo cáo rằng để đảm bảo bảo mật và riêng tư giữa các cộng đồng, em không tóm tắt nhóm khác tại nhóm này, kính mời Sếp nhắn tin riêng 1:1 trực tiếp với bot để nhận báo cáo đầy đủ.\n`
+      : `     + Với thành viên: Lịch sự thông báo bot chỉ hỗ trợ thông tin nội bộ của nhóm mình và không chia sẻ dữ liệu nhóm khác.\n`) +
     `   - Dữ liệu lịch sử chat (<chat_history>) chỉ phục vụ việc nắm bắt ngữ cảnh thảo luận nội bộ của nhóm.\n` +
     `   - TUYỆT ĐỐI KHÔNG lôi chuyện tán gẫu nội bộ, trêu đùa hay cấu hình bot nhóm vào làm câu trả lời khi thành viên hỏi về kiến thức chuyên môn, khoa học, dự án bên ngoài.\n` +
     `   - Chỉ nhắc đến các thành viên có mặt trong nhóm, tuyệt đối không bịa tên người lạ.\n\n` +
@@ -1854,7 +1909,7 @@ async function handleHistoryQA(
 
   const userPrompt =
     `${quotePromptSection}\n${fileContentSection}${liveNewsSection}\n` +
-    `DƯỚI ĐÂY LÀ DỮ LIỆU LỊCH SỬ CHAT CỦA NHÓM ĐỂ THAM KHẢO:\n` +
+    `DƯỚI ĐÂY LÀ DỮ LIỆU LỊCH SỬ CHAT NỘI BỘ CỦA CHÍNH NHÓM "${currentGroupName}" (ID: ${threadId}) ĐỂ THAM KHẢO:\n` +
     `<chat_history>\n${contextData}\n</chat_history>\n\n` +
     `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${question || "Hãy phân tích tài liệu/hình ảnh/nội dung trên giúp tôi."}\n\n` +
     `HÃY TRẢ LỜI THẬT ${isSuperAdmin ? "CHU ĐÁO, CHUẨN XÁC VÀ TÔN TRỌNG SẾP" : "DUYÊN DÁNG, CHUẨN XÁC VÀ HÓM HỈNH"}:`;
