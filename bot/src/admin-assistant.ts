@@ -94,7 +94,9 @@ export function findGroup(query: string): { groupId: string; name: string; total
   // 2. Thử match theo tên (chứa trọn vẹn hoặc khớp chuẩn)
   for (const g of allGroups) {
     const cleanGName = normalizeQuery(g.name);
-    if (cleanGName === cleanQ || cleanGName.includes(cleanQ) || cleanQ.includes(cleanGName)) {
+    if (!cleanGName) continue;
+    const wholeWordRegex = new RegExp(`(?:^|\\s)${cleanGName}(?:$|\\s)`);
+    if (cleanGName === cleanQ || cleanGName.includes(cleanQ) || wholeWordRegex.test(cleanQ)) {
       return g;
     }
   }

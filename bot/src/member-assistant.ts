@@ -36,12 +36,6 @@ import { defaultBotName } from "./config.js";
 import { finalizeGroundedAnswer } from "./search-evidence.js";
 import { generateCloudflareImage, isCloudflareConfigured } from "./cloudflare-ai.js";
 import { formatRealEstateProjectProfileAnswer } from "./real-estate-profile.js";
-import {
-  findGroup,
-  getAllGroupsList,
-  getRecentGroupActivities,
-  normalizeQuery,
-} from "./admin-assistant.js";
 
 export interface MemberMessageEvent {
   threadId: string;
@@ -1010,211 +1004,27 @@ function isMediaOrDocUrl(url?: string | null): boolean {
 }
 
 /**
- * Kiểm tra xem câu hỏi có hướng tới một nhóm Zalo KHÁC (khác threadId hiện tại) hay không.
- * Bảo vệ tính riêng tư tuyệt đối giữa các nhóm (Cross-Group Privacy Guard).
+ * Nhận diện ý định yêu cầu tóm tắt / xem thông tin nhóm khác trong nhóm.
+ * Theo quy tắc nghiệp vụ: Tuyệt đối không chia sẻ hoặc tóm tắt thông tin nhóm khác trong nhóm Zalo (dù là Admin hay thành viên).
+ * Việc tóm tắt các nhóm khác CHỈ được thực hiện qua tương tác 1:1 trực tiếp giữa Admin và Bot.
  */
-export function findTargetOtherGroup(
-  question: string,
-  currentThreadId: string,
-): { isCrossGroupQuery: boolean; targetGroup: { groupId: string; name: string; totalMembers: number; mode: string } | null; isAllGroupsQuery?: boolean } {
-  const cleanQ = question.trim().toLowerCase();
-  if (!cleanQ) return { isCrossGroupQuery: false, targetGroup: null };
+function isExplicitCrossGroupRequest(question: string): boolean {
+  const clean = question.trim().toLowerCase();
+  if (!clean) return false;
 
-  // 1. Nếu câu hỏi nhắm rõ ràng tới NHÓM HIỆN TẠI (nhóm mình, nhóm này, group này, ở đây...) -> không phải cross-group
-  const isCurrentGroupSelfQuery =
-    /(?:nhóm|group|gr)\s*(?:mình|này|ta|của\s*mình|ở\s*đây|nội\s*bộ)/i.test(cleanQ) ||
-    /^(?:tóm\s*tắt|báo\s*cáo|tình\s*hình)\s*(?:hôm\s*nay|gần\s*đây|tin\s*nhắn|thảo\s*luận)(?!\s*(?:của|bên|ở)\s*(?:nhóm|group|gr))/i.test(cleanQ);
-
-  if (isCurrentGroupSelfQuery && !/(?:nhóm|group|gr)\s+(?:khác|kia|[a-zA-Z0-9])/i.test(cleanQ)) {
-    return { isCrossGroupQuery: false, targetGroup: null };
+  // Nếu nói về nhóm mình, nhóm này, ở đây -> KHÔNG phải nhóm khác
+  if (/(?:nhóm|group|gr)\s*(?:mình|này|ta|của\s*mình|ở\s*đây|nội\s*bộ)/i.test(clean)) {
+    return false;
   }
 
-  // 2. Hỏi về "các nhóm khác", "tất cả các nhóm", "mọi nhóm", "tổng quan các nhóm"
-  if (/(?:các\s+nhóm\s+khác|nhóm\s+khác|tất\s+cả\s+(?:các\s+)?nhóm|mọi\s+nhóm|các\s+group\s+khác|tổng\s+quan\s+(?:các\s+)?nhóm)/i.test(cleanQ)) {
-    return { isCrossGroupQuery: true, targetGroup: null, isAllGroupsQuery: true };
-  }
+  // Bắt các mẫu câu có ý định tóm tắt / báo cáo nhóm khác rõ ràng:
+  // VD: "tóm tắt nhóm khác", "tóm tắt bên nhóm B", "tình hình các nhóm khác", "bên nhóm khác có gì mới"
+  const isCrossIntent =
+    /^(?:tóm\s*tắt|báo\s*cáo|tình\s*hình|xem\s*tin)\s+(?:ở\s+|bên\s+|của\s+)?(?:nhóm\s+khác|các\s+nhóm|toàn\s+bộ\s+nhóm|mọi\s+nhóm)\b/i.test(clean) ||
+    /^(?:bên\s+|ở\s+)?(?:nhóm\s+khác|các\s+nhóm)\s+(?:có\s+gì|dạo\s+này|thế\s+nào|nhắn\s+gì|bàn\s+gì)\b/i.test(clean) ||
+    /^(?:tóm\s*tắt|báo\s*cáo|tình\s*hình)\s+(?:ở\s+|bên\s+|của\s+)?(?:nhóm|group|gr)\s+[a-zA-Z0-9\u00C0-\u1EF9]+/i.test(clean);
 
-  const allGroups = getAllGroupsList();
-  if (allGroups.length <= 1) {
-    return { isCrossGroupQuery: false, targetGroup: null };
-  }
-
-  const otherGroups = allGroups.filter((g) => g.groupId !== currentThreadId);
-  if (otherGroups.length === 0) {
-    return { isCrossGroupQuery: false, targetGroup: null };
-  }
-
-  const normQ = normalizeQuery(cleanQ);
-
-  // 3. Khớp chính xác ID nhóm khác
-  for (const g of otherGroups) {
-    if (g.groupId && cleanQ.includes(g.groupId)) {
-      return { isCrossGroupQuery: true, targetGroup: g };
-    }
-  }
-
-  // 4. Khớp theo tên nhóm khác
-  for (const g of otherGroups) {
-    const normG = normalizeQuery(g.name);
-    if (!normG) continue;
-
-    // Khớp trọn vẹn tên nhóm trong câu hỏi
-    if (normQ.includes(normG)) {
-      return { isCrossGroupQuery: true, targetGroup: g };
-    }
-
-    // Tách phần tên cốt lõi (bỏ tiền tố "nhóm", "group", "gr", "clb", "hội")
-    const coreName = g.name.replace(/^(?:nhóm|group|gr|hội|clb)\s+/i, "").trim();
-    const normCore = normalizeQuery(coreName);
-    if (normCore && normCore.length >= 2) {
-      const corePattern = new RegExp(`(?:nhom|group|gr|ben|o)\\s+${normCore.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
-      if (corePattern.test(normQ)) {
-        return { isCrossGroupQuery: true, targetGroup: g };
-      }
-    }
-  }
-
-  // 5. Thử bóc tách cụm từ đứng sau "nhóm / group / bên nhóm / ở nhóm" và tra cứu bằng findGroup
-  const matchCandidate = cleanQ.match(/(?:nhóm|group|gr|bên\s+nhóm|ở\s+nhóm)\s+([a-zA-Z0-9\u00C0-\u1EF9\s]{1,25})/i);
-  if (matchCandidate && matchCandidate[1]) {
-    let candidate = matchCandidate[1].trim();
-    candidate = candidate.replace(/\s+(?:có|dạo|gần|hôm|vừa|đang|về|nói|bàn|chat|gì|thế|sao|như).*$/i, "").trim();
-    if (candidate && !["mình", "này", "ta", "ở đây"].includes(candidate.toLowerCase())) {
-      const found = findGroup(candidate);
-      if (found && found.groupId !== currentThreadId) {
-        return { isCrossGroupQuery: true, targetGroup: found };
-      }
-    }
-  }
-
-  return { isCrossGroupQuery: false, targetGroup: null };
-}
-
-/**
- * Xử lý báo cáo hoạt động / thảo luận chéo nhóm dành riêng cho Super Admin.
- */
-async function handleCrossGroupAdminReport(
-  question: string,
-  displayName: string,
-  currentThreadId: string,
-  crossGroup: { targetGroup: { groupId: string; name: string; totalMembers: number; mode: string } | null; isAllGroupsQuery?: boolean },
-  _options?: { api?: any; sender?: string },
-): Promise<string> {
-  const db = getDb();
-  const groupSettings = getGroupSettings(currentThreadId);
-  const botName = (groupSettings.botName || defaultBotName).trim();
-
-  // Trường hợp Sếp hỏi tổng quan tất cả các nhóm
-  if (crossGroup.isAllGroupsQuery || !crossGroup.targetGroup) {
-    const allActivities = getRecentGroupActivities();
-    const systemPrompt =
-      `${getSystemTemporalPrompt()}\n\n` +
-      `Bạn là '${botName}' - trợ lý AI trung thành, tận tâm và đắc lực của Sếp (Super Admin / Quản trị viên tối cao).\n` +
-      `NHIỆM VỤ ĐẶC BIỆT:\n` +
-      `1. Sếp đang yêu cầu bạn báo cáo tổng quan tình hình thảo luận, hoạt động của TẤT CẢ các nhóm Zalo bạn đang quản lý.\n` +
-      `2. QUY TẮC XƯNG HÔ: BẮT BUỘC xưng 'em', gọi người hỏi là 'Sếp' (hoặc 'Sếp ${displayName}'). Giọng điệu tôn trọng, chu đáo, nhanh nhẹn, hỗ trợ đắc lực cho Sếp.\n` +
-      `3. BÁO CÁO TOÀN DIỆN: Tổng hợp tình hình từng nhóm theo cấu trúc rõ ràng: Tên nhóm, chủ đề nóng đang bàn tán, mức độ sôi nổi.\n` +
-      `4. TUYỆT ĐỐI trung thực dựa trên dữ liệu được cung cấp, không bịa đặt.\n` +
-      `5. Kết thúc bằng lời gợi mở: "Sếp cần em kiểm tra chi tiết nhóm nào cứ chỉ đạo em nhé!"`;
-
-    const userPrompt =
-      `DỮ LIỆU HOẠT ĐỘNG CÁC NHÓM TỪ CƠ SỞ DỮ LIỆU:\n${allActivities}\n\n` +
-      `CHỈ ĐẠO TỪ SẾP: ${question}\n\n` +
-      `HÃY BÁO CÁO CHO SẾP:`;
-
-    try {
-      return await callGemini(systemPrompt, userPrompt, { enableSearch: false });
-    } catch (e) {
-      console.error("[member-assistant] Lỗi báo cáo tổng quan các nhóm cho Sếp:", e);
-      return `Dạ Sếp, em đã tổng hợp dữ liệu các nhóm nhưng gặp lỗi khi tạo bản báo cáo: ${String(e)}. Sếp đợi em một chút rồi thử lại giúp em nhé!`;
-    }
-  }
-
-  const target = crossGroup.targetGroup;
-
-  // 1. Tóm tắt 3 ngày gần nhất của nhóm đích
-  let summariesText = "";
-  try {
-    const summaries = db
-      .prepare(
-        `SELECT day_label, summary_text 
-         FROM daily_summaries 
-         WHERE thread_id = ? 
-         ORDER BY day_date DESC 
-         LIMIT 3`
-      )
-      .all(target.groupId) as { day_label: string; summary_text: string }[];
-
-    if (summaries && summaries.length > 0) {
-      summariesText = "=== TÓM TẮT THẢO LUẬN CÁC NGÀY GẦN ĐÂY CỦA NHÓM ===\n";
-      for (const s of summaries) {
-        summariesText += `[Ngày ${s.day_label}]:\n${s.summary_text.trim()}\n\n`;
-      }
-    }
-  } catch (e) {
-    console.warn(`[member-assistant] Lỗi đọc daily_summaries nhóm ${target.name}:`, e);
-  }
-
-  // 2. Lấy 30 tin nhắn thảo luận thực tế gần nhất
-  let msgsText = "";
-  try {
-    const msgs = db
-      .prepare(
-        `SELECT display_name, text, ts 
-         FROM group_messages 
-         WHERE thread_id = ? AND deleted_at IS NULL AND length(trim(text)) > 0
-         ORDER BY ts DESC 
-         LIMIT 30`
-      )
-      .all(target.groupId) as { display_name: string; text: string; ts: number }[];
-
-    if (msgs && msgs.length > 0) {
-      msgsText = `=== TIN NHẮN THỰC TẾ GẦN ĐÂY (${msgs.length} TIN MỚI NHẤT) ===\n`;
-      for (const m of [...msgs].reverse()) {
-        const timeStr = new Date(m.ts).toLocaleString("vi-VN", {
-          timeZone: "Asia/Ho_Chi_Minh",
-          hour: "2-digit",
-          minute: "2-digit",
-          day: "2-digit",
-          month: "2-digit",
-        });
-        msgsText += `- [${timeStr}] ${m.display_name || "Thành viên"}: ${m.text.trim()}\n`;
-      }
-    }
-  } catch (e) {
-    console.warn(`[member-assistant] Lỗi đọc group_messages nhóm ${target.name}:`, e);
-  }
-
-  if (!summariesText && !msgsText) {
-    return `Dạ Sếp, tại nhóm **"${target.name}"** (ID: ${target.groupId}) hiện tại chưa có dữ liệu tin nhắn thảo luận hoặc tóm tắt nào gần đây trong cơ sở dữ liệu để em tổng hợp ạ.`;
-  }
-
-  const systemPrompt =
-    `${getSystemTemporalPrompt()}\n\n` +
-    `Bạn là '${botName}' - trợ lý AI trung thành, tận tâm và đắc lực của Sếp (Super Admin / Quản trị viên tối cao).\n` +
-    `NHIỆM VỤ ĐẶC QUYỀN:\n` +
-    `1. Sếp đang ở một nhóm khác và yêu cầu bạn báo cáo / tóm tắt tình hình tại nhóm "${target.name}" (ID: ${target.groupId}).\n` +
-    `2. QUY TẮC XƯNG HÔ: BẮT BUỘC xưng 'em', gọi người hỏi là 'Sếp' (hoặc 'Sếp ${displayName}'). Giọng điệu tôn trọng, chu đáo, nhanh nhẹn, hỗ trợ đắc lực.\n` +
-    `3. QUY TẮC BÁO CÁO:\n` +
-    `   - Đi thẳng vào báo cáo cho Sếp ngay dòng đầu tiên (ví dụ: "Dạ Sếp, em xin phép báo cáo tóm tắt tình hình thảo luận mới nhất tại nhóm **${target.name}** như sau:").\n` +
-    `   - Tóm tắt súc tích, mạch lạc các chủ đề chính đang thảo luận, các vấn đề nổi bật, các thành viên tích cực trao đổi.\n` +
-    `   - Dùng gạch đầu dòng rõ ràng, **in đậm** từ khóa then chốt.\n` +
-    `   - TUYỆT ĐỐI trung thực 100% dựa trên dữ liệu được cung cấp, không bịa đặt nội dung không có.\n` +
-    `   - Cuối câu hỏi, kết bài lịch thiệp: "Sếp cần em theo dõi thêm thông tin nào ở nhóm này cứ dặn em nhé ạ!"`;
-
-  const userPrompt =
-    `DỮ LIỆU NỘI BỘ NHÓM "${target.name}" (ID: ${target.groupId}):\n\n` +
-    summariesText +
-    msgsText +
-    `\nCHỈ ĐẠO CỦA SẾP (${displayName}): ${question}\n\n` +
-    `HÃY BÁO CÁO CHO SẾP:`;
-
-  try {
-    return await callGemini(systemPrompt, userPrompt, { enableSearch: false });
-  } catch (e) {
-    console.error(`[member-assistant] Lỗi báo cáo nhóm ${target.name} cho Sếp:`, e);
-    return `Dạ Sếp, em đã nạp dữ liệu nhóm "${target.name}" nhưng gặp sự cố khi tạo bản báo cáo: ${String(e)}. Sếp đợi em một chút rồi thử lại giúp em nhé!`;
-  }
+  return isCrossIntent;
 }
 
 async function handleHistoryQA(
@@ -1236,16 +1046,14 @@ async function handleHistoryQA(
   const db = getDb();
   const isSuperAdmin = options?.isSuperAdmin ?? (options?.sender ? isUserAdmin(options.sender) : false);
 
-  // 0. Cross-Group Privacy Guard & Super Admin Cross-Group Query
-  const crossGroup = findTargetOtherGroup(question, threadId);
-  if (crossGroup.isCrossGroupQuery) {
-    if (!isSuperAdmin) {
-      console.log(`[member-assistant] 🛡️ [Privacy Guard] Chặn thành viên thường (${displayName}) tra cứu chéo nhóm.`);
-      return `Dạ ${displayName ? `bác ${displayName}` : "bác"}, vì lý do bảo mật và bảo vệ quyền riêng tư giữa các cộng đồng, em chỉ hỗ trợ tra cứu và giải đáp thông tin trong nội bộ nhóm mình thôi ạ.\n\nEm không thể chia sẻ dữ liệu hoặc thảo luận từ nhóm khác được, mong bác thông cảm giúp em nhé! 🙏`;
+  // 0. Chặn tra cứu chéo nhóm (Cross-Group Privacy Guard):
+  // Tuyệt đối không cho phép lấy thông tin nhóm A đưa vào nhóm B trong group chat (kể cả khi Admin yêu cầu).
+  // Chỉ khi chat 1:1 trực tiếp với bot thì Admin mới có thể tra cứu tình hình các nhóm.
+  if (isExplicitCrossGroupRequest(question)) {
+    if (isSuperAdmin) {
+      return `Dạ Sếp, để đảm bảo tính riêng tư và bảo mật giữa các cộng đồng, em không tóm tắt hay chia sẻ dữ liệu nhóm khác tại nhóm này ạ.\n\n👉 Sếp vui lòng nhắn tin riêng 1:1 trực tiếp với em, em sẽ báo cáo chi tiết đầy đủ tình hình các nhóm cho Sếp ngay nhé! 🙏`;
     }
-    // Dành riêng cho Super Admin:
-    console.log(`[member-assistant] 👑 [Super Admin Cross-Group] Sếp (${displayName}) yêu cầu tóm tắt/hoạt động nhóm khác:`, crossGroup.targetGroup?.name || "Tất cả các nhóm");
-    return await handleCrossGroupAdminReport(question, displayName, threadId, crossGroup, options);
+    return `Dạ ${displayName ? `bác ${displayName}` : "bác"}, vì lý do bảo mật và bảo vệ quyền riêng tư giữa các cộng đồng, em chỉ hỗ trợ tra cứu và giải đáp thông tin trong nội bộ nhóm mình thôi ạ.\n\nEm không thể chia sẻ dữ liệu hoặc thảo luận từ nhóm khác được, mong bác thông cảm giúp em nhé! 🙏`;
   }
 
   // 1. Tải và giải mã file đính kèm / ảnh / audio (CHỈ tải nếu thực sự là media/file, tuyệt đối không tải web link URL)
