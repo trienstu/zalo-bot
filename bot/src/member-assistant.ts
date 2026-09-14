@@ -385,7 +385,7 @@ export function searchRelevantLinksAndResources(
   try {
     const rows = db
       .prepare(
-        `SELECT display_name, text, ts
+        `SELECT id, display_name, text, ts
          FROM group_messages
          WHERE deleted_at IS NULL
            AND thread_id = ?
@@ -393,7 +393,7 @@ export function searchRelevantLinksAndResources(
          ORDER BY ts DESC
          LIMIT 500`,
       )
-      .all(threadId) as { display_name: string; text: string; ts: number }[];
+      .all(threadId) as { id: number; display_name: string; text: string; ts: number }[];
 
     for (const r of rows) {
       const matches = r.text.match(urlRegex);
@@ -401,11 +401,31 @@ export function searchRelevantLinksAndResources(
       for (const u of matches) {
         const cleanUrl = u.replace(/[.,;!?)]+$/, "");
         if (allLinks.some((l) => l.url === cleanUrl)) continue;
-        const cleanContext = r.text.replace(urlRegex, "").replace(/\s+/g, " ").trim();
+        let cleanContext = r.text.replace(urlRegex, "").replace(/\s+/g, " ").trim();
+
+        // Nếu context của tin nhắn chứa link quá ngắn (< 15 ký tự), lấy thêm 1 tin nhắn văn bản liền trước đó để làm giàu ngữ cảnh
+        if (cleanContext.length < 15) {
+          try {
+            const prevMsg = db
+              .prepare(
+                `SELECT text FROM group_messages
+                 WHERE thread_id = ? AND ts <= ? AND id < ? AND deleted_at IS NULL AND text != '' AND text NOT LIKE 'http%' AND text NOT LIKE '/%'
+                 ORDER BY ts DESC, id DESC LIMIT 1`,
+              )
+              .get(threadId, r.ts, r.id) as { text: string } | undefined;
+            if (prevMsg && prevMsg.text) {
+              const prevClean = prevMsg.text.replace(urlRegex, "").replace(/\s+/g, " ").trim();
+              if (prevClean) {
+                cleanContext = cleanContext ? `${prevClean} | ${cleanContext}` : prevClean;
+              }
+            }
+          } catch { }
+        }
+
         allLinks.push({
           url: cleanUrl,
           sender: r.display_name || "Thành viên",
-          context: cleanContext.slice(0, 180) || "Chia sẻ đường link",
+          context: cleanContext.slice(0, 200) || "Chia sẻ đường link",
           ts: r.ts,
         });
       }
@@ -494,15 +514,19 @@ export function searchRelevantLinksAndResources(
     console.warn("[searchRelevantLinks] Lỗi quét daily_summaries:", err);
   }
 
-  // 3. Tách từ khóa tìm kiếm (loại trừ từ dừng tiếng Việt)
+  // 3. Tách từ khóa tìm kiếm & trích xuất tên người chia sẻ (Author Hint)
   const stopWords = new Set([
     "sen", "chúa", "chua", "mộc", "miên", "moc", "mien", "bot",
     "liệt", "kê", "liet", "ke", "toàn", "bộ", "toan", "bo", "danh", "sách", "sach",
     "link", "đường", "duong", "dẫn", "dan", "có", "co", "liên", "quan", "lien",
     "tới", "toi", "đến", "den", "từ", "tu", "trước", "truoc", "giờ", "gio",
     "trong", "tài", "nguyên", "tai", "nguyen", "nhóm", "nhom", "giúp", "giup",
-    "mình", "minh", "với", "voi", "nhé", "nhe", "ạ", "ơi", "oi", "hỏi", "cho", "em"
+    "mình", "minh", "với", "voi", "nhé", "nhe", "ạ", "ơi", "oi", "hỏi", "cho", "em",
+    "tìm", "tim", "lấy", "lay", "xin", "gửi", "gui", "xem", "của", "cua", "mà", "ma",
+    "đã", "da", "về", "ve", "ở", "o", "bác", "bac", "anh", "chị", "chi"
   ]);
+
+  const authorHint = extractAuthorHint(query);
 
   const rawWords = query
     .toLowerCase()
@@ -514,17 +538,30 @@ export function searchRelevantLinksAndResources(
   if (/github|repo/i.test(query) && !keywords.includes("github")) keywords.push("github");
   if (/zalo/i.test(query) && !keywords.includes("zalo")) keywords.push("zalo");
 
-  if (keywords.length === 0) {
+  if (keywords.length === 0 && !authorHint) {
     return allLinks.slice(0, limit);
   }
 
-  // 4. Chấm điểm độ khớp: URL hoặc Ngữ cảnh chứa từ khóa
+  // 4. Chấm điểm độ khớp: Người gửi + URL + Ngữ cảnh chứa từ khóa
   const scored = allLinks.map((item) => {
-    const textToMatch = `${item.url.toLowerCase()} ${item.context.toLowerCase()}`;
+    const lowerSender = item.sender.toLowerCase();
+    const lowerUrl = item.url.toLowerCase();
+    const lowerContext = item.context.toLowerCase();
+
     let matchCount = 0;
+
+    // Ưu tiên cực cao (+10 điểm) nếu khớp đúng tác giả/người chia sẻ được nhắc tới (VD: bác Huy, anh Nam, Tuấn...)
+    if (authorHint && lowerSender.includes(authorHint.toLowerCase())) {
+      matchCount += 10;
+    }
+
     for (const kw of keywords) {
-      if (textToMatch.includes(kw)) {
-        matchCount++;
+      if (lowerUrl.includes(kw)) {
+        matchCount += 3;
+      } else if (lowerContext.includes(kw)) {
+        matchCount += 2;
+      } else if (lowerSender.includes(kw)) {
+        matchCount += 2;
       }
     }
     return { item, matchCount };
@@ -579,6 +616,42 @@ export interface DiscussionThreadSnippet {
 }
 
 /**
+ * Trích xuất tên thành viên được nhắc tới trong câu hỏi (VD: "bác Huy đã share", "anh Nam gửi", "link của Tuấn", "do chị Lan post"...)
+ */
+export function extractAuthorHint(text: string, customStopWords?: Set<string>): string {
+  if (!text) return "";
+  const defaultStopWords = new Set([
+    "sen", "chúa", "chua", "mộc", "miên", "moc", "mien", "bot",
+    "ai", "nào", "nao", "gì", "gi", "đâu", "dau", "mình", "minh",
+    "bác", "bac", "anh", "chị", "chi", "sếp", "sep", "ông", "ong", "bạn", "ban", "em", "thầy", "thay", "cô", "co",
+    "link", "repo", "web", "tool", "source", "code", "nhóm", "nhom"
+  ]);
+  const stopWords = customStopWords || defaultStopWords;
+
+  // Loại bỏ các đại từ của người yêu cầu trước: 'giúp anh', 'giúp em', 'cho anh', 'cho em', 'cho mình', 'hộ anh', 'hộ em'
+  const cleaned = text.replace(/(?:lấy\s+|tìm\s+|hỏi\s+|kiếm\s+|xem\s+)?(?:giúp|hộ|cho)\s+(?:anh|em|mình|tôi|tao|ad|admin)\s+/gi, " ");
+
+  // Mẫu 1: (mà|của|do|từ|bởi) [danh xưng]? [Tên riêng] (hành động...)
+  const regex1 = /(?:mà|của|do|từ|bởi)\s+(?:(?:bác|anh|chị|sếp|ông|bạn|thầy|cô|em)\s+)?([A-Za-zÀ-ỹ0-9_]+(?:\s+[A-Za-zÀ-ỹ0-9_]+){0,2})\s+(?:đã\s+|da\s+|có\s+|co\s+)?(?:share|chia\s*sẻ|chia\s*se|gửi|gui|nhắn|nhan|post|đăng|dang|up|viết|viet|nói|noi|bảo|bao)/i;
+
+  // Mẫu 2: [danh xưng] [Tên riêng] (hành động...)
+  const regex2 = /(?:bác|anh|chị|sếp|ông|bạn|thầy|cô)\s+([A-Za-zÀ-ỹ0-9_]+(?:\s+[A-Za-zÀ-ỹ0-9_]+){0,2})\s+(?:đã\s+|da\s+|có\s+|co\s+)?(?:share|chia\s*sẻ|chia\s*se|gửi|gui|nhắn|nhan|post|đăng|dang|up|viết|viet|nói|noi|bảo|bao)/i;
+
+  // Mẫu 3: (của|do|từ|bởi) [danh xưng]? [Tên riêng] (về/lúc/hôm/ngày/ở/trên/trong|$)
+  const regex3 = /(?:của|do|từ|bởi)\s+(?:(?:bác|anh|chị|sếp|ông|bạn|thầy|cô|em)\s+)?([A-Za-zÀ-ỹ0-9_]+(?:\s+[A-Za-zÀ-ỹ0-9_]+){0,2})(?:\s+(?:về|lúc|hôm|ngày|ở|trên|trong)|$|[.,;?!])/i;
+
+  const m = cleaned.match(regex1) || cleaned.match(regex2) || cleaned.match(regex3);
+  if (m && m[1]) {
+    let raw = m[1].trim();
+    raw = raw.replace(/\s+(?:đã|da|có|co|vừa|vua|mới|moi)$/i, "").trim();
+    if (raw.length >= 2 && !stopWords.has(raw.toLowerCase())) {
+      return raw;
+    }
+  }
+  return "";
+}
+
+/**
  * Tra cứu sâu các đoạn thảo luận & quy trình trong lịch sử chat của nhóm (group_messages).
  * Tự động phân tích từ khóa, nhận diện tên người chia sẻ (VD: bác Huy, anh Nam, Vũ Trọng...),
  * tìm các tin nhắn gốc và mở rộng cửa sổ ngữ cảnh (Context Window) 2 tin trước + 4 tin sau.
@@ -601,15 +674,8 @@ export function searchRelevantDiscussions(
     "bác", "bac", "anh", "chị", "chi", "sếp", "sep", "ông", "ong", "bạn", "ban"
   ]);
 
-  // Nhận diện người chia sẻ được nhắc tới (VD: "bác Huy", "anh Nam", "Vũ Trọng", "Hoa Van")
-  let authorHint = "";
-  const authorMatch = question.match(/(?:bác|anh|chị|sếp|ông|bạn)\s+([A-Za-z0-9_\sÀ-ỹ]{2,20}?)(?:\s+chia|\s+nói|\s+hướng|\s+bảo|\s+dạy|\s*$|[.,;?!])/i);
-  if (authorMatch && authorMatch[1]) {
-    const candidate = authorMatch[1].trim();
-    if (!stopWords.has(candidate.toLowerCase())) {
-      authorHint = candidate;
-    }
-  }
+  // Nhận diện người chia sẻ được nhắc tới (VD: "bác Huy đã share", "anh Nam gửi", "link của Vũ Trọng"...)
+  const authorHint = extractAuthorHint(question, stopWords);
 
   // Tách từ khóa chủ đề (VD: quy trình, video, thời trang, ai, prompt, tool...)
   const rawWords = question
