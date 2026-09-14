@@ -36,6 +36,12 @@ import { defaultBotName } from "./config.js";
 import { finalizeGroundedAnswer } from "./search-evidence.js";
 import { generateCloudflareImage, isCloudflareConfigured } from "./cloudflare-ai.js";
 import { formatRealEstateProjectProfileAnswer } from "./real-estate-profile.js";
+import {
+  findGroup,
+  getAllGroupsList,
+  getRecentGroupActivities,
+  normalizeQuery,
+} from "./admin-assistant.js";
 
 export interface MemberMessageEvent {
   threadId: string;
@@ -1003,6 +1009,214 @@ function isMediaOrDocUrl(url?: string | null): boolean {
   return false;
 }
 
+/**
+ * Kiểm tra xem câu hỏi có hướng tới một nhóm Zalo KHÁC (khác threadId hiện tại) hay không.
+ * Bảo vệ tính riêng tư tuyệt đối giữa các nhóm (Cross-Group Privacy Guard).
+ */
+export function findTargetOtherGroup(
+  question: string,
+  currentThreadId: string,
+): { isCrossGroupQuery: boolean; targetGroup: { groupId: string; name: string; totalMembers: number; mode: string } | null; isAllGroupsQuery?: boolean } {
+  const cleanQ = question.trim().toLowerCase();
+  if (!cleanQ) return { isCrossGroupQuery: false, targetGroup: null };
+
+  // 1. Nếu câu hỏi nhắm rõ ràng tới NHÓM HIỆN TẠI (nhóm mình, nhóm này, group này, ở đây...) -> không phải cross-group
+  const isCurrentGroupSelfQuery =
+    /(?:nhóm|group|gr)\s*(?:mình|này|ta|của\s*mình|ở\s*đây|nội\s*bộ)/i.test(cleanQ) ||
+    /^(?:tóm\s*tắt|báo\s*cáo|tình\s*hình)\s*(?:hôm\s*nay|gần\s*đây|tin\s*nhắn|thảo\s*luận)(?!\s*(?:của|bên|ở)\s*(?:nhóm|group|gr))/i.test(cleanQ);
+
+  if (isCurrentGroupSelfQuery && !/(?:nhóm|group|gr)\s+(?:khác|kia|[a-zA-Z0-9])/i.test(cleanQ)) {
+    return { isCrossGroupQuery: false, targetGroup: null };
+  }
+
+  // 2. Hỏi về "các nhóm khác", "tất cả các nhóm", "mọi nhóm", "tổng quan các nhóm"
+  if (/(?:các\s+nhóm\s+khác|nhóm\s+khác|tất\s+cả\s+(?:các\s+)?nhóm|mọi\s+nhóm|các\s+group\s+khác|tổng\s+quan\s+(?:các\s+)?nhóm)/i.test(cleanQ)) {
+    return { isCrossGroupQuery: true, targetGroup: null, isAllGroupsQuery: true };
+  }
+
+  const allGroups = getAllGroupsList();
+  if (allGroups.length <= 1) {
+    return { isCrossGroupQuery: false, targetGroup: null };
+  }
+
+  const otherGroups = allGroups.filter((g) => g.groupId !== currentThreadId);
+  if (otherGroups.length === 0) {
+    return { isCrossGroupQuery: false, targetGroup: null };
+  }
+
+  const normQ = normalizeQuery(cleanQ);
+
+  // 3. Khớp chính xác ID nhóm khác
+  for (const g of otherGroups) {
+    if (g.groupId && cleanQ.includes(g.groupId)) {
+      return { isCrossGroupQuery: true, targetGroup: g };
+    }
+  }
+
+  // 4. Khớp theo tên nhóm khác
+  for (const g of otherGroups) {
+    const normG = normalizeQuery(g.name);
+    if (!normG) continue;
+
+    // Khớp trọn vẹn tên nhóm trong câu hỏi
+    if (normQ.includes(normG)) {
+      return { isCrossGroupQuery: true, targetGroup: g };
+    }
+
+    // Tách phần tên cốt lõi (bỏ tiền tố "nhóm", "group", "gr", "clb", "hội")
+    const coreName = g.name.replace(/^(?:nhóm|group|gr|hội|clb)\s+/i, "").trim();
+    const normCore = normalizeQuery(coreName);
+    if (normCore && normCore.length >= 2) {
+      const corePattern = new RegExp(`(?:nhom|group|gr|ben|o)\\s+${normCore.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+      if (corePattern.test(normQ)) {
+        return { isCrossGroupQuery: true, targetGroup: g };
+      }
+    }
+  }
+
+  // 5. Thử bóc tách cụm từ đứng sau "nhóm / group / bên nhóm / ở nhóm" và tra cứu bằng findGroup
+  const matchCandidate = cleanQ.match(/(?:nhóm|group|gr|bên\s+nhóm|ở\s+nhóm)\s+([a-zA-Z0-9\u00C0-\u1EF9\s]{1,25})/i);
+  if (matchCandidate && matchCandidate[1]) {
+    let candidate = matchCandidate[1].trim();
+    candidate = candidate.replace(/\s+(?:có|dạo|gần|hôm|vừa|đang|về|nói|bàn|chat|gì|thế|sao|như).*$/i, "").trim();
+    if (candidate && !["mình", "này", "ta", "ở đây"].includes(candidate.toLowerCase())) {
+      const found = findGroup(candidate);
+      if (found && found.groupId !== currentThreadId) {
+        return { isCrossGroupQuery: true, targetGroup: found };
+      }
+    }
+  }
+
+  return { isCrossGroupQuery: false, targetGroup: null };
+}
+
+/**
+ * Xử lý báo cáo hoạt động / thảo luận chéo nhóm dành riêng cho Super Admin.
+ */
+async function handleCrossGroupAdminReport(
+  question: string,
+  displayName: string,
+  currentThreadId: string,
+  crossGroup: { targetGroup: { groupId: string; name: string; totalMembers: number; mode: string } | null; isAllGroupsQuery?: boolean },
+  _options?: { api?: any; sender?: string },
+): Promise<string> {
+  const db = getDb();
+  const groupSettings = getGroupSettings(currentThreadId);
+  const botName = (groupSettings.botName || defaultBotName).trim();
+
+  // Trường hợp Sếp hỏi tổng quan tất cả các nhóm
+  if (crossGroup.isAllGroupsQuery || !crossGroup.targetGroup) {
+    const allActivities = getRecentGroupActivities();
+    const systemPrompt =
+      `${getSystemTemporalPrompt()}\n\n` +
+      `Bạn là '${botName}' - trợ lý AI trung thành, tận tâm và đắc lực của Sếp (Super Admin / Quản trị viên tối cao).\n` +
+      `NHIỆM VỤ ĐẶC BIỆT:\n` +
+      `1. Sếp đang yêu cầu bạn báo cáo tổng quan tình hình thảo luận, hoạt động của TẤT CẢ các nhóm Zalo bạn đang quản lý.\n` +
+      `2. QUY TẮC XƯNG HÔ: BẮT BUỘC xưng 'em', gọi người hỏi là 'Sếp' (hoặc 'Sếp ${displayName}'). Giọng điệu tôn trọng, chu đáo, nhanh nhẹn, hỗ trợ đắc lực cho Sếp.\n` +
+      `3. BÁO CÁO TOÀN DIỆN: Tổng hợp tình hình từng nhóm theo cấu trúc rõ ràng: Tên nhóm, chủ đề nóng đang bàn tán, mức độ sôi nổi.\n` +
+      `4. TUYỆT ĐỐI trung thực dựa trên dữ liệu được cung cấp, không bịa đặt.\n` +
+      `5. Kết thúc bằng lời gợi mở: "Sếp cần em kiểm tra chi tiết nhóm nào cứ chỉ đạo em nhé!"`;
+
+    const userPrompt =
+      `DỮ LIỆU HOẠT ĐỘNG CÁC NHÓM TỪ CƠ SỞ DỮ LIỆU:\n${allActivities}\n\n` +
+      `CHỈ ĐẠO TỪ SẾP: ${question}\n\n` +
+      `HÃY BÁO CÁO CHO SẾP:`;
+
+    try {
+      return await callGemini(systemPrompt, userPrompt, { enableSearch: false });
+    } catch (e) {
+      console.error("[member-assistant] Lỗi báo cáo tổng quan các nhóm cho Sếp:", e);
+      return `Dạ Sếp, em đã tổng hợp dữ liệu các nhóm nhưng gặp lỗi khi tạo bản báo cáo: ${String(e)}. Sếp đợi em một chút rồi thử lại giúp em nhé!`;
+    }
+  }
+
+  const target = crossGroup.targetGroup;
+
+  // 1. Tóm tắt 3 ngày gần nhất của nhóm đích
+  let summariesText = "";
+  try {
+    const summaries = db
+      .prepare(
+        `SELECT day_label, summary_text 
+         FROM daily_summaries 
+         WHERE thread_id = ? 
+         ORDER BY day_date DESC 
+         LIMIT 3`
+      )
+      .all(target.groupId) as { day_label: string; summary_text: string }[];
+
+    if (summaries && summaries.length > 0) {
+      summariesText = "=== TÓM TẮT THẢO LUẬN CÁC NGÀY GẦN ĐÂY CỦA NHÓM ===\n";
+      for (const s of summaries) {
+        summariesText += `[Ngày ${s.day_label}]:\n${s.summary_text.trim()}\n\n`;
+      }
+    }
+  } catch (e) {
+    console.warn(`[member-assistant] Lỗi đọc daily_summaries nhóm ${target.name}:`, e);
+  }
+
+  // 2. Lấy 30 tin nhắn thảo luận thực tế gần nhất
+  let msgsText = "";
+  try {
+    const msgs = db
+      .prepare(
+        `SELECT display_name, text, ts 
+         FROM group_messages 
+         WHERE thread_id = ? AND deleted_at IS NULL AND length(trim(text)) > 0
+         ORDER BY ts DESC 
+         LIMIT 30`
+      )
+      .all(target.groupId) as { display_name: string; text: string; ts: number }[];
+
+    if (msgs && msgs.length > 0) {
+      msgsText = `=== TIN NHẮN THỰC TẾ GẦN ĐÂY (${msgs.length} TIN MỚI NHẤT) ===\n`;
+      for (const m of [...msgs].reverse()) {
+        const timeStr = new Date(m.ts).toLocaleString("vi-VN", {
+          timeZone: "Asia/Ho_Chi_Minh",
+          hour: "2-digit",
+          minute: "2-digit",
+          day: "2-digit",
+          month: "2-digit",
+        });
+        msgsText += `- [${timeStr}] ${m.display_name || "Thành viên"}: ${m.text.trim()}\n`;
+      }
+    }
+  } catch (e) {
+    console.warn(`[member-assistant] Lỗi đọc group_messages nhóm ${target.name}:`, e);
+  }
+
+  if (!summariesText && !msgsText) {
+    return `Dạ Sếp, tại nhóm **"${target.name}"** (ID: ${target.groupId}) hiện tại chưa có dữ liệu tin nhắn thảo luận hoặc tóm tắt nào gần đây trong cơ sở dữ liệu để em tổng hợp ạ.`;
+  }
+
+  const systemPrompt =
+    `${getSystemTemporalPrompt()}\n\n` +
+    `Bạn là '${botName}' - trợ lý AI trung thành, tận tâm và đắc lực của Sếp (Super Admin / Quản trị viên tối cao).\n` +
+    `NHIỆM VỤ ĐẶC QUYỀN:\n` +
+    `1. Sếp đang ở một nhóm khác và yêu cầu bạn báo cáo / tóm tắt tình hình tại nhóm "${target.name}" (ID: ${target.groupId}).\n` +
+    `2. QUY TẮC XƯNG HÔ: BẮT BUỘC xưng 'em', gọi người hỏi là 'Sếp' (hoặc 'Sếp ${displayName}'). Giọng điệu tôn trọng, chu đáo, nhanh nhẹn, hỗ trợ đắc lực.\n` +
+    `3. QUY TẮC BÁO CÁO:\n` +
+    `   - Đi thẳng vào báo cáo cho Sếp ngay dòng đầu tiên (ví dụ: "Dạ Sếp, em xin phép báo cáo tóm tắt tình hình thảo luận mới nhất tại nhóm **${target.name}** như sau:").\n` +
+    `   - Tóm tắt súc tích, mạch lạc các chủ đề chính đang thảo luận, các vấn đề nổi bật, các thành viên tích cực trao đổi.\n` +
+    `   - Dùng gạch đầu dòng rõ ràng, **in đậm** từ khóa then chốt.\n` +
+    `   - TUYỆT ĐỐI trung thực 100% dựa trên dữ liệu được cung cấp, không bịa đặt nội dung không có.\n` +
+    `   - Cuối câu hỏi, kết bài lịch thiệp: "Sếp cần em theo dõi thêm thông tin nào ở nhóm này cứ dặn em nhé ạ!"`;
+
+  const userPrompt =
+    `DỮ LIỆU NỘI BỘ NHÓM "${target.name}" (ID: ${target.groupId}):\n\n` +
+    summariesText +
+    msgsText +
+    `\nCHỈ ĐẠO CỦA SẾP (${displayName}): ${question}\n\n` +
+    `HÃY BÁO CÁO CHO SẾP:`;
+
+  try {
+    return await callGemini(systemPrompt, userPrompt, { enableSearch: false });
+  } catch (e) {
+    console.error(`[member-assistant] Lỗi báo cáo nhóm ${target.name} cho Sếp:`, e);
+    return `Dạ Sếp, em đã nạp dữ liệu nhóm "${target.name}" nhưng gặp sự cố khi tạo bản báo cáo: ${String(e)}. Sếp đợi em một chút rồi thử lại giúp em nhé!`;
+  }
+}
+
 async function handleHistoryQA(
   question: string,
   displayName: string,
@@ -1015,9 +1229,24 @@ async function handleHistoryQA(
     strictDocMode?: boolean;
     directDocTitle?: string;
     directDocContent?: string;
+    sender?: string;
+    isSuperAdmin?: boolean;
   },
 ): Promise<string> {
   const db = getDb();
+  const isSuperAdmin = options?.isSuperAdmin ?? (options?.sender ? isUserAdmin(options.sender) : false);
+
+  // 0. Cross-Group Privacy Guard & Super Admin Cross-Group Query
+  const crossGroup = findTargetOtherGroup(question, threadId);
+  if (crossGroup.isCrossGroupQuery) {
+    if (!isSuperAdmin) {
+      console.log(`[member-assistant] 🛡️ [Privacy Guard] Chặn thành viên thường (${displayName}) tra cứu chéo nhóm.`);
+      return `Dạ ${displayName ? `bác ${displayName}` : "bác"}, vì lý do bảo mật và bảo vệ quyền riêng tư giữa các cộng đồng, em chỉ hỗ trợ tra cứu và giải đáp thông tin trong nội bộ nhóm mình thôi ạ.\n\nEm không thể chia sẻ dữ liệu hoặc thảo luận từ nhóm khác được, mong bác thông cảm giúp em nhé! 🙏`;
+    }
+    // Dành riêng cho Super Admin:
+    console.log(`[member-assistant] 👑 [Super Admin Cross-Group] Sếp (${displayName}) yêu cầu tóm tắt/hoạt động nhóm khác:`, crossGroup.targetGroup?.name || "Tất cả các nhóm");
+    return await handleCrossGroupAdminReport(question, displayName, threadId, crossGroup, options);
+  }
 
   // 1. Tải và giải mã file đính kèm / ảnh / audio (CHỈ tải nếu thực sự là media/file, tuyệt đối không tải web link URL)
   let mediaPart: GeminiMediaPart | null = null;
@@ -1084,18 +1313,21 @@ async function handleHistoryQA(
       `${getSystemTemporalPrompt()}\n\n` +
       `${personaIntro}\n${customPromptSection}\n` +
       `NHIỆM VỤ:\n` +
-      `1. Bạn vừa nhận được một hình ảnh hoặc tài liệu văn bản đính kèm từ thành viên.\n` +
+      `1. Bạn vừa nhận được một hình ảnh hoặc tài liệu văn bản đính kèm từ ${isSuperAdmin ? `Sếp (${displayName}) - Super Admin / Quản trị viên tối cao của bạn` : "thành viên"}.\n` +
       `2. ĐỌC KỸ TOÀN BỘ NỘI DUNG trong hình ảnh / tài liệu đính kèm.\n` +
-      `3. Trả lời trực tiếp, đầy đủ, rõ ràng và chuẩn xác theo đúng câu hỏi/yêu cầu của thành viên.\n` +
-      `4. NGUYÊN TẮC TRUNG THỰC - TUYỆT ĐỐI KHÔNG BỊA ĐẶT: Nếu trong hình ảnh/tài liệu không có thông tin chi tiết về điều thành viên hỏi, BẮT BUỘC phải nói rõ là trong ảnh/tài liệu không có chi tiết này. TUYỆT ĐỐI KHÔNG tự suy đoán, bịa đặt sự kiện, sản phẩm, con số hay câu chuyện không có thật.\n` +
-      `5. Trả lời chuẩn theo phong cách của bạn (hóm hỉnh, chuyên nghiệp, thông minh).\n` +
-      `6. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
+      `3. Trả lời trực tiếp, đầy đủ, rõ ràng và chuẩn xác theo đúng ${isSuperAdmin ? "chỉ đạo của Sếp" : "câu hỏi/yêu cầu của thành viên"}.\n` +
+      (isSuperAdmin
+        ? `4. QUY TẮC XƯNG HÔ VỚI SẾP: BẮT BUỘC xưng 'em', gọi người hỏi là 'Sếp' (hoặc 'Sếp ${displayName}'). Giọng điệu tôn trọng, chu đáo, hỗ trợ đắc lực và chuẩn xác cho Sếp.\n`
+        : `4. QUY TẮC XƯNG HÔ: Xưng 'em' hoặc '${botName}', gọi người hỏi là 'anh/chị/bác ${displayName}'. TUYỆT ĐỐI KHÔNG gọi người hỏi là 'Sếp' (danh xưng 'Sếp' chỉ dành riêng cho Quản trị viên tối cao của bot).\n`) +
+      `5. NGUYÊN TẮC TRUNG THỰC - TUYỆT ĐỐI KHÔNG BỊA ĐẶT: Nếu trong hình ảnh/tài liệu không có thông tin chi tiết về điều ${isSuperAdmin ? "Sếp" : "thành viên"} hỏi, BẮT BUỘC phải ${isSuperAdmin ? "báo cáo" : "nói"} rõ là trong ảnh/tài liệu không có chi tiết này. TUYỆT ĐỐI KHÔNG tự suy đoán, bịa đặt sự kiện, sản phẩm, con số hay câu chuyện không có thật.\n` +
+      `6. Trả lời chuẩn theo phong cách của bạn (${isSuperAdmin ? "chu đáo, chuyên nghiệp, thông minh" : "hóm hỉnh, chuyên nghiệp, thông minh"}).\n` +
+      `7. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
       `   - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * để in đậm vì Zalo không hỗ trợ markdown (sẽ hiện nguyên văn hai dấu sao rất xấu). Hãy viết hoa chữ cái đầu hoặc viết hoa tiêu đề để làm nổi bật (ví dụ: '1. NHÂN VẬT CHÍNH:', '2. KHÁCH HÀNG:').\n` +
       `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Giữ phong cách thanh lịch, gọn gàng. TUYỆT ĐỐI KHÔNG spam icon ở từng dòng hay từng gạch đầu dòng.`;
 
     const fastUserPrompt =
       `${quoteTextSection}${fileContentSnippet}\n` +
-      `YÊU CẦU / CÂU HỎI TỪ THÀNH VIÊN (${displayName}): ${question || "Hãy phân tích chi tiết hình ảnh/tài liệu này giúp tôi."}\n\n` +
+      `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${question || "Hãy phân tích chi tiết hình ảnh/tài liệu này giúp tôi."}\n\n` +
       `HÃY TRẢ LỜI NGAY:`;
 
     try {
@@ -1241,7 +1473,15 @@ async function handleHistoryQA(
       `     + Với thực thể/thị trường mở (xe cộ, đồ công nghệ, điện thoại, tài chính, dự án, pháp luật, người nổi tiếng): Phân cụm thực thể chuẩn xác, không đánh đồng hay nhầm lẫn chéo giữa các thương hiệu/hãng. Tận dụng dữ liệu báo chí/tìm kiếm để giải đáp toàn diện, không từ chối trả lời.\n` +
       `   - [NGUYÊN TẮC 2 - ZALO RICH TEXT & MARKDOWN]: Thoải mái dùng Markdown (**in đậm** cho từ khóa/số liệu, [do]đỏ[/do], [xanh]xanh[/xanh], [cam]cam[/cam], gạch đầu dòng '-' hoặc '•') vì hệ thống tự động render màu sắc và kiểu chữ native trên Zalo. Tiết chế icon (tối đa 1-2 icon ở tiêu đề, cấm spam icon ở từng đầu gạch dòng). Bảng biểu dùng Khối thẻ (Card Layout).\n` +
       `   - [NGUYÊN TẮC 3 - TRẢ LỜI TRỰC TIẾP, DẪN NGUỒN CHUẨN XÁC & GỢI MỞ]: Đi thẳng vào đáp án/kết quả trọng tâm mà người dùng hỏi ngay từ dòng đầu tiên. TUYỆT ĐỐI CẤM mở bài bằng các câu cảm thán rườm rà, đùa cợt hoặc xưng hô làm loãng nội dung ở mọi chủ đề. Với câu hỏi sử dụng dữ liệu thời gian thực (tin tức, sự kiện, văn bản pháp luật, đơn vị hành chính, giá cả, khoa học), BẮT BUỘC kết thúc bằng 1 dòng nguồn uy tín trong dấu ngoặc đơn in nghiêng: *(Nguồn: [Tên cơ quan ban hành / Tổ chức / Nguồn tin uy tín], [thời điểm nếu có]).* Sau khi trả lời xong, có thể để lại 1 câu hỏi gợi mở ngắn gọn hoặc lời chúc tinh tế.\n` +
-      `   - [NGUYÊN TẮC 4 - PHONG CÁCH ${botName.toUpperCase()}]: Xưng 'em' hoặc '${botName}', gọi người hỏi là 'anh/chị/bác ${displayName}'. Duyên dáng, mặn mà, hóm hỉnh, tôn trọng nhưng cực kỳ uy tín về tri thức. Không xưng 'tôi', không gọi 'bạn'.\n` +
+      (isSuperAdmin
+        ? `   - [NGUYÊN TẮC 4 - XƯNG HÔ ĐẶC QUYỀN VỚI SẾP (SUPER ADMIN)]:\n` +
+          `     + Người hỏi (${displayName}) chính là SUPER ADMIN / CHỦ NHÂN CỦA BẠN.\n` +
+          `     + BẮT BUỘC xưng 'em', gọi người hỏi là 'Sếp' (hoặc 'Sếp ${displayName}').\n` +
+          `     + Giọng điệu tôn trọng, chu đáo, hỗ trợ đắc lực và chuẩn xác cho Sếp (Dạ Sếp, Em báo cáo Sếp...). CẤM xưng 'tôi', CẤM gọi Sếp là 'bác' hay 'bạn'.\n`
+        : `   - [NGUYÊN TẮC 4 - PHONG CÁCH ${botName.toUpperCase()}]:\n` +
+          `     + Xưng 'em' hoặc '${botName}', gọi người hỏi là 'anh/chị/bác ${displayName}'.\n` +
+          `     + TUYỆT ĐỐI KHÔNG gọi người hỏi là 'Sếp' (danh xưng 'Sếp' chỉ dành riêng cho Quản trị viên tối cao của bot, không áp dụng cho thành viên thông thường).\n` +
+          `     + Duyên dáng, mặn mà, hóm hỉnh, tôn trọng nhưng cực kỳ uy tín về tri thức. Không xưng 'tôi', không gọi 'bạn'.\n`) +
       `   - [NGUYÊN TẮC 5 - CÔ LẬP DỮ LIỆU & ĐỘ ƯU TIÊN THỜI GIAN THỰC]: Dữ liệu thời gian thực tra cứu được (Live News, Web Search, Bách khoa toàn thư) CÓ ĐỘ ƯU TIÊN CAO NHẤT, ĐÈ LÊN MỌI LẬP LUẬN CŨ TRONG LỊCH SỬ CHAT VÀ DỮ LIỆU LỖI THỜI TRONG TRÍ NHỚ. Tuyệt đối không lặp lại số liệu cũ nếu có thông tin mới hơn!\n` +
       `   - [CẬP NHẬT DỮ KIỆN THỜI GIAN THỰC & PHÁP LUẬT / HÀNH CHÍNH MỚI NHẤT]: BẮT BUỘC ưu tiên dữ liệu mới nhất từ phần 'DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT'. Khi câu hỏi liên quan đến dữ kiện thực tế có tính biến động (chính sách, luật pháp, đơn vị hành chính, giá cả, số liệu): TUYỆT ĐỐI KHÔNG bám vào số liệu cũ trong trí nhớ đã lỗi thời hay câu trả lời cũ trong lịch sử chat nếu dữ liệu tra cứu cung cấp văn bản, nghị quyết hoặc số liệu mới hơn. Phải giải thích rõ ràng và cập nhật số liệu mới nhất cho người hỏi!\n` +
       `   - [QUY TẮC BẮT BUỘC KHI XUẤT / TẠO FILE TÀI LIỆU (Word .docx, Excel .xlsx, Markdown .md, Text .txt)]:\n` +
@@ -1292,7 +1532,7 @@ async function handleHistoryQA(
       `=== NỘI DUNG ĐƯỢC TRÍCH DẪN (TỪ ${options.quote.senderName || "THÀNH VIÊN"}): ===\n` +
       `"${options.quote.text}"\n` +
       `${quoteDocSection}${quoteLiveNewsSection}\n` +
-      `YÊU CẦU / CÂU HỎI TỪ ${displayName}: ${question || "Hãy giải thích ngắn gọn nội dung này giúp tôi."}\n\n` +
+      `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${question || "Hãy giải thích ngắn gọn nội dung này giúp tôi."}\n\n` +
       `HÃY TRẢ LỜI NGAY DỰA TRÊN DỮ LIỆU MỚI NHẤT ĐƯỢC CUNG CẤP:`;
 
     const isFileGenerationQuery =
@@ -1317,7 +1557,7 @@ async function handleHistoryQA(
                   options.api,
                   threadId,
                   file.filePath,
-                  `📄 ${botName} đã tạo và gửi file [${file.fileName}] lên nhóm thành công! Bác tải về xem nhé.`,
+                  `📄 ${botName} đã tạo và gửi file [${file.fileName}] lên nhóm thành công! ${isSuperAdmin ? "Sếp" : "Bác"} tải về xem nhé.`,
                 );
               }
             } catch (fileErr) {
@@ -1779,10 +2019,17 @@ async function handleHistoryQA(
     `   - Đi thẳng vào đáp án/kết quả trọng tâm, súc tích, ngắn gọn, dễ đọc trên điện thoại.\n` +
     `   - TUYỆT ĐỐI KHÔNG thêm thông tin bổ trợ bên lề thừa thãi làm loãng câu trả lời.\n` +
     `   - Sau khi trả lời trực tiếp xong, BẮT BUỘC kết thúc bằng 1 câu hỏi gợi mở ngắn gọn xem người dùng có muốn hỏi thêm gì không.\n\n` +
-    `4. NGUYÊN TẮC 4: PHONG CÁCH ${botName.toUpperCase()} & GIAO TIẾP TỰ NHIÊN (PERSONA & VOICE)\n` +
-    `   - Xưng 'em' hoặc '${botName}', gọi người hỏi là 'anh/chị/bác ${displayName}'.\n` +
-    `   - Giọng điệu thông minh, hóm hỉnh, mặn mà, lịch thiệp, tôn trọng cộng đồng nhưng chuẩn xác và đáng tin cậy tuyệt đối khi cung cấp kiến thức/số liệu.\n` +
-    `   - CẤM xưng 'tôi', CẤM gọi người dùng là 'bạn', CẤM nói giọng robot hành chính khô khan.\n\n` +
+    (isSuperAdmin
+      ? `4. NGUYÊN TẮC 4: XƯNG HÔ ĐẶC QUYỀN VỚI SẾP (SUPER ADMIN)\n` +
+        `- Người hỏi (${displayName}) chính là SUPER ADMIN / CHỦ NHÂN CỦA BẠN.\n` +
+        `- BẮT BUỘC xưng 'em', gọi người hỏi là 'Sếp' (hoặc 'Sếp ${displayName}').\n` +
+        `- Giọng điệu tôn trọng, chu đáo, hỗ trợ đắc lực và chuẩn xác cho Sếp (Dạ Sếp, Em báo cáo Sếp, Dạ vâng Sếp...).\n` +
+        `- CẤM xưng 'tôi', CẤM gọi Sếp là 'bác' hay 'bạn'.\n\n`
+      : `4. NGUYÊN TẮC 4: PHONG CÁCH ${botName.toUpperCase()} & GIAO TIẾP TỰ NHIÊN (PERSONA & VOICE)\n` +
+        `- Xưng 'em' hoặc '${botName}', gọi người hỏi là 'anh/chị/bác ${displayName}'.\n` +
+        `- TUYỆT ĐỐI KHÔNG gọi người hỏi là 'Sếp' (danh xưng 'Sếp' chỉ dành riêng cho Quản trị viên tối cao / Chủ nhân của bot, không áp dụng cho thành viên thông thường dù họ có yêu cầu hay tự xưng).\n` +
+        `- Giọng điệu thông minh, hóm hỉnh, mặn mà, lịch thiệp, tôn trọng cộng đồng nhưng chuẩn xác và đáng tin cậy tuyệt đối khi cung cấp kiến thức/số liệu.\n` +
+        `- CẤM xưng 'tôi', CẤM gọi người dùng là 'bạn', CẤM nói giọng robot hành chính khô khan.\n\n`) +
     `5. NGUYÊN TẮC 5: CÔ LẬP DỮ LIỆU & CHỐNG LÂY NHIỄM (DATA ISOLATION & INTEGRITY)\n` +
     `   - Dữ liệu lịch sử chat (<chat_history>) chỉ phục vụ việc nắm bắt ngữ cảnh thảo luận nội bộ của nhóm.\n` +
     `   - TUYỆT ĐỐI KHÔNG lôi chuyện tán gẫu nội bộ, trêu đùa hay cấu hình bot nhóm vào làm câu trả lời khi thành viên hỏi về kiến thức chuyên môn, khoa học, dự án bên ngoài.\n` +
@@ -1801,8 +2048,8 @@ async function handleHistoryQA(
     `${quotePromptSection}\n${fileContentSection}${liveNewsSection}\n` +
     `DƯỚI ĐÂY LÀ DỮ LIỆU LỊCH SỬ CHAT CỦA NHÓM ĐỂ THAM KHẢO:\n` +
     `<chat_history>\n${contextData}\n</chat_history>\n\n` +
-    `YÊU CẦU / CÂU HỎI TỪ THÀNH VIÊN (${displayName}): ${question || "Hãy phân tích tài liệu/hình ảnh/nội dung trên giúp tôi."}\n\n` +
-    `HÃY TRẢ LỜI THẬT DUYÊN DÁNG, CHUẨN XÁC VÀ HÓM HỈNH:`;
+    `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${question || "Hãy phân tích tài liệu/hình ảnh/nội dung trên giúp tôi."}\n\n` +
+    `HÃY TRẢ LỜI THẬT ${isSuperAdmin ? "CHU ĐÁO, CHUẨN XÁC VÀ TÔN TRỌNG SẾP" : "DUYÊN DÁNG, CHUẨN XÁC VÀ HÓM HỈNH"}:`;
 
   try {
     const isSearchDisabled =
@@ -1828,7 +2075,7 @@ async function handleHistoryQA(
         onFileGenerated: async (file) => {
           try {
             if (options?.api) {
-              await sendGroupFile(options.api, threadId, file.filePath, `📄 ${botName} đã tạo và gửi file [${file.fileName}] lên nhóm thành công! Bác tải về xem nhé.`);
+              await sendGroupFile(options.api, threadId, file.filePath, `📄 ${botName} đã tạo và gửi file [${file.fileName}] lên nhóm thành công! ${isSuperAdmin ? "Sếp" : "Bác"} tải về xem nhé.`);
             }
           } catch (fileErr) {
             console.warn("[member-assistant] sendGroupFile error:", fileErr);
@@ -2224,8 +2471,8 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     const botName = groupSettings.botName || defaultBotName;
     const customTopic = rawText.replace(/^\/(?:tintuc|!tintuc|bantin|!bantin)\s*/i, "").trim();
     const topic = customTopic || groupSettings.newsTopic || "Trí tuệ nhân tạo (AI), công nghệ mới, mô hình AI mới trên X/Twitter";
-
-    await sendGroupText(api, threadId, `🔍 Đang tra cứu và tổng hợp bản tin về "${topic}" trên Google & X... Bác chờ em xíu nhé!`);
+    const isSuperAdmin = isUserAdmin(sender);
+    await sendGroupText(api, threadId, `🔍 Đang tra cứu và tổng hợp bản tin về "${topic}" trên Google & X... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em xíu nhé!`);
 
     try {
       const newsBriefing = await getDailyAiNewsBriefing(topic, botName);
@@ -2310,11 +2557,12 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       return;
     }
 
+    const isSuperAdmin = isUserAdmin(sender);
     const ratioTag = aspectRatio !== "1:1" ? ` (tỉ lệ ${aspectRatio})` : "";
     await sendGroupText(
       api,
       threadId,
-      `🎨 ${botName} đang vẽ ảnh: "${imagePrompt}"${ratioTag}... Bác chờ em khoảng 2 giây nhé!`,
+      `🎨 ${isSuperAdmin ? "Em đang vẽ ảnh cho Sếp" : `${botName} đang vẽ ảnh`}: "${imagePrompt}"${ratioTag}... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em khoảng 2 giây nhé!`,
     );
 
     try {
@@ -2324,14 +2572,14 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
           api,
           threadId,
           imgRes.filePath,
-          `🎨 Ảnh của bác @${displayName} đây ạ!\n✨ Chủ đề: "${imagePrompt}"${ratioTag}`,
+          `🎨 Ảnh của ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} đây ạ!\n✨ Chủ đề: "${imagePrompt}"${ratioTag}`,
         );
         console.log(`[member-assistant] ✅ Đã gửi ảnh FLUX.1 thành công cho ${displayName} ("${imagePrompt}", ratio: ${aspectRatio})`);
       } else {
         await sendGroupText(
           api,
           threadId,
-          `⚠️ Rất tiếc @${displayName}, quá trình vẽ ảnh gặp sự cố: ${imgRes.error || "Lỗi máy chủ"}. Bác thử lại sau ít phút nhé!`,
+          `⚠️ Rất tiếc ${isSuperAdmin ? "Sếp ơi" : `@${displayName}`}, quá trình vẽ ảnh gặp sự cố: ${imgRes.error || "Lỗi máy chủ"}. ${isSuperAdmin ? "Sếp" : "Bác"} thử lại sau ít phút nhé!`,
         );
       }
     } catch (imgErr: any) {
@@ -2907,13 +3155,17 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
           directDocContent = fetchRes.text;
           console.log(`[member-assistant] ✅ Đã tải trực tiếp thành công ${fetchRes.text.length} ký tự từ Google Doc/Sheet`);
         } else if (fetchRes.error === "PERMISSION_DENIED") {
+          const isSuperAdmin = isUserAdmin(sender);
+          const permDeniedMsg = isSuperAdmin
+            ? `⚠️ Dạ Sếp ơi, em không thể đọc link Google Doc/Sheet này do chưa được mở quyền xem công khai (Viewer) ạ!\n👉 Sếp hãy mở file trên Google, bấm nút "Chia sẻ" (Share) -> chọn "Bất kỳ ai có đường liên kết" thành "Người xem" (Viewer) rồi gửi lại cho em nhé!`
+            : `⚠️ Em không thể đọc link Google Doc/Sheet này do chưa được mở quyền xem công khai (Viewer)!\n👉 Bác hãy mở file trên Google, bấm nút "Chia sẻ" (Share) -> chọn "Bất kỳ ai có đường liên kết" thành "Người xem" (Viewer) rồi gửi lại câu hỏi cho em nhé!`;
           await sendGroupReplyWithMention(
             api,
             threadId,
             botName,
             displayName,
             sender,
-            `⚠️ Em không thể đọc link Google Doc/Sheet này do chưa được mở quyền xem công khai (Viewer)!\n👉 Bác hãy mở file trên Google, bấm nút "Chia sẻ" (Share) -> chọn "Bất kỳ ai có đường liên kết" thành "Người xem" (Viewer) rồi gửi lại câu hỏi cho em nhé!`,
+            permDeniedMsg,
             { quote: buildQuoteObject(event) },
           );
           return;
@@ -2936,12 +3188,16 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       (!question || greetingWords.has(qLower));
 
     if (isGreeting) {
+      const isSuperAdmin = isUserAdmin(sender);
+      const greetingMsg = isSuperAdmin
+        ? `🤖 Dạ em chào Sếp ạ! Em sẵn sàng nhận lệnh từ Sếp: tra cứu thông tin, tổng hợp báo cáo các nhóm, kiểm tra tình hình, đọc tài liệu/ảnh... Sếp cần em hỗ trợ gì cứ chỉ đạo em nhé!`
+        : `🤖 Dạ ${botName} chào ${displayName || "bác"} ạ! Em sẵn sàng hỗ trợ tra cứu thông tin thảo luận trong nhóm, điểm tương tác, đọc hình ảnh, tài liệu (PDF, Word, Excel, Code), dịch thuật và ghi nhớ kiến thức. Bác cần hỏi gì cứ gõ: /hoi [câu hỏi], gửi file/ảnh kèm câu lệnh hoặc tag @${botName} nhé!`;
       await sendGroupText(
         api,
         threadId,
-        `🤖 Dạ ${botName} chào ${displayName || "bác"} ạ! Em sẵn sàng hỗ trợ tra cứu thông tin thảo luận trong nhóm, điểm tương tác, đọc hình ảnh, tài liệu (PDF, Word, Excel, Code), dịch thuật và ghi nhớ kiến thức. Bạn cần hỏi gì cứ gõ: /hoi [câu hỏi], gửi file/ảnh kèm câu lệnh hoặc tag @${botName} nhé!`,
+        greetingMsg,
       );
-      console.log(`[member-assistant] ✅ Đã gửi lời chào cho ${displayName}`);
+      console.log(`[member-assistant] ✅ Đã gửi lời chào cho ${displayName} (isSuperAdmin=${isSuperAdmin})`);
       return;
     }
 
@@ -2976,6 +3232,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         }
       }
 
+      const isSuperAdmin = isUserAdmin(sender);
       const answer = await handleHistoryQA(question, displayName, threadId, {
         api,
         imageUrl: targetImageUrl,
@@ -2984,6 +3241,8 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         strictDocMode: isStrictDocQuery,
         directDocTitle,
         directDocContent,
+        sender,
+        isSuperAdmin,
       });
       const groupSettings = getGroupSettings(threadId);
       const botName = (groupSettings.botName || defaultBotName).trim();

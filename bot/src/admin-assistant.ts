@@ -60,7 +60,7 @@ function appendAdminHistory(userId: string, role: "user" | "model", text: string
 /**
  * Chuẩn hóa chuỗi tìm kiếm (xóa dấu tiếng Việt, viết thường).
  */
-function normalizeQuery(str: string): string {
+export function normalizeQuery(str: string): string {
   return str
     .toLowerCase()
     .normalize("NFD")
@@ -73,7 +73,7 @@ function normalizeQuery(str: string): string {
 /**
  * Tìm kiếm nhóm Zalo theo ID hoặc theo tên gần đúng / tên tắt.
  */
-function findGroup(query: string): { groupId: string; name: string; totalMembers: number; mode: string } | null {
+export function findGroup(query: string): { groupId: string; name: string; totalMembers: number; mode: string } | null {
   const db = getDb();
   const rawQ = query.trim();
   if (!rawQ) return null;
@@ -117,7 +117,7 @@ function findGroup(query: string): { groupId: string; name: string; totalMembers
 /**
  * Lấy danh sách tất cả các nhóm đang quản lý.
  */
-function getAllGroupsList(): { groupId: string; name: string; totalMembers: number; mode: string }[] {
+export function getAllGroupsList(): { groupId: string; name: string; totalMembers: number; mode: string }[] {
   try {
     const db = getDb();
     const rows = db.prepare("SELECT group_id as groupId, name, total_members as totalMembers, mode FROM bot_groups ORDER BY updated_at DESC").all() as any[];
