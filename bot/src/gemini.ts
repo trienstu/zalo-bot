@@ -282,6 +282,78 @@ export async function downloadFileContent(
   }
 }
 
+/** Bóc tách tên nhà xuất bản / tòa soạn báo chí từ uri và title để trích dẫn ngắn gọn (không in link URL) */
+function extractPublisherName(title?: string, uri?: string): string {
+  if (uri) {
+    try {
+      const hostname = new URL(uri).hostname.toLowerCase().replace(/^www\./, "");
+      const domainMap: Record<string, string> = {
+        "vnexpress.net": "VnExpress",
+        "cafef.vn": "CafeF",
+        "cafebiz.vn": "CafeBiz",
+        "vietstock.vn": "Vietstock",
+        "thanhnien.vn": "Thanh Niên",
+        "tuoitre.vn": "Tuổi Trẻ",
+        "vietnamnet.vn": "VietNamNet",
+        "dantri.com.vn": "Dân Trí",
+        "vtv.vn": "VTV",
+        "vov.vn": "VOV",
+        "vneconomy.vn": "VnEconomy",
+        "laodong.vn": "Lao Động",
+        "tienphong.vn": "Tiền Phong",
+        "plo.vn": "Pháp Luật TP.HCM",
+        "baochinhphu.vn": "Báo Chính Phủ",
+        "nhandan.vn": "Báo Nhân Dân",
+        "tinnhanhchungkhoan.vn": "Đầu Tư Chứng Khoán",
+        "baodautu.vn": "Báo Đầu Tư",
+        "znews.vn": "Znews",
+        "zingnews.vn": "Znews",
+        "genk.vn": "GenK",
+        "tinhte.vn": "Tinh tế",
+        "bloomberg.com": "Bloomberg",
+        "reuters.com": "Reuters",
+        "cnbc.com": "CNBC",
+        "wsj.com": "Wall Street Journal",
+        "ft.com": "Financial Times",
+        "forbes.com": "Forbes",
+        "investing.com": "Investing.com",
+        "marketwatch.com": "MarketWatch",
+        "finance.yahoo.com": "Yahoo Finance",
+        "wikipedia.org": "Wikipedia",
+      };
+
+      for (const [d, name] of Object.entries(domainMap)) {
+        if (hostname === d || hostname.endsWith("." + d)) {
+          return name;
+        }
+      }
+
+      const parts = hostname.split(".");
+      if (parts.length >= 2) {
+        const main = parts[parts.length - 2];
+        if (main && main.length > 2) {
+          return main.charAt(0).toUpperCase() + main.slice(1);
+        }
+      }
+    } catch {
+      // Bỏ qua lỗi parse URI
+    }
+  }
+
+  if (title) {
+    const parts = title.split(/\s*[-–—|]\s*/);
+    if (parts.length > 1) {
+      const lastPart = parts[parts.length - 1]?.trim();
+      if (lastPart && lastPart.length > 1 && lastPart.length < 30) {
+        return lastPart.replace(/^báo\s+/i, "");
+      }
+    }
+    return title.length > 25 ? title.slice(0, 25) + "..." : title;
+  }
+
+  return "";
+}
+
 export async function callGemini(
   system: string,
   user: string,
@@ -434,12 +506,12 @@ export async function callGemini(
         const sources = [
           ...new Set(
             candidate.groundingMetadata.groundingChunks
-              .map((c) => c.web?.title?.trim())
+              .map((c) => extractPublisherName(c.web?.title, c.web?.uri))
               .filter((t): t is string => typeof t === "string" && t.length > 0)
           ),
         ];
         if (sources.length > 0 && !content.toLowerCase().includes("nguồn") && !content.toLowerCase().includes("kiểm chứng")) {
-          content += `\n\n🌐 Nguồn Google Live Search: ${sources.join(", ")}.`;
+          content += `\n\n*(Nguồn: ${sources.join(", ")})*`;
         }
         if (candidate.groundingMetadata.webSearchQueries?.length) {
           console.log(`[gemini] 🌐 Google Search Grounding: queries=${JSON.stringify(candidate.groundingMetadata.webSearchQueries)}, sources=${sources.join(", ")}`);
