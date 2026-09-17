@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeQueryPlanIntent, type QueryPlanResult } from "./query-planner.js";
+import { normalizeQueryPlanIntent, extractCleanUserQuery, type QueryPlanResult } from "./query-planner.js";
 
 function factPlan(): QueryPlanResult {
   return {
@@ -100,3 +100,38 @@ test("câu y tế mô tả triệu chứng chung không bị ép fact_check", ()
   assert.equal(plan.needsSearch, false);
   assert.equal(plan.intent, "knowledge");
 });
+
+test("extractCleanUserQuery bóc tách sạch sẽ và bảo toàn nguyên vẹn 100% tên thực thể", () => {
+  const cases = [
+    {
+      input: "có lịch thi đấu fifa asean cup 2026 chưa sen chúa mộc miên",
+      expected: "lịch thi đấu fifa asean cup 2026",
+    },
+    {
+      input: "check giá vàng sjc hôm nay bao nhiêu vậy bot",
+      expected: "giá vàng sjc hôm nay bao nhiêu",
+    },
+    {
+      input: "xem tỷ số trận real madrid vs barca vừa qua với",
+      expected: "tỷ số trận real madrid vs barca",
+    },
+  ];
+
+  for (const c of cases) {
+    const res = extractCleanUserQuery(c.input);
+    assert.equal(res, c.expected);
+  }
+});
+
+test("preserveCoreUserEntities khôi phục thực thể viết hoa nếu planner AI vô tình làm mất", () => {
+  const rawPlan: QueryPlanResult = {
+    needsSearch: true,
+    intent: "realtime_news",
+    queries: ["lịch thi đấu giải vô địch đông nam á 2026"],
+    summaryIntent: "test",
+  };
+
+  const plan = normalizeQueryPlanIntent(rawPlan, "có lịch thi đấu FIFA ASEAN Cup 2026 chưa");
+  assert.ok(plan.queries.some((q) => /FIFA/i.test(q) && /ASEAN/i.test(q)));
+});
+

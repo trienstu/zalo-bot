@@ -299,3 +299,32 @@ test("context thiếu bằng chứng buộc câu trả lời từ chối thay v�
   assert.doesNotMatch(answer, /là X/);
   assert.match(answer, /chưa đủ bằng chứng/i);
 });
+
+test("rankEvidence loại bỏ hoàn toàn các trang wap tỷ số và cá cược rác", () => {
+  const junkItems = [
+    evidence({
+      title: "Lịch thi đấu bóng đá hôm nay - Kèo nhà cái trực tiếp",
+      url: "https://mebongda.net/lich-thi-dau-fifa-asean-cup-2026",
+    }),
+    evidence({
+      title: "Kết quả nhanh bóng đá wap 7m",
+      url: "https://ketquanhanh.net/bong-da",
+    }),
+    evidence({
+      title: "Tỷ lệ cược bóng đá wap info",
+      url: "https://bongdawap.info/ty-le-keo",
+    }),
+    evidence({
+      title: "Lịch thi đấu FIFA ASEAN Cup 2026",
+      url: "https://tuoitre.vn/lich-thi-dau-fifa-asean-cup-2026",
+      sourceType: "news",
+      sourceName: "Tuổi Trẻ",
+      publishedAt: Date.UTC(2026, 8, 15),
+    }),
+  ];
+
+  const ranked = rankEvidence(junkItems, "lịch thi đấu FIFA ASEAN Cup 2026", "realtime_news", NOW);
+  assert.equal(ranked.length, 1);
+  assert.equal(ranked[0].url, "https://tuoitre.vn/lich-thi-dau-fifa-asean-cup-2026");
+});
+

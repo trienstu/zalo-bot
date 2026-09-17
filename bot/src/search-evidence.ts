@@ -221,7 +221,7 @@ export function rankEvidence(
 ): Array<SearchEvidence & Required<Pick<SearchEvidence, "relevanceScore" | "authorityScore" | "totalScore">>> {
   const deduped = new Map<string, SearchEvidence>();
   const ordered = items
-    .filter((item) => item && item.title?.trim() && item.url?.trim())
+    .filter((item) => item && item.title?.trim() && item.url?.trim() && !isJunkOrBettingDomain(item.url) && !isJunkOrBettingDomain(item.title))
     .map((item) => ({ ...item, title: item.title.trim(), snippet: (item.snippet || item.title).trim(), url: item.url.trim() }))
     .sort((a, b) => `${normalizeSearchText(a.title)}\u0000${a.url}`.localeCompare(`${normalizeSearchText(b.title)}\u0000${b.url}`, "en"));
 
@@ -308,7 +308,7 @@ export function extractEvidenceUrls(context: string): string[] {
   return [...new Set(urls)];
 }
 
-function isJunkOrBettingDomain(domainOrTitle: string): boolean {
+export function isJunkOrBettingDomain(domainOrTitle: string): boolean {
   if (!domainOrTitle) return true;
   const lower = domainOrTitle.toLowerCase().trim();
   const junkPatterns = [

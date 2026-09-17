@@ -1,4 +1,4 @@
-import { rankEvidence, type EvidenceSourceType, type SearchIntent } from "../search-evidence.js";
+import { rankEvidence, isJunkOrBettingDomain, type EvidenceSourceType, type SearchIntent } from "../search-evidence.js";
 
 /**
  * Vertical Tools for Zalo Bot Agent Loop.
@@ -35,6 +35,7 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
   const seenTitles = new Set<string>();
 
   const addResult = (it: SearchResultItem) => {
+    if (!it || !it.title || isJunkOrBettingDomain(it.url || "") || isJunkOrBettingDomain(it.title || "")) return;
     const normTitle = it.title.toLowerCase().replace(/\s+/g, " ").slice(0, 40);
     if (!seenTitles.has(normTitle) && (!it.url || !seenUrls.has(it.url))) {
       seenTitles.add(normTitle);

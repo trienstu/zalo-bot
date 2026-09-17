@@ -16,17 +16,36 @@ export interface QueryPlanResult {
 }
 
 /**
- * Kế hoạch dự phòng an toàn khi AI Planner gặp sự cố mạng hoặc timeout (không dùng regex khoá cứng)
+ * Trích xuất truy vấn gốc sạch sẽ trực tiếp từ câu hỏi người dùng (BẤT KHẢ XÂM PHẠM).
+ * Loại bỏ từ rác xưng hô, mệnh lệnh để giữ nguyên 100% tên thực thể (Entity).
  */
-function fallbackSafePlanner(question: string, quoteText = ""): QueryPlanResult {
-  let cleanQ = question
+export function extractCleanUserQuery(question: string, quoteText = ""): string {
+  let clean = question
     .replace(/@\S+/g, "")
-    .replace(/\b(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot)\b/gi, "")
-    .replace(/\b(?:sắp tới đó|sắp tới|vừa qua|cho a|cho anh|cho em|giúp anh|giúp a|giúp em|với anh|với a|với em|nhé|nha|ạ|với|đó)\b/gi, "")
+    .replace(/(?<=^|[^\p{L}\p{N}])(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot)(?=[^\p{L}\p{N}]|$)/giu, "")
+    // Xóa tiền tố mệnh lệnh/tra cứu thường gặp ở đầu câu
+    .replace(/^(?:check|kiểm tra|kiem tra|xem|tra cứu|tra cuu|hỏi|hoi)\s+/iu, "")
+    // Xóa từ xưng hô, đệm, trợ từ câu hỏi đuôi
+    .replace(/(?<=^|[^\p{L}\p{N}])(?:có|chưa|rồi|khi nào|bao giờ|ở đâu|sắp tới đó|sắp tới|vừa qua|cho a|cho anh|cho em|giúp anh|giúp a|giúp em|với anh|với a|với em|nhé|nha|ạ|với|đó|vậy|thế|nhỉ|hả|hử|sao)(?=[^\p{L}\p{N}]|$)/giu, "")
     .replace(/[\/?.!,]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
+  if (clean.length < 3 && quoteText) {
+    clean = quoteText
+      .replace(/@\S+/g, "")
+      .replace(/[\/?.!,]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  return clean.slice(0, 100);
+}
+
+/**
+ * Kế hoạch dự phòng an toàn khi AI Planner gặp sự cố mạng hoặc timeout (không dùng regex khoá cứng)
+ */
+function fallbackSafePlanner(question: string, quoteText = ""): QueryPlanResult {
+  const cleanQ = extractCleanUserQuery(question, quoteText);
   const query = cleanQ.length >= 4 ? cleanQ : (quoteText || question).slice(0, 80);
   const currentYear = new Date().getFullYear();
   const queries: string[] = [query.slice(0, 80)];
@@ -262,12 +281,20 @@ export async function planSearchQueries(params: {
 
     if (raw && typeof raw === "object") {
       const needsSearch = Boolean(raw.needsSearch);
-      const queries = Array.isArray(raw.queries)
+      const rawClean = extractCleanUserQuery(question, quoteText);
+      const llmQueries = Array.isArray(raw.queries)
         ? raw.queries.map((q: any) => String(q).trim()).filter((q: string) => q.length > 2).slice(0, 3)
         : [];
       const intent = ["fact_check", "realtime_news", "project_qa", "knowledge", "chat"].includes(raw.intent)
         ? raw.intent
         : "chat";
+
+      // NGUYÊN TẮC BẤT KHẢ XÂM PHẠM TRUY VẤN GỐC (RAW QUERY FIRST):
+      // Khi cần tìm kiếm, Query #1 LUÔN LUÔN là câu hỏi gốc sạch của người dùng (bảo tồn 100% thực thể, giải đấu, sản phẩm, nhân vật).
+      // Các truy vấn của AI Planner sẽ đóng vai trò mở rộng (Query #2, #3).
+      const queries = (needsSearch && rawClean && rawClean.length >= 3)
+        ? uniqQueries([rawClean, ...llmQueries])
+        : llmQueries;
 
       return normalizeQueryPlanIntent({
         needsSearch: needsSearch || queries.length > 0,

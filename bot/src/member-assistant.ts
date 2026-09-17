@@ -1862,7 +1862,7 @@ async function handleHistoryQA(
 
         // Luôn quét RSS/tin tức thời gian thực để làm giàu dữ liệu thực tế và làm đệm an toàn vững chắc
         const searchResults = await Promise.all(
-          plan.queries.slice(0, 2).map((q) => searchRealtimeNews(q, {
+          plan.queries.slice(0, 3).map((q) => searchRealtimeNews(q, {
             intent: plan.intent,
             requireEvidence: evidenceRequired,
           }).catch(() => ""))
