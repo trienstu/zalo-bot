@@ -567,12 +567,12 @@ export async function GET(request: Request) {
         }
       }
 
-      // 3. Trích xuất các tin nhắn chứa file / link từ group_messages với thuật toán đa link
+      // 3. Trích xuất các tin nhắn chứa file / link từ group_messages và gom thành 1 bài viết cho mỗi tin nhắn
       const linkMessages = db
         .prepare(
           `SELECT message_id, display_name, text, ts, thread_id
            FROM group_messages
-           WHERE (text LIKE '%http://%' OR text LIKE '%https://%' OR text LIKE '%.pdf%' OR text LIKE '%.zip%' OR text LIKE '%.rar%' OR text LIKE '%.docx%' OR text LIKE '%.apk%')
+           WHERE (text LIKE '%http://%' OR text LIKE '%https://%' OR text LIKE '%.pdf%' OR text LIKE '%.zip%' OR text LIKE '%.rar%' OR text LIKE '%.docx%' OR text LIKE '%.apk%' OR text LIKE '%github.com%')
              AND deleted_at IS NULL
              AND is_self = 0
              AND LOWER(display_name) NOT LIKE '%sen chúa%'
@@ -581,19 +581,27 @@ export async function GET(request: Request) {
         )
         .all() as any[];
 
-      const urlRegex = /(https?:\/\/[^\s]+)/gi;
+      const urlRegex = /(https?:\/\/[^\s]+|(?:^|\s)github\.com\/[^\s]+)/gi;
 
       for (const msg of linkMessages) {
         if (!msg.text || isSpamOrBotMessage(msg.text)) continue;
 
-        const matches = msg.text.match(urlRegex);
-        if (!matches || matches.length === 0) continue;
+        const rawMatches = msg.text.match(urlRegex);
+        if (!rawMatches || rawMatches.length === 0) continue;
 
         // Lọc các URL hợp lệ (loại bỏ báo chí / tin tức)
         const cleanUrls: { url: string; isFile: boolean }[] = [];
-        for (const u of matches) {
-          const clean = u.replace(/[.,;!?)]+$/, "");
+        const seenMsgUrls = new Set<string>();
+
+        for (const u of rawMatches) {
+          let clean = u.trim().replace(/[.,;!?)]+$/, "");
+          if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+            clean = "https://" + clean;
+          }
           if (isNewsUrl(clean)) continue;
+          if (seenMsgUrls.has(clean)) continue;
+          seenMsgUrls.add(clean);
+
           const isFile = isFileOrDriveUrl(clean);
           if (isFile) uniqueFiles.add(clean);
           uniqueLinks.add(clean);
@@ -601,6 +609,12 @@ export async function GET(request: Request) {
         }
 
         if (cleanUrls.length === 0) continue;
+
+        // Tránh trùng lặp tin nhắn nếu tất cả các link của tin nhắn này đã tồn tại ở bài viết trước
+        const allAlreadyExist = cleanUrls.every((cu) =>
+          items.some((it) => it.links.some((l) => l.url === cu.url))
+        );
+        if (allAlreadyExist) continue;
 
         const authorName = msg.display_name || "Thành viên";
         contributors.add(authorName);
@@ -610,104 +624,143 @@ export async function GET(request: Request) {
         const msgGroupId = msg.thread_id || "";
         const msgGroupName = groupNameMap.get(msgGroupId) || (msgGroupId ? `Nhóm ${msgGroupId}` : "Nhóm Zalo");
 
-        // Tách các dòng trong tin nhắn để phân tích ngữ cảnh từng link
+        // Tách các dòng văn bản để phân tích
         const textLines = msg.text
           .split("\n")
           .map((l: string) => l.trim())
           .filter((l: string) => l.length > 0 && !isSpamOrBotMessage(l));
 
-        for (let linkIdx = 0; linkIdx < cleanUrls.length; linkIdx++) {
-          const currentLink = cleanUrls[linkIdx];
+        // Gắn nhãn (label) thông minh cho từng link
+        const msgLinks: { url: string; label?: string; isFile?: boolean }[] = [];
+        for (const cu of cleanUrls) {
+          const rawDomain = cu.url.replace(/^https?:\/\//, "");
+          const lineIdx = textLines.findIndex((line: string) => line.includes(cu.url) || line.includes(rawDomain));
+          let label = "";
 
-          // Tránh trùng lặp link đã có trong danh sách
-          if (items.some((it) => it.links.some((l) => l.url === currentLink.url))) {
-            continue;
-          }
-
-          const lineIdxWithUrl = textLines.findIndex((line: string) => line.includes(currentLink.url));
-
-          let titleCandidate = "";
-          let specificDescriptionLines: string[] = [];
-
-          if (lineIdxWithUrl !== -1) {
-            const currentLine = textLines[lineIdxWithUrl];
+          if (lineIdx !== -1) {
+            const currentLine = textLines[lineIdx];
             const inlineText = currentLine
-              .replace(urlRegex, "")
+              .replace(/(https?:\/\/[^\s]+|(?:^|\s)github\.com\/[^\s]+)/gi, "")
+              .replace(/\s*(?:->|=>|:)\s*$/, "")
               .replace(/^[-—•*0-9.)\s]+/, "")
               .trim();
 
-            if (inlineText.length >= 4 && !isRandomIdOrHash(inlineText)) {
-              titleCandidate = inlineText;
-            } else if (lineIdxWithUrl > 0) {
-              const prevLine = textLines[lineIdxWithUrl - 1];
+            if (inlineText.length >= 2 && !isRandomIdOrHash(inlineText)) {
+              label = inlineText;
+            } else if (lineIdx > 0) {
+              const prevLine = textLines[lineIdx - 1];
               if (!urlRegex.test(prevLine)) {
                 const prevText = prevLine.replace(/^[-—•*0-9.)\s]+/, "").trim();
-                if (prevText.length >= 4 && !isRandomIdOrHash(prevText)) {
-                  titleCandidate = prevText;
+                if (prevText.length >= 2 && !isRandomIdOrHash(prevText)) {
+                  label = prevText;
                 }
               }
             }
-
-            // Thu thập các dòng mô tả tiếp theo
-            const nextUrl = cleanUrls[linkIdx + 1]?.url;
-            for (let k = lineIdxWithUrl + 1; k < textLines.length; k++) {
-              const nextL = textLines[k];
-              if (nextUrl && nextL.includes(nextUrl)) break;
-              if (!urlRegex.test(nextL) && nextL.length >= 3 && !isRandomIdOrHash(nextL)) {
-                specificDescriptionLines.push(nextL);
-              }
-            }
           }
 
-          const fallbackTitle = currentLink.isFile
-            ? `Tài liệu chia sẻ từ ${authorName}`
-            : `Tài nguyên từ ${authorName}`;
-
-          const displayTitle = cleanTitle(titleCandidate, fallbackTitle, currentLink.url);
-
-          // Phát hiện danh mục dựa trên ngữ cảnh
-          const contextText = `${displayTitle} ${specificDescriptionLines.join(" ")} ${textLines.join(" ")}`;
-          const { category: detectedCat, label: detectedLabel } = detectCategoryFromContext(contextText, currentLink.isFile);
-
-          // Xây dựng Key Points (ĐÃ BỎ HOÀN TOÀN dòng "Chia sẻ bởi Trungkd (GROUP...)")
-          const keyPoints: string[] = [];
-          if (specificDescriptionLines.length > 0) {
-            for (const dLine of specificDescriptionLines) {
-              keyPoints.push(dLine);
-            }
-          } else if (titleCandidate && titleCandidate !== displayTitle) {
-            keyPoints.push(titleCandidate);
-          } else {
-            // Mô tả chuẩn theo từng loại dịch vụ
-            if (currentLink.url.includes("drive.google.com")) {
-              keyPoints.push("Thư mục tài liệu / file chia sẻ trên Google Drive.");
-            } else if (currentLink.url.includes("canva.com")) {
-              keyPoints.push("Mẫu thiết kế template trực tuyến trên Canva.");
-            } else if (currentLink.url.includes("github.com")) {
-              keyPoints.push("Mã nguồn dự án trên GitHub.");
-            } else {
-              keyPoints.push(displayTitle);
-            }
-          }
-
-          const titlePrefix = currentLink.isFile ? "📂 " : "";
-
-          items.push({
-            id: `msg_${msg.message_id || msg.ts}_${linkIdx}`,
-            title: titlePrefix + displayTitle,
-            category: detectedCat,
-            categoryLabel: detectedLabel,
-            summary: keyPoints.slice(0, 2).join(". ") || "Tài nguyên & liên kết chia sẻ từ cộng đồng.",
-            keyPoints,
-            links: [currentLink],
-            author: authorName,
-            date: dateStr,
-            timestamp: msg.ts,
-            source: "message",
-            groupId: msgGroupId,
-            groupName: msgGroupName,
+          msgLinks.push({
+            url: cu.url,
+            label: label || undefined,
+            isFile: cu.isFile,
           });
         }
+
+        // Xác định Tiêu đề (Title) chung cho bài viết
+        let titleCandidate = "";
+        if (msgLinks.length > 1) {
+          // Trường hợp tin nhắn tổng hợp nhiều link: Tìm dòng chủ đề đầu tiên
+          const headerLine = textLines.find(
+            (l: string) =>
+              !urlRegex.test(l) &&
+              l.length >= 4 &&
+              !/^[0-9]+[.)]/.test(l) &&
+              !isRandomIdOrHash(l)
+          );
+          if (headerLine) {
+            titleCandidate = headerLine.replace(/^[-—•*#\s]+/, "").trim();
+          }
+        } else {
+          // Trường hợp 1 link duy nhất
+          if (msgLinks[0].label) {
+            titleCandidate = msgLinks[0].label;
+          }
+        }
+
+        const fallbackTitle = msgLinks.length > 1
+          ? (msgLinks.every((l) => l.isFile)
+              ? `Bộ sưu tập ${msgLinks.length} tài liệu từ ${authorName}`
+              : `Tổng hợp ${msgLinks.length} công cụ & tài nguyên từ ${authorName}`)
+          : (msgLinks[0].isFile
+              ? `Tài liệu chia sẻ từ ${authorName}`
+              : `Tài nguyên từ ${authorName}`);
+
+        const displayTitle = cleanTitle(titleCandidate, fallbackTitle, msgLinks[0]?.url);
+
+        // Phát hiện danh mục (Category)
+        const contextText = `${displayTitle} ${msg.text}`;
+        const hasFile = msgLinks.some((l) => l.isFile);
+        const { category: detectedCat, label: detectedLabel } = detectCategoryFromContext(contextText, hasFile);
+
+        // Xây dựng Key Points: Trích xuất các phân mục hoặc ghi chú của từng công cụ
+        const keyPoints: string[] = [];
+        for (const line of textLines) {
+          const hasUrlInLine = urlRegex.test(line);
+          if (!hasUrlInLine) {
+            const cleanText = line.replace(/^[-—•*#\s]+/, "").trim();
+            if (cleanText.length >= 3 && !isRandomIdOrHash(cleanText) && cleanText !== displayTitle) {
+              keyPoints.push(cleanText);
+            }
+          } else {
+            const lineText = line
+              .replace(/(https?:\/\/[^\s]+|(?:^|\s)github\.com\/[^\s]+)/gi, "")
+              .replace(/\s*(?:->|=>|:)\s*$/, "")
+              .replace(/^[-—•*\s]+/, "")
+              .trim();
+            if (lineText.length >= 3 && !isRandomIdOrHash(lineText) && lineText !== displayTitle) {
+              keyPoints.push(lineText);
+            }
+          }
+        }
+
+        // Bổ sung các nhãn link vào keyPoints nếu keyPoints còn ít
+        if (keyPoints.length === 0) {
+          for (const l of msgLinks) {
+            if (l.label) keyPoints.push(l.label);
+          }
+        }
+        if (keyPoints.length === 0) {
+          if (msgLinks.length > 1) {
+            keyPoints.push(`Tổng hợp gồm ${msgLinks.length} liên kết & tài nguyên hữu ích.`);
+          } else if (msgLinks[0].isFile) {
+            keyPoints.push("Tài liệu / file đính kèm được chia sẻ.");
+          } else {
+            keyPoints.push(displayTitle);
+          }
+        }
+
+        const summary = msgLinks.length > 1
+          ? `Tổng hợp ${msgLinks.length} tài nguyên & công cụ do ${authorName} chia sẻ.`
+          : (keyPoints.slice(0, 2).join(". ") || "Tài nguyên & liên kết chia sẻ từ cộng đồng.");
+
+        const titlePrefix = msgLinks.every((l) => l.isFile)
+          ? "📂 "
+          : (msgLinks.length > 1 ? "📚 " : "");
+
+        items.push({
+          id: `msg_${msg.message_id || msg.ts}`,
+          title: titlePrefix + displayTitle,
+          category: detectedCat,
+          categoryLabel: detectedLabel,
+          summary,
+          keyPoints: keyPoints.slice(0, 30),
+          links: msgLinks,
+          author: authorName,
+          date: dateStr,
+          timestamp: msg.ts,
+          source: "message",
+          groupId: msgGroupId,
+          groupName: msgGroupName,
+        });
       }
 
       db.close();
@@ -786,7 +839,7 @@ export async function GET(request: Request) {
       filtered = filtered.filter(
         (it) =>
           it.author.toLowerCase().includes(query) ||
-          it.links.some((l) => l.url.toLowerCase().includes(query)) ||
+          it.links.some((l) => l.url.toLowerCase().includes(query) || (l.label && l.label.toLowerCase().includes(query))) ||
           it.title.toLowerCase().includes(query) ||
           it.summary.toLowerCase().includes(query) ||
           it.keyPoints.some((kp) => kp.toLowerCase().includes(query)) ||

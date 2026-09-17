@@ -233,9 +233,13 @@ export function HubClient() {
   }
 
   function handleCopy(item: KnowledgeItem) {
-    const content = `${item.title}\n\n${item.keyPoints.map((kp) => `- ${kp}`).join("\n")}${
-      item.links.length > 0 ? `\n\nLink đính kèm:\n${item.links.map((l) => l.url).join("\n")}` : ""
-    }\n\nNguồn: ${item.groupName || "Cộng đồng Zalo"} (${item.date})`;
+    const linksText =
+      item.links.length > 0
+        ? `\n\nLink & Tài nguyên đính kèm:\n${item.links
+            .map((l) => (l.label ? `• ${l.label}: ${l.url}` : `• ${l.url}`))
+            .join("\n")}`
+        : "";
+    const content = `${item.title}\n\n${item.keyPoints.map((kp) => `- ${kp}`).join("\n")}${linksText}\n\nNguồn: ${item.groupName || "Cộng đồng Zalo"} (${item.date})`;
     navigator.clipboard.writeText(content);
     setCopiedId(item.id);
     setTimeout(() => setCopiedId(null), 2000);
@@ -564,20 +568,27 @@ export function HubClient() {
                   {/* Links & Files attached */}
                   {item.links.length > 0 && (
                     <div className="mt-4 space-y-2 rounded-lg bg-slate-950/60 p-3 border border-slate-800 min-w-0">
-                      <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1.5">
-                        {item.links.some((l) => l.isFile) ? (
-                          <>
-                            <FolderDown className="h-3.5 w-3.5 text-amber-400 shrink-0" />
-                            <span className="text-amber-300">File & Tài liệu đính kèm:</span>
-                          </>
-                        ) : (
-                          <>
-                            <LinkIcon className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                            <span>Tài nguyên & Link:</span>
-                          </>
+                      <div className="flex items-center justify-between text-[11px] font-semibold text-emerald-400">
+                        <span className="flex items-center gap-1.5">
+                          {item.links.some((l) => l.isFile) ? (
+                            <>
+                              <FolderDown className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                              <span className="text-amber-300">File & Tài liệu:</span>
+                            </>
+                          ) : (
+                            <>
+                              <LinkIcon className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                              <span>Tài nguyên ({item.links.length}):</span>
+                            </>
+                          )}
+                        </span>
+                        {item.links.length > 2 && (
+                          <span className="text-[10px] text-cyan-400 font-normal">
+                            +{item.links.length - 2} link khác
+                          </span>
                         )}
-                      </span>
-                      {item.links.map((l, idx) => (
+                      </div>
+                      {item.links.slice(0, 2).map((l, idx) => (
                         <a
                           key={idx}
                           href={l.url}
@@ -595,13 +606,25 @@ export function HubClient() {
                             ) : (
                               <ExternalLink className="h-3 w-3 shrink-0 text-cyan-400" />
                             )}
-                            <span className="truncate break-all min-w-0">{l.url}</span>
+                            <span className="truncate break-all min-w-0 font-medium">
+                              {l.label ? l.label : l.url}
+                            </span>
                           </div>
                           <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider opacity-80 ml-1">
-                            {l.isFile ? "Tải File" : "Mở"}
+                            {l.isFile ? "Tải" : "Mở"}
                           </span>
                         </a>
                       ))}
+
+                      {item.links.length > 2 && (
+                        <button
+                          onClick={() => setSelectedItem(item)}
+                          className="w-full mt-1 py-1.5 px-2 rounded-md bg-cyan-950/50 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-900/60 hover:text-cyan-200 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
+                        >
+                          <LinkIcon className="h-3 w-3 text-cyan-400 shrink-0" />
+                          <span>+ Xem toàn bộ {item.links.length} liên kết & tài nguyên</span>
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -783,20 +806,22 @@ export function HubClient() {
             {/* Link & File đính kèm */}
             {selectedItem.links.length > 0 && (
               <div className="space-y-2 pt-2 min-w-0">
-                <h4 className="font-semibold text-emerald-400 text-xs uppercase tracking-wider flex items-center gap-1.5">
-                  {selectedItem.links.some((l) => l.isFile) ? (
-                    <>
-                      <FolderDown className="h-4 w-4 text-amber-400 shrink-0" />
-                      <span className="text-amber-300">File & Tài liệu đính kèm:</span>
-                    </>
-                  ) : (
-                    <>
-                      <LinkIcon className="h-4 w-4 text-emerald-400 shrink-0" />
-                      <span>Đường link & Tài nguyên:</span>
-                    </>
-                  )}
-                </h4>
-                <div className="space-y-2 min-w-0">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-emerald-400 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                    {selectedItem.links.some((l) => l.isFile) ? (
+                      <>
+                        <FolderDown className="h-4 w-4 text-amber-400 shrink-0" />
+                        <span className="text-amber-300">File & Tài liệu ({selectedItem.links.length}):</span>
+                      </>
+                    ) : (
+                      <>
+                        <LinkIcon className="h-4 w-4 text-emerald-400 shrink-0" />
+                        <span>Danh sách Tài nguyên & Liên kết ({selectedItem.links.length}):</span>
+                      </>
+                    )}
+                  </h4>
+                </div>
+                <div className="space-y-2 min-w-0 max-h-72 overflow-y-auto pr-1">
                   {selectedItem.links.map((l, idx) => (
                     <a
                       key={idx}
@@ -806,15 +831,24 @@ export function HubClient() {
                       className={`flex items-center justify-between rounded-lg p-3 text-xs transition-colors min-w-0 ${
                         l.isFile
                           ? "border border-amber-500/30 bg-amber-950/20 text-amber-300 hover:bg-amber-950/40"
-                          : "border border-emerald-500/20 bg-emerald-950/20 text-emerald-300 hover:bg-emerald-950/40"
+                          : "border border-cyan-500/20 bg-slate-900/80 text-cyan-300 hover:bg-slate-800"
                       }`}
                     >
-                      <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
-                        {l.isFile ? <Download className="h-4 w-4 text-amber-400 shrink-0" /> : <ExternalLink className="h-4 w-4 shrink-0" />}
-                        <span className="truncate break-all min-w-0 flex-1">{l.url}</span>
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1 overflow-hidden">
+                        {l.isFile ? (
+                          <Download className="h-4 w-4 text-amber-400 shrink-0" />
+                        ) : (
+                          <ExternalLink className="h-4 w-4 text-cyan-400 shrink-0" />
+                        )}
+                        <div className="flex flex-col min-w-0 flex-1">
+                          {l.label && (
+                            <span className="font-semibold text-slate-100 truncate text-[13px]">{l.label}</span>
+                          )}
+                          <span className="truncate break-all min-w-0 text-[11px] text-slate-400 opacity-80">{l.url}</span>
+                        </div>
                       </div>
-                      <span className="text-[11px] font-bold uppercase shrink-0 px-2 py-0.5 rounded bg-slate-900 border border-slate-700 ml-1">
-                        {l.isFile ? "Tải File / Mở Drive" : "Mở Link"}
+                      <span className="text-[11px] font-bold uppercase shrink-0 px-2.5 py-1 rounded bg-slate-950 border border-slate-700 ml-2">
+                        {l.isFile ? "Tải File" : "Mở Link"}
                       </span>
                     </a>
                   ))}
