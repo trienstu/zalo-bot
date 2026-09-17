@@ -1,4 +1,5 @@
 import { Metadata } from "next";
+import { Suspense } from "react";
 import { HubClient } from "./hub-client";
 
 export const metadata: Metadata = {
@@ -10,7 +11,9 @@ export const metadata: Metadata = {
 export default function HubPage() {
   return (
     <div className="container mx-auto px-4 py-6 max-w-7xl">
-      <HubClient />
+      <Suspense fallback={<div className="min-h-[50vh] flex items-center justify-center text-slate-400">Đang tải Kho Kiến Thức...</div>}>
+        <HubClient />
+      </Suspense>
     </div>
   );
 }

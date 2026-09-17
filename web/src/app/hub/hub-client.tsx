@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import {
   Sparkles,
   Search,
@@ -19,9 +20,15 @@ import {
   Calendar,
   FolderDown,
   Download,
-  FileText,
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  Lock,
+  ShieldCheck,
+  Layers2,
+  Globe,
+  SlidersHorizontal,
 } from "lucide-react";
-import { Badge } from "@/components/ui";
 
 interface KnowledgeItem {
   id: string;
@@ -35,6 +42,22 @@ interface KnowledgeItem {
   date: string;
   timestamp: number;
   source: "summary" | "message";
+  groupId?: string;
+  groupName?: string;
+}
+
+interface GroupInfo {
+  id: string;
+  name: string;
+  totalMembers: number;
+  token: string;
+}
+
+interface PaginationMeta {
+  page: number;
+  limit: number;
+  totalItems: number;
+  totalPages: number;
 }
 
 const CATEGORIES = [
@@ -45,40 +68,148 @@ const CATEGORIES = [
   { id: "links", label: "🔗 Link & Công cụ", icon: LinkIcon },
 ];
 
+const SORT_OPTIONS = [
+  { id: "newest", label: "🕒 Mới nhất" },
+  { id: "oldest", label: "⏳ Cũ nhất" },
+  { id: "author_asc", label: "👤 Người chia sẻ (A → Z)" },
+  { id: "author_desc", label: "👤 Người chia sẻ (Z → A)" },
+  { id: "title_asc", label: "🔤 Tên tài nguyên (A → Z)" },
+];
+
 export function HubClient() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  // Đọc params từ URL ban đầu
+  const initialGroupId = searchParams.get("groupId") || searchParams.get("group") || "all";
+  const urlToken = searchParams.get("token") || "";
+
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
+  const [selectedSort, setSelectedSort] = useState("newest");
+  const [selectedGroupId, setSelectedGroupId] = useState(initialGroupId);
+  const [groups, setGroups] = useState<GroupInfo[]>([]);
+  const [isLockedGroup, setIsLockedGroup] = useState(false);
+  const [currentGroup, setCurrentGroup] = useState<GroupInfo | null>(null);
+
+  // Phân trang
+  const [pagination, setPagination] = useState<PaginationMeta>({
+    page: 1,
+    limit: 18,
+    totalItems: 0,
+    totalPages: 1,
+  });
+
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copiedGroupLink, setCopiedGroupLink] = useState(false);
   const [stats, setStats] = useState({ totalItems: 0, totalLinks: 0, totalFiles: 0, totalContributors: 0 });
   const [savedItemIds, setSavedItemIds] = useState<string[]>([]);
   const [selectedItem, setSelectedItem] = useState<KnowledgeItem | null>(null);
 
+  // Load saved bookmarks from localStorage
   useEffect(() => {
-    async function loadData() {
-      setLoading(true);
-      try {
-        const res = await fetch("/api/hub");
-        if (res.ok) {
-          const data = await res.json();
-          setItems(data.items || []);
-          if (data.stats) setStats(data.stats);
-        }
-      } catch (e) {
-        console.error("Lỗi tải kho kiến thức:", e);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadData();
-
-    // Load saved bookmarks from localStorage
     try {
       const saved = localStorage.getItem("saved_hub_items");
       if (saved) setSavedItemIds(JSON.parse(saved));
     } catch {}
   }, []);
+
+  // Debounce search input (350ms)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(searchQuery.trim());
+      setPagination((prev) => ({ ...prev, page: 1 }));
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Hàm tải dữ liệu từ API
+  const fetchData = useCallback(
+    async (pageToLoad: number, limitToLoad: number) => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams();
+        params.set("page", String(pageToLoad));
+        params.set("limit", String(limitToLoad));
+        params.set("category", selectedCategory);
+        params.set("sort", selectedSort);
+
+        if (selectedGroupId && selectedGroupId !== "all") {
+          params.set("groupId", selectedGroupId);
+        }
+        if (urlToken) {
+          params.set("token", urlToken);
+        }
+        if (debouncedQuery) {
+          params.set("q", debouncedQuery);
+        }
+
+        const res = await fetch(`/api/hub?${params.toString()}`);
+        if (res.ok) {
+          const data = await res.json();
+          setItems(data.items || []);
+          if (data.pagination) setPagination(data.pagination);
+          if (data.stats) setStats(data.stats);
+          if (data.groups) setGroups(data.groups);
+          if (typeof data.isLockedGroup === "boolean") {
+            setIsLockedGroup(data.isLockedGroup);
+          }
+          if (data.currentGroup) {
+            setCurrentGroup(data.currentGroup);
+          }
+        }
+      } catch (e) {
+        console.error("Lỗi tải kho tài nguyên:", e);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [selectedCategory, selectedSort, selectedGroupId, urlToken, debouncedQuery]
+  );
+
+  // Gọi API mỗi khi filter/sort/group thay đổi
+  useEffect(() => {
+    fetchData(pagination.page, pagination.limit);
+  }, [fetchData, pagination.page, pagination.limit]);
+
+  // Xử lý đổi trang
+  function handlePageChange(newPage: number) {
+    if (newPage < 1 || newPage > pagination.totalPages || newPage === pagination.page) return;
+    setPagination((prev) => ({ ...prev, page: newPage }));
+    window.scrollTo({ top: 380, behavior: "smooth" });
+  }
+
+  // Xử lý đổi số item mỗi trang
+  function handleLimitChange(newLimit: number) {
+    setPagination((prev) => ({ ...prev, limit: newLimit, page: 1 }));
+  }
+
+  // Xử lý đổi nhóm
+  function handleGroupChange(newGroupId: string) {
+    setSelectedGroupId(newGroupId);
+    setPagination((prev) => ({ ...prev, page: 1 }));
+  }
+
+  // Xử lý đổi sắp xếp
+  function handleSortChange(newSort: string) {
+    setSelectedSort(newSort);
+    setPagination((prev) => ({ ...prev, page: 1 }));
+  }
+
+  // Sao chép link chia sẻ bảo mật cho nhóm
+  function handleCopyGroupShareLink() {
+    if (!selectedGroupId || selectedGroupId === "all") return;
+    const currentG = groups.find((g) => g.id === selectedGroupId) || currentGroup;
+    if (!currentG || !currentG.token) return;
+
+    const shareUrl = `${window.location.origin}/hub?groupId=${currentG.id}&token=${currentG.token}`;
+    navigator.clipboard.writeText(shareUrl);
+    setCopiedGroupLink(true);
+    setTimeout(() => setCopiedGroupLink(false), 2500);
+  }
 
   function toggleSave(id: string) {
     const updated = savedItemIds.includes(id)
@@ -93,46 +224,67 @@ export function HubClient() {
   function handleCopy(item: KnowledgeItem) {
     const content = `${item.title}\n\n${item.keyPoints.map((kp) => `- ${kp}`).join("\n")}${
       item.links.length > 0 ? `\n\nLink đính kèm:\n${item.links.map((l) => l.url).join("\n")}` : ""
-    }\n\nNguồn: Nhóm Zalo Community (${item.date})`;
+    }\n\nNguồn: ${item.groupName || "Cộng đồng Zalo"} (${item.date})`;
     navigator.clipboard.writeText(content);
     setCopiedId(item.id);
     setTimeout(() => setCopiedId(null), 2000);
   }
 
-  const filteredItems = useMemo(() => {
-    return items.filter((item) => {
-      const matchesCat = selectedCategory === "all" || item.category === selectedCategory;
-      const q = searchQuery.toLowerCase().trim();
-      const matchesSearch =
-        !q ||
-        item.title.toLowerCase().includes(q) ||
-        item.summary.toLowerCase().includes(q) ||
-        item.author.toLowerCase().includes(q) ||
-        item.keyPoints.some((kp) => kp.toLowerCase().includes(q)) ||
-        item.links.some((l) => l.url.toLowerCase().includes(q));
-      return matchesCat && matchesSearch;
-    });
-  }, [items, selectedCategory, searchQuery]);
+  // Tạo danh sách số trang hiển thị thông minh
+  const pageNumbers = useMemo(() => {
+    const total = pagination.totalPages;
+    const current = pagination.page;
+    if (total <= 7) {
+      return Array.from({ length: total }, (_, i) => i + 1);
+    }
+    const pages: (number | string)[] = [];
+    pages.push(1);
+    if (current > 3) pages.push("...");
+    const start = Math.max(2, current - 1);
+    const end = Math.min(total - 1, current + 1);
+    for (let i = start; i <= end; i++) {
+      pages.push(i);
+    }
+    if (current < total - 2) pages.push("...");
+    pages.push(total);
+    return pages;
+  }, [pagination.totalPages, pagination.page]);
 
   return (
-    <div className="min-h-screen space-y-8 pb-16">
+    <div className="min-h-screen space-y-8 pb-16 text-slate-100">
       {/* 🌟 HERO BANNER & STATS */}
       <div className="relative overflow-hidden rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-slate-900 via-slate-900/90 to-cyan-950/40 p-6 md:p-10 shadow-2xl backdrop-blur-xl">
         <div className="absolute -right-16 -top-16 h-64 w-64 rounded-full bg-cyan-500/10 blur-3xl pointer-events-none" />
         <div className="absolute -left-16 -bottom-16 h-64 w-64 rounded-full bg-blue-500/10 blur-3xl pointer-events-none" />
 
         <div className="relative z-10 max-w-3xl space-y-4">
-          <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-xs font-medium text-cyan-300">
-            <Sparkles className="h-3.5 w-3.5" />
-            <span>AI Knowledge & Resource Hub</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-xs font-medium text-cyan-300">
+              <Sparkles className="h-3.5 w-3.5" />
+              <span>AI Knowledge & Resource Hub</span>
+            </div>
+
+            {/* Chế độ nhóm bị khóa (Member access mode) */}
+            {isLockedGroup && (
+              <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-medium text-emerald-300">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                <span>Kho tài nguyên: {currentGroup?.name || "Nhóm riêng"}</span>
+              </div>
+            )}
           </div>
 
           <h1 className="text-2xl font-bold tracking-tight text-white md:text-4xl">
-            Kho Kiến Thức & Tài Nguyên Cộng Đồng
+            {isLockedGroup ? (
+              <span>Tài Nguyên & Kiến Thức: <span className="text-cyan-400">{currentGroup?.name || "Nhóm Riêng"}</span></span>
+            ) : (
+              "Kho Kiến Thức & Tài Nguyên Cộng Đồng"
+            )}
           </h1>
 
           <p className="text-sm text-slate-300 md:text-base leading-relaxed">
-            Tổng hợp tự động toàn bộ kinh nghiệm, tút kiếm tiền, hướng dẫn AI, kho link và tài liệu được chia sẻ từ cộng đồng Zalo mỗi ngày.
+            {isLockedGroup
+              ? "Tổng hợp tự động toàn bộ link tài liệu, file Drive, tut mẹo và công cụ được chia sẻ độc quyền trong nhóm của bạn."
+              : "Tổng hợp tự động toàn bộ kinh nghiệm, tút kiếm tiền, hướng dẫn AI, kho link và tài liệu được chia sẻ từ cộng đồng Zalo mỗi ngày."}
           </p>
 
           {/* Stat Badges */}
@@ -140,7 +292,7 @@ export function HubClient() {
             <div className="flex items-center gap-2 rounded-lg bg-slate-800/80 px-3.5 py-1.5 border border-slate-700/60 text-xs font-medium text-slate-200">
               <BookOpen className="h-4 w-4 text-cyan-400" />
               <span>
-                <strong className="text-cyan-300">{stats.totalItems || items.length}</strong> bài đúc kết
+                <strong className="text-cyan-300">{stats.totalItems || pagination.totalItems}</strong> bài đúc kết
               </span>
             </div>
             <div className="flex items-center gap-2 rounded-lg bg-slate-800/80 px-3.5 py-1.5 border border-slate-700/60 text-xs font-medium text-slate-200">
@@ -164,49 +316,124 @@ export function HubClient() {
           </div>
         </div>
 
-        {/* 🔍 SEARCH BAR */}
-        <div className="relative z-10 mt-6 max-w-2xl">
-          <div className="relative flex items-center">
+        {/* 🔍 SEARCH BAR & GROUP SELECTION BAR */}
+        <div className="relative z-10 mt-6 space-y-4">
+          <div className="relative flex items-center max-w-2xl">
             <Search className="absolute left-4 h-5 w-5 text-slate-400" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Tìm kiếm theo chủ đề, từ khóa (ví dụ: Adsense, Video AI, TikTok, Canva, link drive...)"
-              className="w-full rounded-xl border border-slate-700/80 bg-slate-950/80 py-3.5 pl-12 pr-4 text-sm text-white placeholder-slate-400 shadow-inner outline-none transition-all focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 backdrop-blur-md"
+              placeholder="Tìm theo tên thành viên, link url, hoặc chủ đề (ví dụ: Hoàng, Drive, Canva, Adsense...)"
+              className="w-full rounded-xl border border-slate-700/80 bg-slate-950/80 py-3.5 pl-12 pr-10 text-sm text-white placeholder-slate-400 shadow-inner outline-none transition-all focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 backdrop-blur-md"
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery("")}
                 className="absolute right-3 rounded-md px-2 py-1 text-xs text-slate-400 hover:text-white"
               >
-                Xóa
+                ✕
               </button>
             )}
           </div>
+
+          {/* CHỌN NHÓM & NÚT COPY LINK CHIA SẺ (Chỉ hiển thị khi KHÔNG ở chế độ khóa nhóm) */}
+          {!isLockedGroup && groups.length > 0 && (
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <div className="flex items-center gap-2 rounded-xl bg-slate-950/60 p-1.5 border border-slate-800">
+                <Users className="h-4 w-4 text-cyan-400 ml-2 shrink-0" />
+                <span className="text-xs font-medium text-slate-400">Xem theo nhóm:</span>
+                <select
+                  value={selectedGroupId}
+                  onChange={(e) => handleGroupChange(e.target.value)}
+                  aria-label="Chọn nhóm Zalo"
+                  className="bg-slate-900 text-xs font-medium text-cyan-300 rounded-lg px-3 py-1.5 border border-slate-700 outline-none cursor-pointer hover:border-cyan-500 transition-colors"
+                >
+                  <option value="all">🌐 Tất cả các nhóm ({stats.totalItems} mục)</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      📌 {g.name} {g.totalMembers ? `(${g.totalMembers} tv)` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Nút Copy Link Chia Sẻ Nhóm Riêng */}
+              {selectedGroupId !== "all" && (
+                <button
+                  onClick={handleCopyGroupShareLink}
+                  className="flex items-center gap-1.5 rounded-xl bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 px-3.5 py-2 text-xs font-semibold text-cyan-300 transition-all shadow-sm"
+                  title="Sao chép link độc quyền chỉ dành riêng cho thành viên nhóm này"
+                >
+                  {copiedGroupLink ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Share2 className="h-3.5 w-3.5 text-cyan-400" />}
+                  <span>{copiedGroupLink ? "Đã sao chép link bảo mật!" : "Copy link chia sẻ cho nhóm này"}</span>
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* 🏷️ CATEGORY TABS */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-slate-800 pb-4">
-        {CATEGORIES.map((cat) => {
-          const Icon = cat.icon;
-          const active = selectedCategory === cat.id;
-          return (
-            <button
-              key={cat.id}
-              onClick={() => setSelectedCategory(cat.id)}
-              className={`flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs md:text-sm font-medium transition-all ${
-                active
-                  ? "bg-cyan-500 text-slate-950 font-semibold shadow-lg shadow-cyan-500/20"
-                  : "bg-slate-900/60 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-800"
-              }`}
+      {/* 🏷️ CATEGORY TABS & SORT BAR */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+        {/* Category Tabs */}
+        <div className="flex flex-wrap items-center gap-2">
+          {CATEGORIES.map((cat) => {
+            const Icon = cat.icon;
+            const active = selectedCategory === cat.id;
+            return (
+              <button
+                key={cat.id}
+                onClick={() => {
+                  setSelectedCategory(cat.id);
+                  setPagination((prev) => ({ ...prev, page: 1 }));
+                }}
+                className={`flex items-center gap-2 rounded-lg px-3.5 py-2 text-xs md:text-sm font-medium transition-all ${
+                  active
+                    ? "bg-cyan-500 text-slate-950 font-semibold shadow-lg shadow-cyan-500/20"
+                    : "bg-slate-900/60 text-slate-300 hover:bg-slate-800 hover:text-white border border-slate-800"
+                }`}
+              >
+                <Icon className="h-4 w-4" />
+                <span>{cat.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Sort Selector & Limit Selector */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 rounded-lg bg-slate-900/80 px-3 py-1.5 border border-slate-800 text-xs">
+            <ArrowUpDown className="h-3.5 w-3.5 text-slate-400" />
+            <span className="text-slate-400">Sắp xếp:</span>
+            <select
+              value={selectedSort}
+              onChange={(e) => handleSortChange(e.target.value)}
+              aria-label="Sắp xếp danh sách tài nguyên"
+              className="bg-transparent text-cyan-300 font-medium outline-none cursor-pointer"
             >
-              <Icon className="h-4 w-4" />
-              <span>{cat.label}</span>
-            </button>
-          );
-        })}
+              {SORT_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id} className="bg-slate-900 text-slate-200">
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1.5 rounded-lg bg-slate-900/80 px-2.5 py-1.5 border border-slate-800 text-xs">
+            <span className="text-slate-400">Hiển thị:</span>
+            <select
+              value={pagination.limit}
+              onChange={(e) => handleLimitChange(Number(e.target.value))}
+              aria-label="Số lượng tài nguyên hiển thị mỗi trang"
+              className="bg-transparent text-slate-200 font-medium outline-none cursor-pointer"
+            >
+              <option value={12} className="bg-slate-900">12 / trang</option>
+              <option value={18} className="bg-slate-900">18 / trang</option>
+              <option value={36} className="bg-slate-900">36 / trang</option>
+            </select>
+          </div>
+        </div>
       </div>
 
       {/* 📚 KNOWLEDGE CARDS GRID */}
@@ -219,17 +446,17 @@ export function HubClient() {
             />
           ))}
         </div>
-      ) : filteredItems.length === 0 ? (
+      ) : items.length === 0 ? (
         <div className="rounded-xl border border-slate-800 bg-slate-900/30 p-12 text-center">
           <BookOpen className="mx-auto h-12 w-12 text-slate-600 mb-3" />
-          <h3 className="text-base font-semibold text-slate-200">Không tìm thấy kiến thức phù hợp</h3>
+          <h3 className="text-base font-semibold text-slate-200">Không tìm thấy tài nguyên phù hợp</h3>
           <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
-            Thử tìm kiếm với từ khóa khác hoặc chuyển sang danh mục "Tất cả" để khám phá thêm nhé.
+            Thử tìm kiếm với từ khóa khác, chuyển danh mục hoặc đổi sang nhóm khác để khám phá thêm nhé.
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {filteredItems.map((item) => {
+          {items.map((item) => {
             const isSaved = savedItemIds.includes(item.id);
             const isCopied = copiedId === item.id;
 
@@ -239,7 +466,7 @@ export function HubClient() {
                 className="group relative flex flex-col justify-between overflow-hidden rounded-xl border border-slate-800/80 bg-slate-900/70 p-5 transition-all duration-300 hover:-translate-y-1 hover:border-cyan-500/40 hover:shadow-xl hover:shadow-cyan-500/5 backdrop-blur-sm"
               >
                 <div>
-                  {/* Top Bar: Category & Date */}
+                  {/* Top Bar: Category & Group Name & Date */}
                   <div className="flex items-center justify-between gap-2 border-b border-slate-800/60 pb-3">
                     <span
                       className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
@@ -272,6 +499,14 @@ export function HubClient() {
                   >
                     {item.title}
                   </h3>
+
+                  {/* Group Tag if viewing all groups */}
+                  {!isLockedGroup && item.groupName && (
+                    <div className="mt-2 inline-flex items-center gap-1 text-[11px] text-slate-400 bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800">
+                      <Users className="h-3 w-3 text-cyan-400" />
+                      <span className="truncate max-w-[200px]">{item.groupName}</span>
+                    </div>
+                  )}
 
                   {/* Key Points */}
                   <div className="mt-3 space-y-2 text-xs text-slate-300 leading-relaxed">
@@ -307,7 +542,7 @@ export function HubClient() {
                           </>
                         )}
                       </span>
-                      {item.links.slice(0, 2).map((l, idx) => (
+                      {item.links.map((l, idx) => (
                         <a
                           key={idx}
                           href={l.url}
@@ -320,7 +555,11 @@ export function HubClient() {
                           }`}
                         >
                           <div className="flex items-center gap-1.5 truncate">
-                            {l.isFile ? <Download className="h-3.5 w-3.5 shrink-0 text-amber-400" /> : <ExternalLink className="h-3 w-3 shrink-0 text-cyan-400" />}
+                            {l.isFile ? (
+                              <Download className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+                            ) : (
+                              <ExternalLink className="h-3 w-3 shrink-0 text-cyan-400" />
+                            )}
                             <span className="truncate">{l.url}</span>
                           </div>
                           <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider opacity-80">
@@ -377,19 +616,96 @@ export function HubClient() {
         </div>
       )}
 
+      {/* 📄 THANH PHÂN TRANG (PAGINATION BAR) */}
+      {!loading && pagination.totalPages > 1 && (
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-slate-800 bg-slate-900/60 p-4 backdrop-blur-md">
+          <div className="text-xs text-slate-400">
+            Hiển thị{" "}
+            <strong className="text-cyan-300">
+              {(pagination.page - 1) * pagination.limit + 1} -{" "}
+              {Math.min(pagination.page * pagination.limit, pagination.totalItems)}
+            </strong>{" "}
+            trên tổng số <strong className="text-white">{pagination.totalItems}</strong> tài nguyên
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            {/* Nút Trang Trước */}
+            <button
+              onClick={() => handlePageChange(pagination.page - 1)}
+              disabled={pagination.page <= 1}
+              className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                pagination.page <= 1
+                  ? "bg-slate-900 text-slate-600 border border-slate-800 cursor-not-allowed"
+                  : "bg-slate-800 text-slate-200 hover:bg-cyan-500 hover:text-slate-950 border border-slate-700"
+              }`}
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              <span>Trước</span>
+            </button>
+
+            {/* Các nút số trang */}
+            {pageNumbers.map((p, idx) => {
+              if (p === "...") {
+                return (
+                  <span key={`dots-${idx}`} className="px-2 text-xs text-slate-500 font-bold">
+                    ...
+                  </span>
+                );
+              }
+              const isCurrent = p === pagination.page;
+              return (
+                <button
+                  key={p}
+                  onClick={() => handlePageChange(Number(p))}
+                  className={`min-w-[32px] h-8 rounded-lg px-2 text-xs font-medium transition-all ${
+                    isCurrent
+                      ? "bg-cyan-500 text-slate-950 font-bold shadow-md shadow-cyan-500/20"
+                      : "bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700/60"
+                  }`}
+                >
+                  {p}
+                </button>
+              );
+            })}
+
+            {/* Nút Trang Sau */}
+            <button
+              onClick={() => handlePageChange(pagination.page + 1)}
+              disabled={pagination.page >= pagination.totalPages}
+              className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
+                pagination.page >= pagination.totalPages
+                  ? "bg-slate-900 text-slate-600 border border-slate-800 cursor-not-allowed"
+                  : "bg-slate-800 text-slate-200 hover:bg-cyan-500 hover:text-slate-950 border border-slate-700"
+              }`}
+            >
+              <span>Sau</span>
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 📄 MODAL XEM CHI TIẾT BÀI VIẾT */}
       {selectedItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-in fade-in">
           <div className="relative max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-cyan-500/30 bg-slate-900 p-6 md:p-8 shadow-2xl space-y-5">
             <div className="flex items-start justify-between gap-4 border-b border-slate-800 pb-4">
               <div>
-                <span className="inline-flex items-center gap-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-0.5 text-xs text-cyan-300 mb-2">
-                  <Tag className="h-3 w-3" />
-                  {selectedItem.categoryLabel}
-                </span>
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-0.5 text-xs text-cyan-300">
+                    <Tag className="h-3 w-3" />
+                    {selectedItem.categoryLabel}
+                  </span>
+                  {selectedItem.groupName && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 border border-slate-700 px-2.5 py-0.5 text-xs text-slate-300">
+                      <Users className="h-3 w-3 text-cyan-400" />
+                      {selectedItem.groupName}
+                    </span>
+                  )}
+                </div>
                 <h2 className="text-xl font-bold text-white leading-snug">{selectedItem.title}</h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  Được đúc kết từ thảo luận ngày {selectedItem.date} · Chia sẻ bởi {selectedItem.author}
+                  Được đúc kết ngày {selectedItem.date} · Chia sẻ bởi {selectedItem.author}
                 </p>
               </div>
               <button
@@ -403,7 +719,7 @@ export function HubClient() {
             {/* Chi tiết nội dung */}
             <div className="space-y-3 text-sm text-slate-200 leading-relaxed">
               <h4 className="font-semibold text-cyan-300 text-xs uppercase tracking-wider">
-                Nội Dung Chi Tiết & Hướng Dẫn Thực Hành:
+                Nội Dung Chi Tiết & Hướng Dẫn:
               </h4>
               <div className="space-y-3 rounded-xl bg-slate-950/70 p-4 md:p-5 border border-slate-800">
                 {selectedItem.keyPoints.map((kp, idx) => {
