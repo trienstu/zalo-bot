@@ -68,6 +68,8 @@ const FILE_DOMAINS = [
   "dropbox.com",
   "mega.nz",
   "mediafire.com",
+  "fshare.vn",
+  "4share.vn",
   "1drv.ms",
   "onedrive.live.com",
   "github.com",
@@ -76,6 +78,7 @@ const FILE_DOMAINS = [
   "notion.site",
   "figma.com",
   "canva.com",
+  "files-cdn.zalo.me",
 ];
 
 function isNewsUrl(url: string): boolean {
@@ -85,17 +88,9 @@ function isNewsUrl(url: string): boolean {
 
 function isFileOrDriveUrl(url: string): boolean {
   const lower = url.toLowerCase();
+  if (FILE_DOMAINS.some((d) => lower.includes(d))) return true;
+  if (/\.(pdf|zip|rar|docx?|xlsx?|pptx?|apk|psd|json|csv|7z)(\?|#|$)/i.test(lower)) return true;
   return (
-    FILE_DOMAINS.some((d) => lower.includes(d)) ||
-    lower.endsWith(".pdf") ||
-    lower.endsWith(".zip") ||
-    lower.endsWith(".rar") ||
-    lower.endsWith(".docx") ||
-    lower.endsWith(".xlsx") ||
-    lower.endsWith(".pptx") ||
-    lower.endsWith(".apk") ||
-    lower.endsWith(".psd") ||
-    lower.endsWith(".json") ||
     lower.includes("/file/d/") ||
     lower.includes("/document/d/") ||
     lower.includes("/spreadsheets/d/") ||
