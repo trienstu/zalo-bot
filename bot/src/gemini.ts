@@ -452,7 +452,7 @@ export async function callGemini(
         temperature,
         maxTokens,
         search: true,
-        images: options?.images,
+        images: allMedia,
       });
       if (vertexRes && vertexRes.trim().length > 0) {
         return vertexRes;

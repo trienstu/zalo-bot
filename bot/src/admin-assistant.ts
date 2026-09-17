@@ -1518,12 +1518,14 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       /(?:thời tiết|giá vàng|tỷ giá|chứng khoán|tin tức|mới nhất|khi nào|bao giờ|ai là|lịch thi đấu|tỉ số|kết quả|vừa ra mắt)/i.test(rawText)
     );
 
+    let effectiveUserPrompt = userPrompt;
     // Nếu cần tìm kiếm nhưng Tier 1 (Grounding) không khả dụng và chưa có liveNews từ trước, quét nhanh RSS fallback:
     if (needsSearch && !canUseGrounding() && !liveNews) {
       console.log(`[admin-assistant] 📰 Tier 2 Fallback: Kích hoạt quét RSS nhanh...`);
       const searchRes = await searchRealtimeNews(rawText, { intent: "fact_check", requireEvidence: false }).catch(() => "");
       if (searchRes) {
         liveNews = searchRes;
+        effectiveUserPrompt = `\n=== DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT (QUÉT NHANH): ===\n${liveNews}\n\n` + userPrompt;
       }
     }
 
@@ -1551,7 +1553,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     let answer = "";
     if (needsAgentLoop && !isSearchDisabled) {
       // 🚀 AGENT LOOP (Chỉ dùng khi cần tạo/xuất file hoặc tải link)
-      answer = await callGeminiAgentLoop(fullSystemPrompt, userPrompt, {
+      answer = await callGeminiAgentLoop(fullSystemPrompt, effectiveUserPrompt, {
         model: targetModel,
         mediaParts: mediaPart ? [mediaPart] : undefined,
         onFileGenerated: async (file) => {
@@ -1564,7 +1566,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       });
     } else {
       // ⚡ FAST-PATH: Trả lời siêu tốc trong 1 lượt duy nhất (~1 giây)
-      answer = await callGemini(fullSystemPrompt, userPrompt, {
+      answer = await callGemini(fullSystemPrompt, effectiveUserPrompt, {
         model: targetModel,
         maxTokens: !isAdmin ? 600 : undefined,
         mediaParts: mediaPart ? [mediaPart] : undefined,

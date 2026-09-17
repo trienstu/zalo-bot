@@ -2012,16 +2012,18 @@ async function handleHistoryQA(
         /(?:thời tiết|giá vàng|tỷ giá|chứng khoán|tin tức|mới nhất|khi nào|bao giờ|ai là|lịch thi đấu|tỉ số|kết quả|vừa ra mắt)/i.test(question)
       );
 
+      let effectiveUserPrompt = userPrompt;
       // Nếu cần tìm kiếm nhưng Tier 1 (Grounding) không khả dụng và chưa có liveNews từ trước, quét nhanh RSS fallback:
       if (needsSearch && !canUseGrounding() && !liveNews) {
         console.log(`[member-assistant] 📰 Tier 2 Fallback: Kích hoạt quét RSS nhanh...`);
         const searchRes = await searchRealtimeNews(question, { intent: "fact_check", requireEvidence: false }).catch(() => "");
         if (searchRes) {
           liveNews = searchRes;
+          effectiveUserPrompt = `\n=== DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT (QUÉT NHANH): ===\n${liveNews}\n\n` + userPrompt;
         }
       }
 
-      answer = await callGemini(systemPrompt, userPrompt, {
+      answer = await callGemini(systemPrompt, effectiveUserPrompt, {
         model: (needsSearch && canUseGrounding()) ? "gemini-2.5-flash" : "gemini-3.1-flash-lite-preview",
         mediaParts: mediaPart ? [mediaPart] : undefined,
         enableSearch: needsSearch,
