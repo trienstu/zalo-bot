@@ -19,17 +19,29 @@ export interface QueryPlanResult {
  * Kế hoạch dự phòng an toàn khi AI Planner gặp sự cố mạng hoặc timeout (không dùng regex khoá cứng)
  */
 function fallbackSafePlanner(question: string, quoteText = ""): QueryPlanResult {
-  const cleanQ = question
+  let cleanQ = question
     .replace(/@\S+/g, "")
     .replace(/\b(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot)\b/gi, "")
+    .replace(/\b(?:sắp tới đó|sắp tới|vừa qua|cho a|cho anh|cho em|giúp anh|giúp a|giúp em|với anh|với a|với em|nhé|nha|ạ|với|đó)\b/gi, "")
     .replace(/[\/?.!,]+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 
   const query = cleanQ.length >= 4 ? cleanQ : (quoteText || question).slice(0, 80);
+  const currentYear = new Date().getFullYear();
+  const queries: string[] = [query.slice(0, 80)];
+
+  // Nếu câu hỏi về thể thao / bóng đá / lịch thi đấu
+  if (/(?:lịch thi đấu|kết quả|bóng đá|la\s*liga|ngoại hạng|champions league|cúp c1|serie a|bundesliga|v-league)/i.test(query)) {
+    queries.push(`${query} ${currentYear} mới nhất`.slice(0, 80));
+  } else if (/(?:giá vàng|tỷ giá|chứng khoán|thời tiết|tin tức)/i.test(query)) {
+    queries.push(`${query} hôm nay`.slice(0, 80));
+  }
+
   return {
     needsSearch: true,
     intent: "realtime_news",
-    queries: [query.slice(0, 80)],
+    queries: uniqQueries(queries),
     summaryIntent: "Fallback safe planner",
   };
 }

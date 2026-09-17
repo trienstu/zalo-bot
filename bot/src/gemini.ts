@@ -283,8 +283,23 @@ export async function downloadFileContent(
   }
 }
 
+export function isJunkOrBettingDomain(domainOrTitle: string): boolean {
+  if (!domainOrTitle) return true;
+  const lower = domainOrTitle.toLowerCase().trim();
+  const junkPatterns = [
+    /(?:keo\d+|keonhacai|tylekeo|soikeo|nhacai|cacuoc|cadobongda|nhacaiuytin)/i,
+    /(?:xoilac|tiengruoi|mitom|vebo|thapcam|banhkhuc|cakhia|rakhoi|xoivo|suongtv|khangtv|shutli)/i,
+    /(?:bet88|bong88|w88|fb88|fun88|bk8|kubet|thabet|shbet|new88|789bet|jun88|hi88|okvip|f8bet|12bet|dafabis|m88|188bet|k8cc|mu88)/i,
+    /(?:keo90phut|xoilacvl|xoilacz|cakhiatv|vebotv)/i,
+  ];
+  return junkPatterns.some((re) => re.test(lower));
+}
+
 /** Bóc tách tên nhà xuất bản / tòa soạn báo chí từ uri và title để trích dẫn ngắn gọn (không in link URL) */
 export function extractPublisherName(title?: string, uri?: string): string {
+  if ((title && isJunkOrBettingDomain(title)) || (uri && isJunkOrBettingDomain(uri))) {
+    return "";
+  }
   const domainMap: Record<string, string> = {
     "vnexpress.net": "VnExpress",
     "cafef.vn": "CafeF",
@@ -343,6 +358,7 @@ export function extractPublisherName(title?: string, uri?: string): string {
   if (uri && !uri.includes("vertexaisearch.cloud.google.com")) {
     try {
       const hostname = new URL(uri).hostname.toLowerCase().replace(/^www\./, "");
+      if (isJunkOrBettingDomain(hostname)) return "";
       for (const [d, name] of Object.entries(domainMap)) {
         if (hostname === d || hostname.endsWith("." + d)) {
           return name;
@@ -356,16 +372,18 @@ export function extractPublisherName(title?: string, uri?: string): string {
     const parts = title.split(/\s*[-–—|]\s*/);
     if (parts.length > 1) {
       const lastPart = parts[parts.length - 1]?.trim() || "";
-      if (lastPart.length > 1 && lastPart.length < 30) {
+      if (lastPart.length > 1 && lastPart.length < 30 && !isJunkOrBettingDomain(lastPart)) {
         return lastPart.replace(/^báo\s+/i, "");
       }
     }
     // Nếu title là một domain bất kỳ (e.g. somesite.com)
     if (/^[a-z0-9-]+\.[a-z]{2,}(?:\.[a-z]{2,})?$/i.test(title.trim())) {
       const host = title.trim().replace(/^www\./i, "");
+      if (isJunkOrBettingDomain(host)) return "";
       const base = host.split(".")[0];
       return base ? base.charAt(0).toUpperCase() + base.slice(1) : host;
     }
+    if (isJunkOrBettingDomain(title)) return "";
     return title.length > 25 ? title.slice(0, 25) + "..." : title;
   }
 
@@ -437,9 +455,17 @@ export async function callGemini(
   }
   userParts.push({ text: user });
 
-  const effectiveSystem = system?.includes("SYSTEM TEMPORAL ANCHOR")
+  const effectiveSystemBase = system?.includes("SYSTEM TEMPORAL ANCHOR")
     ? system
     : (system ? `${getSystemTemporalPrompt()}\n\n${system}` : getSystemTemporalPrompt());
+
+  const searchSystemGuard = isSearchEnabled
+    ? `\n\n=== CHỈ THỊ AN TOÀN NGUỒN TIN TÌM KIẾM (SEARCH GROUNDING HYGIENE) ===\n` +
+      `- CHỈ ĐƯỢC trích xuất dữ liệu từ các cơ quan báo chí chính thống, cổng thông tin chính thức của giải đấu/tổ chức, hoặc các nguồn uy tín (Bongdaplus, 24h, VnExpress, Tuổi Trẻ, LaLiga, UEFA, FIFA, Báo Đầu Tư, Dân Trí, v.v.).\n` +
+      `- TUYỆT ĐỐI BỎ QUA và KHÔNG sử dụng thông tin hay trích dẫn từ các website cá độ bóng đá, web xem bóng đá lậu (như Xoilac, Mitom, Thapcam, VeBo...), web spam SEO clickbait. Nếu dữ liệu chỉ xuất hiện từ các trang này, hãy xem như chưa có thông tin chính thức.\n`
+    : "";
+
+  const effectiveSystem = effectiveSystemBase + searchSystemGuard;
 
   // 🌐 NẾU CẦN SEARCH GROUNDING & VERTEX AI ĐÃ CẤU HÌNH:
   // Chỉ dùng Vertex AI khi cần Google Search Grounding để hưởng 1.500 lượt search miễn phí/ngày và trừ vào $300 credit.

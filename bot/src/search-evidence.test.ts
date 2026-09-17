@@ -257,10 +257,10 @@ test("context fact-check ưu tiên nguồn có ngày thật và citation cuối 
     true,
   );
   assert.doesNotMatch(answer, /Cơ quan tưởng tượng/);
-  assert.match(answer, /Nguồn kiểm chứng: orion\.example\./);
+  assert.match(answer, /\*\(Nguồn:\s*orion\.example\)\*/);
   assert.doesNotMatch(answer, /https:\/\/orion\.example\/coach/);
   assert.doesNotMatch(answer, /https:\/\/outside\.example/);
-  assert.equal((answer.match(/Nguồn kiểm chứng:/g) || []).length, 1);
+  assert.equal((answer.match(/Nguồn:/g) || []).length, 1);
 });
 
 test("context fact-check bỏ nguồn cũ không ngày và nguồn cấp phó khi đã có bằng chứng chính", () => {

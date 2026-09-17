@@ -50,6 +50,20 @@ function getAdminHistory(userId: string) {
   return adminChatSessions.get(userId)!;
 }
 
+function clearAdminHistory(userId: string) {
+  adminChatSessions.delete(userId);
+}
+
+function sanitizeModelHistoryText(text: string): string {
+  if (!text) return "";
+  let cleaned = text.trim();
+  // Loại bỏ các câu mở đầu xin lỗi, phân trần, thoái thác thường gặp của AI
+  cleaned = cleaned.replace(/^(?:Chào\s+(?:Sếp|anh|chị|bạn)[^,.\n]*[,.\n]\s*)?(?:em\s+xin\s+lỗi\s+(?:Sếp|anh|chị|bạn)[^.\n]*[.\n]\s*)+/i, "");
+  cleaned = cleaned.replace(/^(?:dạ\s+)?(?:em\s+rất\s+xin\s+lỗi|em\s+xin\s+lỗi|xin\s+lỗi\s+sếp)[^.\n]*[.\n]\s*/i, "");
+  cleaned = cleaned.replace(/^(?:thông\s+tin\s+trước\s+đó\s+chưa\s+tập\s+trung|em\s+đã\s+hiểu\s+sai)[^.\n]*[.\n]\s*/i, "");
+  return cleaned.trim();
+}
+
 function appendAdminHistory(userId: string, role: "user" | "model", text: string) {
   const history = getAdminHistory(userId);
   history.push({ role, text });
@@ -296,6 +310,16 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       );
       return;
     }
+  }
+
+  // Lệnh làm sạch bộ nhớ ngữ cảnh 1:1: /clear hoặc /reset
+  if (lower === "/clear" || lower === "/reset" || lower === "!clear" || lower === "!reset") {
+    clearAdminHistory(sender);
+    const reply = isAdmin
+      ? `🧹 Dạ em Sen Chúa đã làm sạch toàn bộ ngữ cảnh hội thoại 1:1 rồi Sếp ơi! Sếp có thể bắt đầu chủ đề mới tinh tươm nhé! ☘️`
+      : `🧹 Em đã làm sạch lịch sử trò chuyện rồi bạn nhé! Chúng mình bắt đầu cuộc trò chuyện mới nào. ☘️`;
+    await sendDirectText(api, sender, reply);
+    return;
   }
 
   // =========================================================================
@@ -1293,10 +1317,14 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     }
   }
 
-  // Lấy lịch sử trò chuyện nhiều lượt
+  // Lấy lịch sử trò chuyện nhiều lượt (đã được làm sạch các câu xin lỗi/phân trần)
   const history = getAdminHistory(sender);
   const historyText = history
-    .map((h) => `${h.role === "user" ? `${displayName}` : "Sen Chúa (Trợ lý)"}: ${h.text}`)
+    .map((h) => {
+      const content = h.role === "model" ? sanitizeModelHistoryText(h.text) : h.text;
+      return `${h.role === "user" ? `${displayName}` : "Sen Chúa (Trợ lý)"}: ${content}`;
+    })
+    .filter((line) => line.trim().length > 0)
     .join("\n\n");
 
   const groupsSummary = isAdmin
@@ -1319,12 +1347,18 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `   <nội dung thực tế cần gửi vào nhóm>\n` +
     `   [/ACTION]\n` +
     `   Hệ thống máy chủ sẽ tự động bóc tách thẻ này và gửi tin nhắn thật vào nhóm Zalo cho Sếp ngay lập tức!\n` +
-    `6. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
-    `   - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * để in đậm vì Zalo không hỗ trợ markdown (dùng chữ in hoa hoặc gạch đầu dòng để làm nổi bật).\n` +
-    `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Tuyệt đối không chèn icon vào từng gạch đầu dòng, phong cách tinh tế, lịch sự, chỉ dùng 1-2 icon ở tiêu đề chính nếu cần thiết.\n` +
-    `   - KHI TRÌNH BÀY BẢNG BIỂU / SO SÁNH / LÃI SUẤT: Tuyệt đối không dùng bảng Markdown (| Cột 1 | Cột 2 |) vì sẽ bị gãy dòng trên Zalo. Dùng định dạng Khối thẻ (Card layout) hoặc dòng so sánh rút gọn.\n` +
-    `7. Thái độ phục vụ: Lễ phép, thông minh, gọi Admin là 'Sếp' hoặc '${displayName}', xưng 'em' hoặc 'Sen Chúa'.\n` +
-    `8. ĐỘ DÀI & TỐC ĐỘ: Trả lời gãy gọn, đúng trọng tâm, súc tích (khoảng 300-600 ký tự). Tránh viết dài dòng lan man trừ khi được yêu cầu phân tích sâu.\n` +
+    `6. ĐỊNH DẠNG TINH HOA ZALO RICH TEXT (ZALO MARKDOWN ENGINE):\n` +
+    `   - Hệ thống đã tích hợp bộ chuyển đổi Rich Text native cho Zalo. THOẢI MÁI dùng cú pháp Markdown tiêu chuẩn:\n` +
+    `     + Dùng **in đậm** cho từ khóa chính, số liệu then chốt, tên trận đấu/đội bóng, thời gian, tên thực thể.\n` +
+    `     + Dùng gạch đầu dòng '- ' cho cấp 1, '• ' cho cấp 2. Số thứ tự '1. ', '2. ' được tự động làm nổi bật.\n` +
+    `   - BẢNG BIỂU & SO SÁNH: Zalo không hỗ trợ bảng kẻ viền (table). BẮT BUỘC trình bày dạng KHỐI THẺ (Card Layout) từng đối tượng hoặc danh sách so sánh rút gọn (dưới 40 ký tự/dòng).\n` +
+    `   - TIẾT CHẾ ICON / EMOJI: Tối đa 1-2 icon ở tiêu đề chính (như 🔥, 📅, ⚡, 📌). CẤM spam icon vào từng đầu gạch dòng.\n` +
+    `7. QUY TẮC CƠ CẤU TRẢ LỜI ĐA LĨNH VỰC: TRỰC TIẾP, DẪN NGUỒN CHUẨN XÁC & GỢI MỞ:\n` +
+    `   - BẮT BUỘC ĐI THẲNG VÀO ĐÁP ÁN, SỐ LIỆU HOẶC THÔNG TIN CỐT LÕI ngay từ dòng đầu tiên.\n` +
+    `   - TUYỆT ĐỐI CẤM mở bài bằng các câu chào hỏi rườm rà, cảm thán đùa cợt, phân trần giải thích lý do, hứa hẹn tương lai, tự kiểm điểm hoặc các câu chào báo cáo dài dòng làm loãng tin (CẤM các câu kiểu "em xin lỗi Sếp vì...", "thông tin trước đó chưa tập trung...", "em đang theo dõi sát sao...").\n` +
+    `   - Dù ở lượt trước Sếp có nhắc nhở hay phàn nàn, lượt này PHẢI CUNG CẤP NGAY ĐÁP ÁN CHÍNH XÁC VÀ GỌN GÀNG, tuyệt đối không nhắc lại chuyện cũ hay phân trần.\n` +
+    `   - Xưng 'em' hoặc 'Sen Chúa', gọi Admin là 'Sếp' hoặc '${displayName}' một cách lịch thiệp, tôn trọng và chu đáo.\n` +
+    `8. ĐỘ DÀI & TỐC ĐỘ: Trả lời gãy gọn, đúng trọng tâm, súc tích (khoảng 300-800 ký tự). Tránh viết dài dòng lan man trừ khi được yêu cầu phân tích sâu.\n` +
     `9. NGUYÊN TẮC TRUNG THỰC & CHỐNG BỊA ĐẶT (ANTI-HALLUCINATION):\n` +
     `   - Nếu trong tài liệu, hình ảnh, trích dẫn hoặc dữ liệu không có thông tin chi tiết về điều Sếp hỏi, hãy thành thật trả lời là không có thông tin đó. Tuyệt đối cấm tự suy diễn hoặc bịa ra sự kiện, sản phẩm không có căn cứ.\n` +
     `   - KHI ADMIN YÊU CẦU KIỂM TRA / RÀ SOÁT / TÓM TẮT TÌNH HÌNH CÁC NHÓM: BẮT BUỘC chỉ được tổng hợp từ danh sách tin nhắn và tóm tắt thực tế được cung cấp trong mục [DỮ LIỆU HOẠT ĐỘNG THỰC TẾ TỪ CÁC NHÓM]. Nêu rõ tên nhóm và những ý chính CÓ THẬT. Nếu nhóm nào không có tin nhắn thảo luận mới, hãy báo trung thực là nhóm đó chưa có hoạt động mới. TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT chính sách, tài liệu hay sự kiện của nhóm!`
@@ -1332,11 +1366,11 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `NHIỆM VỤ CỦA BẠN:\n` +
     `1. Trò chuyện tự nhiên, vui vẻ, giải đáp mọi câu hỏi, tư vấn học tập, công việc, tâm sự, dịch thuật, phân tích hình ảnh/tài liệu khi được gửi tới.\n` +
     `2. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
-    `   - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * in đậm vì Zalo không hỗ trợ markdown (dùng chữ in hoa hoặc gạch đầu dòng để làm nổi bật).\n` +
+    `   - Hệ thống đã tích hợp bộ chuyển đổi Rich Text native cho Zalo. THOẢI MÁI dùng cú pháp Markdown: **in đậm** từ khóa chính, số liệu; dùng gạch đầu dòng '- ' hoặc '• '.\n` +
     `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Giữ văn phong thanh lịch, không chèn icon vào từng gạch đầu dòng, chỉ dùng 1-2 icon ở tiêu đề nếu cần.\n` +
-    `3. Thái độ: Lễ phép, thân thiện, gần gũi, xưng 'em' hoặc 'mình', gọi người dùng là '${displayName}' hoặc 'bạn'.\n` +
+    `3. Thái độ: Lễ phép, thân thiện, gần gũi, xưng 'em' hoặc 'mình', gọi người dùng là '${displayName}' hoặc 'bạn'. Bắt buộc đi thẳng vào đáp án, cấm mở bài xin lỗi hoặc vòng vo.\n` +
     `4. Bạn là trợ lý trò chuyện cá nhân, không có quyền can thiệp vào các nhóm Zalo khác.\n` +
-    `5. ĐỘ DÀI & TỐC ĐỘ: Trả lời gãy gọn, súc tích (khoảng 300-600 ký tự), dễ đọc trên điện thoại.\n` +
+    `5. ĐỘ DÀI & TỐC ĐỘ: Trả lời gãy gọn, súc tích (khoảng 300-800 ký tự), dễ đọc trên điện thoại.\n` +
     `6. NGUYÊN TẮC TRUNG THỰC: Nếu không có dữ liệu chi tiết, hãy nói rõ là không có thông tin, tuyệt đối không tự bịa đặt câu chuyện hay chi tiết không có thật.`);
 
   let fileSection = "";
@@ -1470,7 +1504,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `      + NÊU RÕ THỜI ĐIỂM CỤ THỂ: Ghi rõ ngày tháng diễn ra (ví dụ: ngày 07/09/2026, ngày 04/09/2026).\n` +
     `      + NGUỒN KIỂM CHỨNG: Chỉ dùng URL và ngày có trong các bản ghi [E#] được cung cấp; không tự thêm tên nguồn hoặc mốc ngày.\n` +
     `      + CHỦ ĐỘNG GỢI Ý CÂU HỎI MỞ: Luôn kết thúc bằng một câu hỏi tương tác tinh tế, gợi mở đào sâu các mảng liên quan (ví dụ: "Anh/Sếp đang theo dõi cụ thể phát ngôn của ông ấy về mảng kinh tế thương mại hay chiến sự Trung Đông để em tìm sâu hơn ạ?").\n` +
-    `      + ĐỊNH DẠNG: Tuyệt đối KHÔNG dùng dấu ** in đậm, KHÔNG spam icon ở từng dòng; dùng gạch đầu dòng '-' hoặc '*' hoặc '•' rõ ràng, mạch lạc.\n` +
+    `      + ĐỊNH DẠNG: Thoải mái dùng **in đậm** cho từ khóa then chốt; không spam icon ở từng dòng; dùng gạch đầu dòng '-' hoặc '•' rõ ràng, mạch lạc.\n` +
     `    - KHI HỎI VỀ SẢN PHẨM / CÔNG NGHỆ / TIẾN ĐỘ RA MẮT:\n` +
     `      + Trình bày rõ: [Tiến độ & Thời điểm phát hành dự kiến] (nêu mốc thời gian thực tế, các bản thử nghiệm/chính thức).\n` +
     `      + Nếu câu hỏi có so sánh đối thủ: Trình bày [So sánh đa chiều] tinh gọn, thanh lịch. Với từng đối thủ nêu rõ 3 ý bằng gạch đầu dòng thông thường (TUYỆT ĐỐI KHÔNG dùng icon ở từng dòng): - Điểm mạnh nhất: ... | - So sánh tương quan: ... | - Điểm trừ / Lưu ý: ...\n` +
@@ -1481,7 +1515,9 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `      + Nếu câu hỏi hỏi nhiều tài sản cùng lúc (ví dụ cả Vàng và Bitcoin/Crypto): BẮT BUỘC cung cấp cụ thể số liệu của TẤT CẢ các tài sản được hỏi, tuyệt đối không được bỏ sót con số của bất kỳ loại tài sản nào.\n` +
     `    - KHI HỎI VỀ PHÁP LÝ / THỦ TỤC HÀNH CHÍNH (Đất đai, Xe cộ, Thuế, VNeID, Giao thông):\n` +
     `    - KHI HỎI VỀ THỂ THAO / LỊCH THI ĐẤU / SỰ KIỆN CÓ MỐC THỜI GIAN:\n` +
-    `      + BẮT BUỘC liệt kê danh sách chi tiết: Ngày thi đấu/diễn ra, Giờ cụ thể (theo giờ VN), Cặp đấu đối đầu (Đội A vs Đội B), Vòng đấu / Bảng đấu.\n` +
+    `      + BẮT BUỘC phân chia khối thẻ rõ ràng, trực quan:\n` +
+    `        🔥 Các trận cầu đinh không thể bỏ lỡ (hoặc Trận cầu tâm điểm)\n` +
+    `        📅 Lịch chi tiết các cặp đấu còn lại (hoặc Lịch chi tiết phân nhóm theo từng ngày Thứ Bảy, Chủ nhật, Thứ Hai kèm giờ VN, cặp đối đầu Đội A vs Đội B, vòng đấu).\n` +
     `      + TUYỆT ĐỐI KHÔNG chỉ nói chung chung 2-3 đội rồi dừng lại mà phải cung cấp lịch thi đấu cụ thể, chi tiết nhất từ dữ liệu tra cứu.\n` +
     `    - KHI HỎI VỀ ĐỊNH NGHĨA / LỊCH SỬ / KHOA HỌC / ĐỜI SỐNG:\n` +
     `      + Giải thích bản chất một cách dễ hiểu, sinh động, chuẩn xác như bách khoa toàn thư.\n` +

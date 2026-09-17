@@ -308,8 +308,21 @@ export function extractEvidenceUrls(context: string): string[] {
   return [...new Set(urls)];
 }
 
+function isJunkOrBettingDomain(domainOrTitle: string): boolean {
+  if (!domainOrTitle) return true;
+  const lower = domainOrTitle.toLowerCase().trim();
+  const junkPatterns = [
+    /(?:keo\d+|keonhacai|tylekeo|soikeo|nhacai|cacuoc|cadobongda|nhacaiuytin)/i,
+    /(?:xoilac|tiengruoi|mitom|vebo|thapcam|banhkhuc|cakhia|rakhoi|xoivo|suongtv|khangtv|shutli)/i,
+    /(?:bet88|bong88|w88|fb88|fun88|bk8|kubet|thabet|shbet|new88|789bet|jun88|hi88|okvip|f8bet|12bet|dafabis|m88|188bet|k8cc|mu88)/i,
+    /(?:keo90phut|xoilacvl|xoilacz|cakhiatv|vebotv)/i,
+  ];
+  return junkPatterns.some((re) => re.test(lower));
+}
+
 function cleanPublisherName(raw: string): string {
-  const clean = raw.trim().replace(/^báo\s+/i, "").replace(/^www\./i, "");
+  const clean = raw.trim().replace(/^https?:\/\//i, "").replace(/^www\./i, "").replace(/\/.*$/, "");
+  if (!clean || isJunkOrBettingDomain(clean)) return "";
   const map: Record<string, string> = {
     "vnexpress.net": "VnExpress",
     "vnexpress": "VnExpress",
