@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
 import Database from "better-sqlite3";
+import { getGroupHubToken, verifyGroupHubToken } from "@/lib/hub-token";
 
 export const dynamic = "force-dynamic";
 
@@ -21,8 +21,6 @@ function getBotDbPath(): string {
   return path.resolve(process.cwd(), "..", "bot", "data", "bot.db");
 }
 
-import { getGroupHubToken, verifyGroupHubToken } from "@/lib/hub-token";
-
 export interface KnowledgeItem {
   id: string;
   title: string;
@@ -39,7 +37,7 @@ export interface KnowledgeItem {
   groupName?: string;
 }
 
-// Domain báo chí / tin tức cần loại bỏ hoàn toàn khỏi kho tài nguyên học tập & công cụ
+// Domain báo chí / tin tức cần loại bỏ hoàn toàn
 const NEWS_DOMAINS = [
   "vnexpress.net",
   "dantri.com.vn",
@@ -129,60 +127,149 @@ function isSpamOrBotMessage(text: string): boolean {
   );
 }
 
+/**
+ * Kiểm tra xem một chuỗi có phải là ID ngẫu nhiên, mã hash, Base64 vô nghĩa hay không
+ * Ví dụ: 1LRairoS14LXAIkhQUm5nZS6o7GM-4GDb, 8FQ23qrg9Blh2EJGsO6LHVT63gCHK5udl, 1202585366262580
+ */
+function isRandomIdOrHash(str: string): boolean {
+  if (!str) return true;
+  const s = str.trim();
+  if (s.length < 3) return true;
+  // Toàn chữ số (ví dụ ID Zalo, ID FB Reel, ID bài viết)
+  if (/^\d+$/.test(s) || /^[\d_-]+$/.test(s)) return true;
+  // UUID
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return true;
+  // Chuỗi ID Base64/Alphanumeric dài không có dấu cách: ví dụ 1LRairoS14LXAIkhQUm5nZS6o7GM-4GDb
+  if (s.length >= 14 && !s.includes(" ") && /[A-Z]/.test(s) && /[a-z]/.test(s) && /\d/.test(s)) {
+    return true;
+  }
+  // Chuỗi hex dài > 14 ký tự
+  if (s.length >= 14 && !s.includes(" ") && /^[0-9a-f_-]+$/i.test(s)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Trích xuất tiêu đề có nghĩa từ URL, loại bỏ triệt để chuỗi ID ngẫu nhiên
+ */
 function extractTitleFromUrl(url: string): string | null {
   try {
     const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, "").toLowerCase();
     const pathname = decodeURIComponent(u.pathname);
+
+    // 1. Nhận diện các dịch vụ cụ thể
+    if (host.includes("drive.google.com")) {
+      if (pathname.includes("/folders")) {
+        return "Thư mục tài liệu Google Drive";
+      }
+      if (pathname.includes("/file/d/")) {
+        return "Tài liệu chia sẻ Google Drive";
+      }
+      return "Tài liệu Google Drive";
+    }
+
+    if (host.includes("docs.google.com")) {
+      if (pathname.includes("/spreadsheets")) return "Bảng tính Google Sheets";
+      if (pathname.includes("/document")) return "Tài liệu văn bản Google Docs";
+      if (pathname.includes("/forms")) return "Biểu mẫu Google Forms";
+      if (pathname.includes("/presentation")) return "Bản thuyết trình Google Slides";
+      return "Tài liệu Google Docs";
+    }
+
+    if (host.includes("canva.com")) {
+      return "Template thiết kế Canva";
+    }
+
+    if (host.includes("notion.")) {
+      return "Trang tài liệu Notion";
+    }
+
+    if (host.includes("figma.com")) {
+      return "Bản thiết kế Figma";
+    }
+
+    if (host.includes("github.com")) {
+      const segments = pathname.split("/").filter(Boolean);
+      if (segments.length >= 2) {
+        return `GitHub: ${segments[0]}/${segments[1].replace(/\.git$/, "")}`;
+      }
+      return "Mã nguồn mở GitHub";
+    }
+
+    if (host.includes("youtube.com") || host.includes("youtu.be")) {
+      return "Video hướng dẫn YouTube";
+    }
+
+    if (host.includes("facebook.com") && (pathname.includes("/reel") || pathname.includes("/watch") || pathname.includes("/videos"))) {
+      return "Video chia sẻ trên Facebook";
+    }
+
+    if (host.includes("tiktok.com")) {
+      return "Video chia sẻ trên TikTok";
+    }
+
+    // 2. Nếu có tên file thực sự ở cuối pathname
     const segments = pathname.split("/").filter(Boolean);
     const lastSeg = segments[segments.length - 1] || "";
-
     if (lastSeg.length >= 4) {
+      // Bỏ phần extension
+      const extMatch = lastSeg.match(/\.([a-z0-9]{2,5})$/i);
       const cleanSlug = lastSeg
-        .replace(/-[a-f0-9]{20,}/i, "")
+        .replace(/\.[a-z0-9]{2,5}$/i, "")
         .replace(/^(p|d|file|document)\//i, "")
         .replace(/[_-]+/g, " ")
-        .replace(/\.[a-z0-9]{2,5}$/i, "")
         .trim();
 
-      if (cleanSlug.length >= 4 && !/^[0-9a-f]+$/i.test(cleanSlug)) {
+      // Chỉ lấy nếu không phải ID ngẫu nhiên và có độ dài hợp lý
+      if (cleanSlug.length >= 4 && cleanSlug.length <= 65 && !isRandomIdOrHash(cleanSlug)) {
         return cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1);
       }
     }
-    // Lấy domain làm gợi ý nếu có
-    const host = u.hostname.replace(/^www\./, "");
-    if (host.includes("github.com") && segments.length >= 2) {
-      return `Github: ${segments[0]}/${segments[1]}`;
-    }
-    if (host.includes("drive.google.com") || host.includes("docs.google.com")) {
-      return "Tài liệu Google Drive";
-    }
-    if (host.includes("notion.")) {
-      return "Tài liệu Notion";
-    }
-    if (host.includes("canva.com")) {
-      return "Template Canva";
+
+    // Gợi ý từ tên miền
+    const domainName = host.split(".")[0];
+    if (domainName && domainName.length >= 3 && domainName !== "com" && domainName !== "vn") {
+      return `Tài nguyên từ ${domainName.charAt(0).toUpperCase() + domainName.slice(1)}`;
     }
   } catch {}
   return null;
 }
 
-function cleanTitle(raw: string, fallback: string, url?: string): string {
+/**
+ * Làm sạch tiêu đề theo thứ tự ưu tiên:
+ * Ưu tiên 1: Mô tả của thành viên viết trong tin nhắn (làm sạch tiền tố, chặn ID rác)
+ * Ưu tiên 2: Tiêu đề chuẩn hóa từ URL (không để lộ chuỗi ID vô nghĩa)
+ * Ưu tiên 3: Fallback an toàn
+ */
+function cleanTitle(rawCandidate: string, fallback: string, url?: string): string {
+  // 🥇 ƯU TIÊN 1: Mô tả của thành viên
+  if (rawCandidate) {
+    let t = rawCandidate
+      .replace(/^[-—•*0-9.)\s]+/, "")
+      .replace(/^(bước|buoc)\s*\d+[\s.:-]*\s*/i, "")
+      .replace(/\s*\([^)]*\)$/, "")
+      .replace(/^(hướng dẫn|chia sẻ|kinh nghiệm|tút|tut|bí quyết|tool|cách|link)\s*:\s*/i, "")
+      .trim();
+
+    // Chỉ nhận khi có độ dài >= 4 và không phải ID/hash ngẫu nhiên
+    if (t.length >= 4 && !isRandomIdOrHash(t)) {
+      if (t.length > 75) {
+        t = t.slice(0, 73) + "...";
+      }
+      return t;
+    }
+  }
+
+  // 🥈 ƯU TIÊN 2: Tiêu đề chuẩn hóa từ URL
   if (url) {
     const fromUrl = extractTitleFromUrl(url);
-    if (fromUrl && fromUrl.length >= 6) return fromUrl;
+    if (fromUrl) return fromUrl;
   }
 
-  let t = raw
-    .replace(/^[-—•*0-9.)\s]+/, "")
-    .replace(/^(bước|buoc)\s*\d+[\s.:-]*\s*/i, "")
-    .replace(/\s*\([^)]*\)$/, "")
-    .replace(/^(hướng dẫn|chia sẻ|kinh nghiệm|tút|tut|bí quyết|tool|cách)\s*:\s*/i, "")
-    .trim();
-
-  if (t.length > 80) {
-    t = t.slice(0, 78) + "...";
-  }
-  return t || fallback;
+  // 🥉 ƯU TIÊN 3: Fallback an toàn
+  return fallback;
 }
 
 function detectCategoryFromContext(text: string, isFile: boolean): { category: KnowledgeItem["category"]; label: string } {
@@ -225,6 +312,81 @@ function detectCategoryFromContext(text: string, isFile: boolean): { category: K
   return { category: "links", label: "🔗 Link & Công cụ" };
 }
 
+// Bộ nhớ đệm thông tin GitHub (Lưu 24 giờ)
+const GITHUB_CACHE = new Map<string, { summary: string; expires: number }>();
+
+async function getGitHubSummary(url: string): Promise<string> {
+  try {
+    const u = new URL(url);
+    if (!u.hostname.includes("github.com")) return "";
+    const parts = u.pathname.split("/").filter(Boolean);
+    if (parts.length < 2) return "";
+    const owner = parts[0];
+    const repo = parts[1].replace(/\.git$/, "");
+    const key = `${owner}/${repo}`.toLowerCase();
+
+    const cached = GITHUB_CACHE.get(key);
+    if (cached && cached.expires > Date.now()) {
+      return cached.summary;
+    }
+
+    let summary = "";
+    // 1. Fetch README.md raw (siêu nhanh, không cần auth, không bị rate limit)
+    try {
+      const res = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/HEAD/README.md`, {
+        headers: { "User-Agent": "ZaloBot-Hub" },
+        signal: AbortSignal.timeout(2000),
+      });
+      if (res.ok) {
+        const text = await res.text();
+        const lines = text
+          .split("\n")
+          .map((l) => l.trim())
+          .filter((l) => l && !l.startsWith("#") && !l.startsWith("!") && !l.startsWith("[!") && !l.startsWith("<") && l.length > 20);
+        if (lines.length > 0) {
+          summary = lines[0].slice(0, 160);
+        }
+      }
+    } catch {}
+
+    // 2. Fetch repo API nếu chưa lấy được từ README
+    if (!summary) {
+      try {
+        const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+          headers: { "User-Agent": "ZaloBot-Hub" },
+          signal: AbortSignal.timeout(2000),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.description) {
+            summary = data.description.slice(0, 160);
+          }
+        }
+      } catch {}
+    }
+
+    const finalSummary = summary || `Mã nguồn dự án ${owner}/${repo} trên GitHub.`;
+    GITHUB_CACHE.set(key, { summary: finalSummary, expires: Date.now() + 24 * 3600 * 1000 });
+    return finalSummary;
+  } catch {
+    return "";
+  }
+}
+
+// ⚡ IN-MEMORY CACHE TỔNG CHO SERVER (Lưu 60 giây, giúp tìm kiếm và phân trang dưới 10ms)
+interface HubCacheStore {
+  items: KnowledgeItem[];
+  uniqueLinks: Set<string>;
+  uniqueFiles: Set<string>;
+  contributors: Set<string>;
+  allGroups: { id: string; name: string; totalMembers: number; token: string }[];
+  groupNameMap: Map<string, string>;
+  timestamp: number;
+}
+
+let HUB_MEMORY_CACHE: HubCacheStore | null = null;
+const CACHE_TTL_MS = 60 * 1000; // 60 giây
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -247,38 +409,13 @@ export async function GET(request: Request) {
       });
     }
 
-    const db = new Database(dbPath, { readonly: true });
-
-    // 1. Thu thập danh sách các nhóm hợp lệ từ bot_groups & group_messages
-    const groupNameMap = new Map<string, string>();
-    let allGroups: { id: string; name: string; totalMembers: number; token: string }[] = [];
-    try {
-      const rows = db.prepare("SELECT group_id, name, total_members FROM bot_groups ORDER BY total_members DESC").all() as any[];
-      for (const r of rows) {
-        const gid = String(r.group_id);
-        const gname = r.name || `Nhóm ${gid}`;
-        groupNameMap.set(gid, gname);
-        allGroups.push({
-          id: gid,
-          name: gname,
-          totalMembers: r.total_members || 0,
-          token: getGroupHubToken(gid),
-        });
-      }
-    } catch {}
-
     // Kiểm tra bảo mật:
-    // - Nếu có token: Kiểm tra token nhóm cho thành viên
-    // - Nếu không có token: Bắt buộc phải là Admin (đã đăng nhập). Thành viên không thể tự vào /hub để xem mọi nhóm
+    // - Nếu có token: Cho phép thành viên vào nhóm riêng
+    // - Nếu không có token: Bắt buộc phải là Admin (đã đăng nhập)
     const cookieHeader = request.headers.get("cookie") || "";
     const isAdminAuthenticated = cookieHeader.includes("admin_auth_session=authenticated_admin");
 
-    let isLockedGroup = false;
-    let targetGroupId = requestedGroupId;
-    let currentGroup: { id: string; name: string; token: string } | null = null;
-
     if (!token && !isAdminAuthenticated) {
-      db.close();
       return NextResponse.json(
         {
           error: "unauthorized",
@@ -292,9 +429,308 @@ export async function GET(request: Request) {
       );
     }
 
+    // 1. Kiểm tra In-Memory Cache (Nếu cache còn hiệu lực thì lấy ngay lập tức trong 1ms)
+    const now = Date.now();
+    let cacheStore = HUB_MEMORY_CACHE;
+
+    if (!cacheStore || now - cacheStore.timestamp > CACHE_TTL_MS) {
+      const db = new Database(dbPath, { readonly: true });
+
+      const groupNameMap = new Map<string, string>();
+      const allGroups: { id: string; name: string; totalMembers: number; token: string }[] = [];
+      try {
+        const rows = db.prepare("SELECT group_id, name, total_members FROM bot_groups ORDER BY total_members DESC").all() as any[];
+        for (const r of rows) {
+          const gid = String(r.group_id);
+          const gname = r.name || `Nhóm ${gid}`;
+          groupNameMap.set(gid, gname);
+          allGroups.push({
+            id: gid,
+            name: gname,
+            totalMembers: r.total_members || 0,
+            token: getGroupHubToken(gid),
+          });
+        }
+      } catch {}
+
+      const items: KnowledgeItem[] = [];
+      const uniqueLinks = new Set<string>();
+      const uniqueFiles = new Set<string>();
+      const contributors = new Set<string>();
+
+      // 2. Trích xuất từ bảng daily_summaries
+      const summaries = db.prepare("SELECT * FROM daily_summaries ORDER BY day_date DESC").all() as any[];
+
+      for (const s of summaries) {
+        const summaryText = s.summary_text || "";
+        const dayLabel = s.day_label || s.day_date || "";
+        const ts = s.day_start_ts || s.created_at || Date.now();
+        const gId = s.thread_id || "";
+        const gName = groupNameMap.get(gId) || (gId ? `Nhóm ${gId}` : "Cộng đồng Zalo");
+
+        let author = "Cộng đồng AI & MMO";
+        try {
+          const topSenders = JSON.parse(s.top_senders_json || "[]");
+          if (Array.isArray(topSenders) && topSenders.length > 0) {
+            author = topSenders[0].replace(/\s*\(\d+\)$/, "");
+            contributors.add(author);
+          }
+        } catch {}
+
+        const sections = summaryText.split(/(?=\([1-7]\)|\b(?:📢|💼|🤖|🎓|🔗|❓|☕)\b)/);
+
+        for (let secIdx = 0; secIdx < sections.length; secIdx++) {
+          const rawSec = sections[secIdx].trim();
+          if (!rawSec) continue;
+
+          let cat: KnowledgeItem["category"] = "general";
+          let catLabel = "Kiến thức chung";
+          let defaultTitle = "";
+
+          if (rawSec.includes("AI & CÔNG NGHỆ") || rawSec.includes("🤖")) {
+            cat = "ai";
+            catLabel = "AI & Video";
+            defaultTitle = "Kỹ thuật & Công cụ AI";
+          } else if (rawSec.includes("CHỦ ĐỀ CHUYÊN MÔN") || rawSec.includes("💼")) {
+            cat = "mmo";
+            catLabel = "MMO & Tut";
+            defaultTitle = "Kinh nghiệm & Tut kiếm tiền";
+          } else if (rawSec.includes("HỌC HÀNH & KINH NGHIỆM") || rawSec.includes("🎓")) {
+            cat = "learning";
+            catLabel = "Học tập & Chia sẻ";
+            defaultTitle = "Bài học & Quy trình thực tế";
+          } else if (rawSec.includes("LINK ĐÃ CHIA SẺ") || rawSec.includes("🔗")) {
+            cat = "links";
+            catLabel = "Tài nguyên & File";
+            defaultTitle = "Tổng hợp Tài nguyên & Link";
+          } else {
+            continue;
+          }
+
+          const lines = rawSec
+            .split("\n")
+            .map((l: string) => l.trim())
+            .filter((l: string) => l.startsWith("-") || l.startsWith("•") || l.startsWith("*"));
+
+          const keyPoints: string[] = [];
+          const urlRegex = /(https?:\/\/[^\s]+)/gi;
+          const secLinks: { url: string; label?: string; isFile?: boolean }[] = [];
+
+          for (const line of lines) {
+            const cleanLine = line.replace(/^[-•*]\s*/, "");
+            if (!cleanLine || isSpamOrBotMessage(cleanLine)) continue;
+
+            const matches = cleanLine.match(urlRegex);
+            let hasIgnoredNews = false;
+
+            if (matches) {
+              for (const u of matches) {
+                const cleanUrl = u.replace(/[.,;!?)]+$/, "");
+                if (isNewsUrl(cleanUrl)) {
+                  hasIgnoredNews = true;
+                  continue;
+                }
+                const isFile = isFileOrDriveUrl(cleanUrl);
+                if (isFile) uniqueFiles.add(cleanUrl);
+                uniqueLinks.add(cleanUrl);
+                secLinks.push({ url: cleanUrl, isFile });
+              }
+            }
+
+            if (hasIgnoredNews && !cleanLine.replace(urlRegex, "").trim()) {
+              continue;
+            }
+
+            keyPoints.push(cleanLine);
+          }
+
+          if (keyPoints.length === 0) continue;
+
+          const firstPoint = keyPoints[0];
+          const displayTitle = cleanTitle(firstPoint.split(":")[0] || firstPoint, defaultTitle, secLinks[0]?.url);
+
+          items.push({
+            id: `sum_${s.id || s.day_date}_${secIdx}`,
+            title: displayTitle,
+            category: cat,
+            categoryLabel: catLabel,
+            summary: keyPoints.slice(0, 2).join(". ") + (keyPoints.length > 2 ? "..." : ""),
+            keyPoints,
+            links: secLinks,
+            author,
+            date: dayLabel,
+            timestamp: ts,
+            source: "summary",
+            groupId: gId,
+            groupName: gName,
+          });
+        }
+      }
+
+      // 3. Trích xuất các tin nhắn chứa file / link từ group_messages với thuật toán đa link
+      const linkMessages = db
+        .prepare(
+          `SELECT message_id, display_name, text, ts, thread_id
+           FROM group_messages
+           WHERE (text LIKE '%http://%' OR text LIKE '%https://%' OR text LIKE '%.pdf%' OR text LIKE '%.zip%' OR text LIKE '%.rar%' OR text LIKE '%.docx%' OR text LIKE '%.apk%')
+             AND deleted_at IS NULL
+             AND is_self = 0
+             AND LOWER(display_name) NOT LIKE '%sen chúa%'
+           ORDER BY ts DESC
+           LIMIT 1000`
+        )
+        .all() as any[];
+
+      const urlRegex = /(https?:\/\/[^\s]+)/gi;
+
+      for (const msg of linkMessages) {
+        if (!msg.text || isSpamOrBotMessage(msg.text)) continue;
+
+        const matches = msg.text.match(urlRegex);
+        if (!matches || matches.length === 0) continue;
+
+        // Lọc các URL hợp lệ (loại bỏ báo chí / tin tức)
+        const cleanUrls: { url: string; isFile: boolean }[] = [];
+        for (const u of matches) {
+          const clean = u.replace(/[.,;!?)]+$/, "");
+          if (isNewsUrl(clean)) continue;
+          const isFile = isFileOrDriveUrl(clean);
+          if (isFile) uniqueFiles.add(clean);
+          uniqueLinks.add(clean);
+          cleanUrls.push({ url: clean, isFile });
+        }
+
+        if (cleanUrls.length === 0) continue;
+
+        const authorName = msg.display_name || "Thành viên";
+        contributors.add(authorName);
+
+        const d = new Date(msg.ts + 7 * 3600 * 1000);
+        const dateStr = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
+        const msgGroupId = msg.thread_id || "";
+        const msgGroupName = groupNameMap.get(msgGroupId) || (msgGroupId ? `Nhóm ${msgGroupId}` : "Nhóm Zalo");
+
+        // Tách các dòng trong tin nhắn để phân tích ngữ cảnh từng link
+        const textLines = msg.text
+          .split("\n")
+          .map((l: string) => l.trim())
+          .filter((l: string) => l.length > 0 && !isSpamOrBotMessage(l));
+
+        for (let linkIdx = 0; linkIdx < cleanUrls.length; linkIdx++) {
+          const currentLink = cleanUrls[linkIdx];
+
+          // Tránh trùng lặp link đã có trong danh sách
+          if (items.some((it) => it.links.some((l) => l.url === currentLink.url))) {
+            continue;
+          }
+
+          const lineIdxWithUrl = textLines.findIndex((line: string) => line.includes(currentLink.url));
+
+          let titleCandidate = "";
+          let specificDescriptionLines: string[] = [];
+
+          if (lineIdxWithUrl !== -1) {
+            const currentLine = textLines[lineIdxWithUrl];
+            const inlineText = currentLine
+              .replace(urlRegex, "")
+              .replace(/^[-—•*0-9.)\s]+/, "")
+              .trim();
+
+            if (inlineText.length >= 4 && !isRandomIdOrHash(inlineText)) {
+              titleCandidate = inlineText;
+            } else if (lineIdxWithUrl > 0) {
+              const prevLine = textLines[lineIdxWithUrl - 1];
+              if (!urlRegex.test(prevLine)) {
+                const prevText = prevLine.replace(/^[-—•*0-9.)\s]+/, "").trim();
+                if (prevText.length >= 4 && !isRandomIdOrHash(prevText)) {
+                  titleCandidate = prevText;
+                }
+              }
+            }
+
+            // Thu thập các dòng mô tả tiếp theo
+            const nextUrl = cleanUrls[linkIdx + 1]?.url;
+            for (let k = lineIdxWithUrl + 1; k < textLines.length; k++) {
+              const nextL = textLines[k];
+              if (nextUrl && nextL.includes(nextUrl)) break;
+              if (!urlRegex.test(nextL) && nextL.length >= 3 && !isRandomIdOrHash(nextL)) {
+                specificDescriptionLines.push(nextL);
+              }
+            }
+          }
+
+          const fallbackTitle = currentLink.isFile
+            ? `Tài liệu chia sẻ từ ${authorName}`
+            : `Tài nguyên từ ${authorName}`;
+
+          const displayTitle = cleanTitle(titleCandidate, fallbackTitle, currentLink.url);
+
+          // Phát hiện danh mục dựa trên ngữ cảnh
+          const contextText = `${displayTitle} ${specificDescriptionLines.join(" ")} ${textLines.join(" ")}`;
+          const { category: detectedCat, label: detectedLabel } = detectCategoryFromContext(contextText, currentLink.isFile);
+
+          // Xây dựng Key Points (ĐÃ BỎ HOÀN TOÀN dòng "Chia sẻ bởi Trungkd (GROUP...)")
+          const keyPoints: string[] = [];
+          if (specificDescriptionLines.length > 0) {
+            for (const dLine of specificDescriptionLines) {
+              keyPoints.push(dLine);
+            }
+          } else if (titleCandidate && titleCandidate !== displayTitle) {
+            keyPoints.push(titleCandidate);
+          } else {
+            // Mô tả chuẩn theo từng loại dịch vụ
+            if (currentLink.url.includes("drive.google.com")) {
+              keyPoints.push("Thư mục tài liệu / file chia sẻ trên Google Drive.");
+            } else if (currentLink.url.includes("canva.com")) {
+              keyPoints.push("Mẫu thiết kế template trực tuyến trên Canva.");
+            } else if (currentLink.url.includes("github.com")) {
+              keyPoints.push("Mã nguồn dự án trên GitHub.");
+            } else {
+              keyPoints.push(displayTitle);
+            }
+          }
+
+          const titlePrefix = currentLink.isFile ? "📂 " : "";
+
+          items.push({
+            id: `msg_${msg.message_id || msg.ts}_${linkIdx}`,
+            title: titlePrefix + displayTitle,
+            category: detectedCat,
+            categoryLabel: detectedLabel,
+            summary: keyPoints.slice(0, 2).join(". ") || "Tài nguyên & liên kết chia sẻ từ cộng đồng.",
+            keyPoints,
+            links: [currentLink],
+            author: authorName,
+            date: dateStr,
+            timestamp: msg.ts,
+            source: "message",
+            groupId: msgGroupId,
+            groupName: msgGroupName,
+          });
+        }
+      }
+
+      db.close();
+
+      cacheStore = {
+        items,
+        uniqueLinks,
+        uniqueFiles,
+        contributors,
+        allGroups,
+        groupNameMap,
+        timestamp: now,
+      };
+      HUB_MEMORY_CACHE = cacheStore;
+    }
+
+    // 4. Lọc bảo mật theo Token hoặc Admin
+    let isLockedGroup = false;
+    let targetGroupId = requestedGroupId;
+    let currentGroup: { id: string; name: string; token: string } | null = null;
+
     if (token) {
       if (!requestedGroupId || !verifyGroupHubToken(requestedGroupId, token)) {
-        db.close();
         return NextResponse.json(
           {
             error: "Đường link không hợp lệ hoặc bạn không có quyền truy cập nhóm này.",
@@ -307,296 +743,27 @@ export async function GET(request: Request) {
       }
       isLockedGroup = true;
       targetGroupId = requestedGroupId;
-      const found = allGroups.find((g) => g.id === targetGroupId);
+      const found = cacheStore.allGroups.find((g) => g.id === targetGroupId);
       currentGroup = found || {
         id: targetGroupId,
-        name: groupNameMap.get(targetGroupId) || `Nhóm ${targetGroupId}`,
+        name: cacheStore.groupNameMap.get(targetGroupId) || `Nhóm ${targetGroupId}`,
         token,
       };
     } else if (targetGroupId && targetGroupId !== "all") {
-      const found = allGroups.find((g) => g.id === targetGroupId);
+      const found = cacheStore.allGroups.find((g) => g.id === targetGroupId);
       if (found) {
         currentGroup = found;
       } else {
         currentGroup = {
           id: targetGroupId,
-          name: groupNameMap.get(targetGroupId) || `Nhóm ${targetGroupId}`,
+          name: cacheStore.groupNameMap.get(targetGroupId) || `Nhóm ${targetGroupId}`,
           token: getGroupHubToken(targetGroupId),
         };
       }
     }
 
-    const items: KnowledgeItem[] = [];
-    const uniqueLinks = new Set<string>();
-    const uniqueFiles = new Set<string>();
-    const contributors = new Set<string>();
-
-    // 2. Trích xuất từ bảng daily_summaries
-    let summarySql = "SELECT * FROM daily_summaries";
-    const summaryParams: any[] = [];
-    if (targetGroupId && targetGroupId !== "all") {
-      summarySql += " WHERE thread_id = ? OR thread_id IS NULL";
-      summaryParams.push(targetGroupId);
-    }
-    summarySql += " ORDER BY day_date DESC";
-
-    const summaries = db.prepare(summarySql).all(...summaryParams) as any[];
-
-    for (const s of summaries) {
-      const summaryText = s.summary_text || "";
-      const dayLabel = s.day_label || s.day_date || "";
-      const ts = s.day_start_ts || s.created_at || Date.now();
-      const gId = s.thread_id || "";
-      const gName = groupNameMap.get(gId) || (gId ? `Nhóm ${gId}` : "Cộng đồng Zalo");
-
-      let author = "Cộng đồng AI & MMO";
-      try {
-        const topSenders = JSON.parse(s.top_senders_json || "[]");
-        if (Array.isArray(topSenders) && topSenders.length > 0) {
-          author = topSenders[0].replace(/\s*\(\d+\)$/, "");
-          contributors.add(author);
-        }
-      } catch {}
-
-      const sections = summaryText.split(/(?=\([1-7]\)|\b(?:📢|💼|🤖|🎓|🔗|❓|☕)\b)/);
-
-      for (let secIdx = 0; secIdx < sections.length; secIdx++) {
-        const rawSec = sections[secIdx].trim();
-        if (!rawSec) continue;
-
-        let cat: KnowledgeItem["category"] = "general";
-        let catLabel = "Kiến thức chung";
-        let defaultTitle = "";
-
-        if (rawSec.includes("AI & CÔNG NGHỆ") || rawSec.includes("🤖")) {
-          cat = "ai";
-          catLabel = "AI & Video";
-          defaultTitle = "Kỹ thuật & Công cụ AI";
-        } else if (rawSec.includes("CHỦ ĐỀ CHUYÊN MÔN") || rawSec.includes("💼")) {
-          cat = "mmo";
-          catLabel = "MMO & Tut";
-          defaultTitle = "Kinh nghiệm & Tut kiếm tiền";
-        } else if (rawSec.includes("HỌC HÀNH & KINH NGHIỆM") || rawSec.includes("🎓")) {
-          cat = "learning";
-          catLabel = "Học tập & Chia sẻ";
-          defaultTitle = "Bài học & Quy trình thực tế";
-        } else if (rawSec.includes("LINK ĐÃ CHIA SẺ") || rawSec.includes("🔗")) {
-          cat = "links";
-          catLabel = "Tài nguyên & File";
-          defaultTitle = "Tổng hợp Tài nguyên & Link";
-        } else {
-          continue;
-        }
-
-        const lines = rawSec
-          .split("\n")
-          .map((l: string) => l.trim())
-          .filter((l: string) => l.startsWith("-") || l.startsWith("•") || l.startsWith("*"));
-
-        const keyPoints: string[] = [];
-        const urlRegex = /(https?:\/\/[^\s]+)/gi;
-        const secLinks: { url: string; label?: string; isFile?: boolean }[] = [];
-
-        for (const line of lines) {
-          const cleanLine = line.replace(/^[-•*]\s*/, "");
-          if (!cleanLine || isSpamOrBotMessage(cleanLine)) continue;
-
-          const matches = cleanLine.match(urlRegex);
-          let hasIgnoredNews = false;
-
-          if (matches) {
-            for (const u of matches) {
-              const cleanUrl = u.replace(/[.,;!?)]+$/, "");
-              if (isNewsUrl(cleanUrl)) {
-                hasIgnoredNews = true;
-                continue;
-              }
-              const isFile = isFileOrDriveUrl(cleanUrl);
-              if (isFile) uniqueFiles.add(cleanUrl);
-              uniqueLinks.add(cleanUrl);
-              secLinks.push({ url: cleanUrl, isFile });
-            }
-          }
-
-          if (hasIgnoredNews && !cleanLine.replace(urlRegex, "").trim()) {
-            continue;
-          }
-
-          keyPoints.push(cleanLine);
-        }
-
-        if (keyPoints.length === 0) continue;
-
-        const firstPoint = keyPoints[0];
-        const displayTitle = cleanTitle(firstPoint.split(":")[0] || firstPoint, defaultTitle, secLinks[0]?.url);
-
-        items.push({
-          id: `sum_${s.id || s.day_date}_${secIdx}`,
-          title: displayTitle,
-          category: cat,
-          categoryLabel: catLabel,
-          summary: keyPoints.slice(0, 2).join(". ") + (keyPoints.length > 2 ? "..." : ""),
-          keyPoints,
-          links: secLinks,
-          author,
-          date: dayLabel,
-          timestamp: ts,
-          source: "summary",
-          groupId: gId,
-          groupName: gName,
-        });
-      }
-    }
-
-    // 3. Trích xuất các tin nhắn chứa file / link từ group_messages với thuật toán đa link
-    let msgSql = `SELECT message_id, display_name, text, ts, thread_id
-                  FROM group_messages
-                  WHERE (text LIKE '%http://%' OR text LIKE '%https://%' OR text LIKE '%.pdf%' OR text LIKE '%.zip%' OR text LIKE '%.rar%' OR text LIKE '%.docx%' OR text LIKE '%.apk%')
-                    AND deleted_at IS NULL
-                    AND is_self = 0
-                    AND LOWER(display_name) NOT LIKE '%sen chúa%'`;
-    const msgParams: any[] = [];
-    if (targetGroupId && targetGroupId !== "all") {
-      msgSql += " AND thread_id = ?";
-      msgParams.push(targetGroupId);
-    }
-    msgSql += " ORDER BY ts DESC LIMIT 1000";
-
-    const linkMessages = db.prepare(msgSql).all(...msgParams) as any[];
-
-    const urlRegex = /(https?:\/\/[^\s]+)/gi;
-
-    for (const msg of linkMessages) {
-      if (!msg.text || isSpamOrBotMessage(msg.text)) continue;
-
-      const matches = msg.text.match(urlRegex);
-      if (!matches || matches.length === 0) continue;
-
-      // Lọc các URL hợp lệ (loại bỏ báo chí / tin tức)
-      const cleanUrls: { url: string; isFile: boolean }[] = [];
-      for (const u of matches) {
-        const clean = u.replace(/[.,;!?)]+$/, "");
-        if (isNewsUrl(clean)) continue;
-        const isFile = isFileOrDriveUrl(clean);
-        if (isFile) uniqueFiles.add(clean);
-        uniqueLinks.add(clean);
-        cleanUrls.push({ url: clean, isFile });
-      }
-
-      if (cleanUrls.length === 0) continue;
-
-      const authorName = msg.display_name || "Thành viên";
-      contributors.add(authorName);
-
-      const d = new Date(msg.ts + 7 * 3600 * 1000);
-      const dateStr = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()}`;
-      const msgGroupId = msg.thread_id || "";
-      const msgGroupName = groupNameMap.get(msgGroupId) || (msgGroupId ? `Nhóm ${msgGroupId}` : "Nhóm Zalo");
-
-      // Tách các dòng trong tin nhắn để phân tích ngữ cảnh từng link
-      const textLines = msg.text
-        .split("\n")
-        .map((l: string) => l.trim())
-        .filter((l: string) => l.length > 0 && !isSpamOrBotMessage(l));
-
-      // BÓC TÁCH ĐA LINK TRONG 1 TIN NHẮN:
-      // Duyệt qua từng URL và tìm ngữ cảnh / mô tả tương ứng cho từng link
-      for (let linkIdx = 0; linkIdx < cleanUrls.length; linkIdx++) {
-        const currentLink = cleanUrls[linkIdx];
-
-        // Tránh trùng lặp link đã có trong danh sách items
-        if (items.some((it) => it.links.some((l) => l.url === currentLink.url))) {
-          continue;
-        }
-
-        // Tìm dòng chứa URL này
-        const lineIdxWithUrl = textLines.findIndex((line: string) => line.includes(currentLink.url));
-
-        let titleCandidate = "";
-        let specificDescriptionLines: string[] = [];
-
-        if (lineIdxWithUrl !== -1) {
-          const currentLine = textLines[lineIdxWithUrl];
-          // Trích xuất phần text cùng dòng sau khi loại bỏ URL
-          const inlineText = currentLine
-            .replace(urlRegex, "")
-            .replace(/^[-—•*0-9.)\s]+/, "")
-            .trim();
-
-          if (inlineText.length >= 4) {
-            titleCandidate = inlineText;
-          } else if (lineIdxWithUrl > 0) {
-            // Nếu trên dòng chỉ có URL đơn lẻ, nhìn lên dòng liền kề phía trước
-            const prevLine = textLines[lineIdxWithUrl - 1];
-            if (!urlRegex.test(prevLine)) {
-              titleCandidate = prevLine.replace(/^[-—•*0-9.)\s]+/, "").trim();
-            }
-          }
-
-          // Thu thập các dòng mô tả tiếp theo (nằm trước link kế tiếp)
-          const nextUrl = cleanUrls[linkIdx + 1]?.url;
-          for (let k = lineIdxWithUrl + 1; k < textLines.length; k++) {
-            const nextL = textLines[k];
-            if (nextUrl && nextL.includes(nextUrl)) break;
-            if (!urlRegex.test(nextL) && nextL.length >= 3) {
-              specificDescriptionLines.push(nextL);
-            }
-          }
-        }
-
-        // Nếu chưa có tiêu đề, trích xuất từ URL hoặc fallback
-        const urlSlugTitle = extractTitleFromUrl(currentLink.url);
-        if (!titleCandidate && urlSlugTitle) {
-          titleCandidate = urlSlugTitle;
-        }
-
-        const fallbackTitle = currentLink.isFile
-          ? `Tài liệu chia sẻ từ ${authorName}`
-          : `Tài nguyên & Tool từ ${authorName}`;
-
-        const displayTitle = cleanTitle(titleCandidate, fallbackTitle, currentLink.url);
-
-        // Phát hiện danh mục dựa trên ngữ cảnh của link này
-        const contextText = `${displayTitle} ${specificDescriptionLines.join(" ")} ${textLines.join(" ")}`;
-        const { category: detectedCat, label: detectedLabel } = detectCategoryFromContext(contextText, currentLink.isFile);
-
-        // Xây dựng Key Points
-        const keyPoints: string[] = [];
-        if (specificDescriptionLines.length > 0) {
-          for (const dLine of specificDescriptionLines) {
-            keyPoints.push(dLine);
-          }
-        } else if (titleCandidate && titleCandidate !== displayTitle) {
-          keyPoints.push(titleCandidate);
-        } else {
-          keyPoints.push(displayTitle);
-        }
-        keyPoints.push(`Chia sẻ bởi ${authorName} (${msgGroupName})`);
-
-        const titlePrefix = currentLink.isFile ? "📂 " : "";
-
-        items.push({
-          id: `msg_${msg.message_id || msg.ts}_${linkIdx}`,
-          title: titlePrefix + displayTitle,
-          category: detectedCat,
-          categoryLabel: detectedLabel,
-          summary: keyPoints.slice(0, 2).join(". ") || "Tài nguyên & liên kết chia sẻ từ cộng đồng.",
-          keyPoints,
-          links: [currentLink],
-          author: authorName,
-          date: dateStr,
-          timestamp: msg.ts,
-          source: "message",
-          groupId: msgGroupId,
-          groupName: msgGroupName,
-        });
-      }
-    }
-
-    db.close();
-
-    // 4. Áp dụng các bộ lọc: Category, Group, Search Query
-    let filtered = items;
+    // 5. Áp dụng các bộ lọc: Category, Group, Search Query từ Cache trong RAM (Tốc độ < 5ms)
+    let filtered = cacheStore.items;
 
     // Lọc theo Category
     if (category !== "all") {
@@ -627,7 +794,7 @@ export async function GET(request: Request) {
       );
     }
 
-    // 5. Sắp xếp (Sort)
+    // 6. Sắp xếp (Sort)
     if (sort === "oldest") {
       filtered.sort((a, b) => a.timestamp - b.timestamp);
     } else if (sort === "author_asc") {
@@ -641,20 +808,30 @@ export async function GET(request: Request) {
       filtered.sort((a, b) => b.timestamp - a.timestamp);
     }
 
-    // 6. Phân trang dữ liệu (Pagination)
+    // 7. Phân trang dữ liệu (Pagination)
     const totalItems = filtered.length;
     const totalPages = Math.ceil(totalItems / limit) || 1;
     const clampedPage = Math.min(page, totalPages);
     const startIndex = (clampedPage - 1) * limit;
     const pagedItems = filtered.slice(startIndex, startIndex + limit);
 
-    // Danh sách nhóm trả về cho client:
-    // Nếu là chế độ khóa nhóm (member truy cập qua token link), KHÔNG trả về các nhóm khác
+    // Tự động bổ sung GitHub README summary cho các link GitHub trên trang hiện tại
+    for (const item of pagedItems) {
+      const ghLink = item.links.find((l) => l.url.includes("github.com"));
+      if (ghLink && item.keyPoints.length <= 1) {
+        const ghDesc = await getGitHubSummary(ghLink.url);
+        if (ghDesc) {
+          item.summary = ghDesc;
+          item.keyPoints = [ghDesc];
+        }
+      }
+    }
+
     const returnedGroups = isLockedGroup
       ? currentGroup
         ? [currentGroup]
         : []
-      : allGroups;
+      : cacheStore.allGroups;
 
     return NextResponse.json({
       items: pagedItems,
@@ -665,10 +842,10 @@ export async function GET(request: Request) {
         totalPages,
       },
       stats: {
-        totalItems: items.length,
-        totalLinks: uniqueLinks.size,
-        totalFiles: uniqueFiles.size,
-        totalContributors: contributors.size,
+        totalItems: cacheStore.items.length,
+        totalLinks: cacheStore.uniqueLinks.size,
+        totalFiles: cacheStore.uniqueFiles.size,
+        totalContributors: cacheStore.contributors.size,
       },
       groups: returnedGroups,
       isLockedGroup,

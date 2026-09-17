@@ -120,12 +120,12 @@ export function HubClient() {
     } catch {}
   }, []);
 
-  // Debounce search input (350ms)
+  // Debounce search input (450ms giúp gõ êm mượt không spam server)
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedQuery(searchQuery.trim());
       setPagination((prev) => ({ ...prev, page: 1 }));
-    }, 350);
+    }, 450);
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
@@ -320,19 +320,7 @@ export function HubClient() {
             )}
           </div>
 
-          <h1 className="text-2xl font-bold tracking-tight text-white md:text-4xl">
-            {isLockedGroup ? (
-              <span>Tài Nguyên & Kiến Thức: <span className="text-cyan-400">{currentGroup?.name || "Nhóm Riêng"}</span></span>
-            ) : (
-              "Kho Kiến Thức & Tài Nguyên Cộng Đồng"
-            )}
-          </h1>
 
-          <p className="text-sm text-slate-300 md:text-base leading-relaxed">
-            {isLockedGroup
-              ? "Tổng hợp tự động toàn bộ link tài liệu, file Drive, tut mẹo và công cụ được chia sẻ độc quyền trong nhóm của bạn."
-              : "Tổng hợp tự động toàn bộ kinh nghiệm, tút kiếm tiền, hướng dẫn AI, kho link và tài liệu được chia sẻ từ cộng đồng Zalo mỗi ngày."}
-          </p>
 
           {/* Stat Badges */}
           <div className="flex flex-wrap items-center gap-3 pt-2">
@@ -541,7 +529,7 @@ export function HubClient() {
                   {/* Title - Click to open modal */}
                   <h3
                     onClick={() => setSelectedItem(item)}
-                    className="mt-3 text-base font-semibold text-white leading-snug group-hover:text-cyan-300 transition-colors cursor-pointer hover:underline"
+                    className="mt-3 text-base font-semibold text-white leading-snug group-hover:text-cyan-300 transition-colors cursor-pointer hover:underline break-words break-all [overflow-wrap:anywhere] min-w-0"
                     title="Bấm để xem chi tiết nội dung"
                   >
                     {item.title}
@@ -549,18 +537,18 @@ export function HubClient() {
 
                   {/* Group Tag if viewing all groups */}
                   {!isLockedGroup && item.groupName && (
-                    <div className="mt-2 inline-flex items-center gap-1 text-[11px] text-slate-400 bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800">
-                      <Users className="h-3 w-3 text-cyan-400" />
-                      <span className="truncate max-w-[200px]">{item.groupName}</span>
+                    <div className="mt-2 inline-flex items-center gap-1 text-[11px] text-slate-400 bg-slate-950/60 px-2 py-0.5 rounded border border-slate-800 max-w-full truncate">
+                      <Users className="h-3 w-3 text-cyan-400 shrink-0" />
+                      <span className="truncate">{item.groupName}</span>
                     </div>
                   )}
 
                   {/* Key Points */}
-                  <div className="mt-3 space-y-2 text-xs text-slate-300 leading-relaxed">
+                  <div className="mt-3 space-y-2 text-xs text-slate-300 leading-relaxed min-w-0">
                     {item.keyPoints.slice(0, 3).map((point, idx) => (
-                      <div key={idx} className="flex items-start gap-2">
-                        <span className="text-cyan-400 font-bold">•</span>
-                        <p className="line-clamp-2">{point}</p>
+                      <div key={idx} className="flex items-start gap-2 min-w-0">
+                        <span className="text-cyan-400 font-bold shrink-0">•</span>
+                        <p className="line-clamp-2 break-words break-all [overflow-wrap:anywhere] min-w-0">{point}</p>
                       </div>
                     ))}
                     {item.keyPoints.length > 3 && (
@@ -575,16 +563,16 @@ export function HubClient() {
 
                   {/* Links & Files attached */}
                   {item.links.length > 0 && (
-                    <div className="mt-4 space-y-2 rounded-lg bg-slate-950/60 p-3 border border-slate-800">
+                    <div className="mt-4 space-y-2 rounded-lg bg-slate-950/60 p-3 border border-slate-800 min-w-0">
                       <span className="text-[11px] font-semibold text-emerald-400 flex items-center gap-1.5">
                         {item.links.some((l) => l.isFile) ? (
                           <>
-                            <FolderDown className="h-3.5 w-3.5 text-amber-400" />
+                            <FolderDown className="h-3.5 w-3.5 text-amber-400 shrink-0" />
                             <span className="text-amber-300">File & Tài liệu đính kèm:</span>
                           </>
                         ) : (
                           <>
-                            <LinkIcon className="h-3.5 w-3.5 text-emerald-400" />
+                            <LinkIcon className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
                             <span>Tài nguyên & Link:</span>
                           </>
                         )}
@@ -595,21 +583,21 @@ export function HubClient() {
                           href={l.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className={`flex items-center justify-between gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors truncate ${
+                          className={`flex items-center justify-between gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition-colors min-w-0 ${
                             l.isFile
                               ? "bg-amber-500/10 text-amber-300 border border-amber-500/20 hover:bg-amber-500/20"
                               : "bg-slate-900/80 text-cyan-300 border border-slate-700/60 hover:bg-slate-800 hover:text-cyan-200"
                           }`}
                         >
-                          <div className="flex items-center gap-1.5 truncate">
+                          <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
                             {l.isFile ? (
                               <Download className="h-3.5 w-3.5 shrink-0 text-amber-400" />
                             ) : (
                               <ExternalLink className="h-3 w-3 shrink-0 text-cyan-400" />
                             )}
-                            <span className="truncate">{l.url}</span>
+                            <span className="truncate break-all min-w-0">{l.url}</span>
                           </div>
-                          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider opacity-80">
+                          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider opacity-80 ml-1">
                             {l.isFile ? "Tải File" : "Mở"}
                           </span>
                         </a>
@@ -750,38 +738,42 @@ export function HubClient() {
                     </span>
                   )}
                 </div>
-                <h2 className="text-xl font-bold text-white leading-snug">{selectedItem.title}</h2>
+                <h2 className="text-lg md:text-xl font-bold text-white leading-snug break-words break-all [overflow-wrap:anywhere] max-w-full">
+                  {selectedItem.title}
+                </h2>
                 <p className="text-xs text-slate-400 mt-1">
                   Được đúc kết ngày {selectedItem.date} · Chia sẻ bởi {selectedItem.author}
                 </p>
               </div>
               <button
                 onClick={() => setSelectedItem(null)}
-                className="rounded-lg bg-slate-800 p-2 text-slate-400 hover:text-white hover:bg-slate-700"
+                className="rounded-lg bg-slate-800 p-2 text-slate-400 hover:text-white hover:bg-slate-700 shrink-0"
               >
                 ✕
               </button>
             </div>
 
             {/* Chi tiết nội dung */}
-            <div className="space-y-3 text-sm text-slate-200 leading-relaxed">
+            <div className="space-y-3 text-sm text-slate-200 leading-relaxed min-w-0">
               <h4 className="font-semibold text-cyan-300 text-xs uppercase tracking-wider">
                 Nội Dung Chi Tiết & Hướng Dẫn:
               </h4>
-              <div className="space-y-3 rounded-xl bg-slate-950/70 p-4 md:p-5 border border-slate-800">
+              <div className="space-y-3 rounded-xl bg-slate-950/70 p-4 md:p-5 border border-slate-800 min-w-0 overflow-hidden">
                 {selectedItem.keyPoints.map((kp, idx) => {
                   const isStep = /^(—\s*bước|bước|buoc|step|\d+\.)/i.test(kp);
                   return (
                     <div
                       key={idx}
-                      className={`flex items-start gap-3 ${
+                      className={`flex items-start gap-3 min-w-0 ${
                         isStep ? "p-2.5 rounded-lg bg-slate-900/90 border border-slate-800" : ""
                       }`}
                     >
                       <span className="text-cyan-400 font-bold mt-0.5 text-sm shrink-0">
                         {isStep ? "📍" : "•"}
                       </span>
-                      <p className="text-slate-200 leading-relaxed break-words whitespace-pre-wrap">{kp}</p>
+                      <p className="text-slate-200 leading-relaxed break-words break-all [overflow-wrap:anywhere] whitespace-pre-wrap flex-1 min-w-0">
+                        {kp}
+                      </p>
                     </div>
                   );
                 })}
@@ -790,38 +782,38 @@ export function HubClient() {
 
             {/* Link & File đính kèm */}
             {selectedItem.links.length > 0 && (
-              <div className="space-y-2 pt-2">
+              <div className="space-y-2 pt-2 min-w-0">
                 <h4 className="font-semibold text-emerald-400 text-xs uppercase tracking-wider flex items-center gap-1.5">
                   {selectedItem.links.some((l) => l.isFile) ? (
                     <>
-                      <FolderDown className="h-4 w-4 text-amber-400" />
+                      <FolderDown className="h-4 w-4 text-amber-400 shrink-0" />
                       <span className="text-amber-300">File & Tài liệu đính kèm:</span>
                     </>
                   ) : (
                     <>
-                      <LinkIcon className="h-4 w-4 text-emerald-400" />
+                      <LinkIcon className="h-4 w-4 text-emerald-400 shrink-0" />
                       <span>Đường link & Tài nguyên:</span>
                     </>
                   )}
                 </h4>
-                <div className="space-y-2">
+                <div className="space-y-2 min-w-0">
                   {selectedItem.links.map((l, idx) => (
                     <a
                       key={idx}
                       href={l.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className={`flex items-center justify-between rounded-lg p-3 text-xs transition-colors ${
+                      className={`flex items-center justify-between rounded-lg p-3 text-xs transition-colors min-w-0 ${
                         l.isFile
                           ? "border border-amber-500/30 bg-amber-950/20 text-amber-300 hover:bg-amber-950/40"
                           : "border border-emerald-500/20 bg-emerald-950/20 text-emerald-300 hover:bg-emerald-950/40"
                       }`}
                     >
-                      <div className="flex items-center gap-2 truncate max-w-[450px]">
+                      <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
                         {l.isFile ? <Download className="h-4 w-4 text-amber-400 shrink-0" /> : <ExternalLink className="h-4 w-4 shrink-0" />}
-                        <span className="truncate">{l.url}</span>
+                        <span className="truncate break-all min-w-0 flex-1">{l.url}</span>
                       </div>
-                      <span className="text-[11px] font-bold uppercase shrink-0 px-2 py-0.5 rounded bg-slate-900 border border-slate-700">
+                      <span className="text-[11px] font-bold uppercase shrink-0 px-2 py-0.5 rounded bg-slate-900 border border-slate-700 ml-1">
                         {l.isFile ? "Tải File / Mở Drive" : "Mở Link"}
                       </span>
                     </a>
