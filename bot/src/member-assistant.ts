@@ -36,6 +36,7 @@ import { defaultBotName } from "./config.js";
 import { finalizeGroundedAnswer } from "./search-evidence.js";
 import { generateCloudflareImage, isCloudflareConfigured } from "./cloudflare-ai.js";
 import { formatRealEstateProjectProfileAnswer } from "./real-estate-profile.js";
+import { canUseGrounding, formatGroundingQuotaReport } from "./grounding-quota.js";
 
 export interface MemberMessageEvent {
   threadId: string;
@@ -1778,6 +1779,12 @@ async function handleHistoryQA(
     customPromptSection = `\n=== CHỈ THỊ & NỘI QUY RIÊNG CỦA ADMIN CHO NHÓM NÀY (BẮT BUỘC TUÂN THỦ 100%): ===\n${groupSettings.customPrompt.trim()}\n`;
   }
 
+  const isSearchDisabled =
+    process.env.DISABLE_SEARCH === "true" ||
+    Boolean((groupSettings as any)?.disableSearch) ||
+    Boolean((groupSettings as any)?.enableSearch === 0) ||
+    /tắt search|không tìm kiếm|không tra cứu/i.test(groupSettings.customPrompt || "");
+
   // 2.0. Đọc hiểu ngữ nghĩa & Lập kế hoạch tra cứu bằng Gemini Flash-Lite (Semantic Query Planner)
   let liveNews = "";
   let evidenceRequired = false;
@@ -1803,13 +1810,20 @@ async function handleHistoryQA(
     if (plan.needsSearch && plan.queries.length > 0) {
       evidenceRequired = plan.intent === "fact_check";
       console.log(`[member-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(plan.queries)}`);
-      const searchResults = await Promise.all(
-        plan.queries.slice(0, 2).map((q) => searchRealtimeNews(q, {
-          intent: plan.intent,
-          requireEvidence: evidenceRequired,
-        }).catch(() => ""))
-      );
-      liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
+
+      // ⚡ TIER 1: Nếu Google Search Grounding khả dụng và còn hạn mức, ưu tiên tìm kiếm trực tiếp trên Google Search, bỏ qua quét RSS để siêu tốc (~1.5s thay vì ~5s)
+      if (canUseGrounding() && !isSearchDisabled) {
+        console.log(`[member-assistant] ⚡ Tier 1: Ưu tiên Google Search Grounding trực tiếp, bỏ qua quét RSS để tối ưu tốc độ.`);
+      } else {
+        console.log(`[member-assistant] 📰 Tier 2: Quota Grounding tạm hết hoặc bị tắt, kích hoạt quét RSS nội bộ...`);
+        const searchResults = await Promise.all(
+          plan.queries.slice(0, 2).map((q) => searchRealtimeNews(q, {
+            intent: plan.intent,
+            requireEvidence: evidenceRequired,
+          }).catch(() => ""))
+        );
+        liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
+      }
     }
   } catch (e) {
     console.warn("[member-assistant] planSearchQueries lỗi:", e);
@@ -1917,12 +1931,6 @@ async function handleHistoryQA(
     `HÃY TRẢ LỜI THẬT ${isSuperAdmin ? "CHU ĐÁO, CHUẨN XÁC VÀ TÔN TRỌNG SẾP" : "DUYÊN DÁNG, CHUẨN XÁC VÀ HÓM HỈNH"}:`;
 
   try {
-    const isSearchDisabled =
-      process.env.DISABLE_SEARCH === "true" ||
-      Boolean((groupSettings as any)?.disableSearch) ||
-      Boolean((groupSettings as any)?.enableSearch === 0) ||
-      /tắt search|không tìm kiếm|không tra cứu/i.test(groupSettings.customPrompt || "");
-
     const isFileGenerationQuery =
       /(?:tạo|xuất|làm|lưu|gửi|convert|chuyển|viết)\s*(?:thành\s*)?(?:file|tệp)?\s*(?:word|excel|docx|xlsx|doc|sheet|bảng|pdf|txt|md|code)/i.test(question) ||
       /(?:file|tệp)\s*(?:word|excel|docx|xlsx)/i.test(question) ||
@@ -1955,8 +1963,17 @@ async function handleHistoryQA(
         /(?:thời tiết|giá vàng|tỷ giá|chứng khoán|tin tức|hôm nay|mới nhất|khi nào|bao giờ|ai là|lịch thi đấu|tỉ số|kết quả|vừa ra mắt)/i.test(question)
       );
 
+      // Nếu cần tìm kiếm nhưng Tier 1 (Grounding) không khả dụng và chưa có liveNews từ trước, quét nhanh RSS fallback:
+      if (needsSearch && !canUseGrounding() && !liveNews) {
+        console.log(`[member-assistant] 📰 Tier 2 Fallback: Kích hoạt quét RSS nhanh...`);
+        const searchRes = await searchRealtimeNews(question, { intent: "fact_check", requireEvidence: false }).catch(() => "");
+        if (searchRes) {
+          liveNews = searchRes;
+        }
+      }
+
       answer = await callGemini(systemPrompt, userPrompt, {
-        model: needsSearch ? "gemini-2.5-flash" : "gemini-3.1-flash-lite-preview",
+        model: (needsSearch && canUseGrounding()) ? "gemini-2.5-flash" : "gemini-3.1-flash-lite-preview",
         mediaParts: mediaPart ? [mediaPart] : undefined,
         enableSearch: needsSearch,
       });
@@ -2268,6 +2285,24 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     const reply = handleTopCommand(threadId);
     await sendGroupText(api, threadId, reply);
     console.log(`[member-assistant] ✅ Đã phản hồi /top cho ${displayName}`);
+    return;
+  }
+
+  // 3.5. Lệnh /quota, !quota, /grounding, !grounding: Kiểm tra hạn mức Google Search Grounding hôm nay
+  if (
+    lower === "/quota" ||
+    lower === "!quota" ||
+    lower === "quota" ||
+    lower === "/grounding" ||
+    lower === "!grounding" ||
+    lower === "grounding" ||
+    lower === "/hanmuc" ||
+    lower === "!hanmuc"
+  ) {
+    userCooldowns.set(sender, now);
+    const reply = formatGroundingQuotaReport();
+    await sendGroupText(api, threadId, reply);
+    console.log(`[member-assistant] ✅ Đã phản hồi /quota cho ${displayName}`);
     return;
   }
 

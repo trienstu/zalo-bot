@@ -22,6 +22,11 @@ import {
 import { fetchWeatherData } from "./weather.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
 import { callCloudflareLlm, isCloudflareConfigured } from "./cloudflare-ai.js";
+import {
+  canUseGrounding,
+  incrementGroundingUsage,
+  markGroundingExhausted,
+} from "./grounding-quota.js";
 
 /**
  * Lớp gọi Google Gemini API dùng chung (Tóm tắt hội thoại Zalo, bóc tách dữ liệu).
@@ -295,9 +300,12 @@ export async function callGemini(
 
   const groundingKey = (process.env.GEMINI_GROUNDING_API_KEY || config.geminiGroundingApiKey || "").trim();
 
+  const isSearchRequested = Boolean(options?.enableSearch);
+  const isSearchEnabled = isSearchRequested && canUseGrounding();
+
   // NẾU LÀ YÊU CẦU GOOGLE SEARCH GROUNDING:
   // CHỈ SỬ DỤNG DUY NHẤT KEY ĐÃ GẮN BILLING ĐỂ HƯỞNG 1500 LƯỢT SEARCH/NGÀY VÀ TRÁNH 429 TỪ CÁC KEY FREE
-  if (options?.enableSearch) {
+  if (isSearchEnabled) {
     if (groundingKey) {
       apiKeys = [groundingKey];
     } else if (apiKeys.length > 0 && apiKeys[0]) {
@@ -311,14 +319,14 @@ export async function callGemini(
   }
 
   let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-3.1-flash-lite-preview";
-  if (options?.enableSearch) {
+  if (isSearchEnabled) {
     primaryModel = "gemini-2.5-flash";
   } else if (!primaryModel || !primaryModel.includes("lite")) {
     primaryModel = "gemini-3.1-flash-lite-preview";
   }
 
   // Danh sách model cascading dự phòng siêu tốc (~800ms) khi model chính nghẽn mạng / 503 / 429 / Timeout:
-  const candidateFallbacks = options?.enableSearch
+  const candidateFallbacks = isSearchEnabled
     ? []
     : [
         "gemini-3.1-flash-lite-preview",
@@ -363,7 +371,7 @@ export async function callGemini(
           parts: userParts,
         },
       ],
-      ...(options?.enableSearch ? { tools: [{ google_search: {} }] } : {}),
+      ...(isSearchEnabled ? { tools: [{ google_search: {} }] } : {}),
       generationConfig: {
         temperature,
         ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
@@ -383,7 +391,8 @@ export async function callGemini(
       });
 
       // Nếu yêu cầu Google Search Grounding bị lỗi 429 (vượt hạn mức / chưa có billing), tự động fallback gọi không có grounding tool
-      if (!resp.ok && options?.enableSearch && resp.status === 429) {
+      if (!resp.ok && isSearchEnabled && resp.status === 429) {
+        markGroundingExhausted("Google API trả về HTTP 429 (Hết lượt Grounding)");
         delete requestBody.tools;
         const retryResp = await fetch(endpoint, {
           method: "POST",
@@ -404,13 +413,37 @@ export async function callGemini(
       }
 
       const data = (await resp.json()) as {
-        candidates?: { content?: { parts?: { text?: string }[] } }[];
+        candidates?: {
+          content?: { parts?: { text?: string }[] };
+          groundingMetadata?: {
+            webSearchQueries?: string[];
+            groundingChunks?: { web?: { uri?: string; title?: string } }[];
+          };
+        }[];
       };
       const candidate = data.candidates?.[0];
       let content = candidate?.content?.parts?.map((p: { text?: string }) => p.text || "").join("").trim();
       if (!content) {
         lastError = new Error(`Response Gemini API (${targetModel}) rỗng`);
         return null;
+      }
+
+      // 🌐 NẾU CÓ KẾT QUẢ GOOGLE SEARCH GROUNDING:
+      if (candidate?.groundingMetadata?.groundingChunks && candidate.groundingMetadata.groundingChunks.length > 0) {
+        incrementGroundingUsage(1);
+        const sources = [
+          ...new Set(
+            candidate.groundingMetadata.groundingChunks
+              .map((c) => c.web?.title?.trim())
+              .filter((t): t is string => typeof t === "string" && t.length > 0)
+          ),
+        ];
+        if (sources.length > 0 && !content.toLowerCase().includes("nguồn") && !content.toLowerCase().includes("kiểm chứng")) {
+          content += `\n\n🌐 Nguồn Google Live Search: ${sources.join(", ")}.`;
+        }
+        if (candidate.groundingMetadata.webSearchQueries?.length) {
+          console.log(`[gemini] 🌐 Google Search Grounding: queries=${JSON.stringify(candidate.groundingMetadata.webSearchQueries)}, sources=${sources.join(", ")}`);
+        }
       }
 
       return content;

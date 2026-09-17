@@ -29,6 +29,7 @@ import { searchRealtimeNews } from "./realtime-search.js";
 import { planSearchQueries } from "./query-planner.js";
 import { finalizeGroundedAnswer } from "./search-evidence.js";
 import { formatRealEstateProjectProfileAnswer } from "./real-estate-profile.js";
+import { formatGroundingQuotaReport } from "./grounding-quota.js";
 import {
   parseGoogleUrl,
   fetchGoogleContent,
@@ -478,7 +479,8 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         `🔹 Hoặc chat tự nhiên: "Nhắc tôi 30 phút nữa gọi cho anh Nam", "8h tối mai nhắc tôi xem bóng đá"\n\n` +
         `☀️ TRA CỨU THỜI TIẾT & BẢN TIN AI:\n` +
         `🔹 /thoitiet [địa điểm] : Xem thời tiết & bụi mịn PM2.5 (TP.HCM, Hà Nội, Đà Lạt...)\n` +
-        `🔹 /bantin : Xem ngay điểm tin AI & Công nghệ nóng nhất 24h qua trên X/Twitter\n\n` +
+        `🔹 /bantin : Xem ngay điểm tin AI & Công nghệ nóng nhất 24h qua trên X/Twitter\n` +
+        `🔹 /quota : Xem hạn mức & số lượt Google Search Grounding đã dùng hôm nay\n\n` +
         `📋 QUẢN LÝ NHÓM ZALO:\n` +
         `🔹 /groups : Xem danh sách & ID tất cả các nhóm Zalo Bot đang tham gia\n` +
         `🔹 /send [tên_nhóm/id] [nội dung] : Gửi tin nhắn/thông báo vào nhóm chỉ định\n` +
@@ -520,6 +522,22 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   if (lower === "/bantin" || lower === "!bantin" || lower === "bantin" || /bản tin (?:ai|sáng|công nghệ|hôm nay)/i.test(rawText)) {
     const briefing = await getDailyAiNewsBriefing("AI & Công nghệ trên X", "Sen Chúa");
     await sendDirectText(api, sender, briefing);
+    return;
+  }
+
+  // 2.25. Lệnh /quota, !quota, /grounding: Báo cáo hạn mức Google Search Grounding
+  if (
+    lower === "/quota" ||
+    lower === "!quota" ||
+    lower === "quota" ||
+    lower === "/grounding" ||
+    lower === "!grounding" ||
+    lower === "grounding" ||
+    lower === "/hanmuc" ||
+    lower === "!hanmuc"
+  ) {
+    const report = formatGroundingQuotaReport();
+    await sendDirectText(api, sender, report);
     return;
   }
 
