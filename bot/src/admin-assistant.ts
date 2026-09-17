@@ -29,7 +29,7 @@ import { searchRealtimeNews } from "./realtime-search.js";
 import { planSearchQueries } from "./query-planner.js";
 import { finalizeGroundedAnswer } from "./search-evidence.js";
 import { formatRealEstateProjectProfileAnswer } from "./real-estate-profile.js";
-import { formatGroundingQuotaReport } from "./grounding-quota.js";
+import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from "./grounding-quota.js";
 import {
   parseGoogleUrl,
   fetchGoogleContent,
@@ -525,11 +525,13 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     return;
   }
 
-  // 2.25. Lệnh /quota, !quota, /grounding: Báo cáo hạn mức Google Search Grounding
+  // 2.25. Lệnh /quota, !quota, /checkquota, !checkquota: Báo cáo hạn mức Google Search Grounding
   if (
     lower === "/quota" ||
     lower === "!quota" ||
     lower === "quota" ||
+    lower === "/checkquota" ||
+    lower === "!checkquota" ||
     lower === "/grounding" ||
     lower === "!grounding" ||
     lower === "grounding" ||
@@ -538,6 +540,13 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   ) {
     const report = formatGroundingQuotaReport();
     await sendDirectText(api, sender, report);
+    return;
+  }
+
+  // 2.26. Lệnh /resetquota, !resetquota: Reset bộ đếm hạn mức Grounding hôm nay
+  if (lower === "/resetquota" || lower === "!resetquota" || lower === "/resetgrounding" || lower === "!resetgrounding") {
+    resetGroundingQuota();
+    await sendDirectText(api, sender, "✅ Đã reset bộ đếm hạn mức và kích hoạt lại Google Search Grounding hôm nay!");
     return;
   }
 
@@ -1343,6 +1352,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   // 2.0. Đọc hiểu ngữ nghĩa & Lập kế hoạch tra cứu bằng Gemini Flash-Lite (Semantic Query Planner)
   let liveNews = "";
   let evidenceRequired = false;
+  let planNeedsSearch = false;
   try {
     const plan = await planSearchQueries({
       question: rawText,
@@ -1351,15 +1361,19 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     });
 
     if (plan.needsSearch && plan.queries.length > 0) {
+      planNeedsSearch = true;
       evidenceRequired = plan.intent === "fact_check";
       console.log(`[admin-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(plan.queries)}`);
-      const searchResults = await Promise.all(
-        plan.queries.slice(0, 3).map((q) => searchRealtimeNews(q, {
-          intent: plan.intent,
-          requireEvidence: evidenceRequired,
-        }).catch(() => ""))
-      );
-      liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
+      // Nếu Tier 1 (Grounding) không khả dụng, mới quét RSS đa nguồn
+      if (!canUseGrounding()) {
+        const searchResults = await Promise.all(
+          plan.queries.slice(0, 3).map((q) => searchRealtimeNews(q, {
+            intent: plan.intent,
+            requireEvidence: evidenceRequired,
+          }).catch(() => ""))
+        );
+        liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
+      }
     }
   } catch (e) {
     console.warn("[admin-assistant] planSearchQueries lỗi:", e);
@@ -1499,11 +1513,27 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     (isAdmin ? `HÃY TRẢ LỜI SẾP THẬT CHUẨN XÁC, THÔNG MINH VÀ HỮU ÍCH:` : `HÃY TRẢ LỜI THẬT THÂN THIỆN, CHUẨN XÁC VÀ HỮU ÍCH:`);
 
   try {
-    const chosenModel = !isAdmin
-      ? (process.env.USER_DIRECT_GEMINI_MODEL?.trim() || "gemini-flash-lite-latest")
-      : (process.env.ADMIN_DIRECT_GEMINI_MODEL?.trim() || undefined);
-
     const isSearchDisabled = process.env.DISABLE_SEARCH === "true";
+
+    const needsSearch = !isSearchDisabled && (
+      planNeedsSearch ||
+      /(?:thời tiết|giá vàng|tỷ giá|chứng khoán|tin tức|mới nhất|khi nào|bao giờ|ai là|lịch thi đấu|tỉ số|kết quả|vừa ra mắt)/i.test(rawText)
+    );
+
+    // Nếu cần tìm kiếm nhưng Tier 1 (Grounding) không khả dụng và chưa có liveNews từ trước, quét nhanh RSS fallback:
+    if (needsSearch && !canUseGrounding() && !liveNews) {
+      console.log(`[admin-assistant] 📰 Tier 2 Fallback: Kích hoạt quét RSS nhanh...`);
+      const searchRes = await searchRealtimeNews(rawText, { intent: "fact_check", requireEvidence: false }).catch(() => "");
+      if (searchRes) {
+        liveNews = searchRes;
+      }
+    }
+
+    const defaultFastModel = !isAdmin
+      ? (process.env.USER_DIRECT_GEMINI_MODEL?.trim() || "gemini-3.1-flash-lite-preview")
+      : (process.env.ADMIN_DIRECT_GEMINI_MODEL?.trim() || "gemini-3.1-flash-lite-preview");
+
+    const targetModel = (needsSearch && canUseGrounding()) ? "gemini-2.5-flash" : defaultFastModel;
 
     const fullSystemPrompt =
       systemPrompt +
@@ -1524,7 +1554,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     if (needsAgentLoop && !isSearchDisabled) {
       // 🚀 AGENT LOOP (Chỉ dùng khi cần tạo/xuất file hoặc tải link)
       answer = await callGeminiAgentLoop(fullSystemPrompt, userPrompt, {
-        model: chosenModel,
+        model: targetModel,
         mediaParts: mediaPart ? [mediaPart] : undefined,
         onFileGenerated: async (file) => {
           try {
@@ -1537,10 +1567,10 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     } else {
       // ⚡ FAST-PATH: Trả lời siêu tốc trong 1 lượt duy nhất (~1 giây)
       answer = await callGemini(fullSystemPrompt, userPrompt, {
-        model: chosenModel,
+        model: targetModel,
         maxTokens: !isAdmin ? 600 : undefined,
         mediaParts: mediaPart ? [mediaPart] : undefined,
-        enableSearch: false,
+        enableSearch: needsSearch,
       });
     }
 
