@@ -27,6 +27,7 @@ import {
   incrementGroundingUsage,
   markGroundingExhausted,
 } from "./grounding-quota.js";
+import { callVertexGemini, isVertexConfigured } from "./vertex-gemini.js";
 
 /**
  * Lớp gọi Google Gemini API dùng chung (Tóm tắt hội thoại Zalo, bóc tách dữ liệu).
@@ -283,7 +284,7 @@ export async function downloadFileContent(
 }
 
 /** Bóc tách tên nhà xuất bản / tòa soạn báo chí từ uri và title để trích dẫn ngắn gọn (không in link URL) */
-function extractPublisherName(title?: string, uri?: string): string {
+export function extractPublisherName(title?: string, uri?: string): string {
   const domainMap: Record<string, string> = {
     "vnexpress.net": "VnExpress",
     "cafef.vn": "CafeF",
@@ -439,6 +440,28 @@ export async function callGemini(
   const effectiveSystem = system?.includes("SYSTEM TEMPORAL ANCHOR")
     ? system
     : (system ? `${getSystemTemporalPrompt()}\n\n${system}` : getSystemTemporalPrompt());
+
+  // 🌐 NẾU CẦN SEARCH GROUNDING & VERTEX AI ĐÃ CẤU HÌNH:
+  // Chỉ dùng Vertex AI khi cần Google Search Grounding để hưởng 1.500 lượt search miễn phí/ngày và trừ vào $300 credit.
+  // Khi chat thường hoặc tóm tắt (không search), bot tiếp tục dùng các key cũ hoàn toàn miễn phí.
+  if (isSearchEnabled && isVertexConfigured()) {
+    try {
+      const vertexRes = await callVertexGemini(user, {
+        model: "gemini-2.5-flash",
+        systemInstruction: effectiveSystem,
+        temperature,
+        maxTokens,
+        search: true,
+        images: options?.images,
+      });
+      if (vertexRes && vertexRes.trim().length > 0) {
+        return vertexRes;
+      }
+      console.warn("[gemini] Vertex AI không trả về kết quả, fallback sang AI Studio / RSS");
+    } catch (vErr) {
+      console.warn("[gemini] Lỗi gọi Vertex AI, fallback sang AI Studio / RSS:", vErr);
+    }
+  }
 
   // Thử lần lượt qua từng API Key nếu có nhiều key (Xoay vòng chống 429 Rate Limit)
   for (let attempt = 0; attempt < numKeys; attempt += 1) {

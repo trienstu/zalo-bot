@@ -11,6 +11,12 @@ data/
 *.session.json
 zalo-session*.json
 
+# Google Cloud credentials — TUYỆT ĐỐI không commit
+*credentials*.json
+*service-account*.json
+gcp-key*.json
+google-credentials.json
+
 # SQLite database (data tích luỹ trên VPS, không versioned)
 *.db
 *.db-shm

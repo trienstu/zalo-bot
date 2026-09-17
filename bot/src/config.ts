@@ -303,6 +303,13 @@ export const config = {
     ? process.env.GEMINI_MODEL.trim()
     : "gemini-3.1-flash-lite-preview",
 
+  /** Google Cloud Vertex AI (Chuyên dụng cho Google Search Grounding: hưởng 1500 lượt search/ngày & trừ vào $300 credit) */
+  vertexProjectId: process.env.VERTEX_PROJECT_ID?.trim() || "gen-lang-client-0283698215",
+  vertexLocation: process.env.VERTEX_LOCATION?.trim() || "us-central1",
+  vertexCredentialsPath: process.env.VERTEX_CREDENTIALS_PATH?.trim() || process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim() || "google-credentials.json",
+  vertexServiceAccountJson: process.env.VERTEX_SERVICE_ACCOUNT_JSON?.trim() || "",
+  vertexModel: process.env.VERTEX_MODEL?.trim() || "gemini-2.5-flash",
+
   /** API key DeepSeek cho tóm tắt hằng ngày (https://platform.deepseek.com). Rỗng = tắt. */
   deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() || "",
 
