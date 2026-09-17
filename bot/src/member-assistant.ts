@@ -624,26 +624,25 @@ export function extractAuthorHint(text: string, customStopWords?: Set<string>): 
     "sen", "chúa", "chua", "mộc", "miên", "moc", "mien", "bot",
     "ai", "nào", "nao", "gì", "gi", "đâu", "dau", "mình", "minh",
     "bác", "bac", "anh", "chị", "chi", "sếp", "sep", "ông", "ong", "bạn", "ban", "em", "thầy", "thay", "cô", "co",
-    "link", "repo", "web", "tool", "source", "code", "nhóm", "nhom"
+    "link", "repo", "web", "tool", "source", "code", "nhóm", "nhom",
+    "trước", "truoc", "tới", "toi", "giờ", "gio", "gần", "gan", "đây", "day", "toàn", "bộ"
   ]);
   const stopWords = customStopWords || defaultStopWords;
 
   // Loại bỏ các đại từ của người yêu cầu trước: 'giúp anh', 'giúp em', 'cho anh', 'cho em', 'cho mình', 'hộ anh', 'hộ em'
   const cleaned = text.replace(/(?:lấy\s+|tìm\s+|hỏi\s+|kiếm\s+|xem\s+)?(?:giúp|hộ|cho)\s+(?:anh|em|mình|tôi|tao|ad|admin)\s+/gi, " ");
 
-  // Mẫu 1: (mà|của|do|từ|bởi) [danh xưng]? [Tên riêng] (hành động...)
-  const regex1 = /(?:mà|của|do|từ|bởi)\s+(?:(?:bác|anh|chị|sếp|ông|bạn|thầy|cô|em)\s+)?([A-Za-zÀ-ỹ0-9_]+(?:\s+[A-Za-zÀ-ỹ0-9_]+){0,2})\s+(?:đã\s+|da\s+|có\s+|co\s+)?(?:share|chia\s*sẻ|chia\s*se|gửi|gui|nhắn|nhan|post|đăng|dang|up|viết|viet|nói|noi|bảo|bao)/i;
+  // Mẫu 1: Có danh xưng (bác|anh|chị|sếp|em|bạn) [Tên riêng] (1-2 từ)
+  const regexHonorific = /(?:của|do|từ|bởi)?\s*(?:bác|anh|chị|sếp|ông|bạn|thầy|cô|em)\s+([A-Za-zÀ-ỹ0-9_]+(?:\s+[A-Za-zÀ-ỹ0-9_]+)?)/i;
 
-  // Mẫu 2: [danh xưng] [Tên riêng] (hành động...)
-  const regex2 = /(?:bác|anh|chị|sếp|ông|bạn|thầy|cô)\s+([A-Za-zÀ-ỹ0-9_]+(?:\s+[A-Za-zÀ-ỹ0-9_]+){0,2})\s+(?:đã\s+|da\s+|có\s+|co\s+)?(?:share|chia\s*sẻ|chia\s*se|gửi|gui|nhắn|nhan|post|đăng|dang|up|viết|viet|nói|noi|bảo|bao)/i;
+  // Mẫu 2: (của|do|bởi) [Tên riêng]
+  const regexPrep = /(?:của|do|bởi)\s+([A-Za-zÀ-ỹ0-9_]+(?:\s+[A-Za-zÀ-ỹ0-9_]+)?)/i;
 
-  // Mẫu 3: (của|do|từ|bởi) [danh xưng]? [Tên riêng] (về/lúc/hôm/ngày/ở/trên/trong|$)
-  const regex3 = /(?:của|do|từ|bởi)\s+(?:(?:bác|anh|chị|sếp|ông|bạn|thầy|cô|em)\s+)?([A-Za-zÀ-ỹ0-9_]+(?:\s+[A-Za-zÀ-ỹ0-9_]+){0,2})(?:\s+(?:về|lúc|hôm|ngày|ở|trên|trong)|$|[.,;?!])/i;
-
-  const m = cleaned.match(regex1) || cleaned.match(regex2) || cleaned.match(regex3);
+  const m = cleaned.match(regexHonorific) || cleaned.match(regexPrep);
   if (m && m[1]) {
     let raw = m[1].trim();
-    raw = raw.replace(/\s+(?:đã|da|có|co|vừa|vua|mới|moi)$/i, "").trim();
+    // Loại bỏ từ nối thời gian hoặc hành động nếu bị nuốt nhầm vào từ thứ hai
+    raw = raw.replace(/\s+(?:từ|tu|trước|truoc|về|ve|lúc|luc|hôm|hom|ngày|ngay|share|gửi|gui|nhắn|nhan|post|đăng|dang|up|viết|viet|đã|da|có|co|vừa|vua|mới|moi)$/i, "").trim();
     if (raw.length >= 2 && !stopWords.has(raw.toLowerCase())) {
       return raw;
     }
