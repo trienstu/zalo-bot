@@ -36,7 +36,7 @@ import { defaultBotName } from "./config.js";
 import { finalizeGroundedAnswer } from "./search-evidence.js";
 import { generateCloudflareImage, isCloudflareConfigured } from "./cloudflare-ai.js";
 import { formatRealEstateProjectProfileAnswer } from "./real-estate-profile.js";
-import { canUseGrounding, formatGroundingQuotaReport } from "./grounding-quota.js";
+import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from "./grounding-quota.js";
 
 export interface MemberMessageEvent {
   threadId: string;
@@ -2355,6 +2355,14 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     const reply = formatGroundingQuotaReport();
     await sendGroupText(api, threadId, reply);
     console.log(`[member-assistant] ✅ Đã phản hồi /quota cho ${displayName}`);
+    return;
+  }
+
+  // 3.6. Lệnh /resetquota, !resetquota: Reset bộ đếm hạn mức hôm nay
+  if (lower === "/resetquota" || lower === "!resetquota" || lower === "/resetgrounding" || lower === "!resetgrounding") {
+    userCooldowns.set(sender, now);
+    resetGroundingQuota();
+    await sendGroupText(api, threadId, "✅ Đã reset bộ đếm hạn mức và kích hoạt lại Google Search Grounding hôm nay!");
     return;
   }
 
