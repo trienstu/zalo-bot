@@ -46,9 +46,22 @@ This project is indexed by GitNexus as **zalo-bot** (4345 symbols, 10609 relatio
 # Quy Tắc Cập Nhật & Triển Khai (Deployment Rules)
 
 - **LUÔN CẬP NHẬT ĐỒNG THỜI CẢ 2 BOT**: Trên VPS (`zalo-bot-free`), hệ thống chạy mô hình 2 bot độc lập:
-  - Bot 1 (`zalo-bot-1`): thư mục `~/zalo-bot`
-  - Bot 2 (`zalo-bot-2`): thư mục `~/zalo-bot-2`
-  - Khi gửi câu lệnh cập nhật cho người dùng, **BẮT BUỘC** luôn cung cấp lệnh đồng bộ, build và restart cho CẢ 2 BOT cùng lúc:
+  - Bot 1 (`zalo-bot-1`, `zalo-web-1`): thư mục `~/zalo-bot`
+  - Bot 2 (`zalo-bot-2`, `zalo-web-2`): thư mục `~/zalo-bot-2`
+
+- **QUY TẮC TRIỂN KHAI PHẦN WEB (DASHBOARD & HUB) - SIÊU TỐC CHO VPS FREE**:
+  - VPS là phiên bản cấu hình yếu (VPS Free, 1 CPU, 1GB RAM), **TUYỆT ĐỐI KHÔNG** bắt VPS chạy `npm run build --prefix web` (Next.js build) vì sẽ chiếm 100% CPU/RAM và rất lâu (thậm chí crash).
+  - **Quy trình chuẩn khi có sửa đổi Web**:
+    1. Build sẵn tại local máy Mac: `npm run build --prefix web`
+    2. Nén bản build thành file nhỏ ~1MB: `tar --exclude='.next/cache' -czf web/next-build.tar.gz -C web .next`
+    3. Commit & push `web/next-build.tar.gz` lên GitHub cùng code.
+    4. Cung cấp cho người dùng lệnh giải nén siêu tốc đồng bộ CẢ 2 BOT (chỉ mất 2-3 giây):
+       ```bash
+       (cd ~/zalo-bot && git pull origin main && tar -xzf web/next-build.tar.gz -C web) && (cd ~/zalo-bot-2 && git pull origin main && tar -xzf web/next-build.tar.gz -C web) && pm2 restart all
+       ```
+
+- **KHI CHỈ CẬP NHẬT BOT BACKEND (Không đổi web)**:
+  - Lệnh đồng bộ cả 2 bot:
     ```bash
     (cd ~/zalo-bot && git pull origin main && npm run build --prefix bot) && (cd ~/zalo-bot-2 && git pull origin main && npm run build --prefix bot) && pm2 restart all
     ```
