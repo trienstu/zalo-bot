@@ -528,6 +528,34 @@ export function searchRelevantLinksAndResources(
   ]);
 
   const authorHint = extractAuthorHint(query);
+  const isTodayQuery = /(?:hôm nay|hom nay|today)/i.test(query);
+
+  const now = new Date();
+  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+  const vnNow = new Date(utc + 7 * 3600000);
+  vnNow.setHours(0, 0, 0, 0);
+  const startOfTodayMs = vnNow.getTime() - 7 * 3600000;
+
+  // Lọc sơ bộ: Nếu có tác giả cụ thể hoặc mốc hôm nay
+  let candidateLinks = allLinks;
+  if (authorHint) {
+    const authorFiltered = allLinks.filter((item) =>
+      item.sender.toLowerCase().includes(authorHint.toLowerCase())
+    );
+    if (authorFiltered.length > 0) {
+      candidateLinks = authorFiltered;
+    }
+  }
+
+  if (isTodayQuery) {
+    const todayFiltered = candidateLinks.filter((item) => item.ts >= startOfTodayMs);
+    if (todayFiltered.length > 0) {
+      candidateLinks = todayFiltered;
+    }
+  }
+
+  const wantsAll = /(?:toàn bộ|toan bo|tất cả|tat ca|toàn thể|danh sách|check\s+toàn\s+bộ)/i.test(query);
+  const effectiveLimit = wantsAll ? Math.max(limit, 50) : limit;
 
   const rawWords = query
     .toLowerCase()
@@ -540,11 +568,11 @@ export function searchRelevantLinksAndResources(
   if (/zalo/i.test(query) && !keywords.includes("zalo")) keywords.push("zalo");
 
   if (keywords.length === 0 && !authorHint) {
-    return allLinks.slice(0, limit);
+    return candidateLinks.slice(0, effectiveLimit);
   }
 
   // 4. Chấm điểm độ khớp: Người gửi + URL + Ngữ cảnh chứa từ khóa
-  const scored = allLinks.map((item) => {
+  const scored = candidateLinks.map((item) => {
     const lowerSender = item.sender.toLowerCase();
     const lowerUrl = item.url.toLowerCase();
     const lowerContext = item.context.toLowerCase();
@@ -554,6 +582,11 @@ export function searchRelevantLinksAndResources(
     // Ưu tiên cực cao (+10 điểm) nếu khớp đúng tác giả/người chia sẻ được nhắc tới (VD: bác Huy, anh Nam, Tuấn...)
     if (authorHint && lowerSender.includes(authorHint.toLowerCase())) {
       matchCount += 10;
+    }
+
+    // Ưu tiên cộng điểm (+5 điểm) nếu link gửi trong ngày hôm nay
+    if (isTodayQuery && item.ts >= startOfTodayMs) {
+      matchCount += 5;
     }
 
     for (const kw of keywords) {
@@ -573,7 +606,11 @@ export function searchRelevantLinksAndResources(
     .sort((a, b) => b.matchCount - a.matchCount || b.item.ts - a.item.ts)
     .map((s) => s.item);
 
-  return matched.slice(0, limit);
+  if (matched.length === 0 && candidateLinks.length > 0) {
+    return candidateLinks.slice(0, effectiveLimit);
+  }
+
+  return matched.slice(0, effectiveLimit);
 }
 
 /**
@@ -633,17 +670,20 @@ export function extractAuthorHint(text: string, customStopWords?: Set<string>): 
   // Loại bỏ các đại từ của người yêu cầu trước: 'giúp anh', 'giúp em', 'cho anh', 'cho em', 'cho mình', 'hộ anh', 'hộ em'
   const cleaned = text.replace(/(?:lấy\s+|tìm\s+|hỏi\s+|kiếm\s+|xem\s+)?(?:giúp|hộ|cho)\s+(?:anh|em|mình|tôi|tao|ad|admin)\s+/gi, " ");
 
-  // Mẫu 1: Có danh xưng (bác|anh|chị|sếp|em|bạn) [Tên riêng] (1-2 từ)
-  const regexHonorific = /(?:của|do|từ|bởi)?\s*(?:bác|anh|chị|sếp|ông|bạn|thầy|cô|em)\s+([A-Za-zÀ-ỹ0-9_]+(?:\s+[A-Za-zÀ-ỹ0-9_]+)?)/i;
+  // Mẫu 1: Tag trực tiếp @[Tên riêng] (VD: @Trungkd, @Nam Nguyen)
+  const regexDirectTag = /@([A-Za-zÀ-ỹ0-9_]+(?:\s+[A-Za-zÀ-ỹ0-9_]+)?)/i;
 
-  // Mẫu 2: (của|do|bởi) [Tên riêng]
-  const regexPrep = /(?:của|do|bởi)\s+([A-Za-zÀ-ỹ0-9_]+(?:\s+[A-Za-zÀ-ỹ0-9_]+)?)/i;
+  // Mẫu 2: Có danh xưng (bác|anh|chị|sếp|em|bạn) [@?Tên riêng] (1-2 từ)
+  const regexHonorific = /(?:của|do|từ|bởi)?\s*(?:bác|anh|chị|sếp|ông|bạn|thầy|cô|em)\s+@?([A-Za-zÀ-ỹ0-9_]+(?:\s+[A-Za-zÀ-ỹ0-9_]+)?)/i;
 
-  const m = cleaned.match(regexHonorific) || cleaned.match(regexPrep);
+  // Mẫu 3: (của|do|bởi) [@?Tên riêng]
+  const regexPrep = /(?:của|do|bởi)\s+@?([A-Za-zÀ-ỹ0-9_]+(?:\s+[A-Za-zÀ-ỹ0-9_]+)?)/i;
+
+  const m = cleaned.match(regexDirectTag) || cleaned.match(regexHonorific) || cleaned.match(regexPrep);
   if (m && m[1]) {
     let raw = m[1].trim();
-    // Loại bỏ từ nối thời gian hoặc hành động nếu bị nuốt nhầm vào từ thứ hai
-    raw = raw.replace(/\s+(?:từ|tu|trước|truoc|về|ve|lúc|luc|hôm|hom|ngày|ngay|share|gửi|gui|nhắn|nhan|post|đăng|dang|up|viết|viet|đã|da|có|co|vừa|vua|mới|moi)$/i, "").trim();
+    // Loại bỏ từ nối thời gian, hành động hoặc từ chia sẻ đi kèm
+    raw = raw.replace(/\s+(?:chia\s+sẻ|chia|sẻ|từ|tu|trước|truoc|về|ve|lúc|luc|hôm|hom|ngày|ngay|share|gửi|gui|nhắn|nhan|post|đăng|dang|up|viết|viet|đã|da|có|co|vừa|vua|mới|moi)$/i, "").trim();
     if (raw.length >= 2 && !stopWords.has(raw.toLowerCase())) {
       return raw;
     }
@@ -1445,7 +1485,7 @@ async function handleHistoryQA(
     );
 
   const isOnlyLinkQuery =
-    /(?:cho xin|gửi|xin|danh sách)\s*(?:link|đường dẫn|repo|mã nguồn|source)/i.test(question) &&
+    /(?:cho xin|gửi|xin|danh sách|check|lấy|tìm|tổng hợp|xem|liệt kê|toàn bộ|tất cả)\s*(?:các\s*)?(?:link|đường dẫn|repo|mã nguồn|source)/i.test(question) &&
     !isDiscussionOrProcessQuery;
 
   const isResourceQuery =
@@ -1472,7 +1512,7 @@ async function handleHistoryQA(
   let relevantLinks: FoundResource[] = [];
   if (isResourceQuery || isDiscussionOrProcessQuery) {
     try {
-      relevantLinks = searchRelevantLinksAndResources(threadId, question, 15);
+      relevantLinks = searchRelevantLinksAndResources(threadId, question, isOnlyLinkQuery ? 50 : 20);
     } catch (e) {
       console.warn("[handleHistoryQA] Lỗi searchRelevantLinksAndResources:", e);
     }
@@ -1697,7 +1737,9 @@ async function handleHistoryQA(
     });
     if (isOnlyLinkQuery) {
       contextLines.push(
-        "CHỈ DẪN QUAN TRỌNG: Thành viên đang yêu cầu tìm kiếm/liệt kê đường link. Bạn HÃY SỬ DỤNG TRỰC TIẾP danh sách link ở trên để tổng hợp, trình bày đẹp mắt từng link (kèm ai là người chia sẻ, ngày nào, tóm tắt nội dung/lời bình). Giữ nguyên link URL đầy đủ, tuyệt đối không bịa link ảo!"
+        "CHỈ DẪN QUAN TRỌNG: Thành viên đang yêu cầu TÌM KIẾM / LIỆT KÊ ĐẦY ĐỦ ĐƯỜNG LINK. " +
+        "Bạn BẮT BUỘC PHẢI LIỆT KÊ 100% ĐẦY ĐỦ TẤT CẢ các link có trong danh sách ở trên theo dạng danh sách gạch đầu dòng (URL đầy đủ, Người chia sẻ, Ngày gửi, Ngữ cảnh/Nội dung tóm tắt). " +
+        "TUYỆT ĐỐI KHÔNG tự ý bỏ sót bất kỳ link nào! TUYỆT ĐỐI KHÔNG tự ý chọn 1 link để ngồi phân tích dài dòng nếu người dùng chỉ hỏi danh sách link!"
       );
     } else {
       contextLines.push(
@@ -1785,48 +1827,58 @@ async function handleHistoryQA(
     Boolean((groupSettings as any)?.enableSearch === 0) ||
     /tắt search|không tìm kiếm|không tra cứu/i.test(groupSettings.customPrompt || "");
 
+  const isInternalGroupLookup =
+    isResourceQuery ||
+    isOnlyLinkQuery ||
+    /(?:link|đường dẫn|tin nhắn|nội dung|thảo luận|file|tệp|tài liệu).*(?:trong nhóm|nhóm mình|nhóm này|ae|anh em|bác|anh|chị|thành viên|đã gửi|đã share|từ trước)/i.test(question) ||
+    /(?:ai|thành viên nào|người nào).*(?:nhắn|gửi|share|nói)/i.test(question);
+
   // 2.0. Đọc hiểu ngữ nghĩa & Lập kế hoạch tra cứu bằng Gemini Flash-Lite (Semantic Query Planner)
   let liveNews = "";
   let evidenceRequired = false;
   let planNeedsSearch = false;
 
-  try {
-    const recentCtx =
-      relevantMessages.length > 0
-        ? relevantMessages
-          .slice(-5)
-          .map((m) => `${m.display_name}: ${m.text}`)
-          .join("\n")
-        : undefined;
+  if (!isInternalGroupLookup) {
+    try {
+      const recentCtx =
+        relevantMessages.length > 0
+          ? relevantMessages
+            .slice(-5)
+            .map((m) => `${m.display_name}: ${m.text}`)
+            .join("\n")
+          : undefined;
 
-    const plan = await planSearchQueries({
-      question,
-      recentContext: recentCtx,
-      displayName,
-    });
+      const plan = await planSearchQueries({
+        question,
+        recentContext: recentCtx,
+        displayName,
+      });
 
-    planNeedsSearch = Boolean(plan.needsSearch);
+      planNeedsSearch = Boolean(plan.needsSearch);
 
-    if (plan.needsSearch && plan.queries.length > 0) {
-      evidenceRequired = plan.intent === "fact_check";
-      console.log(`[member-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(plan.queries)}`);
+      if (plan.needsSearch && plan.queries.length > 0) {
+        evidenceRequired = plan.intent === "fact_check";
+        console.log(`[member-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(plan.queries)}`);
 
-      // ⚡ TIER 1: Nếu Google Search Grounding khả dụng và còn hạn mức, ưu tiên tìm kiếm trực tiếp trên Google Search, bỏ qua quét RSS để siêu tốc (~1.5s thay vì ~5s)
-      if (canUseGrounding() && !isSearchDisabled) {
-        console.log(`[member-assistant] ⚡ Tier 1: Ưu tiên Google Search Grounding trực tiếp, bỏ qua quét RSS để tối ưu tốc độ.`);
-      } else {
-        console.log(`[member-assistant] 📰 Tier 2: Quota Grounding tạm hết hoặc bị tắt, kích hoạt quét RSS nội bộ...`);
-        const searchResults = await Promise.all(
-          plan.queries.slice(0, 2).map((q) => searchRealtimeNews(q, {
-            intent: plan.intent,
-            requireEvidence: evidenceRequired,
-          }).catch(() => ""))
-        );
-        liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
+        // ⚡ TIER 1: Nếu Google Search Grounding khả dụng và còn hạn mức, ưu tiên tìm kiếm trực tiếp trên Google Search, bỏ qua quét RSS để siêu tốc (~1.5s thay vì ~5s)
+        if (canUseGrounding() && !isSearchDisabled) {
+          console.log(`[member-assistant] ⚡ Tier 1: Ưu tiên Google Search Grounding trực tiếp, bỏ qua quét RSS để tối ưu tốc độ.`);
+        } else {
+          console.log(`[member-assistant] 📰 Tier 2: Quota Grounding tạm hết hoặc bị tắt, kích hoạt quét RSS nội bộ...`);
+          const searchResults = await Promise.all(
+            plan.queries.slice(0, 2).map((q) => searchRealtimeNews(q, {
+              intent: plan.intent,
+              requireEvidence: evidenceRequired,
+            }).catch(() => ""))
+          );
+          liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
+        }
       }
+    } catch (e) {
+      console.warn("[member-assistant] planSearchQueries lỗi:", e);
     }
-  } catch (e) {
-    console.warn("[member-assistant] planSearchQueries lỗi:", e);
+  } else {
+    console.log(`[member-assistant] 🔒 Tra cứu dữ liệu nội bộ nhóm (link/nội dung), không kích hoạt tìm kiếm ngoài web.`);
   }
 
   const liveNewsSection = liveNews
@@ -1958,9 +2010,9 @@ async function handleHistoryQA(
     } else {
       // ⚡ FAST-PATH DIRECT RESPONSE:
       // Tự động kích hoạt Google Search Grounding với model gemini-2.5-flash khi câu hỏi cần dữ liệu thời gian thực
-      const needsSearch = !isSearchDisabled && (
+      const needsSearch = !isSearchDisabled && !isInternalGroupLookup && (
         planNeedsSearch ||
-        /(?:thời tiết|giá vàng|tỷ giá|chứng khoán|tin tức|hôm nay|mới nhất|khi nào|bao giờ|ai là|lịch thi đấu|tỉ số|kết quả|vừa ra mắt)/i.test(question)
+        /(?:thời tiết|giá vàng|tỷ giá|chứng khoán|tin tức|mới nhất|khi nào|bao giờ|ai là|lịch thi đấu|tỉ số|kết quả|vừa ra mắt)/i.test(question)
       );
 
       // Nếu cần tìm kiếm nhưng Tier 1 (Grounding) không khả dụng và chưa có liveNews từ trước, quét nhanh RSS fallback:
