@@ -316,6 +316,7 @@ function isJunkOrBettingDomain(domainOrTitle: string): boolean {
     /(?:xoilac|tiengruoi|mitom|vebo|thapcam|banhkhuc|cakhia|rakhoi|xoivo|suongtv|khangtv|shutli)/i,
     /(?:bet88|bong88|w88|fb88|fun88|bk8|kubet|thabet|shbet|new88|789bet|jun88|hi88|okvip|f8bet|12bet|dafabis|m88|188bet|k8cc|mu88)/i,
     /(?:keo90phut|xoilacvl|xoilacz|cakhiatv|vebotv)/i,
+    /(?:mebongda|ketquanhanh|bongdawap|bongdalu|7m\.cn|nowgoal|flashscore|tysobongda)/i,
   ];
   return junkPatterns.some((re) => re.test(lower));
 }

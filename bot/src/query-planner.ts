@@ -108,7 +108,41 @@ function augmentDeveloperProjectQueries(plan: QueryPlanResult, question: string)
   };
 }
 
+function preserveCoreUserEntities(plan: QueryPlanResult, question: string): QueryPlanResult {
+  if (!plan.needsSearch) return plan;
+
+  const raw = question
+    .replace(/@\S+/g, "")
+    .replace(/\b(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot)\b/gi, "")
+    .replace(/[\/?.!,]+/g, " ")
+    .trim();
+
+  // Bắt các cụm thực thể viết hoa đặc thù (acronyms như FIFA, UEFA, AFC, VFF, SJC, VNeID, ASEAN...)
+  const acronymMatches = [...raw.matchAll(/\b([A-Z]{2,}(?:\s+[A-Z][a-z0-9]+)*)\b/g)]
+    .map((m) => m[1]?.trim())
+    .filter((w): w is string => typeof w === "string" && w.length > 0 && !/^(?:AI|TP|HCM|HN|OK|YES|NO)$/i.test(w));
+
+  for (const acr of acronymMatches) {
+    const hasAcr = plan.queries.some((q) => new RegExp(`\\b${acr}\\b`, "i").test(q));
+    if (!hasAcr) {
+      console.log(`[query-planner] 🛡️ Khôi phục thực thể viết hoa '${acr}' vào truy vấn tìm kiếm.`);
+      const baseClean = raw
+        .replace(/\b(?:có|chưa|rồi|khi nào|bao giờ|ở đâu|cho anh|cho em|giúp anh|nhé|nha|ạ)\b/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const newQuery = baseClean.length >= 3 ? baseClean : raw;
+      return {
+        ...plan,
+        queries: uniqQueries([newQuery, ...plan.queries]),
+      };
+    }
+  }
+
+  return plan;
+}
+
 export function normalizeQueryPlanIntent(plan: QueryPlanResult, question: string, quoteText = ""): QueryPlanResult {
+  const guardedPlan = preserveCoreUserEntities(plan, question);
   const text = normalizePlannerText(`${question} ${quoteText}`);
   const fallbackQuery = question
     .replace(/@\S+/g, "")
@@ -119,14 +153,14 @@ export function normalizeQueryPlanIntent(plan: QueryPlanResult, question: string
   const asksMedicalAction = /\b(?:thuoc|lieu dung|lieu luong|dieu tri|vac xin|vaccine|phac do|uong thuoc|nen uong|ke don|tac dung phu|chong chi dinh|tuong tac thuoc)\b/i.test(text);
   if (asksMedicalAction) {
     return {
-      ...plan,
+      ...guardedPlan,
       needsSearch: true,
       intent: "fact_check",
-      queries: plan.queries.length > 0 ? plan.queries : [fallbackQuery].filter(Boolean),
+      queries: guardedPlan.queries.length > 0 ? guardedPlan.queries : [fallbackQuery].filter(Boolean),
     };
   }
 
-  if (!plan.needsSearch || plan.intent !== "fact_check") return plan;
+  if (!guardedPlan.needsSearch || guardedPlan.intent !== "fact_check") return guardedPlan;
 
   const asksOverview =
     /\b(?:tong quan|gioi thieu|thong tin|review|danh gia|overview|introduction|about|profile)\b/i.test(text);
@@ -139,9 +173,9 @@ export function normalizeQueryPlanIntent(plan: QueryPlanResult, question: string
     /\b(?:hien nay|hien tai|moi nhat|hom nay|dang|con|phap ly|so hong|giay phep|tien do|mo ban|ban giao|chu dau tu|so huu|ai|bao nhieu|khi nao|ngay nao|dung khong|kiem tra|check|xac minh|fact check)\b/i.test(text);
 
   if (asksOverview && !asksStrictFact) {
-    return augmentDeveloperProjectQueries({ ...plan, intent: "knowledge" }, question);
+    return augmentDeveloperProjectQueries({ ...guardedPlan, intent: "knowledge" }, question);
   }
-  return augmentDeveloperProjectQueries(plan, question);
+  return augmentDeveloperProjectQueries(guardedPlan, question);
 }
 
 /**
@@ -189,8 +223,11 @@ export async function planSearchQueries(params: {
     `      8. Thống kê Kinh tế - Xã hội & Kỷ lục: Dân số Việt Nam/thế giới, GDP, người giàu nhất thế giới, tòa nhà cao nhất...\n` +
     `      => BẮT BUỘC needsSearch: true! Phân loại intent: "realtime_news" (với tin nóng, thể thao, biến động 24h-7d) hoặc "fact_check" (với hành chính, pháp lý, lãnh đạo, hồ sơ, số liệu).\n\n` +
     `3. Khi needsSearch: true -> Bóc tách 1-3 cụm từ tìm kiếm (queries) tối ưu:\n` +
+    `   - BẢO TỒN NGUYÊN VẸN TÊN THỰC THỂ CỐT LÕI (STRICT ENTITY PRESERVATION):\n` +
+    `     + TUYỆT ĐỐI KHÔNG TỰ Ý THAY THẾ, SUY DIỄN HOẶC HOÁN ĐỔI tên giải đấu, thương hiệu, tổ chức, công nghệ hoặc sự kiện mà người dùng hỏi sang một cái tên khác (ví dụ: người dùng hỏi "FIFA ASEAN Cup" thì BẮT BUỘC query 1 phải có cụm từ "FIFA ASEAN Cup", TUYỆT ĐỐI CẤM tự ý đổi sang "ASEAN Mitsubishi Electric Cup" hay "AFF Cup"; hỏi "iPhone 16" cấm đổi sang "iPhone 15"; hỏi "Luật Đất đai 2024" cấm đổi sang "Luật 2013").\n` +
+    `     + Query đầu tiên (queries[0]) BẮT BUỘC phải giữ nguyên vẹn toàn bộ các danh từ riêng / cụm từ định danh thực thể của người dùng kết hợp với mục tiêu tra cứu.\n` +
     `   - Bóc tách đúng THỰC THỂ CHÍNH (Entities) và MỤC TIÊU CẦN TÌM (Target attribute/action).\n` +
-    `   - LOẠI BỎ TOÀN BỘ từ rác, xưng hô, mệnh lệnh (check, kiểm tra, xem, giúp, cho anh, sen chúa, kevin, bot ơi, nhé, nha, ạ...).\n` +
+    `   - LOẠI BỎ TOÀN BỘ từ rác, xưng hô, mệnh lệnh (check, kiểm tra, xem, giúp, cho anh, sen chúa, mộc miên, kevin, bot ơi, nhé, nha, ạ, có ... chưa, rồi chưa...).\n` +
     `   - BẮT BUỘC giữ nguyên dấu tiếng Việt chuẩn xác (TUYỆT ĐỐI KHÔNG viết không dấu vì tiếng Việt không dấu sẽ làm sai lệch hoàn toàn kết quả tra cứu báo chí và văn bản pháp luật).\n` +
     `   - Giữ query ngắn gọn, tự nhiên, mang tính tra cứu thông tin khách quan.\n\n` +
     `4. Xuất định dạng JSON duy nhất:\n` +
