@@ -79,6 +79,8 @@ const FILE_DOMAINS = [
   "figma.com",
   "canva.com",
   "files-cdn.zalo.me",
+  "dlfl.vn",
+  "dlfl.me",
 ];
 
 function isNewsUrl(url: string): boolean {
@@ -203,6 +205,21 @@ function extractTitleFromUrl(url: string): string | null {
 
     if (host.includes("tiktok.com")) {
       return "Video chia sẻ trên TikTok";
+    }
+
+    if (host.includes("dlfl.vn") || host.includes("dlfl.me") || host.includes("files-cdn.zalo.me")) {
+      const segments = pathname.split("/").filter(Boolean);
+      const lastSeg = segments[segments.length - 1] || "";
+      if (lastSeg.length >= 4 && !isRandomIdOrHash(lastSeg)) {
+        const cleanSlug = lastSeg
+          .replace(/\.[a-z0-9]{2,5}$/i, "")
+          .replace(/[_-]+/g, " ")
+          .trim();
+        if (cleanSlug.length >= 3) {
+          return cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1);
+        }
+      }
+      return "Tệp tài liệu tải từ Zalo";
     }
 
     // 2. Nếu có tên file thực sự ở cuối pathname
@@ -567,7 +584,7 @@ export async function GET(request: Request) {
         .prepare(
           `SELECT message_id, display_name, text, ts, thread_id
            FROM group_messages
-           WHERE (text LIKE '%http://%' OR text LIKE '%https://%' OR text LIKE '%.pdf%' OR text LIKE '%.zip%' OR text LIKE '%.rar%' OR text LIKE '%.docx%' OR text LIKE '%.apk%' OR text LIKE '%github.com%')
+           WHERE (text LIKE '%http://%' OR text LIKE '%https://%' OR text LIKE '%.pdf%' OR text LIKE '%.zip%' OR text LIKE '%.rar%' OR text LIKE '%.docx%' OR text LIKE '%.apk%' OR text LIKE '%github.com%' OR text LIKE '%dlfl%')
              AND deleted_at IS NULL
              AND is_self = 0
              AND LOWER(display_name) NOT LIKE '%sen chúa%'
