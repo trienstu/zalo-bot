@@ -291,7 +291,20 @@ export async function callGemini(
   },
 ): Promise<string> {
   const rawKey = (process.env.GEMINI_API_KEY || config.geminiApiKey || "").trim();
-  const apiKeys = rawKey.split(",").map((k) => k.trim()).filter(Boolean);
+  let apiKeys = rawKey.split(",").map((k) => k.trim()).filter(Boolean);
+
+  const groundingKey = (process.env.GEMINI_GROUNDING_API_KEY || config.geminiGroundingApiKey || "").trim();
+
+  // NẾU LÀ YÊU CẦU GOOGLE SEARCH GROUNDING:
+  // CHỈ SỬ DỤNG DUY NHẤT KEY ĐÃ GẮN BILLING ĐỂ HƯỞNG 1500 LƯỢT SEARCH/NGÀY VÀ TRÁNH 429 TỪ CÁC KEY FREE
+  if (options?.enableSearch) {
+    if (groundingKey) {
+      apiKeys = [groundingKey];
+    } else if (apiKeys.length > 0 && apiKeys[0]) {
+      // Mặc định lấy key đầu tiên (key billing vừa nạp)
+      apiKeys = [apiKeys[0]];
+    }
+  }
 
   if (apiKeys.length === 0) {
     throw new Error("Thiếu GEMINI_API_KEY trong .env");

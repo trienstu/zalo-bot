@@ -295,6 +295,9 @@ export const config = {
   /** API key Google Gemini (https://aistudio.google.com/app/apikey). Rỗng = tắt. */
   geminiApiKey: process.env.GEMINI_API_KEY?.trim() || "",
 
+  /** API key Google Gemini chuyên dùng cho Google Search Grounding (key có gắn thẻ billing để hưởng 1500 lượt search/ngày). Rỗng = dùng key đầu tiên của GEMINI_API_KEY. */
+  geminiGroundingApiKey: process.env.GEMINI_GROUNDING_API_KEY?.trim() || "",
+
   /** Model Gemini dùng để tóm tắt và xử lý thông tin (mặc định gemini-3.1-flash-lite-preview siêu tốc ~800ms). */
   geminiModel: (process.env.GEMINI_MODEL?.trim() && process.env.GEMINI_MODEL.includes("lite"))
     ? process.env.GEMINI_MODEL.trim()
