@@ -308,11 +308,114 @@ export function extractEvidenceUrls(context: string): string[] {
   return [...new Set(urls)];
 }
 
+function cleanPublisherName(raw: string): string {
+  const clean = raw.trim().replace(/^báo\s+/i, "").replace(/^www\./i, "");
+  const map: Record<string, string> = {
+    "vnexpress.net": "VnExpress",
+    "vnexpress": "VnExpress",
+    "cafef.vn": "CafeF",
+    "cafef": "CafeF",
+    "cafebiz.vn": "CafeBiz",
+    "cafebiz": "CafeBiz",
+    "vietstock.vn": "Vietstock",
+    "vietstock": "Vietstock",
+    "thanhnien.vn": "Thanh Niên",
+    "thanhnien": "Thanh Niên",
+    "thanh niên": "Thanh Niên",
+    "tuoitre.vn": "Tuổi Trẻ",
+    "tuoitre": "Tuổi Trẻ",
+    "tuổi trẻ": "Tuổi Trẻ",
+    "vietnamnet.vn": "VietNamNet",
+    "vietnamnet": "VietNamNet",
+    "dantri.com.vn": "Dân Trí",
+    "dantri": "Dân Trí",
+    "dân trí": "Dân Trí",
+    "vtv.vn": "VTV",
+    "vtv": "VTV",
+    "vov.vn": "VOV",
+    "vov": "VOV",
+    "vneconomy.vn": "VnEconomy",
+    "vneconomy": "VnEconomy",
+    "laodong.vn": "Lao Động",
+    "laodong": "Lao Động",
+    "lao động": "Lao Động",
+    "tienphong.vn": "Tiền Phong",
+    "tienphong": "Tiền Phong",
+    "tiền phong": "Tiền Phong",
+    "baochinhphu.vn": "Báo Chính Phủ",
+    "baochinhphu": "Báo Chính Phủ",
+    "nhandan.vn": "Báo Nhân Dân",
+    "nhandan": "Báo Nhân Dân",
+    "tinnhanhchungkhoan.vn": "Đầu Tư Chứng Khoán",
+    "baodautu.vn": "Báo Đầu Tư",
+    "baodautu": "Báo Đầu Tư",
+    "znews.vn": "Znews",
+    "zingnews.vn": "Znews",
+    "genk.vn": "GenK",
+    "tinhte.vn": "Tinh tế",
+    "bongda.com.vn": "Bóng Đá",
+    "bongdaplus.vn": "Bóng Đá Plus",
+    "bongda24h.vn": "Bóng Đá 24h",
+    "goal.com": "Goal.com",
+    "fotmob.com": "FotMob",
+    "onefootball.com": "OneFootball",
+    "baomoi.com": "Báo Mới",
+    "baomoi": "Báo Mới",
+    "24h.com.vn": "24h",
+    "foxsports.com": "Fox Sports",
+    "laliga.com": "LaLiga",
+    "bloomberg.com": "Bloomberg",
+    "bloomberg": "Bloomberg",
+    "reuters.com": "Reuters",
+    "reuters": "Reuters",
+    "cnbc.com": "CNBC",
+    "cnbc": "CNBC",
+    "wsj.com": "Wall Street Journal",
+    "ft.com": "Financial Times",
+    "forbes.com": "Forbes",
+    "investing.com": "Investing.com",
+    "marketwatch.com": "MarketWatch",
+    "wikipedia.org": "Wikipedia",
+    "wikipedia": "Wikipedia",
+  };
+  const lower = clean.toLowerCase();
+  for (const [key, val] of Object.entries(map)) {
+    if (lower === key || lower.includes(key)) {
+      return val;
+    }
+  }
+  return clean.length > 20 ? clean.slice(0, 20) + "..." : clean;
+}
+
 export function extractEvidenceSources(context: string): string[] {
-  const sources = [...String(context || "").matchAll(/^Nguồn:\s*(.+?)\s*$/gim)]
-    .map((match) => match[1]?.trim() || "")
-    .filter(Boolean);
-  return [...new Set(sources)].slice(0, 3);
+  const sources: string[] = [];
+
+  // 1. Dạng [Nguồn: domain | Tiêu đề: Tiêu đề - Tên Báo] từ realtime-search / RSS
+  const snippetMatches = [...String(context || "").matchAll(/\[Nguồn:\s*([^|\]]+)\s*\|\s*Tiêu đề:\s*([^\]]+)\]/gi)];
+  for (const m of snippetMatches) {
+    const domain = (m[1] || "").trim();
+    const title = (m[2] || "").trim();
+    const parts = title.split(/\s*[-–—|]\s*/);
+    if (parts.length > 1) {
+      const candidate = parts[parts.length - 1]?.trim().replace(/^báo\s+/i, "");
+      if (candidate && candidate.length > 1 && candidate.length < 25) {
+        sources.push(cleanPublisherName(candidate));
+        continue;
+      }
+    }
+    if (domain && !domain.includes("google.com")) {
+      sources.push(cleanPublisherName(domain));
+    }
+  }
+
+  // 2. Dạng Nguồn: ...
+  const directMatches = [...String(context || "").matchAll(/^Nguồn:\s*(.+?)\s*$/gim)];
+  for (const m of directMatches) {
+    const s = m[1]?.trim();
+    if (s) sources.push(cleanPublisherName(s));
+  }
+
+  return [...new Set(sources.filter(Boolean))].slice(0, 3);
 }
 
 function stripTrailingSourceBlock(answer: string): string {
@@ -325,17 +428,30 @@ function stripTrailingSourceBlock(answer: string): string {
 }
 
 export function finalizeGroundedAnswer(answer: string, evidenceContext: string, evidenceRequired: boolean): string {
-  if (!evidenceRequired) return answer;
-  const hasSufficientEvidence = /^EVIDENCE_STATUS:\s*SUFFICIENT/im.test(evidenceContext);
-  if (!hasSufficientEvidence) {
-    return "Em chưa đủ bằng chứng đáng tin cậy và cập nhật để khẳng định câu trả lời này. Anh/chị vui lòng cho em kiểm tra lại khi có thêm nguồn chính thức hoặc nguồn độc lập xác nhận.";
+  if (evidenceRequired) {
+    const hasSufficientEvidence = /^EVIDENCE_STATUS:\s*SUFFICIENT/im.test(evidenceContext);
+    if (!hasSufficientEvidence) {
+      return "Em chưa đủ bằng chứng đáng tin cậy và cập nhật để khẳng định câu trả lời này. Anh/chị vui lòng cho em kiểm tra lại khi có thêm nguồn chính thức hoặc nguồn độc lập xác nhận.";
+    }
+
+    const allowedSources = extractEvidenceSources(evidenceContext);
+    if (allowedSources.length === 0) {
+      return "Em chưa đủ bằng chứng có thể dẫn nguồn để khẳng định câu trả lời này.";
+    }
+
+    const cleaned = stripTrailingSourceBlock(answer);
+    return `${cleaned}\n\n*(Nguồn: ${allowedSources.join(", ")})*`.trim();
   }
 
-  const allowedSources = extractEvidenceSources(evidenceContext);
-  if (allowedSources.length === 0) {
-    return "Em chưa đủ bằng chứng có thể dẫn nguồn để khẳng định câu trả lời này.";
+  // Nếu câu trả lời có context dữ liệu thời gian thực (liveNews) và câu trả lời chưa có trích dẫn nguồn
+  if (evidenceContext && evidenceContext.trim().length > 0) {
+    const allowedSources = extractEvidenceSources(evidenceContext);
+    const alreadyHasCitation = /(?:nguồn(?:\s+kiểm\s+chứng)?|source)\s*:/i.test(answer) || /\*\(nguồn/i.test(answer);
+    if (allowedSources.length > 0 && !alreadyHasCitation) {
+      const cleaned = stripTrailingSourceBlock(answer);
+      return `${cleaned}\n\n*(Nguồn: ${allowedSources.join(", ")})*`.trim();
+    }
   }
 
-  const cleaned = stripTrailingSourceBlock(answer);
-  return `${cleaned}\n\nNguồn kiểm chứng: ${allowedSources.join(", ")}.`.trim();
+  return answer;
 }

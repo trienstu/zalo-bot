@@ -1860,19 +1860,14 @@ async function handleHistoryQA(
         evidenceRequired = plan.intent === "fact_check";
         console.log(`[member-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(plan.queries)}`);
 
-        // ⚡ TIER 1: Nếu Google Search Grounding khả dụng và còn hạn mức, ưu tiên tìm kiếm trực tiếp trên Google Search, bỏ qua quét RSS để siêu tốc (~1.5s thay vì ~5s)
-        if (canUseGrounding() && !isSearchDisabled) {
-          console.log(`[member-assistant] ⚡ Tier 1: Ưu tiên Google Search Grounding trực tiếp, bỏ qua quét RSS để tối ưu tốc độ.`);
-        } else {
-          console.log(`[member-assistant] 📰 Tier 2: Quota Grounding tạm hết hoặc bị tắt, kích hoạt quét RSS nội bộ...`);
-          const searchResults = await Promise.all(
-            plan.queries.slice(0, 2).map((q) => searchRealtimeNews(q, {
-              intent: plan.intent,
-              requireEvidence: evidenceRequired,
-            }).catch(() => ""))
-          );
-          liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
-        }
+        // Luôn quét RSS/tin tức thời gian thực để làm giàu dữ liệu thực tế và làm đệm an toàn vững chắc
+        const searchResults = await Promise.all(
+          plan.queries.slice(0, 2).map((q) => searchRealtimeNews(q, {
+            intent: plan.intent,
+            requireEvidence: evidenceRequired,
+          }).catch(() => ""))
+        );
+        liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
       }
     } catch (e) {
       console.warn("[member-assistant] planSearchQueries lỗi:", e);

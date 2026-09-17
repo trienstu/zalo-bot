@@ -1364,16 +1364,14 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       planNeedsSearch = true;
       evidenceRequired = plan.intent === "fact_check";
       console.log(`[admin-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(plan.queries)}`);
-      // Nếu Tier 1 (Grounding) không khả dụng, mới quét RSS đa nguồn
-      if (!canUseGrounding()) {
-        const searchResults = await Promise.all(
-          plan.queries.slice(0, 3).map((q) => searchRealtimeNews(q, {
-            intent: plan.intent,
-            requireEvidence: evidenceRequired,
-          }).catch(() => ""))
-        );
-        liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
-      }
+      // Luôn quét RSS/tin tức thời gian thực để làm giàu dữ liệu thực tế và làm đệm an toàn vững chắc
+      const searchResults = await Promise.all(
+        plan.queries.slice(0, 3).map((q) => searchRealtimeNews(q, {
+          intent: plan.intent,
+          requireEvidence: evidenceRequired,
+        }).catch(() => ""))
+      );
+      liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
     }
   } catch (e) {
     console.warn("[admin-assistant] planSearchQueries lỗi:", e);
