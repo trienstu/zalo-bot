@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   Sparkles,
   Search,
@@ -16,6 +17,7 @@ import {
   Flame,
   Layers,
   ArrowUpRight,
+  ArrowRight,
   Bookmark,
   Calendar,
   FolderDown,
@@ -108,6 +110,7 @@ export function HubClient() {
   const [stats, setStats] = useState({ totalItems: 0, totalLinks: 0, totalFiles: 0, totalContributors: 0 });
   const [savedItemIds, setSavedItemIds] = useState<string[]>([]);
   const [selectedItem, setSelectedItem] = useState<KnowledgeItem | null>(null);
+  const [unauthorizedError, setUnauthorizedError] = useState<string | null>(null);
 
   // Load saved bookmarks from localStorage
   useEffect(() => {
@@ -148,7 +151,15 @@ export function HubClient() {
         }
 
         const res = await fetch(`/api/hub?${params.toString()}`);
+        if (res.status === 401) {
+          const errData = await res.json().catch(() => ({}));
+          setUnauthorizedError(errData.message || "Kho tài nguyên này chỉ dành cho Quản trị viên.");
+          setLoading(false);
+          return;
+        }
+
         if (res.ok) {
+          setUnauthorizedError(null);
           const data = await res.json();
           setItems(data.items || []);
           if (data.pagination) setPagination(data.pagination);
@@ -249,6 +260,42 @@ export function HubClient() {
     pages.push(total);
     return pages;
   }, [pagination.totalPages, pagination.page]);
+
+  if (unauthorizedError) {
+    return (
+      <div className="flex min-h-[70vh] items-center justify-center px-4 py-16">
+        <div className="relative overflow-hidden w-full max-w-lg rounded-2xl border border-rose-500/30 bg-gradient-to-b from-slate-900 via-slate-900/90 to-slate-950 p-8 shadow-2xl backdrop-blur-xl text-center space-y-6">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-rose-500/10 border border-rose-500/30 text-rose-400 shadow-inner">
+            <Lock className="h-10 w-10 text-rose-400" />
+          </div>
+
+          <div className="space-y-3">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-xs font-semibold text-rose-300">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              <span>Khu Vực Được Bảo Vệ</span>
+            </span>
+            <h2 className="text-2xl font-bold text-white tracking-tight">Yêu Cầu Quyền Truy Cập</h2>
+            <p className="text-sm text-slate-300 leading-relaxed max-w-md mx-auto">
+              {unauthorizedError}
+            </p>
+            <p className="text-xs text-slate-400 leading-relaxed bg-slate-950/80 p-3 rounded-xl border border-slate-800">
+              💡 <strong>Dành cho thành viên:</strong> Vui lòng sử dụng đường link chia sẻ bảo mật do Trưởng nhóm Zalo cung cấp để vào thẳng kho tài nguyên của nhóm mình.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+            <Link
+              href="/login"
+              className="flex items-center justify-center gap-2 w-full sm:w-auto rounded-xl bg-cyan-500 px-6 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition-all hover:bg-cyan-400"
+            >
+              <span>Đăng Nhập Quản Trị Viên</span>
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen space-y-8 pb-16 text-slate-100">

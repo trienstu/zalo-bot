@@ -267,10 +267,30 @@ export async function GET(request: Request) {
       }
     } catch {}
 
-    // Kiểm tra bảo mật khi có token (Member access mode)
+    // Kiểm tra bảo mật:
+    // - Nếu có token: Kiểm tra token nhóm cho thành viên
+    // - Nếu không có token: Bắt buộc phải là Admin (đã đăng nhập). Thành viên không thể tự vào /hub để xem mọi nhóm
+    const cookieHeader = request.headers.get("cookie") || "";
+    const isAdminAuthenticated = cookieHeader.includes("admin_auth_session=authenticated_admin");
+
     let isLockedGroup = false;
     let targetGroupId = requestedGroupId;
     let currentGroup: { id: string; name: string; token: string } | null = null;
+
+    if (!token && !isAdminAuthenticated) {
+      db.close();
+      return NextResponse.json(
+        {
+          error: "unauthorized",
+          message: "Kho tài nguyên tổng hợp chỉ dành cho Quản trị viên. Thành viên vui lòng dùng link chia sẻ riêng của nhóm.",
+          items: [],
+          pagination: { page: 1, limit, totalItems: 0, totalPages: 0 },
+          isLockedGroup: true,
+          needAdminAuth: true,
+        },
+        { status: 401 }
+      );
+    }
 
     if (token) {
       if (!requestedGroupId || !verifyGroupHubToken(requestedGroupId, token)) {
