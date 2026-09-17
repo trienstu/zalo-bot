@@ -298,16 +298,20 @@ export async function callGemini(
   }
 
   let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-3.1-flash-lite-preview";
-  if (!primaryModel || !primaryModel.includes("lite")) {
+  if (options?.enableSearch) {
+    primaryModel = "gemini-2.5-flash";
+  } else if (!primaryModel || !primaryModel.includes("lite")) {
     primaryModel = "gemini-3.1-flash-lite-preview";
   }
 
   // Danh sách model cascading dự phòng siêu tốc (~800ms) khi model chính nghẽn mạng / 503 / 429 / Timeout:
-  const candidateFallbacks = [
-    "gemini-3.1-flash-lite-preview",
-    "gemini-3.1-flash-lite",
-    "gemini-flash-lite-latest",
-  ].filter((m) => m !== primaryModel);
+  const candidateFallbacks = options?.enableSearch
+    ? []
+    : [
+        "gemini-3.1-flash-lite-preview",
+        "gemini-3.1-flash-lite",
+        "gemini-flash-lite-latest",
+      ].filter((m) => m !== primaryModel);
 
   const temperature = options?.temperature ?? 0.3;
   const maxTokens = options?.maxTokens;

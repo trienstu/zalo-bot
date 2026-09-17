@@ -1782,6 +1782,7 @@ async function handleHistoryQA(
   // 2.0. Đọc hiểu ngữ nghĩa & Lập kế hoạch tra cứu bằng Gemini Flash-Lite (Semantic Query Planner)
   let liveNews = "";
   let evidenceRequired = false;
+  let planNeedsSearch = false;
 
   try {
     const recentCtx =
@@ -1797,6 +1798,8 @@ async function handleHistoryQA(
       recentContext: recentCtx,
       displayName,
     });
+
+    planNeedsSearch = Boolean(plan.needsSearch);
 
     if (plan.needsSearch && plan.queries.length > 0) {
       evidenceRequired = plan.intent === "fact_check";
@@ -1946,12 +1949,17 @@ async function handleHistoryQA(
         },
       });
     } else {
-      // ⚡ FAST-PATH DIRECT RESPONSE: Dữ liệu thời gian thực đã được Semantic Planner + Realtime Search nạp sẵn vào prompt
-      // Gọi trực tiếp gemini-3.1-flash-lite-preview để phản hồi ngay trong ~800ms, triệt tiêu 100% độ trễ và lỗi 503!
+      // ⚡ FAST-PATH DIRECT RESPONSE:
+      // Tự động kích hoạt Google Search Grounding với model gemini-2.5-flash khi câu hỏi cần dữ liệu thời gian thực
+      const needsSearch = !isSearchDisabled && (
+        planNeedsSearch ||
+        /(?:thời tiết|giá vàng|tỷ giá|chứng khoán|tin tức|hôm nay|mới nhất|khi nào|bao giờ|ai là|lịch thi đấu|tỉ số|kết quả|vừa ra mắt)/i.test(question)
+      );
+
       answer = await callGemini(systemPrompt, userPrompt, {
-        model: "gemini-3.1-flash-lite-preview",
+        model: needsSearch ? "gemini-2.5-flash" : "gemini-3.1-flash-lite-preview",
         mediaParts: mediaPart ? [mediaPart] : undefined,
-        enableSearch: false,
+        enableSearch: needsSearch,
       });
     }
 
