@@ -1904,7 +1904,9 @@ async function handleHistoryQA(
     `   - TUYỆT ĐỐI CẤM mở bài bằng các câu chào hỏi rườm rà, cảm thán đùa cợt hay xưng hô văn vẻ làm loãng tin (CẤM các câu kiểu chào báo cáo, tự xưng hóng tin, soi tin, phân trần hoặc giới thiệu vòng vo).\n` +
     `   - Dùng gạch đầu dòng rõ ràng, **in đậm** ngày giờ, số liệu, tên đơn vị, văn bản hoặc từ khóa then chốt.\n` +
     `2. QUY CHUẨN TRÌNH BÀY CHO CÁC DẠNG DỮ LIỆU ĐẶC THÙ:\n` +
-    `   - Lịch trình / Sự kiện có mốc thời gian (thể thao, hội nghị, lịch phát sóng, sự kiện, chuyến bay...): Liệt kê danh sách rõ ràng: • [Thời gian]: [Tên sự kiện / Đối tượng] ([Địa điểm / Chi tiết bổ trợ nếu có]).\n` +
+    `   - Lịch trình / Sự kiện / Thể thao có mốc thời gian (lịch thi đấu, giải đấu, hội nghị, sự kiện, chuyến bay...):\n` +
+    `     + BẮT BUỘC liệt kê danh sách chi tiết: Ngày thi đấu/diễn ra, Giờ cụ thể (theo giờ VN), Cặp đấu đối đầu (Đội A vs Đội B), Vòng đấu / Bảng đấu.\n` +
+    `     + TUYỆT ĐỐI KHÔNG chỉ nói chung chung 2-3 đội rồi dừng lại mà phải cung cấp lịch thi đấu cụ thể, chi tiết nhất từ dữ liệu tra cứu.\n` +
     `   - Chỉ số / Giá cả / Thị trường (vàng, ngoại tệ, chứng khoán, crypto, nhiên liệu...): Nêu thẳng con số giá niêm yết hiện tại kèm đơn vị tính rõ ràng.\n` +
     `   - Văn bản pháp quy / Hành chính / Thủ tục: Nêu rõ tên văn bản (Luật, Nghị quyết, Nghị định, Thông tư), số hiệu, thời điểm có hiệu lực và nội dung điều khoản áp dụng.\n` +
     `   - Thông tin liên quan có giá trị gia tăng (nếu có): Chỉ ghi chú ngắn gọn, khiêm tốn ở phần phụ: "*(Ngoài ra, nếu anh/chị quan tâm đến [...], thì [...])*".\n` +

@@ -1482,9 +1482,9 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `      + Nêu rõ nguồn số liệu niêm yết (SJC, DOJI, Kitco, Binance, CoinGecko, Petrolimex, Vietcombank...).\n` +
     `      + Nếu câu hỏi hỏi nhiều tài sản cùng lúc (ví dụ cả Vàng và Bitcoin/Crypto): BẮT BUỘC cung cấp cụ thể số liệu của TẤT CẢ các tài sản được hỏi, tuyệt đối không được bỏ sót con số của bất kỳ loại tài sản nào.\n` +
     `    - KHI HỎI VỀ PHÁP LÝ / THỦ TỤC HÀNH CHÍNH (Đất đai, Xe cộ, Thuế, VNeID, Giao thông):\n` +
-    `      + Hướng dẫn dạng checklist từng bước (Bước 1, Bước 2, Bước 3), hồ sơ cần chuẩn bị, nơi nộp và mức phí/mức phạt quy định.\n` +
-    `    - KHI HỎI VỀ THỂ THAO / BÓNG ĐÁ:\n` +
-    `      + Nêu chính xác tỉ số, người ghi bàn, thời gian trận đấu, bảng xếp hạng và nhận định ngắn gọn.\n` +
+    `    - KHI HỎI VỀ THỂ THAO / LỊCH THI ĐẤU / SỰ KIỆN CÓ MỐC THỜI GIAN:\n` +
+    `      + BẮT BUỘC liệt kê danh sách chi tiết: Ngày thi đấu/diễn ra, Giờ cụ thể (theo giờ VN), Cặp đấu đối đầu (Đội A vs Đội B), Vòng đấu / Bảng đấu.\n` +
+    `      + TUYỆT ĐỐI KHÔNG chỉ nói chung chung 2-3 đội rồi dừng lại mà phải cung cấp lịch thi đấu cụ thể, chi tiết nhất từ dữ liệu tra cứu.\n` +
     `    - KHI HỎI VỀ ĐỊNH NGHĨA / LỊCH SỬ / KHOA HỌC / ĐỜI SỐNG:\n` +
     `      + Giải thích bản chất một cách dễ hiểu, sinh động, chuẩn xác như bách khoa toàn thư.\n` +
     `    - CẬP NHẬT DỮ KIỆN THỜI GIAN THỰC & PHÁP LUẬT / HÀNH CHÍNH MỚI NHẤT:\n` +

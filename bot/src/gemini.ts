@@ -284,69 +284,86 @@ export async function downloadFileContent(
 
 /** Bóc tách tên nhà xuất bản / tòa soạn báo chí từ uri và title để trích dẫn ngắn gọn (không in link URL) */
 function extractPublisherName(title?: string, uri?: string): string {
-  if (uri) {
+  const domainMap: Record<string, string> = {
+    "vnexpress.net": "VnExpress",
+    "cafef.vn": "CafeF",
+    "cafebiz.vn": "CafeBiz",
+    "vietstock.vn": "Vietstock",
+    "thanhnien.vn": "Thanh Niên",
+    "tuoitre.vn": "Tuổi Trẻ",
+    "vietnamnet.vn": "VietNamNet",
+    "dantri.com.vn": "Dân Trí",
+    "vtv.vn": "VTV",
+    "vov.vn": "VOV",
+    "vneconomy.vn": "VnEconomy",
+    "laodong.vn": "Lao Động",
+    "tienphong.vn": "Tiền Phong",
+    "plo.vn": "Pháp Luật TP.HCM",
+    "baochinhphu.vn": "Báo Chính Phủ",
+    "nhandan.vn": "Báo Nhân Dân",
+    "tinnhanhchungkhoan.vn": "Đầu Tư Chứng Khoán",
+    "baodautu.vn": "Báo Đầu Tư",
+    "znews.vn": "Znews",
+    "zingnews.vn": "Znews",
+    "genk.vn": "GenK",
+    "tinhte.vn": "Tinh tế",
+    "bongda.com.vn": "Bóng Đá",
+    "bongdaplus.vn": "Bóng Đá Plus",
+    "bongda24h.vn": "Bóng Đá 24h",
+    "goal.com": "Goal.com",
+    "fotmob.com": "FotMob",
+    "onefootball.com": "OneFootball",
+    "baomoi.com": "Báo Mới",
+    "24h.com.vn": "24h",
+    "foxsports.com": "Fox Sports",
+    "laliga.com": "LaLiga",
+    "bloomberg.com": "Bloomberg",
+    "reuters.com": "Reuters",
+    "cnbc.com": "CNBC",
+    "wsj.com": "Wall Street Journal",
+    "ft.com": "Financial Times",
+    "forbes.com": "Forbes",
+    "investing.com": "Investing.com",
+    "marketwatch.com": "MarketWatch",
+    "finance.yahoo.com": "Yahoo Finance",
+    "wikipedia.org": "Wikipedia",
+  };
+
+  const rawTitle = (title || "").trim().toLowerCase();
+
+  // 1. Kiểm tra nếu title chính là tên miền (Google Search Grounding thường trả title = "bongda.com.vn", "goal.com", v.v.)
+  for (const [d, name] of Object.entries(domainMap)) {
+    if (rawTitle === d || rawTitle.includes(d)) {
+      return name;
+    }
+  }
+
+  // 2. Nếu URI không phải là link redirect nội bộ của Vertex AI thì kiểm tra domain từ URI
+  if (uri && !uri.includes("vertexaisearch.cloud.google.com")) {
     try {
       const hostname = new URL(uri).hostname.toLowerCase().replace(/^www\./, "");
-      const domainMap: Record<string, string> = {
-        "vnexpress.net": "VnExpress",
-        "cafef.vn": "CafeF",
-        "cafebiz.vn": "CafeBiz",
-        "vietstock.vn": "Vietstock",
-        "thanhnien.vn": "Thanh Niên",
-        "tuoitre.vn": "Tuổi Trẻ",
-        "vietnamnet.vn": "VietNamNet",
-        "dantri.com.vn": "Dân Trí",
-        "vtv.vn": "VTV",
-        "vov.vn": "VOV",
-        "vneconomy.vn": "VnEconomy",
-        "laodong.vn": "Lao Động",
-        "tienphong.vn": "Tiền Phong",
-        "plo.vn": "Pháp Luật TP.HCM",
-        "baochinhphu.vn": "Báo Chính Phủ",
-        "nhandan.vn": "Báo Nhân Dân",
-        "tinnhanhchungkhoan.vn": "Đầu Tư Chứng Khoán",
-        "baodautu.vn": "Báo Đầu Tư",
-        "znews.vn": "Znews",
-        "zingnews.vn": "Znews",
-        "genk.vn": "GenK",
-        "tinhte.vn": "Tinh tế",
-        "bloomberg.com": "Bloomberg",
-        "reuters.com": "Reuters",
-        "cnbc.com": "CNBC",
-        "wsj.com": "Wall Street Journal",
-        "ft.com": "Financial Times",
-        "forbes.com": "Forbes",
-        "investing.com": "Investing.com",
-        "marketwatch.com": "MarketWatch",
-        "finance.yahoo.com": "Yahoo Finance",
-        "wikipedia.org": "Wikipedia",
-      };
-
       for (const [d, name] of Object.entries(domainMap)) {
         if (hostname === d || hostname.endsWith("." + d)) {
           return name;
         }
       }
-
-      const parts = hostname.split(".");
-      if (parts.length >= 2) {
-        const main = parts[parts.length - 2];
-        if (main && main.length > 2) {
-          return main.charAt(0).toUpperCase() + main.slice(1);
-        }
-      }
-    } catch {
-      // Bỏ qua lỗi parse URI
-    }
+    } catch {}
   }
 
+  // 3. Nếu title có cấu trúc "Tiêu đề bài viết - Tên Báo"
   if (title) {
     const parts = title.split(/\s*[-–—|]\s*/);
     if (parts.length > 1) {
-      const lastPart = parts[parts.length - 1]?.trim();
-      if (lastPart && lastPart.length > 1 && lastPart.length < 30) {
+      const lastPart = parts[parts.length - 1]?.trim() || "";
+      if (lastPart.length > 1 && lastPart.length < 30) {
         return lastPart.replace(/^báo\s+/i, "");
       }
+    }
+    // Nếu title là một domain bất kỳ (e.g. somesite.com)
+    if (/^[a-z0-9-]+\.[a-z]{2,}(?:\.[a-z]{2,})?$/i.test(title.trim())) {
+      const host = title.trim().replace(/^www\./i, "");
+      const base = host.split(".")[0];
+      return base ? base.charAt(0).toUpperCase() + base.slice(1) : host;
     }
     return title.length > 25 ? title.slice(0, 25) + "..." : title;
   }
@@ -376,14 +393,9 @@ export async function callGemini(
   const isSearchEnabled = isSearchRequested && canUseGrounding();
 
   // NẾU LÀ YÊU CẦU GOOGLE SEARCH GROUNDING:
-  // CHỈ SỬ DỤNG DUY NHẤT KEY ĐÃ GẮN BILLING ĐỂ HƯỞNG 1500 LƯỢT SEARCH/NGÀY VÀ TRÁNH 429 TỪ CÁC KEY FREE
-  if (isSearchEnabled) {
-    if (groundingKey) {
-      apiKeys = [groundingKey];
-    } else if (apiKeys.length > 0 && apiKeys[0]) {
-      // Mặc định lấy key đầu tiên (key billing vừa nạp)
-      apiKeys = [apiKeys[0]];
-    }
+  // Đưa key billing lên đầu tiên để ưu tiên search 1500 lượt/ngày; các key khác làm dự phòng nếu key billing có sự cố
+  if (isSearchEnabled && groundingKey) {
+    apiKeys = [groundingKey, ...apiKeys.filter((k) => k !== groundingKey)];
   }
 
   if (apiKeys.length === 0) {
@@ -398,13 +410,11 @@ export async function callGemini(
   }
 
   // Danh sách model cascading dự phòng siêu tốc (~800ms) khi model chính nghẽn mạng / 503 / 429 / Timeout:
-  const candidateFallbacks = isSearchEnabled
-    ? []
-    : [
-        "gemini-3.1-flash-lite-preview",
-        "gemini-3.1-flash-lite",
-        "gemini-flash-lite-latest",
-      ].filter((m) => m !== primaryModel);
+  const candidateFallbacks = [
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-lite-latest",
+  ].filter((m) => m !== primaryModel);
 
   const temperature = options?.temperature ?? 0.3;
   const maxTokens = options?.maxTokens;
@@ -510,7 +520,8 @@ export async function callGemini(
               .filter((t): t is string => typeof t === "string" && t.length > 0)
           ),
         ];
-        if (sources.length > 0 && !content.toLowerCase().includes("nguồn") && !content.toLowerCase().includes("kiểm chứng")) {
+        const alreadyHasCitation = /(?:nguồn(?:\s+kiểm\s+chứng)?|source)\s*:/i.test(content) || /\*\(nguồn/i.test(content);
+        if (sources.length > 0 && !alreadyHasCitation) {
           content += `\n\n*(Nguồn: ${sources.join(", ")})*`;
         }
         if (candidate.groundingMetadata.webSearchQueries?.length) {
@@ -537,7 +548,8 @@ export async function callGemini(
     for (const fbModel of candidateFallbacks) {
       try {
         console.log(`[gemini] ⚡ Model chính gặp lỗi/nghẽn, tự động chuyển sang model dự phòng: ${fbModel}...`);
-        const fbRes = await executeModel(fbModel, 5_000);
+        delete requestBody.tools; // Gỡ bỏ tool search vì các model lite không hỗ trợ google_search
+        const fbRes = await executeModel(fbModel, 6_000);
         if (fbRes) {
           console.log(`[gemini] ✅ Đã phản hồi thành công qua fallback model ${fbModel}!`);
           botKeyOffset = (keyIdx + 1) % numKeys;
