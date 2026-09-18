@@ -8,6 +8,8 @@ export interface OfficialLiveDataOptions {
 
 const CACHE_TTL_MS = 3 * 60 * 1000;
 const responseCache = new Map<string, { expiresAt: number; value: string }>();
+const sportsResponseCaches = new WeakMap<FetchLike, Map<string, { expiresAt: number; promise: Promise<any> }>>();
+let warnedMissingSportsKey = false;
 
 function decodeHtml(value: string): string {
   return value
@@ -86,7 +88,7 @@ export function selectSportsFixtures(query: string, fixtures: any[]): any[] {
   const competitionAliases = competition?.[1];
   const competitionTokens = new Set((competition ? normalizedQuery.match(competition[0])?.[0] : "")?.split(" ").filter(Boolean));
   const anchors = [...new Set(normalizedQuery.split(" ").filter((token) => (
-    token.length >= 2 && !SPORTS_QUERY_NOISE.has(token) && !competitionTokens.has(token)
+    token.length >= 2 && !/^\d{1,4}$/.test(token) && !SPORTS_QUERY_NOISE.has(token) && !competitionTokens.has(token)
   )))];
   if (anchors.length === 0 && !competitionAliases) return fixtures;
 
@@ -184,15 +186,43 @@ export function parseLotteryHtml(html: string): string[] {
 }
 
 async function fetchSportsFixtures(query: string, fetcher: FetchLike, apiKey: string, now: Date): Promise<string> {
-  if (!apiKey) return "";
+  if (!apiKey) {
+    if (!warnedMissingSportsKey) {
+      console.warn("[official-live-data] API-Football chưa hoạt động: thiếu API_FOOTBALL_KEY trong tiến trình bot.");
+      warnedMissingSportsKey = true;
+    }
+    return "";
+  }
   const date = vietnamDate(now);
+  const url = `https://v3.football.api-sports.io/fixtures?date=${date}&timezone=Asia%2FHo_Chi_Minh`;
   try {
-    const response = await fetcher(`https://v3.football.api-sports.io/fixtures?date=${date}&timezone=Asia%2FHo_Chi_Minh`, {
-      headers: { Accept: "application/json", "x-apisports-key": apiKey },
-      signal: AbortSignal.timeout(2800),
-    });
-    if (!response.ok) return "";
-    const data = await response.json() as any;
+    let cache = sportsResponseCaches.get(fetcher);
+    if (!cache) {
+      cache = new Map();
+      sportsResponseCaches.set(fetcher, cache);
+    }
+    const cacheKey = `${date}:${apiKey}`;
+    const cached = cache.get(cacheKey);
+    let dataPromise: Promise<any>;
+    if (cached && cached.expiresAt > Date.now()) {
+      dataPromise = cached.promise;
+    } else {
+      dataPromise = (async () => {
+        const response = await fetcher(url, {
+          headers: { Accept: "application/json", "x-apisports-key": apiKey },
+          signal: AbortSignal.timeout(4500),
+        });
+        const data = await response.json() as any;
+        if (!response.ok || (data?.errors && Object.keys(data.errors).length > 0)) {
+          const reason = !response.ok ? `HTTP ${response.status}` : JSON.stringify(data.errors);
+          throw new Error(reason);
+        }
+        return data;
+      })();
+      cache.set(cacheKey, { expiresAt: Date.now() + CACHE_TTL_MS, promise: dataPromise });
+      dataPromise.catch(() => cache?.delete(cacheKey));
+    }
+    const data = await dataPromise;
     const fixtures = Array.isArray(data?.response) ? data.response : [];
     const lines = selectSportsFixtures(query, fixtures)
       .slice(0, 8)
@@ -206,7 +236,8 @@ async function fetchSportsFixtures(query: string, fetcher: FetchLike, apiKey: st
         return `- ${home} vs ${away}: ${score}, trạng thái ${status}, lúc ${item?.fixture?.date || "chưa rõ"}`;
       });
     return sourceBlock("LỊCH/TỶ SỐ BÓNG ĐÁ TỪ API-FOOTBALL", lines, "API-Football", "https://www.api-football.com/", now);
-  } catch {
+  } catch (error) {
+    console.warn(`[official-live-data] API-Football thất bại cho ngày ${date}: ${error instanceof Error ? error.message : String(error)}`);
     return "";
   }
 }

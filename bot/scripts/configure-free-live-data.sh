@@ -47,6 +47,18 @@ for bot_dir in "${BOT_DIRS[@]}"; do
   echo "Đã cấu hình ${bot_dir}/bot/.env"
 done
 
+# Bot 2 nạp cấu hình riêng theo BOT_ID trước cấu hình gốc. Ghi thêm vào đúng
+# vị trí runtime để API dùng được dù tiến trình được khởi động với BOT_ID=bot-2.
+for bot2_env in \
+  "${HOME}/zalo-bot/data/bots/bot-2/.env" \
+  "${HOME}/zalo-bot-2/bot/data/bots/bot-2/.env"; do
+  if [[ -f "${bot2_env}" ]]; then
+    upsert_env "${bot2_env}" "API_FOOTBALL_KEY" "${API_FOOTBALL_KEY}"
+    upsert_env "${bot2_env}" "SEARCH_GROUNDING_ENABLED" "false"
+    echo "Đã cấu hình ${bot2_env}"
+  fi
+done
+
 unset API_FOOTBALL_KEY
-pm2 restart all
+pm2 restart all --update-env
 echo "Hoàn tất: API-Football đã bật và Search Grounding đã tắt trên cả hai bot."
