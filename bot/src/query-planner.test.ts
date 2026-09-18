@@ -101,6 +101,36 @@ test("câu y tế mô tả triệu chứng chung không bị ép fact_check", ()
   assert.equal(plan.intent, "knowledge");
 });
 
+test("so sánh tư vấn kỹ thuật dùng knowledge dù planner trả fact-check hoặc realtime", () => {
+  const cases = [
+    "google vision với apple vision cái nào xịn hơn",
+    "AWS hay Google Cloud nên dùng cái nào",
+    "camera Sony và Canon loại nào phù hợp hơn",
+    "so sánh OCR Tesseract vs PaddleOCR",
+  ];
+
+  for (const question of cases) {
+    for (const intent of ["fact_check", "realtime_news"] as const) {
+      const plan = normalizeQueryPlanIntent({ ...factPlan(), intent }, question);
+      assert.equal(plan.intent, "knowledge", `${intent}: ${question}`);
+    }
+  }
+});
+
+test("so sánh thuộc lĩnh vực rủi ro cao hoặc hỏi giá hiện tại vẫn cần bằng chứng", () => {
+  const cases = [
+    "thuốc A hay thuốc B loại nào tốt hơn",
+    "cổ phiếu ABC hay XYZ nên đầu tư cái nào",
+    "gói vay ngân hàng A hay B tốt hơn",
+    "iPhone hay Samsung giá hiện nay cái nào tốt hơn",
+  ];
+
+  for (const question of cases) {
+    const plan = normalizeQueryPlanIntent(factPlan(), question);
+    assert.equal(plan.intent, "fact_check", question);
+  }
+});
+
 test("extractCleanUserQuery bóc tách sạch sẽ và bảo toàn nguyên vẹn 100% tên thực thể", () => {
   const cases = [
     {
@@ -134,4 +164,3 @@ test("preserveCoreUserEntities khôi phục thực thể viết hoa nếu planne
   const plan = normalizeQueryPlanIntent(rawPlan, "có lịch thi đấu FIFA ASEAN Cup 2026 chưa");
   assert.ok(plan.queries.some((q) => /FIFA/i.test(q) && /ASEAN/i.test(q)));
 });
-

@@ -41,6 +41,14 @@ export function extractCleanUserQuery(question: string, quoteText = ""): string 
   return clean.slice(0, 100);
 }
 
+function isAdvisoryComparison(text: string): boolean {
+  return /\b(?:so sanh|cai nao|loai nao|nen dung|nen chon|nen mua|xin hon|tot hon|phu hop hon|uu nhuoc diem|recommend|recommendation|compare|comparison|versus|vs)\b/i.test(text);
+}
+
+function isHighStakesAdvice(text: string): boolean {
+  return /\b(?:thuoc|lieu dung|lieu luong|dieu tri|vac xin|vaccine|phac do|benh|y te|phap ly|luat|thue|dau tu|co phieu|chung khoan|crypto|tien dien tu|tin dung|vay|bao hiem)\b/i.test(text);
+}
+
 /**
  * Kế hoạch dự phòng an toàn khi AI Planner gặp sự cố mạng hoặc timeout (không dùng regex khoá cứng)
  */
@@ -49,6 +57,16 @@ function fallbackSafePlanner(question: string, quoteText = ""): QueryPlanResult 
   const query = cleanQ.length >= 4 ? cleanQ : (quoteText || question).slice(0, 80);
   const currentYear = new Date().getFullYear();
   const queries: string[] = [query.slice(0, 80)];
+  const normalized = normalizePlannerText(`${question} ${quoteText}`);
+
+  if (isAdvisoryComparison(normalized)) {
+    return {
+      needsSearch: true,
+      intent: isHighStakesAdvice(normalized) ? "fact_check" : "knowledge",
+      queries: uniqQueries(queries),
+      summaryIntent: "Fallback comparison planner",
+    };
+  }
 
   // Nếu câu hỏi về thể thao / bóng đá / lịch thi đấu
   if (/(?:lịch thi đấu|kết quả|bóng đá|la\s*liga|ngoại hạng|champions league|cúp c1|serie a|bundesliga|v-league)/i.test(query)) {
@@ -179,6 +197,17 @@ export function normalizeQueryPlanIntent(plan: QueryPlanResult, question: string
     };
   }
 
+  const asksComparison = isAdvisoryComparison(text);
+  const asksHighStakesAdvice = isHighStakesAdvice(text);
+  const asksVolatileComparisonFact = /\b(?:hien nay|hien tai|moi nhat|hom nay|gia|bang gia|bao gia|phien ban moi|vua ra mat)\b/i.test(text);
+  if (asksComparison && !asksHighStakesAdvice && !asksVolatileComparisonFact) {
+    return {
+      ...guardedPlan,
+      intent: "knowledge",
+      queries: guardedPlan.queries.length > 0 ? guardedPlan.queries : [fallbackQuery].filter(Boolean),
+    };
+  }
+
   if (!guardedPlan.needsSearch || guardedPlan.intent !== "fact_check") return guardedPlan;
 
   const asksOverview =
@@ -227,6 +256,7 @@ export async function planSearchQueries(params: {
     `   A) NHÓM TRI THỨC NỀN TẢNG / TƯ DUY / CHAT (needsSearch: false):\n` +
     `      - Khoa học tự nhiên, toán học, định lý, vật lý, hóa học, sinh học, giải phẫu.\n` +
     `      - Kỹ thuật, lập trình/code, cú pháp, thuật toán, viết regex, kiến trúc phần mềm.\n` +
+    `      - Câu hỏi so sánh/tư vấn kỹ thuật kiểu "cái nào tốt hơn", "nên dùng/chọn cái nào": có thể needsSearch: true để lấy tài liệu bổ trợ nhưng intent phải là "knowledge", không được biến thiếu RSS thành từ chối trả lời. Ngoại lệ: y tế, pháp lý, tài chính/đầu tư hoặc câu hỏi giá/phiên bản hiện tại vẫn là fact_check.\n` +
     `      - Lịch sử cổ - trung đại đã cố định (các cuộc chiến lịch sử, triều đại phong kiến, năm diễn ra sự kiện lịch sử cố định hàng chục/trăm năm trước).\n` +
     `      - Văn hóa, nghệ thuật, triết học, giải thích khái niệm trừu tượng, sáng tác, dịch thuật, soạn email.\n` +
     `      - Chào hỏi xã giao, khen ngợi, đùa vui thông thường.\n` +
