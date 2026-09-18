@@ -293,6 +293,82 @@ test("context fact-check bỏ nguồn cũ không ngày và nguồn cấp phó kh
   assert.doesNotMatch(context, /https:\/\/agency\.gov\.vn\/deputy/);
 });
 
+test("câu hỏi chức danh hiện tại loại nguồn người tiền nhiệm và chỉ giữ nguồn mới", () => {
+  const query = "bí thư tỉnh ủy Quảng Ngãi hiện nay là ai";
+  const ranked = rankEvidence([
+    evidence({
+      title: "Bí thư Tỉnh ủy Quảng Ngãi Bùi Thị Quỳnh Vân chủ trì hội nghị",
+      snippet: "Bà Bùi Thị Quỳnh Vân giữ chức Bí thư Tỉnh ủy Quảng Ngãi trong nhiệm kỳ trước.",
+      url: "https://official.example/old-secretary",
+      sourceType: "official",
+      publishedAt: Date.UTC(2025, 1, 1),
+    }),
+    evidence({
+      title: "Bí thư Tỉnh ủy Quảng Ngãi Hồ Văn Niên làm việc tại địa phương",
+      snippet: "Ông Hồ Văn Niên, Bí thư Tỉnh ủy Quảng Ngãi, chủ trì cuộc họp mới nhất.",
+      url: "https://quangngai.gov.vn/current-secretary",
+      sourceType: "official",
+      publishedAt: Date.UTC(2026, 7, 27),
+    }),
+  ], query, "fact_check", Date.UTC(2026, 8, 18));
+  const context = formatEvidenceContext(ranked, "fact_check", query);
+
+  assert.match(context, /Hồ Văn Niên/);
+  assert.doesNotMatch(context, /Bùi Thị Quỳnh Vân/);
+  assert.match(context, /CLAIM_BINDING: STRICT/);
+});
+
+test("câu hỏi danh tính hiện tại không trộn hai nguồn chuyển giao cách nhau vài tuần", () => {
+  const query = "CEO Acme hiện nay là ai";
+  const ranked = rankEvidence([
+    evidence({
+      title: "CEO Acme John Roe điều hành doanh nghiệp",
+      url: "https://acme.example/former-ceo",
+      sourceType: "primary",
+      publishedAt: Date.UTC(2026, 7, 10),
+    }),
+    evidence({
+      title: "CEO Acme Jane Doe bắt đầu nhiệm kỳ mới",
+      url: "https://acme.example/current-ceo",
+      sourceType: "primary",
+      publishedAt: Date.UTC(2026, 8, 1),
+    }),
+  ], query, "fact_check", NOW);
+  const context = formatEvidenceContext(ranked, "fact_check", query);
+
+  assert.match(context, /Jane Doe/);
+  assert.doesNotMatch(context, /John Roe/);
+});
+
+test("hai trang bách khoa không tạo đồng thuận đủ mạnh cho dữ kiện hiện tại", () => {
+  const ranked = rankEvidence([
+    evidence({ title: "CEO Acme hiện tại là Jane Doe", url: "https://en.wikipedia.org/wiki/Acme", sourceType: "encyclopedia" }),
+    evidence({ title: "CEO Acme hiện tại Jane Doe", url: "https://vi.wikipedia.org/wiki/Acme", sourceType: "encyclopedia" }),
+  ], "CEO Acme hiện tại là ai", "fact_check", NOW);
+
+  assert.equal(assessEvidenceSufficiency(ranked, "fact_check", "CEO Acme hiện tại là ai").sufficient, false);
+});
+
+test("quy tắc binding áp dụng cho nhiều lĩnh vực nhạy cảm", () => {
+  const cases = [
+    ["liều dùng thuốc Nova hiện nay", "Thuốc Nova: liều dùng theo hướng dẫn chính thức"],
+    ["giá cổ phiếu ABC hiện nay", "Mã ABC: giá cổ phiếu cập nhật hiện nay"],
+    ["pháp lý dự án Orion hiện tại", "Dự án Orion cập nhật tình trạng pháp lý"],
+    ["phiên bản AcmeOS mới nhất", "AcmeOS công bố phiên bản mới nhất"],
+    ["huấn luyện viên đội Orion hiện nay là ai", "Đội Orion bổ nhiệm huấn luyện viên trưởng Jane Doe"],
+  ];
+
+  for (const [query, title] of cases) {
+    const ranked = rankEvidence([
+      evidence({ title: title!, snippet: title!, url: "https://official.example/current", sourceType: "official", publishedAt: Date.UTC(2026, 8, 1) }),
+      evidence({ title: "Thông tin tổng hợp không đúng thực thể", url: "https://news.example/noise", publishedAt: Date.UTC(2026, 8, 2) }),
+    ], query!, "fact_check", NOW);
+    const context = formatEvidenceContext(ranked, "fact_check", query!);
+    assert.match(context, /CLAIM_BINDING: STRICT/, query);
+    assert.doesNotMatch(context, /Thông tin tổng hợp không đúng thực thể/, query);
+  }
+});
+
 test("context thiếu bằng chứng buộc câu trả lời từ chối thay vì đoán", () => {
   const context = formatEvidenceContext([], "fact_check");
   const answer = finalizeGroundedAnswer("Tôi đoán người giữ chức vụ là X.", context, true);

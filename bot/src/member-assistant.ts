@@ -1930,6 +1930,8 @@ async function handleHistoryQA(
     `3. DẪN NGUỒN THEO BẰNG CHỨNG ĐƯỢC CUNG CẤP (GROUNDING CITATION CHO MỌI LĨNH VỰC):\n` +
     `   - Khi câu trả lời sử dụng dữ liệu thời gian thực (tin tức, thể thao, văn bản pháp luật, đơn vị hành chính, giá cả thị trường, nghiên cứu khoa học):\n` +
     `     + Chỉ sử dụng các bản ghi [E#], URL và ngày công bố xuất hiện trong phần bằng chứng. Không tự thêm tên cơ quan, ngày hoặc URL.\n` +
+    `     + Mỗi mệnh đề phải được MỘT bản ghi [E#] chứa đồng thời đúng thực thể, thuộc tính/chức vụ và giá trị/tên người. Cấm ghép tên ở nguồn này với chức vụ, con số, ngày, liều dùng hoặc sự kiện ở nguồn khác.\n` +
+    `     + Với câu hỏi "hiện nay/hiện tại là ai", chỉ trả lời danh tính được nguồn chính thức mới nhất xác nhận; không lấy người tiền nhiệm/người chỉ được nhắc tới và không tự thêm hoạt động nếu không được hỏi.\n` +
     `     + Nếu EVIDENCE_STATUS là INSUFFICIENT, phải nói rõ chưa đủ bằng chứng và không được đoán đáp án.\n` +
     `     + Giữ nguyên ngày của từng nguồn; thời điểm hệ thống hiện tại không phải ngày công bố của nguồn.\n` +
     `4. KẾT BÀI GỢI MỞ HOẶC LỜI CHÚC LỊCH THIỆP:\n` +

@@ -148,6 +148,11 @@ function isIdentityQuery(query: string): boolean {
   return /\b(?:ai|who|whom)\b/i.test(normalizeSearchText(query));
 }
 
+function isCurrentIdentityQuery(query: string): boolean {
+  const normalized = normalizeSearchText(query);
+  return isIdentityQuery(query) && /\b(?:hien nay|hien tai|current|currently|now)\b/i.test(normalized);
+}
+
 function hasCurrentLanguage(item: SearchEvidence): boolean {
   return /\b(?:current|currently|latest|now|hien tai|hien nay|moi nhat)\b/i.test(
     normalizeSearchText(`${item.title} ${item.snippet}`)
@@ -246,17 +251,23 @@ export function rankEvidence(
 export function assessEvidenceSufficiency(
   evidence: SearchEvidence[],
   intent: SearchIntent,
+  query = "",
 ): EvidenceSufficiency {
   if (intent !== "fact_check") return { sufficient: true, reason: "not-required" };
 
-  const relevant = evidence.filter((item) => (item.relevanceScore || 0) >= 0.55 && Boolean(item.url));
+  const eligible = selectCurrentIdentityEvidence(evidence, query);
+  const relevant = eligible.filter((item) => (item.relevanceScore || 0) >= 0.55 && Boolean(item.url));
   const strongOfficial = relevant.some((item) =>
     (item.authorityScore || inferAuthority(item)) >= 0.9 &&
     (Boolean(item.publishedAt) || hasCurrentLanguage(item))
   );
   if (strongOfficial) return { sufficient: true, reason: "strong-official-source" };
 
-  const independentSources = new Set(relevant.map((item) => {
+  const corroborating = relevant.filter((item) =>
+    item.sourceType !== "encyclopedia" &&
+    (item.authorityScore || inferAuthority(item)) >= 0.7
+  );
+  const independentSources = new Set(corroborating.map((item) => {
     if (item.sourceType === "news" && item.sourceName) return normalizeSearchText(item.sourceName);
     return hostnameOf(item.url);
   }).filter(Boolean));
@@ -265,15 +276,34 @@ export function assessEvidenceSufficiency(
   return { sufficient: false, reason: "insufficient-relevant-evidence" };
 }
 
-function selectEvidenceForContext(evidence: SearchEvidence[], intent: SearchIntent): SearchEvidence[] {
+function selectCurrentIdentityEvidence(evidence: SearchEvidence[], query: string): SearchEvidence[] {
+  if (!isCurrentIdentityQuery(query)) return evidence;
+  const relevantDated = evidence.filter((item) =>
+    (item.relevanceScore || 0) >= 0.55 && Boolean(item.publishedAt) && !item.disambiguationPenalty
+  );
+  if (relevantDated.length === 0) return evidence.filter((item) => !item.disambiguationPenalty);
+  const newest = Math.max(...relevantDated.map((item) => item.publishedAt || 0));
+  // Với danh tính/chức danh hiện tại, các bài trước một đợt chuyển giao rất dễ
+  // vẫn còn đứng cao trên RSS. Chỉ giữ cụm bằng chứng sát mốc mới nhất để không
+  // trộn người tiền nhiệm với người đang giữ chức vụ.
+  const currentWindowStart = newest - 14 * 24 * 60 * 60 * 1000;
+  return evidence.filter((item) =>
+    !item.disambiguationPenalty &&
+    (Boolean(item.publishedAt && item.publishedAt >= currentWindowStart) ||
+      ((item.authorityScore || inferAuthority(item)) >= 0.9 && hasCurrentLanguage(item)))
+  );
+}
+
+function selectEvidenceForContext(evidence: SearchEvidence[], intent: SearchIntent, query: string): SearchEvidence[] {
   if (intent !== "fact_check") return evidence.slice(0, 8);
-  const hasDatedRelevantEvidence = evidence.some((item) => (item.relevanceScore || 0) >= 0.55 && Boolean(item.publishedAt));
-  if (!hasDatedRelevantEvidence) return evidence.slice(0, 8);
-  const hasUnpenalizedDatedEvidence = evidence.some((item) =>
+  const eligible = selectCurrentIdentityEvidence(evidence, query);
+  const hasDatedRelevantEvidence = eligible.some((item) => (item.relevanceScore || 0) >= 0.55 && Boolean(item.publishedAt));
+  if (!hasDatedRelevantEvidence) return eligible.slice(0, 8);
+  const hasUnpenalizedDatedEvidence = eligible.some((item) =>
     (item.relevanceScore || 0) >= 0.55 && Boolean(item.publishedAt) && !item.disambiguationPenalty
   );
 
-  return evidence
+  return eligible
     .filter((item) => Boolean(item.publishedAt) || ((item.authorityScore || inferAuthority(item)) >= 0.9 && hasCurrentLanguage(item)))
     .filter((item) => !hasUnpenalizedDatedEvidence || !item.disambiguationPenalty)
     .slice(0, 8);
@@ -289,18 +319,27 @@ function formatPublishedAt(timestamp: number | null | undefined): string {
   }).format(new Date(timestamp));
 }
 
-export function formatEvidenceContext(evidence: SearchEvidence[], intent: SearchIntent): string {
-  const sufficiency = assessEvidenceSufficiency(evidence, intent);
+export function formatEvidenceContext(evidence: SearchEvidence[], intent: SearchIntent, query = ""): string {
+  const sufficiency = assessEvidenceSufficiency(evidence, intent, query);
   if (!sufficiency.sufficient) {
     return "EVIDENCE_STATUS: INSUFFICIENT\nKhông có đủ nguồn liên quan, có thể kiểm chứng và độc lập để khẳng định dữ kiện hiện tại.";
   }
 
-  const lines = selectEvidenceForContext(evidence, intent).map((item, index) => {
+  const lines = selectEvidenceForContext(evidence, intent, query).map((item, index) => {
     const source = item.sourceName || hostnameOf(item.url) || item.sourceType || "web";
     const date = formatPublishedAt(item.publishedAt);
     return `[E${index + 1}] ${item.title}\nNguồn: ${source}\nURL: ${item.url}\nNgày công bố: ${date}\nTrích đoạn: ${item.snippet}`;
   });
-  return `EVIDENCE_STATUS: SUFFICIENT (${sufficiency.reason})\n${lines.join("\n\n")}`;
+  const bindingRules = intent === "fact_check"
+    ? [
+        "CLAIM_BINDING: STRICT",
+        "- Mỗi mệnh đề phải được một bản ghi [E#] duy nhất xác nhận đồng thời đúng thực thể, thuộc tính/chức vụ và giá trị/tên người.",
+        "- Không ghép tên từ nguồn này với chức vụ, con số, ngày, liều dùng, trạng thái hoặc sự kiện từ nguồn khác.",
+        "- Với câu hỏi 'hiện nay/hiện tại là ai', ưu tiên nguồn chính thức mới nhất; không lấy người tiền nhiệm hoặc người chỉ được nhắc trong bài.",
+        "- Chỉ trả lời phần được hỏi; không tự thêm hoạt động, thành tích, nguyên nhân hay mốc thời gian ngoài trích đoạn.",
+      ].join("\n")
+    : "";
+  return `EVIDENCE_STATUS: SUFFICIENT (${sufficiency.reason})\n${bindingRules}${bindingRules ? "\n" : ""}${lines.join("\n\n")}`;
 }
 
 export function extractEvidenceUrls(context: string): string[] {

@@ -1539,6 +1539,8 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `\n13. NGUYÊN TẮC NEO DỮ KIỆN & LỌC SỰ THẬT CÓ NGÀY THÁNG (CLAIM GROUNDING WITH DATES):\n` +
     `    - KHI TRẢ LỜI VỀ TIN TỨC, CÔNG NGHỆ, MÔ HÌNH AI, SỰ KIỆN, PHÁT HÀNH, GIÁ CẢ:\n` +
     `      + Chỉ khẳng định dữ kiện có trong bản ghi [E#] đã được hệ thống chấp nhận; giữ nguyên ngày và URL của bản ghi.\n` +
+    `      + Mỗi mệnh đề phải được MỘT bản ghi [E#] chứa đồng thời đúng thực thể, thuộc tính/chức vụ và giá trị/tên người. Cấm ghép tên ở nguồn này với chức vụ, con số, ngày hoặc sự kiện ở nguồn khác.\n` +
+    `      + Với câu hỏi "hiện nay/hiện tại là ai", chỉ trả lời danh tính được nguồn chính thức mới nhất xác nhận; không lấy người tiền nhiệm/người chỉ được nhắc tới và không tự thêm danh sách hoạt động nếu không được hỏi.\n` +
     `      + Nếu EVIDENCE_STATUS là INSUFFICIENT hoặc thông tin chỉ là đồn đoán: nói rõ chưa đủ xác nhận, tuyệt đối không đoán hoặc tự bịa mốc thời gian.\n` +
     `      + Tuyệt đối không tạo tên nguồn, ngày hoặc URL không có trong dữ liệu bằng chứng.\n` +
     `\n14. KỸ NĂNG XUẤT TÀI LIỆU THÀNH FILE THẬT (.DOCX, .XLSX, .MD, .TXT):\n` +

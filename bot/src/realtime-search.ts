@@ -1128,7 +1128,7 @@ async function doSearchRealtimeNews(
       })),
     ];
     const rankedEvidence = rankEvidence(evidenceCandidates, cleanQ, intent).slice(0, 10);
-    const evidenceContext = formatEvidenceContext(rankedEvidence, intent);
+    const evidenceContext = formatEvidenceContext(rankedEvidence, intent, cleanQ);
 
     // Nếu mọi kênh đều không có dữ liệu, trả trạng thái thiếu bằng chứng cho fact-check và rỗng cho tin tổng hợp.
     const structuredContext = await structuredContextPromise;
