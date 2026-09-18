@@ -423,7 +423,7 @@ export function extractEvidenceSources(context: string): string[] {
   }
 
   // 2. Dạng Nguồn: ...
-  const directMatches = [...String(context || "").matchAll(/^Nguồn:\s*(.+?)\s*$/gim)];
+  const directMatches = [...String(context || "").matchAll(/^-?\s*Nguồn(?:\s+chính\s+thức)?\s*:\s*(.+?)\s*$/gim)];
   for (const m of directMatches) {
     const s = m[1]?.trim();
     if (s) sources.push(cleanPublisherName(s));

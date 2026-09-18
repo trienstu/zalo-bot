@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   assessEvidenceSufficiency,
+  extractEvidenceSources,
   finalizeGroundedAnswer,
   formatEvidenceContext,
   rankEvidence,
@@ -300,6 +301,18 @@ test("context thiếu bằng chứng buộc câu trả lời từ chối thay v�
   assert.match(answer, /chưa đủ bằng chứng/i);
 });
 
+test("nguồn dữ liệu cấu trúc chính thức được giữ lại và rút gọn đúng", () => {
+  const context = [
+    "EVIDENCE_STATUS: SUFFICIENT (structured-official-source)",
+    "Nguồn chính thức: API-Football",
+    "Ngày dữ liệu: 18/09/2026",
+  ].join("\n");
+
+  assert.deepEqual(extractEvidenceSources(context), ["API-Football"]);
+  const answer = finalizeGroundedAnswer("Hôm nay không có trận La Liga phù hợp.", context, true);
+  assert.match(answer, /\*\(Nguồn:\s*API-Football\)\*/);
+});
+
 test("rankEvidence loại bỏ hoàn toàn các trang wap tỷ số và cá cược rác", () => {
   const junkItems = [
     evidence({
@@ -327,4 +340,3 @@ test("rankEvidence loại bỏ hoàn toàn các trang wap tỷ số và cá cư�
   assert.equal(ranked.length, 1);
   assert.equal(ranked[0].url, "https://tuoitre.vn/lich-thi-dau-fifa-asean-cup-2026");
 });
-

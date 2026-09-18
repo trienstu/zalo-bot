@@ -8,6 +8,7 @@ import {
   parseLegalHtml,
   parseLotteryHtml,
   parseSjcGoldHtml,
+  selectSportsFixtures,
 } from "./official-live-data.js";
 
 test("parses official SJC buy/sell rows and rejects empty markup", () => {
@@ -73,4 +74,29 @@ test("formats matching API-Football fixtures with a free key", async () => {
     },
   });
   assert.match(output, /Vietnam vs Thailand: 1-0/);
+  assert.match(output, /EVIDENCE_STATUS: SUFFICIENT/);
+});
+
+test("filters API-Football fixtures by the requested competition instead of returning arbitrary matches", () => {
+  const fixtures = [
+    { teams: { home: { name: "Alaves" }, away: { name: "Athletic Club" } }, league: { name: "La Liga", country: "Spain" } },
+    { teams: { home: { name: "Real Betis" }, away: { name: "Getafe" } }, league: { name: "La Liga", country: "Spain" } },
+    { teams: { home: { name: "Gonsenheim" }, away: { name: "Schott Mainz" } }, league: { name: "Liga 3", country: "Germany" } },
+  ];
+  const selected = selectSportsFixtures("lịch thi đấu La Liga hôm nay", fixtures);
+  assert.equal(selected.length, 2);
+  assert.ok(selected.every((item) => item.league.name === "La Liga"));
+});
+
+test("uses the Vietnam calendar date for API-Football queries", async () => {
+  let requestedUrl = "";
+  await getOfficialLiveDataContext("lịch thi đấu hôm nay", {
+    sportsApiKey: "test-key",
+    now: new Date("2026-09-17T18:30:00.000Z"),
+    fetch: async (input) => {
+      requestedUrl = String(input);
+      return new Response(JSON.stringify({ response: [] }), { status: 200 });
+    },
+  });
+  assert.match(requestedUrl, /date=2026-09-18/);
 });

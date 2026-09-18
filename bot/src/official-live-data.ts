@@ -43,12 +43,71 @@ async function fetchText(url: string, fetcher: FetchLike): Promise<string> {
 function sourceBlock(title: string, lines: string[], sourceName: string, sourceUrl: string, now: Date): string {
   if (lines.length === 0) return "";
   return [
+    "EVIDENCE_STATUS: SUFFICIENT (structured-official-source)",
     `=== ${title} ===`,
     ...lines.slice(0, 12),
     `- Nguồn chính thức: ${sourceName}`,
     `- URL nguồn: ${sourceUrl}`,
     `- Thời điểm lấy dữ liệu: ${now.toISOString()}`,
   ].join("\n");
+}
+
+function normalize(value: string): string {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+const SPORTS_QUERY_NOISE = new Set([
+  "lich", "thi", "dau", "bong", "da", "hom", "nay", "ngay", "tran", "ket", "qua", "ty", "so",
+  "moi", "nhat", "cap", "nhat", "gio", "viet", "nam", "league", "fixture", "fixtures", "match", "today",
+]);
+
+const SPORTS_COMPETITION_ALIASES: Array<[RegExp, string[]]> = [
+  [/\b(?:la\s*liga|laliga)\b/i, ["la liga", "laliga"]],
+  [/\b(?:premier league|epl)\b/i, ["premier league"]],
+  [/\b(?:champions league|c1)\b/i, ["champions league"]],
+  [/\b(?:europa league|c2)\b/i, ["europa league"]],
+  [/\bserie\s*a\b/i, ["serie a"]],
+  [/\bbundesliga\b/i, ["bundesliga"]],
+  [/\bligue\s*1\b/i, ["ligue 1"]],
+  [/\b(?:v[ .-]?league|vleague)\b/i, ["v league", "v-league", "vleague"]],
+  [/\bworld cup\b/i, ["world cup"]],
+  [/\basian cup\b/i, ["asian cup"]],
+];
+
+export function selectSportsFixtures(query: string, fixtures: any[]): any[] {
+  const normalizedQuery = normalize(query);
+  const competition = SPORTS_COMPETITION_ALIASES.find(([pattern]) => pattern.test(normalizedQuery));
+  const competitionAliases = competition?.[1];
+  const competitionTokens = new Set((competition ? normalizedQuery.match(competition[0])?.[0] : "")?.split(" ").filter(Boolean));
+  const anchors = [...new Set(normalizedQuery.split(" ").filter((token) => (
+    token.length >= 2 && !SPORTS_QUERY_NOISE.has(token) && !competitionTokens.has(token)
+  )))];
+  if (anchors.length === 0 && !competitionAliases) return fixtures;
+
+  return fixtures.filter((item: any) => {
+    const haystack = normalize(`${item?.teams?.home?.name || ""} ${item?.teams?.away?.name || ""} ${item?.league?.name || ""} ${item?.league?.country || ""}`);
+    const compactHaystack = haystack.replace(/\s+/g, "");
+    if (competitionAliases && !competitionAliases.some((alias) => {
+      const normalizedAlias = normalize(alias);
+      return haystack.includes(normalizedAlias) || compactHaystack.includes(normalizedAlias.replace(/\s+/g, ""));
+    })) return false;
+    return anchors.every((anchor) => haystack.includes(anchor) || compactHaystack.includes(anchor));
+  });
+}
+
+function vietnamDate(now: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Ho_Chi_Minh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
 }
 
 export function parseSjcGoldHtml(html: string): string[] {
@@ -126,7 +185,7 @@ export function parseLotteryHtml(html: string): string[] {
 
 async function fetchSportsFixtures(query: string, fetcher: FetchLike, apiKey: string, now: Date): Promise<string> {
   if (!apiKey) return "";
-  const date = now.toISOString().slice(0, 10);
+  const date = vietnamDate(now);
   try {
     const response = await fetcher(`https://v3.football.api-sports.io/fixtures?date=${date}&timezone=Asia%2FHo_Chi_Minh`, {
       headers: { Accept: "application/json", "x-apisports-key": apiKey },
@@ -134,13 +193,8 @@ async function fetchSportsFixtures(query: string, fetcher: FetchLike, apiKey: st
     });
     if (!response.ok) return "";
     const data = await response.json() as any;
-    const queryTokens = query.toLowerCase().split(/\s+/).filter((token) => token.length >= 3);
     const fixtures = Array.isArray(data?.response) ? data.response : [];
-    const lines = fixtures
-      .filter((item: any) => {
-        const haystack = `${item?.teams?.home?.name || ""} ${item?.teams?.away?.name || ""} ${item?.league?.name || ""}`.toLowerCase();
-        return queryTokens.some((token) => haystack.includes(token)) || /(?:hôm nay|lịch thi đấu|tỷ số)/i.test(query);
-      })
+    const lines = selectSportsFixtures(query, fixtures)
       .slice(0, 8)
       .map((item: any) => {
         const home = item?.teams?.home?.name || "Đội nhà";

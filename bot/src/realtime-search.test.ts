@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { detectNewsCategories, parseOpenWebRssItems } from "./realtime-search.js";
+import { detectNewsCategories, matchesVolatileTopic, parseOpenWebRssItems } from "./realtime-search.js";
 import { formatEvidenceContext, rankEvidence } from "./search-evidence.js";
 
 const NOW = Date.UTC(2026, 8, 12);
@@ -73,4 +73,20 @@ test("phân loại các nhu cầu cần dữ liệu mới theo lĩnh vực, khô
   assert.deepEqual(detectNewsCategories("Lịch thi đấu V-League hôm nay"), [
     "the-thao",
   ]);
+});
+
+test("lọc tin dài nhưng sai thuộc tính khỏi câu hỏi giá vàng", () => {
+  assert.equal(matchesVolatileTopic({
+    title: "Chứng khoán Việt Nam được nâng hạng",
+    snippet: "Thị trường chuyển từ cận biên lên mới nổi và doanh nghiệp chuẩn bị niêm yết quốc tế.",
+  }, "giá vàng hôm nay"), false);
+  assert.equal(matchesVolatileTopic({
+    title: "Giá vàng SJC tăng trong phiên sáng",
+    snippet: "Vàng miếng được niêm yết theo giá mua vào và bán ra.",
+  }, "giá vàng hôm nay"), true);
+});
+
+test("lọc lịch thể thao theo đúng giải được hỏi", () => {
+  assert.equal(matchesVolatileTopic({ title: "Lịch thi đấu La Liga hôm nay", snippet: "Các trận vòng 7" }, "lịch thi đấu La Liga hôm nay"), true);
+  assert.equal(matchesVolatileTopic({ title: "Lịch bóng đá Thụy Điển", snippet: "Các trận giải Ettan" }, "lịch thi đấu La Liga hôm nay"), false);
 });

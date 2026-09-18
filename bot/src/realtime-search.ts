@@ -66,6 +66,22 @@ export interface SearchRealtimeOptions {
   requireEvidence?: boolean;
 }
 
+export function matchesVolatileTopic(item: Pick<ParsedNewsItem, "title" | "snippet">, query: string): boolean {
+  const text = `${item.title} ${item.snippet || ""}`;
+  if (/(?:giá vàng|vàng sjc|vàng miếng|vàng nhẫn|gold)/i.test(query)) {
+    return /(?:giá vàng|vàng sjc|vàng miếng|vàng nhẫn|gold|ounce|lượng)/i.test(text);
+  }
+  if (/(?:giá xăng|giá dầu|xăng dầu|RON95|E5RON|diesel|điêzen)/i.test(query)) {
+    return /(?:giá xăng|giá dầu|xăng dầu|RON95|E5RON|diesel|điêzen|đồng\/lít)/i.test(text);
+  }
+  if (/(?:bitcoin|btc|ethereum|eth|crypto|tiền điện tử)/i.test(query)) {
+    return /(?:bitcoin|btc|ethereum|eth|crypto|tiền điện tử)/i.test(text);
+  }
+  const competition = query.match(/(?:la liga|premier league|ngoại hạng anh|champions league|cúp c1|v-league|serie a|bundesliga|ligue 1)/i)?.[0];
+  if (competition) return text.toLowerCase().includes(competition.toLowerCase());
+  return true;
+}
+
 export interface FeedSource {
   sourceName: string;
   url: string;
@@ -721,19 +737,36 @@ async function queryNewsPipeline(
 }
 
 export async function searchRealtimeNews(query: string | string[], options: SearchRealtimeOptions = {}): Promise<string> {
-  const searchPromise = doSearchRealtimeNews(query, options);
-  const timeoutPromise = new Promise<string>((resolve) =>
-    setTimeout(() => {
-      resolve("");
-    }, 5000)
-  );
-  return Promise.race([searchPromise, timeoutPromise]);
+  const rawQuery = Array.isArray(query) ? query.join(" ") : String(query || "");
+  const structuredContextPromise = getStructuredRealtimeContext(rawQuery);
+  const searchPromise = doSearchRealtimeNews(query, options, structuredContextPromise);
+  const timedOut = Symbol("search-timeout");
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<typeof timedOut>((resolve) => {
+    timer = setTimeout(() => resolve(timedOut), 5000);
+  });
+  const result = await Promise.race([searchPromise, timeoutPromise]);
+  if (timer) clearTimeout(timer);
+  if (result !== timedOut) return result;
+
+  const structured = await Promise.race([
+    structuredContextPromise,
+    new Promise<string>((resolve) => setTimeout(() => resolve(""), 700)),
+  ]);
+  if (structured) return structured;
+  return options.requireEvidence
+    ? "EVIDENCE_STATUS: INSUFFICIENT\nKhông có đủ nguồn liên quan, có thể kiểm chứng và độc lập để khẳng định dữ kiện hiện tại."
+    : "";
 }
 
-async function doSearchRealtimeNews(query: string | string[], options: SearchRealtimeOptions = {}): Promise<string> {
+async function doSearchRealtimeNews(
+  query: string | string[],
+  options: SearchRealtimeOptions = {},
+  injectedStructuredContext?: Promise<string>,
+): Promise<string> {
   try {
     const rawQuery = Array.isArray(query) ? query.join(" ") : String(query || "");
-    const structuredContextPromise = getStructuredRealtimeContext(rawQuery);
+    const structuredContextPromise = injectedStructuredContext || getStructuredRealtimeContext(rawQuery);
     const intent: SearchIntent = options.intent || (/\b(?:hiện nay|hiện tại|mới nhất|current|latest)\b/i.test(rawQuery) ? "fact_check" : "realtime_news");
 
     // 1. Phân loại nhu cầu thời gian từ câu hỏi
@@ -910,10 +943,7 @@ async function doSearchRealtimeNews(query: string | string[], options: SearchRea
       });
     } else if (categories.includes("kinh-doanh")) {
       const kdRegex = /(?:kinh doanh|kinh tế|chứng khoán|cổ phiếu|ngân hàng|doanh nghiệp|tài chính|giá vàng|giá xăng|lãi suất|vn-index|thương mại|xuất khẩu|nhập khẩu|lợi nhuận|doanh thu)/i;
-      candidates = candidates.filter((it) => {
-        if (it.snippet && it.snippet.length > 25) return true;
-        return kdRegex.test(it.title);
-      });
+      candidates = candidates.filter((it) => matchesVolatileTopic(it, rawQuery) && kdRegex.test(`${it.title} ${it.snippet || ""}`));
     } else if (categories.includes("so-hoa")) {
       const techRegex = /(?:công nghệ|ai\b|mô hình|gpt|gemini|bán dẫn|chip|apple|iphone|macbook|số hóa|deepseek|claude|phần mềm|smartphone|điện thoại|máy tính)/i;
       candidates = candidates.filter((it) => {
@@ -922,10 +952,7 @@ async function doSearchRealtimeNews(query: string | string[], options: SearchRea
       });
     } else if (categories.includes("the-thao")) {
       const sportRegex = /(?:thể thao|bóng đá|đá banh|lịch thi đấu|kết quả|tỉ số|trận|v-league|ngoại hạng anh|cúp|champions league|la liga|serie a|bundesliga|clb|đội tuyển|huấn luyện viên|cầu thủ)/i;
-      candidates = candidates.filter((it) => {
-        if (it.snippet && it.snippet.length > 25) return true;
-        return sportRegex.test(it.title);
-      });
+      candidates = candidates.filter((it) => matchesVolatileTopic(it, rawQuery) && sportRegex.test(`${it.title} ${it.snippet || ""}`));
     } else if (categories.includes("xe-co")) {
       const carRegex = /(?:ô tô|xe máy|xe hơi|xe điện|vinfast|toyota|honda|hyundai|kia|mazda|ford|mercedes|bmw|audi|tesla|byd|bằng lái|đăng kiểm|giá xe|phạt nguội|xe)/i;
       candidates = candidates.filter((it) => {

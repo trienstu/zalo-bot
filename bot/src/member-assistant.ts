@@ -1394,7 +1394,7 @@ async function handleHistoryQA(
       });
 
       if (plan.needsSearch && plan.queries.length > 0) {
-        quoteEvidenceRequired = plan.intent === "fact_check";
+        quoteEvidenceRequired = plan.intent === "fact_check" || plan.intent === "realtime_news";
         const searchQueries = plan.queries.slice(0, 2);
         const searchPromises = Promise.all(
           searchQueries.map((q) => searchRealtimeNews(q, {
@@ -1402,13 +1402,15 @@ async function handleHistoryQA(
             requireEvidence: quoteEvidenceRequired,
           }).catch(() => ""))
         );
-        const searchTimeout = new Promise<string[]>((resolve) =>
-          setTimeout(() => {
+        let searchTimer: NodeJS.Timeout | undefined;
+        const searchTimeout = new Promise<string[]>((resolve) => {
+          searchTimer = setTimeout(() => {
             console.warn(`[member-assistant] ⏱️ Quote QA timeout quét tìm kiếm (6s), tiếp tục với dữ liệu sẵn có`);
             resolve([]);
-          }, 6000)
-        );
+          }, 6000);
+        });
         const searchResults = await Promise.race([searchPromises, searchTimeout]);
+        if (searchTimer) clearTimeout(searchTimer);
         quoteLiveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
       }
     } catch (e) {
@@ -1864,7 +1866,7 @@ async function handleHistoryQA(
       planNeedsSearch = Boolean(plan.needsSearch);
 
       if (plan.needsSearch && plan.queries.length > 0) {
-        evidenceRequired = plan.intent === "fact_check";
+        evidenceRequired = plan.intent === "fact_check" || plan.intent === "realtime_news";
         const searchQueries = plan.queries.slice(0, 2);
         console.log(`[member-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(searchQueries)}`);
 
@@ -1876,13 +1878,15 @@ async function handleHistoryQA(
             requireEvidence: evidenceRequired,
           }).catch(() => ""))
         );
-        const searchTimeout = new Promise<string[]>((resolve) =>
-          setTimeout(() => {
+        let searchTimer: NodeJS.Timeout | undefined;
+        const searchTimeout = new Promise<string[]>((resolve) => {
+          searchTimer = setTimeout(() => {
             console.warn(`[member-assistant] ⏱️ Timeout quét tìm kiếm (6s), tiếp tục với dữ liệu sẵn có`);
             resolve([]);
-          }, 6000)
-        );
+          }, 6000);
+        });
         const searchResults = await Promise.race([searchPromises, searchTimeout]);
+        if (searchTimer) clearTimeout(searchTimer);
         liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
         console.log(`[member-assistant] ⏱️ Quét dữ liệu hoàn tất trong ${Date.now() - tStartSearch}ms (dài: ${liveNews.length} ký tự)`);
       }
