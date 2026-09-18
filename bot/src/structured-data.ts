@@ -1,5 +1,6 @@
 import { getWeatherReport } from "./weather.js";
 import { getFinancialMarketSummary } from "./tools/finance-tools.js";
+import { getOfficialLiveDataContext } from "./official-live-data.js";
 
 type FetchLike = typeof fetch;
 
@@ -7,6 +8,7 @@ export interface StructuredDataDependencies {
   fetch?: FetchLike;
   weather?: (location: string, targetDate?: string | number) => Promise<string>;
   finance?: (query: string) => Promise<string>;
+  official?: (query: string) => Promise<string>;
 }
 
 function extractWeatherLocation(query: string): string {
@@ -85,6 +87,7 @@ export async function getStructuredRealtimeContext(
   const fetcher = dependencies.fetch || fetch;
   const weather = dependencies.weather || getWeatherReport;
   const finance = dependencies.finance || getFinancialMarketSummary;
+  const official = dependencies.official || ((value: string) => getOfficialLiveDataContext(value, { fetch: fetcher }));
   const tasks: Promise<string>[] = [];
 
   if (/(?:thời tiết|nhiệt độ|dự báo mưa|chất lượng không khí|\baqi\b)/i.test(query)) {
@@ -95,6 +98,7 @@ export async function getStructuredRealtimeContext(
     tasks.push(finance(query));
   }
   tasks.push(lookupNpm(query, fetcher), lookupPypi(query, fetcher), lookupGithubRelease(query, fetcher));
+  tasks.push(official(query));
 
   const results = await Promise.allSettled(tasks);
   const sections = results

@@ -41,7 +41,16 @@ test("does not guess a structured provider for an ambiguous general-news query",
   let fetchCalls = 0;
   const output = await getStructuredRealtimeContext("tin kinh tế mới nhất", {
     fetch: async () => { fetchCalls += 1; return new Response(null, { status: 404 }); },
+    official: async () => "",
   });
   assert.equal(fetchCalls, 0);
   assert.equal(output, "");
+});
+
+test("combines official adapters with the existing structured gateway", async () => {
+  const output = await getStructuredRealtimeContext("giá vàng hôm nay", {
+    official: async () => "=== GIÁ VÀNG SJC ===\n- Nguồn chính thức: SJC",
+    fetch: async () => new Response(null, { status: 404 }),
+  });
+  assert.match(output, /GIÁ VÀNG SJC/);
 });

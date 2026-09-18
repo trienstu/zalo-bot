@@ -1,0 +1,76 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  getOfficialLiveDataContext,
+  extractLatestFuelNoticeUrl,
+  parseFuelHtml,
+  parseHnxHtml,
+  parseLegalHtml,
+  parseLotteryHtml,
+  parseSjcGoldHtml,
+} from "./official-live-data.js";
+
+test("parses official SJC buy/sell rows and rejects empty markup", () => {
+  assert.deepEqual(parseSjcGoldHtml("<table><tr><td>Vàng SJC 1L</td><td>125.000</td><td>127.000</td></tr></table>"), [
+    "- Vàng SJC 1L: mua 125.000, bán 127.000 (nghìn đồng/lượng)",
+  ]);
+  assert.deepEqual(parseSjcGoldHtml("<html>maintenance</html>"), []);
+});
+
+test("parses official fuel ceilings", () => {
+  const lines = parseFuelHtml("Áp dụng từ 18/09/2026. E5RON92 không cao hơn 20.500 đồng/lít; RON95-III không cao hơn 21.300 đồng/lít");
+  assert.deepEqual(lines, [
+    "- Kỳ điều hành/ngày áp dụng: 18/09/2026",
+    "- E5RON92: không cao hơn 20.500 đồng",
+    "- RON95-III: không cao hơn 21.300 đồng",
+  ]);
+});
+
+test("finds the latest official fuel notice and rejects a listing without prices", () => {
+  assert.equal(
+    extractLatestFuelNoticeUrl('<a href="/van-ban/thong-bao.html" title="Thông báo điều hành giá xăng dầu ngày 18/9">x</a>'),
+    "https://moit.gov.vn/van-ban/thong-bao.html",
+  );
+  assert.deepEqual(parseFuelHtml("Thông báo điều hành giá xăng dầu ngày 18/09/2026"), []);
+});
+
+test("parses legal status and document identifiers", () => {
+  const lines = parseLegalHtml("Hiệu lực: Còn hiệu lực. Nghị định 12/2026/NĐ-CP quy định về dữ liệu thị trường.");
+  assert.match(lines.join(" "), /Còn hiệu lực/);
+  assert.match(lines.join(" "), /Nghị định 12\/2026\/NĐ-CP/);
+});
+
+test("parses an HNX market row for an explicit symbol", () => {
+  const lines = parseHnxHtml("A32 VN000000A329 29.000 33.300 24.700 27.000 29.000 28.200 29.500 27.000", "A32");
+  assert.equal(lines.length, 1);
+  assert.match(lines[0] || "", /đóng cửa 29\.000/);
+});
+
+test("parses official lottery draw metadata", () => {
+  const lines = parseLotteryHtml('Kết quả QSMT kỳ <b>#00829</b> ngày <b>17/08/2026</b><div class="day_so_ket_qua_v2"><span>07</span><span>13</span><span>19</span><span>32</span><span>33</span><span>11</span></div>');
+  assert.deepEqual(lines, ["- Kỳ quay: 00829 ngày 17/08/2026", "- Bộ số: 07 13 19 32 33 11"]);
+});
+
+test("skips sports API cleanly when no key is configured", async () => {
+  const output = await getOfficialLiveDataContext("tỷ số bóng đá hôm nay", {
+    sportsApiKey: "",
+    fetch: async () => { throw new Error("must not fetch"); },
+  });
+  assert.equal(output, "");
+});
+
+test("formats matching API-Football fixtures with a free key", async () => {
+  const output = await getOfficialLiveDataContext("lịch thi đấu hôm nay", {
+    sportsApiKey: "test-key",
+    now: new Date("2026-09-18T00:00:00.000Z"),
+    fetch: async (_input, init) => {
+      assert.equal((init?.headers as Record<string, string>)["x-apisports-key"], "test-key");
+      return new Response(JSON.stringify({ response: [{
+        teams: { home: { name: "Vietnam" }, away: { name: "Thailand" } },
+        league: { name: "Friendly" }, goals: { home: 1, away: 0 },
+        fixture: { date: "2026-09-18T19:00:00+07:00", status: { short: "2H" } },
+      }] }), { status: 200 });
+    },
+  });
+  assert.match(output, /Vietnam vs Thailand: 1-0/);
+});
