@@ -9,10 +9,15 @@ export interface GroundingQuotaStatus {
   remaining: number;
   isAvailable: boolean;
   isExhausted: boolean;
+  isEnabled: boolean;
 }
 
 const DAILY_LIMIT = 1500;
 const SAFE_THRESHOLD = 1480; // Ngưỡng an toàn chủ động ngắt để bảo vệ 100% không phát sinh chi phí
+
+export function isSearchGroundingEnabled(value = process.env.SEARCH_GROUNDING_ENABLED): boolean {
+  return /^(?:1|true|yes|on)$/i.test(String(value || "").trim());
+}
 
 function getTodayString(): string {
   // Múi giờ Việt Nam (UTC+7)
@@ -82,6 +87,7 @@ function saveQuotaState(): void {
  * Kiểm tra xem có thể gọi Google Search Grounding hay không
  */
 export function canUseGrounding(): boolean {
+  if (!isSearchGroundingEnabled()) return false;
   const state = loadQuotaState();
   if (state.isExhausted) return false;
   if (state.used >= SAFE_THRESHOLD) {
@@ -133,6 +139,7 @@ export function resetGroundingQuota(): void {
 export function getGroundingQuotaStatus(): GroundingQuotaStatus {
   const state = loadQuotaState();
   const remaining = Math.max(0, DAILY_LIMIT - state.used);
+  const isEnabled = isSearchGroundingEnabled();
   return {
     date: state.date,
     used: state.used,
@@ -140,6 +147,7 @@ export function getGroundingQuotaStatus(): GroundingQuotaStatus {
     remaining,
     isAvailable: canUseGrounding(),
     isExhausted: state.isExhausted,
+    isEnabled,
   };
 }
 
@@ -149,7 +157,9 @@ export function getGroundingQuotaStatus(): GroundingQuotaStatus {
 export function formatGroundingQuotaReport(): string {
   const status = getGroundingQuotaStatus();
   const percent = ((status.used / status.limit) * 100).toFixed(1);
-  const statusEmoji = status.isAvailable
+  const statusEmoji = !status.isEnabled
+    ? "⏸️ Đã tắt theo cấu hình (Đang dùng API công khai + RSS)"
+    : status.isAvailable
     ? "✅ Đang hoạt động ổn định (Tier 1 - Ưu tiên trực tiếp)"
     : "⚠️ Đã tạm dừng / Hết hạn mức (Đang dùng RSS Tier 2)";
 

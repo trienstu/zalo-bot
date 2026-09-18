@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseOpenWebRssItems } from "./realtime-search.js";
+import { detectNewsCategories, parseOpenWebRssItems } from "./realtime-search.js";
 import { formatEvidenceContext, rankEvidence } from "./search-evidence.js";
 
 const NOW = Date.UTC(2026, 8, 12);
@@ -57,4 +57,20 @@ test("context fact-check bỏ nguồn yếu không ngày khi đã có bằng ch�
   assert.match(context, /Ngày công bố: 01\/09\/2026/);
   assert.doesNotMatch(context, /URL: https:\/\/news\.example\/interview/);
   assert.doesNotMatch(context, /Không rõ ngày công bố/);
+});
+
+test("phân loại các nhu cầu cần dữ liệu mới theo lĩnh vực, không phụ thuộc một thực thể cụ thể", () => {
+  assert.deepEqual(detectNewsCategories("Cảnh báo bão và lũ quét mới nhất"), [
+    "thoi-su",
+    "thoi-tiet-thien-tai",
+  ]);
+  assert.deepEqual(detectNewsCategories("Lỗ hổng zero-day mới trên trình duyệt"), [
+    "an-ninh-mang",
+  ]);
+  assert.deepEqual(detectNewsCategories("Giá Bitcoin và tin tiền điện tử hôm nay"), [
+    "crypto",
+  ]);
+  assert.deepEqual(detectNewsCategories("Lịch thi đấu V-League hôm nay"), [
+    "the-thao",
+  ]);
 });

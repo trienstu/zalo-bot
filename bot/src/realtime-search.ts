@@ -7,7 +7,7 @@
  */
 
 import { webSearch, fetchUrl, SearchResultItem } from "./tools/vertical-tools.js";
-import { getFinancialMarketSummary } from "./tools/finance-tools.js";
+import { getStructuredRealtimeContext } from "./structured-data.js";
 import {
   formatEvidenceContext,
   rankEvidence,
@@ -70,6 +70,7 @@ export interface FeedSource {
   sourceName: string;
   url: string;
   lang: "vi" | "en";
+  sourceType?: EvidenceSourceType;
 }
 
 const CATEGORY_FEEDS_REGISTRY: Record<string, FeedSource[]> = {
@@ -87,6 +88,8 @@ const CATEGORY_FEEDS_REGISTRY: Record<string, FeedSource[]> = {
     { sourceName: "Tuổi Trẻ", url: "https://tuoitre.vn/rss/kinh-doanh.rss", lang: "vi" },
     { sourceName: "Thanh Niên", url: "https://thanhnien.vn/rss/kinh-te.rss", lang: "vi" },
     { sourceName: "VietnamNet", url: "https://vietnamnet.vn/rss/kinh-doanh.rss", lang: "vi" },
+    { sourceName: "Znews Tài chính", url: "https://znews.vn/rss/kinh-doanh-tai-chinh.rss", lang: "vi" },
+    { sourceName: "Tiền Phong Kinh tế", url: "https://tienphong.vn/rss/kinh-te.rss", lang: "vi" },
     { sourceName: "New York Times Business", url: "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml", lang: "en" },
   ],
   "so-hoa": [
@@ -95,6 +98,7 @@ const CATEGORY_FEEDS_REGISTRY: Record<string, FeedSource[]> = {
     { sourceName: "TechCrunch", url: "https://techcrunch.com/feed/", lang: "en" },
     { sourceName: "BBC Tech", url: "https://feeds.bbci.co.uk/news/technology/rss.xml", lang: "en" },
     { sourceName: "Ars Technica", url: "https://feeds.arstechnica.com/arstechnica/index", lang: "en" },
+    { sourceName: "Znews Công nghệ", url: "https://znews.vn/rss/cong-nghe.rss", lang: "vi" },
   ],
   "the-gioi": [
     { sourceName: "VnExpress Thế Giới", url: "https://vnexpress.net/rss/the-gioi.rss", lang: "vi" },
@@ -110,16 +114,23 @@ const CATEGORY_FEEDS_REGISTRY: Record<string, FeedSource[]> = {
     { sourceName: "Tuổi Trẻ Thời Sự", url: "https://tuoitre.vn/rss/thoi-su.rss", lang: "vi" },
     { sourceName: "Thanh Niên Thời Sự", url: "https://thanhnien.vn/rss/thoi-su.rss", lang: "vi" },
     { sourceName: "VietnamNet Thời Sự", url: "https://vietnamnet.vn/rss/thoi-su.rss", lang: "vi" },
+    { sourceName: "Znews Xã hội", url: "https://znews.vn/rss/xa-hoi.rss", lang: "vi" },
+    { sourceName: "Tiền Phong Xã hội", url: "https://tienphong.vn/rss/xa-hoi.rss", lang: "vi" },
   ],
   "crypto": [
     { sourceName: "CoinDesk", url: "https://www.coindesk.com/arc/outboundfeeds/rss/", lang: "en" },
+    { sourceName: "Cointelegraph", url: "https://cointelegraph.com/rss", lang: "en" },
   ],
   "the-thao": [
+    { sourceName: "VFF", url: "https://vff.org.vn/feed/", lang: "vi", sourceType: "primary" },
+    { sourceName: "VPF", url: "https://vpf.vn/feed/", lang: "vi", sourceType: "primary" },
     { sourceName: "VietnamNet Thể Thao", url: "https://vietnamnet.vn/rss/the-thao.rss", lang: "vi" },
     { sourceName: "VOV Thể Thao", url: "https://vov.vn/rss/the-thao.rss", lang: "vi" },
     { sourceName: "VnExpress Thể Thao", url: "https://vnexpress.net/rss/the-thao.rss", lang: "vi" },
     { sourceName: "Tuổi Trẻ Thể Thao", url: "https://tuoitre.vn/rss/the-thao.rss", lang: "vi" },
     { sourceName: "Thanh Niên Thể Thao", url: "https://thanhnien.vn/rss/the-thao.rss", lang: "vi" },
+    { sourceName: "Znews Thể thao", url: "https://znews.vn/rss/the-thao.rss", lang: "vi" },
+    { sourceName: "Tiền Phong Thể thao", url: "https://tienphong.vn/rss/the-thao.rss", lang: "vi" },
     { sourceName: "24h Bóng Đá", url: "https://www.24h.com.vn/upload/rss/bongda.rss", lang: "vi" },
     { sourceName: "BBC Sport", url: "https://feeds.bbci.co.uk/sport/rss.xml", lang: "en" },
   ],
@@ -140,6 +151,21 @@ const CATEGORY_FEEDS_REGISTRY: Record<string, FeedSource[]> = {
     { sourceName: "Tuổi Trẻ Sức Khỏe", url: "https://tuoitre.vn/rss/suc-khoe.rss", lang: "vi" },
     { sourceName: "Thanh Niên Sức Khỏe", url: "https://thanhnien.vn/rss/suc-khoe.rss", lang: "vi" },
     { sourceName: "BBC Health", url: "https://feeds.bbci.co.uk/news/health/rss.xml", lang: "en" },
+    { sourceName: "WHO", url: "https://www.who.int/rss-feeds/news-english.xml", lang: "en", sourceType: "primary" },
+  ],
+  "thoi-tiet-thien-tai": [
+    { sourceName: "Trung tâm Dự báo KTTV Quốc gia", url: "https://nchmf.gov.vn/kttvsite/rss/thoi-tiet-dat-lien-24h-2.rss", lang: "vi", sourceType: "primary" },
+    { sourceName: "Trung tâm Dự báo KTTV Quốc gia", url: "https://nchmf.gov.vn/kttvsite/rss/thoi-tiet-10-ngay-toi-4.rss", lang: "vi", sourceType: "primary" },
+    { sourceName: "Trung tâm Dự báo KTTV Quốc gia", url: "https://nchmf.gov.vn/kttvsite/rss/lu-ngap-lut-16.rss", lang: "vi", sourceType: "primary" },
+    { sourceName: "Trung tâm Dự báo KTTV Quốc gia", url: "https://nchmf.gov.vn/kttvsite/rss/bao-ap-thap-nhiet-doi-2049.rss", lang: "vi", sourceType: "primary" },
+    { sourceName: "VnExpress Thời Sự", url: "https://vnexpress.net/rss/thoi-su.rss", lang: "vi" },
+    { sourceName: "VietnamNet Thời Sự", url: "https://vietnamnet.vn/rss/thoi-su.rss", lang: "vi" },
+  ],
+  "an-ninh-mang": [
+    { sourceName: "CISA", url: "https://www.cisa.gov/cybersecurity-advisories/all.xml", lang: "en", sourceType: "primary" },
+    { sourceName: "CIS", url: "https://www.cisecurity.org/feed/advisories", lang: "en", sourceType: "primary" },
+    { sourceName: "Ars Technica", url: "https://feeds.arstechnica.com/arstechnica/security", lang: "en" },
+    { sourceName: "VietnamNet Công nghệ", url: "https://vietnamnet.vn/rss/cong-nghe.rss", lang: "vi" },
   ],
   "khoa-hoc": [
     { sourceName: "VnExpress Khoa Học", url: "https://vnexpress.net/rss/khoa-hoc.rss", lang: "vi" },
@@ -210,6 +236,12 @@ export function detectNewsCategories(query: string): string[] {
   }
   if (/(?:crypto|bitcoin|btc|eth|solana|binance|tiền ảo|tiền điện tử|blockchain|web3)/i.test(query)) {
     cats.push("crypto");
+  }
+  if (/(?:thời tiết|dự báo thời tiết|bão|áp thấp nhiệt đới|mưa lớn|lũ|ngập lụt|lũ quét|sạt lở|nắng nóng|rét đậm|không khí lạnh|triều cường|thiên tai)/i.test(query)) {
+    cats.push("thoi-tiet-thien-tai");
+  }
+  if (/(?:an ninh mạng|an toàn thông tin|lỗ hổng|cve\b|mã độc|malware|ransomware|zero[ -]?day|tấn công mạng|rò rỉ dữ liệu|data breach|bản vá bảo mật|security advisory)/i.test(query)) {
+    cats.push("an-ninh-mang");
   }
   if (cats.length === 0 && /(?:tin tức|tin mới|hôm nay|24h|nóng|thời sự)/i.test(query)) {
     cats.push("tin-moi-nhat");
@@ -311,7 +343,16 @@ async function fetchSingleRssFeed(source: FeedSource, timeoutMs = 2500): Promise
       const url = rawLink ? cleanStr(rawLink) : "";
 
       if (title) {
-        items.push({ title, snippet, timeLabel, timestamp, ageHours, url });
+        items.push({
+          title,
+          snippet,
+          timeLabel,
+          timestamp,
+          ageHours,
+          url,
+          sourceName: source.sourceName,
+          sourceType: source.sourceType || "news",
+        });
       }
     }
 
@@ -692,6 +733,7 @@ export async function searchRealtimeNews(query: string | string[], options: Sear
 async function doSearchRealtimeNews(query: string | string[], options: SearchRealtimeOptions = {}): Promise<string> {
   try {
     const rawQuery = Array.isArray(query) ? query.join(" ") : String(query || "");
+    const structuredContextPromise = getStructuredRealtimeContext(rawQuery);
     const intent: SearchIntent = options.intent || (/\b(?:hiện nay|hiện tại|mới nhất|current|latest)\b/i.test(rawQuery) ? "fact_check" : "realtime_news");
 
     // 1. Phân loại nhu cầu thời gian từ câu hỏi
@@ -1062,11 +1104,13 @@ async function doSearchRealtimeNews(query: string | string[], options: SearchRea
     const evidenceContext = formatEvidenceContext(rankedEvidence, intent);
 
     // Nếu mọi kênh đều không có dữ liệu, trả trạng thái thiếu bằng chứng cho fact-check và rỗng cho tin tổng hợp.
-    if (!wikiText && !richSnippetsText && mergedItems.length === 0) {
+    const structuredContext = await structuredContextPromise;
+    if (!structuredContext && !wikiText && !richSnippetsText && mergedItems.length === 0) {
       return intent === "fact_check" || options.requireEvidence ? evidenceContext : "";
     }
 
     const sections: string[] = [];
+    if (structuredContext) sections.push(structuredContext);
 
     // 10.4. Nếu hỏi về bóng đá / lịch thi đấu, tự động trích xuất bảng lịch thi đấu chi tiết từ bài báo thể thao
     const isAskingSportsSchedule =
@@ -1126,16 +1170,6 @@ async function doSearchRealtimeNews(query: string | string[], options: SearchRea
           }
         } catch {}
       }
-    }
-
-    // 10.5. Nếu liên quan đến crypto / tài chính / tỷ giá, tiêm bảng giá trực tiếp Binance
-    try {
-      const marketSummary = await getFinancialMarketSummary(cleanQ);
-      if (marketSummary) {
-        sections.push(marketSummary);
-      }
-    } catch (mErr) {
-      console.warn("[realtime-search] Lỗi lấy market summary:", mErr);
     }
 
     if (realEstateProfileText) sections.push(realEstateProfileText);
