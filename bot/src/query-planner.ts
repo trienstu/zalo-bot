@@ -46,7 +46,39 @@ function isAdvisoryComparison(text: string): boolean {
 }
 
 function isHighStakesAdvice(text: string): boolean {
-  return /\b(?:thuoc|lieu dung|lieu luong|dieu tri|vac xin|vaccine|phac do|benh|y te|phap ly|luat|thue|dau tu|co phieu|chung khoan|crypto|tien dien tu|tin dung|vay|bao hiem)\b/i.test(text);
+  const scienceLaw = /\b(?:dinh luat|quy luat|luat bao toan|luat hap dan|luat newton|luat ohm)\b/i.test(text);
+  const highStakes = /\b(?:thuoc|lieu dung|lieu luong|dieu tri|vac xin|vaccine|phac do|benh|trieu chung|chan doan|mang thai|thai ky|dinh duong|thuc pham chuc nang|y te|phap ly|luat|thue|hop dong|khoi kien|muc phat|dau tu|co phieu|chung khoan|crypto|tien dien tu|tin dung|vay|bao hiem)\b/i.test(text);
+  return highStakes && !scienceLaw;
+}
+
+type PlannerSignals = {
+  advisoryComparison: boolean;
+  highStakes: boolean;
+  explicitlyCurrent: boolean;
+  inherentlyVolatile: boolean;
+  stableTask: boolean;
+};
+
+/**
+ * Guardrail deterministic độc lập với LLM. Không trả lời câu hỏi thay LLM;
+ * chỉ xác định mức độ cần dữ liệu mới và mức rủi ro để planner không thể
+ * vô tình hạ một câu hỏi biến động/rủi ro cao thành tri thức nền.
+ */
+function detectPlannerSignals(question: string, quoteText = ""): PlannerSignals {
+  const text = normalizePlannerText(`${question} ${quoteText}`);
+  const scienceLaw = /\b(?:dinh luat|quy luat|luat bao toan|luat hap dan|luat newton|luat ohm)\b/i.test(text);
+  const explicitlyCurrent = /\b(?:hien nay|hien tai|hom nay|luc nay|bay gio|moi nhat|co gi moi|tin moi|nghien cuu moi|vua qua|sap toi|nam nay|thang nay|tuan nay|cap nhat|dang dien ra|con hieu luc|phien ban moi|vua ra mat|sap ra mat|bang gia|bao gia|gia ban|gia mua|gia thi truong|lich thi dau|ket qua|ti so|bang xep hang|du bao|thoi tiet)\b/i.test(text) ||
+    /^gia\s+/i.test(text);
+  const inherentlyVolatile = /\b(?:lanh dao|chu tich|bi thu|tong bi thu|thu tuong|bo truong|giam doc|ceo|hlv|chuc vu|nhan su|gia vang|gia xang|gia dau|ty gia|lai suat|chung khoan|co phieu|vn-index|crypto|bitcoin|thoi tiet|bao so|bao ap thap|con bao|lu lut|ngap lut|dong dat|lich thi dau|ket qua tran|ti so|bang xep hang|vo dich|chuyen nhuong|phap luat|luat|nghi dinh|thong tu|thue|muc phat|thu tuc|quy hoach|sap nhap|dia gioi|dan so|gdp|du an|bat dong san|mo ban|tien do|phap ly|chu dau tu|chuyen bay|xo so|dich benh|canh bao an ninh|lo hong bao mat|tuyen sinh|diem chuan|hoc phi|lich thi|visa|thi thuc|giay phep|lich mo cua|gio mo cua|thong so ky thuat|ngay phat hanh)\b/i.test(text) && !scienceLaw;
+  const stableTask = /\b(?:dich|viet lai|tom tat van ban|soan|sang tac|dat ten|giai phuong trinh|tinh toan|chung minh|viet code|sua code|regex|thuat toan|giai thich khai niem|la gi|hoat dong nhu the nao|cach hoat dong)\b/i.test(text) &&
+    !explicitlyCurrent && !inherentlyVolatile;
+  return {
+    advisoryComparison: isAdvisoryComparison(text),
+    highStakes: isHighStakesAdvice(text),
+    explicitlyCurrent,
+    inherentlyVolatile,
+    stableTask,
+  };
 }
 
 /**
@@ -57,12 +89,12 @@ function fallbackSafePlanner(question: string, quoteText = ""): QueryPlanResult 
   const query = cleanQ.length >= 4 ? cleanQ : (quoteText || question).slice(0, 80);
   const currentYear = new Date().getFullYear();
   const queries: string[] = [query.slice(0, 80)];
-  const normalized = normalizePlannerText(`${question} ${quoteText}`);
+  const signals = detectPlannerSignals(question, quoteText);
 
-  if (isAdvisoryComparison(normalized)) {
+  if (signals.advisoryComparison) {
     return {
       needsSearch: true,
-      intent: isHighStakesAdvice(normalized) ? "fact_check" : "knowledge",
+      intent: signals.highStakes || signals.explicitlyCurrent ? "fact_check" : "knowledge",
       queries: uniqQueries(queries),
       summaryIntent: "Fallback comparison planner",
     };
@@ -75,11 +107,12 @@ function fallbackSafePlanner(question: string, quoteText = ""): QueryPlanResult 
     queries.push(`${query} hôm nay`.slice(0, 80));
   }
 
+  const needsSearch = signals.highStakes || signals.explicitlyCurrent || signals.inherentlyVolatile;
   return {
-    needsSearch: true,
-    intent: "realtime_news",
-    queries: uniqQueries(queries),
-    summaryIntent: "Fallback safe planner",
+    needsSearch,
+    intent: needsSearch ? "fact_check" : "knowledge",
+    queries: needsSearch ? uniqQueries(queries) : [],
+    summaryIntent: needsSearch ? "Fallback verified planner" : "Fallback stable knowledge planner",
   };
 }
 
@@ -103,6 +136,17 @@ function uniqQueries(queries: string[]): string[] {
     }
   }
   return out.slice(0, 4);
+}
+
+function buildContextualFallbackQuery(question: string, quoteText = ""): string {
+  const cleanQuestion = extractCleanUserQuery(question, quoteText);
+  const isFollowUp = /^(?:còn|con|vậy|vay|thế|the|nó|no|người này|nguoi nay|cái này|cai nay|trường hợp này|truong hop nay)\b/i
+    .test(normalizePlannerText(question.trim()));
+  if (isFollowUp && quoteText.trim()) {
+    const cleanQuote = extractCleanUserQuery(quoteText);
+    return `${cleanQuote} ${cleanQuestion}`.replace(/\s+/g, " ").trim().slice(0, 180);
+  }
+  return cleanQuestion.slice(0, 180);
 }
 
 function extractDeveloperEntity(question: string, plan: QueryPlanResult): string {
@@ -181,14 +225,9 @@ function preserveCoreUserEntities(plan: QueryPlanResult, question: string): Quer
 export function normalizeQueryPlanIntent(plan: QueryPlanResult, question: string, quoteText = ""): QueryPlanResult {
   const guardedPlan = preserveCoreUserEntities(plan, question);
   const text = normalizePlannerText(`${question} ${quoteText}`);
-  const fallbackQuery = question
-    .replace(/@\S+/g, "")
-    .replace(/[\/?.!,]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 100);
-  const asksMedicalAction = /\b(?:thuoc|lieu dung|lieu luong|dieu tri|vac xin|vaccine|phac do|uong thuoc|nen uong|ke don|tac dung phu|chong chi dinh|tuong tac thuoc)\b/i.test(text);
-  if (asksMedicalAction) {
+  const signals = detectPlannerSignals(question, quoteText);
+  const fallbackQuery = buildContextualFallbackQuery(question, quoteText);
+  if (signals.highStakes) {
     return {
       ...guardedPlan,
       needsSearch: true,
@@ -197,14 +236,36 @@ export function normalizeQueryPlanIntent(plan: QueryPlanResult, question: string
     };
   }
 
-  const asksComparison = isAdvisoryComparison(text);
-  const asksHighStakesAdvice = isHighStakesAdvice(text);
-  const asksVolatileComparisonFact = /\b(?:hien nay|hien tai|moi nhat|hom nay|gia|bang gia|bao gia|phien ban moi|vua ra mat)\b/i.test(text);
-  if (asksComparison && !asksHighStakesAdvice && !asksVolatileComparisonFact) {
+  if (signals.advisoryComparison && !signals.explicitlyCurrent) {
     return {
       ...guardedPlan,
+      needsSearch: guardedPlan.needsSearch,
       intent: "knowledge",
+      queries: guardedPlan.needsSearch
+        ? (guardedPlan.queries.length > 0 ? guardedPlan.queries : [fallbackQuery].filter(Boolean))
+        : [],
+    };
+  }
+
+  // Dữ kiện vốn biến động hoặc có neo thời gian luôn cần kiểm chứng, kể cả khi
+  // LLM planner trả needsSearch=false. Đây là chốt an toàn đa lĩnh vực.
+  if (signals.explicitlyCurrent || signals.inherentlyVolatile) {
+    return augmentDeveloperProjectQueries({
+      ...guardedPlan,
+      needsSearch: true,
+      intent: signals.explicitlyCurrent && /\b(?:tin|su kien|tran|thoi tiet|bao|lu|dong dat)\b/i.test(text)
+        ? "realtime_news"
+        : "fact_check",
       queries: guardedPlan.queries.length > 0 ? guardedPlan.queries : [fallbackQuery].filter(Boolean),
+    }, question);
+  }
+
+  if (signals.stableTask || !guardedPlan.needsSearch) {
+    return {
+      ...guardedPlan,
+      needsSearch: false,
+      intent: guardedPlan.intent === "chat" ? "chat" : "knowledge",
+      queries: [],
     };
   }
 
@@ -271,6 +332,11 @@ export async function planSearchQueries(params: {
     `      7. Thể thao, Đương kim vô địch & Chuyển nhượng: Đội vô địch giải đấu (Cúp C1, Ngoại hạng Anh, World Cup, V-League), CLB hiện tại của cầu thủ, bảng xếp hạng...\n` +
     `      8. Thống kê Kinh tế - Xã hội & Kỷ lục: Dân số Việt Nam/thế giới, GDP, người giàu nhất thế giới, tòa nhà cao nhất...\n` +
     `      => BẮT BUỘC needsSearch: true! Phân loại intent: "realtime_news" (với tin nóng, thể thao, biến động 24h-7d) hoặc "fact_check" (với hành chính, pháp lý, lãnh đạo, hồ sơ, số liệu).\n\n` +
+    `   NGUYÊN TẮC BA TRỤC ÁP DỤNG CHO MỌI LĨNH VỰC NGOÀI 8 VÍ DỤ TRÊN:\n` +
+    `   - TÍNH BIẾN ĐỘNG: thông tin có thể đổi theo thời gian (người giữ chức vụ, giá, lịch, trạng thái, phiên bản, quy định, hồ sơ thương mại) => cần search.\n` +
+    `   - RỦI RO SAI SÓT: y tế, pháp lý, tài chính/đầu tư, an toàn/an ninh => fact_check kể cả khi người dùng không nói "mới nhất".\n` +
+    `   - TÍNH CỤ THỂ: câu hỏi đòi tên người, con số, ngày, giá trị, điều khoản, thông số hoặc trạng thái của một thực thể có thật => ưu tiên fact_check; câu giải thích khái niệm/cách làm ổn định mới dùng knowledge.\n` +
+    `   Không giới hạn vào danh sách từ khóa hay 8 lĩnh vực minh họa; phải suy luận theo ba trục này.\n\n` +
     `3. Khi needsSearch: true -> Bóc tách 1-3 cụm từ tìm kiếm (queries) tối ưu:\n` +
     `   - BẢO TỒN NGUYÊN VẸN TÊN THỰC THỂ CỐT LÕI (STRICT ENTITY PRESERVATION):\n` +
     `     + TUYỆT ĐỐI KHÔNG TỰ Ý THAY THẾ, SUY DIỄN HOẶC HOÁN ĐỔI tên giải đấu, thương hiệu, tổ chức, công nghệ hoặc sự kiện mà người dùng hỏi sang một cái tên khác (ví dụ: người dùng hỏi "FIFA ASEAN Cup" thì BẮT BUỘC query 1 phải có cụm từ "FIFA ASEAN Cup", TUYỆT ĐỐI CẤM tự ý đổi sang "ASEAN Mitsubishi Electric Cup" hay "AFF Cup"; hỏi "iPhone 16" cấm đổi sang "iPhone 15"; hỏi "Luật Đất đai 2024" cấm đổi sang "Luật 2013").\n` +
@@ -311,7 +377,7 @@ export async function planSearchQueries(params: {
 
     if (raw && typeof raw === "object") {
       const needsSearch = Boolean(raw.needsSearch);
-      const rawClean = extractCleanUserQuery(question, quoteText);
+      const rawClean = buildContextualFallbackQuery(question, quoteText);
       const llmQueries = Array.isArray(raw.queries)
         ? raw.queries.map((q: any) => String(q).trim()).filter((q: string) => q.length > 2).slice(0, 3)
         : [];

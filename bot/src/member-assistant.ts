@@ -1859,6 +1859,7 @@ async function handleHistoryQA(
 
       const plan = await planSearchQueries({
         question,
+        quoteText: options?.quote?.text,
         recentContext: recentCtx,
         displayName,
       });

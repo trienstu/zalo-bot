@@ -12,10 +12,10 @@ function factPlan(): QueryPlanResult {
   };
 }
 
-test("câu tổng quan dự án là knowledge dù planner thô trả fact_check", () => {
+test("câu tổng quan dự án cần fact_check vì hồ sơ dự án là dữ liệu thương mại biến động", () => {
   const plan = normalizeQueryPlanIntent(factPlan(), "tổng quan dự án Gladia Heights");
 
-  assert.equal(plan.intent, "knowledge");
+  assert.equal(plan.intent, "fact_check");
 });
 
 test("câu tổng quan sản phẩm là knowledge khi không hỏi dữ kiện biến động", () => {
@@ -97,8 +97,91 @@ test("câu y tế mô tả triệu chứng chung không bị ép fact_check", ()
 
   const plan = normalizeQueryPlanIntent(base, "triệu chứng sốt xuất huyết ở trẻ em");
 
-  assert.equal(plan.needsSearch, false);
-  assert.equal(plan.intent, "knowledge");
+  assert.equal(plan.needsSearch, true);
+  assert.equal(plan.intent, "fact_check");
+});
+
+test("guardrail nâng câu biến động lên fact_check dù planner LLM bỏ search", () => {
+  const unsafePlan: QueryPlanResult = {
+    needsSearch: false,
+    intent: "knowledge",
+    queries: [],
+  };
+  const cases = [
+    "Bí thư Tỉnh ủy Quảng Ngãi hiện nay là ai",
+    "giá vàng SJC hôm nay",
+    "lịch thi đấu La Liga tối nay",
+    "quy định thuế thu nhập cá nhân",
+    "tổng quan dự án Serena Riverside",
+    "thời tiết Đà Nẵng ngày mai",
+    "lỗ hổng bảo mật Chrome mới nhất",
+    "điểm chuẩn đại học Bách Khoa năm nay",
+    "học phí trường X bao nhiêu",
+    "visa Nhật Bản cần thủ tục gì",
+    "giờ mở cửa bảo tàng",
+    "thông số kỹ thuật máy ảnh Sony A1",
+    "đội nào vô địch Champions League",
+    "nghiên cứu mới về pin thể rắn",
+    "GPT-6 có gì mới",
+  ];
+
+  for (const question of cases) {
+    const plan = normalizeQueryPlanIntent(unsafePlan, question);
+    assert.equal(plan.needsSearch, true, question);
+    assert.ok(["fact_check", "realtime_news"].includes(plan.intent), question);
+    assert.ok(plan.queries.length > 0, question);
+  }
+});
+
+test("câu ổn định không bị planner ép tìm kiếm chỉ vì sinh dư query", () => {
+  const noisyPlan: QueryPlanResult = {
+    needsSearch: false,
+    intent: "knowledge",
+    queries: ["nguồn RSS không cần thiết"],
+  };
+  const cases = [
+    "giải phương trình bậc hai như thế nào",
+    "viết regex kiểm tra email",
+    "dịch câu này sang tiếng Anh",
+    "giải thích định luật Newton",
+    "soạn email cảm ơn khách hàng",
+    "soạn báo cáo tổng kết quý",
+    "cấu hình nginx reverse proxy như thế nào",
+    "giải thích thông số của hàm JavaScript",
+  ];
+
+  for (const question of cases) {
+    const plan = normalizeQueryPlanIntent(noisyPlan, question);
+    assert.equal(plan.needsSearch, false, question);
+    assert.equal(plan.intent, "knowledge", question);
+    assert.deepEqual(plan.queries, [], question);
+  }
+});
+
+test("câu tư vấn rủi ro cao ở nhiều lĩnh vực luôn cần kiểm chứng", () => {
+  const unsafePlan: QueryPlanResult = { needsSearch: false, intent: "knowledge", queries: [] };
+  const cases = [
+    "triệu chứng đau ngực có nguy hiểm không",
+    "mang thai có nên dùng thực phẩm chức năng này không",
+    "hợp đồng này có đủ điều kiện khởi kiện không",
+    "nên vay gói lãi suất thả nổi hay cố định",
+    "bảo hiểm có chi trả trường hợp này không",
+  ];
+
+  for (const question of cases) {
+    const plan = normalizeQueryPlanIntent(unsafePlan, question);
+    assert.equal(plan.needsSearch, true, question);
+    assert.equal(plan.intent, "fact_check", question);
+  }
+});
+
+test("nội dung quote tham gia phân loại để câu hỏi nối tiếp không mất chủ đề", () => {
+  const unsafePlan: QueryPlanResult = { needsSearch: false, intent: "knowledge", queries: [] };
+  const plan = normalizeQueryPlanIntent(unsafePlan, "còn hiện nay thì sao", "Bí thư Tỉnh ủy Quảng Ngãi là ai");
+
+  assert.equal(plan.needsSearch, true);
+  assert.ok(["fact_check", "realtime_news"].includes(plan.intent));
+  assert.match(plan.queries[0] || "", /Bí thư Tỉnh ủy Quảng Ngãi.*hiện nay/i);
 });
 
 test("so sánh tư vấn kỹ thuật dùng knowledge dù planner trả fact-check hoặc realtime", () => {
