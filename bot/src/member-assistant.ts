@@ -1395,13 +1395,20 @@ async function handleHistoryQA(
 
       if (plan.needsSearch && plan.queries.length > 0) {
         quoteEvidenceRequired = plan.intent === "fact_check";
-        // Chạy song song tối đa 3 truy vấn chuyên biệt bóc tách từ ngữ nghĩa người dùng
-        const searchResults = await Promise.all(
-          plan.queries.slice(0, 3).map((q) => searchRealtimeNews(q, {
+        const searchQueries = plan.queries.slice(0, 2);
+        const searchPromises = Promise.all(
+          searchQueries.map((q) => searchRealtimeNews(q, {
             intent: plan.intent,
             requireEvidence: quoteEvidenceRequired,
           }).catch(() => ""))
         );
+        const searchTimeout = new Promise<string[]>((resolve) =>
+          setTimeout(() => {
+            console.warn(`[member-assistant] ⏱️ Quote QA timeout quét tìm kiếm (6s), tiếp tục với dữ liệu sẵn có`);
+            resolve([]);
+          }, 6000)
+        );
+        const searchResults = await Promise.race([searchPromises, searchTimeout]);
         quoteLiveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
       }
     } catch (e) {
@@ -1858,16 +1865,26 @@ async function handleHistoryQA(
 
       if (plan.needsSearch && plan.queries.length > 0) {
         evidenceRequired = plan.intent === "fact_check";
-        console.log(`[member-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(plan.queries)}`);
+        const searchQueries = plan.queries.slice(0, 2);
+        console.log(`[member-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(searchQueries)}`);
 
-        // Luôn quét RSS/tin tức thời gian thực để làm giàu dữ liệu thực tế và làm đệm an toàn vững chắc
-        const searchResults = await Promise.all(
-          plan.queries.slice(0, 3).map((q) => searchRealtimeNews(q, {
+        // Quét RSS/tin tức thời gian thực tối đa 2 truy vấn với timeout an toàn 6 giây chống nghẽn
+        const tStartSearch = Date.now();
+        const searchPromises = Promise.all(
+          searchQueries.map((q) => searchRealtimeNews(q, {
             intent: plan.intent,
             requireEvidence: evidenceRequired,
           }).catch(() => ""))
         );
+        const searchTimeout = new Promise<string[]>((resolve) =>
+          setTimeout(() => {
+            console.warn(`[member-assistant] ⏱️ Timeout quét tìm kiếm (6s), tiếp tục với dữ liệu sẵn có`);
+            resolve([]);
+          }, 6000)
+        );
+        const searchResults = await Promise.race([searchPromises, searchTimeout]);
         liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
+        console.log(`[member-assistant] ⏱️ Quét dữ liệu hoàn tất trong ${Date.now() - tStartSearch}ms (dài: ${liveNews.length} ký tự)`);
       }
     } catch (e) {
       console.warn("[member-assistant] planSearchQueries lỗi:", e);
@@ -2024,11 +2041,15 @@ async function handleHistoryQA(
         }
       }
 
+      const chosenModel = (needsSearch && canUseGrounding()) ? "gemini-2.5-flash" : "gemini-3.1-flash-lite-preview";
+      console.log(`[member-assistant] 🤖 Đang gọi AI sinh câu trả lời (model: ${chosenModel}, search: ${needsSearch})...`);
+      const tAiStart = Date.now();
       answer = await callGemini(systemPrompt, effectiveUserPrompt, {
-        model: (needsSearch && canUseGrounding()) ? "gemini-2.5-flash" : "gemini-3.1-flash-lite-preview",
+        model: chosenModel,
         mediaParts: mediaPart ? [mediaPart] : undefined,
         enableSearch: needsSearch,
       });
+      console.log(`[member-assistant] ⚡ AI hoàn tất trong ${Date.now() - tAiStart}ms (kết quả: ${answer.length} ký tự)`);
     }
 
     answer = finalizeGroundedAnswer(answer, liveNews, evidenceRequired);
@@ -3224,6 +3245,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       }
 
       // Gửi câu trả lời tức thì kèm @Mention thật và Quote tin nhắn gốc
+      console.log(`[member-assistant] 📤 Đang gửi phản hồi vào nhóm [${threadId}]...`);
       await sendGroupReplyWithMention(api, threadId, botName, displayName, sender, answer, {
         jitter: false,
         quote: buildQuoteObject(event),

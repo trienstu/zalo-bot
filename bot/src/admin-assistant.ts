@@ -1397,15 +1397,24 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     if (plan.needsSearch && plan.queries.length > 0) {
       planNeedsSearch = true;
       evidenceRequired = plan.intent === "fact_check";
-      console.log(`[admin-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(plan.queries)}`);
-      // Luôn quét RSS/tin tức thời gian thực để làm giàu dữ liệu thực tế và làm đệm an toàn vững chắc
-      const searchResults = await Promise.all(
-        plan.queries.slice(0, 3).map((q) => searchRealtimeNews(q, {
+      const searchQueries = plan.queries.slice(0, 2);
+      console.log(`[admin-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(searchQueries)}`);
+      const tStartSearch = Date.now();
+      const searchPromises = Promise.all(
+        searchQueries.map((q) => searchRealtimeNews(q, {
           intent: plan.intent,
           requireEvidence: evidenceRequired,
         }).catch(() => ""))
       );
+      const searchTimeout = new Promise<string[]>((resolve) =>
+        setTimeout(() => {
+          console.warn(`[admin-assistant] ⏱️ Timeout quét tìm kiếm (6s), tiếp tục với dữ liệu sẵn có`);
+          resolve([]);
+        }, 6000)
+      );
+      const searchResults = await Promise.race([searchPromises, searchTimeout]);
       liveNews = searchResults.filter(Boolean).join("\n\n---\n\n");
+      console.log(`[admin-assistant] ⏱️ Quét dữ liệu hoàn tất trong ${Date.now() - tStartSearch}ms (dài: ${liveNews.length} ký tự)`);
     }
   } catch (e) {
     console.warn("[admin-assistant] planSearchQueries lỗi:", e);

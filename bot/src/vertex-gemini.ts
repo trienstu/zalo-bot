@@ -98,6 +98,7 @@ export async function getVertexAccessToken(): Promise<string> {
   const tokenUri = creds.token_uri || "https://oauth2.googleapis.com/token";
   const res = await fetch(tokenUri, {
     method: "POST",
+    signal: AbortSignal.timeout(6000),
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",

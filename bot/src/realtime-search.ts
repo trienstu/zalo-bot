@@ -680,6 +680,16 @@ async function queryNewsPipeline(
 }
 
 export async function searchRealtimeNews(query: string | string[], options: SearchRealtimeOptions = {}): Promise<string> {
+  const searchPromise = doSearchRealtimeNews(query, options);
+  const timeoutPromise = new Promise<string>((resolve) =>
+    setTimeout(() => {
+      resolve("");
+    }, 5000)
+  );
+  return Promise.race([searchPromise, timeoutPromise]);
+}
+
+async function doSearchRealtimeNews(query: string | string[], options: SearchRealtimeOptions = {}): Promise<string> {
   try {
     const rawQuery = Array.isArray(query) ? query.join(" ") : String(query || "");
     const intent: SearchIntent = options.intent || (/\b(?:hiện nay|hiện tại|mới nhất|current|latest)\b/i.test(rawQuery) ? "fact_check" : "realtime_news");

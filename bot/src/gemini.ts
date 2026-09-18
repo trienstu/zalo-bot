@@ -582,9 +582,10 @@ export async function callGemini(
       return content;
     };
 
-    // 1. Thử model chính (primaryModel, mặc định gemini-flash-lite-latest siêu tốc)
+    // 1. Thử model chính (primaryModel, mặc định gemini-flash-lite-latest siêu tốc, 20s khi có Search Grounding)
     try {
-      const primaryRes = await executeModel(primaryModel, 8_000);
+      const primaryTimeout = isSearchEnabled ? 20_000 : 8_000;
+      const primaryRes = await executeModel(primaryModel, primaryTimeout);
       if (primaryRes) {
         botKeyOffset = (keyIdx + 1) % numKeys;
         return primaryRes;
