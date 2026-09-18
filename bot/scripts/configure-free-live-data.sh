@@ -3,8 +3,16 @@ set -euo pipefail
 
 BOT_DIRS=("${HOME}/zalo-bot" "${HOME}/zalo-bot-2")
 
-read -r -s -p "Dán API_FOOTBALL_KEY rồi nhấn Enter: " API_FOOTBALL_KEY
-printf '\n'
+API_FOOTBALL_KEY="${API_FOOTBALL_KEY:-}"
+if [[ -z "${API_FOOTBALL_KEY}" && -f "${HOME}/zalo-bot/bot/.env" ]]; then
+  API_FOOTBALL_KEY="$(LC_ALL=C awk -F= 'index($0, "API_FOOTBALL_KEY=") == 1 { sub(/^[^=]*=/, ""); value=$0 } END { print value }' "${HOME}/zalo-bot/bot/.env")"
+fi
+if [[ -z "${API_FOOTBALL_KEY}" ]]; then
+  read -r -s -p "Dán API_FOOTBALL_KEY rồi nhấn Enter: " API_FOOTBALL_KEY
+  printf '\n'
+else
+  echo "Đã tìm thấy API_FOOTBALL_KEY hiện có; không cần nhập lại."
+fi
 
 if [[ -z "${API_FOOTBALL_KEY}" ]]; then
   echo "API_FOOTBALL_KEY không được để trống." >&2
@@ -19,7 +27,7 @@ upsert_env() {
   temp_file="$(mktemp)"
 
   if [[ -f "${env_file}" ]]; then
-    awk -v key="${key}" -v value="${value}" '
+    LC_ALL=C awk -v key="${key}" -v value="${value}" '
       BEGIN { replaced = 0 }
       index($0, key "=") == 1 {
         if (!replaced) print key "=" value
