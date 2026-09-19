@@ -248,6 +248,10 @@ function extractCompletionText(payload: unknown): string {
   return "";
 }
 
+function containsExecutableActionEnvelope(text: string): boolean {
+  return /\[ACTION:[A-Z0-9_-]+(?:\s[^\]]*)?\][\s\S]*?\[\/ACTION\]/i.test(text);
+}
+
 function defaultLogger(event: HybridTelemetryEvent): void {
   const status = typeof event.status === "number" ? ` status=${event.status}` : "";
   console.info(
@@ -456,6 +460,9 @@ export class HybridAgentRuntime {
       }
       const answer = extractCompletionText(payload);
       if (!answer) throw new ProviderRequestError("invalid_response", response.status);
+      if (!candidate.allowTools && containsExecutableActionEnvelope(answer)) {
+        throw new ProviderRequestError("invalid_response", response.status);
+      }
       return answer;
     } finally {
       clearTimeout(timeout);
