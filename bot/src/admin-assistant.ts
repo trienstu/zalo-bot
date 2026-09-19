@@ -1657,17 +1657,13 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     answer = finalizeGroundedAnswer(answer, liveNews, evidenceRequired);
 
     // Kiểm tra và thực thi thẻ hành động [ACTION:SEND_GROUP target="..."]...[/ACTION] CHỈ DÀNH CHO ADMIN
-    const actionPattern = /\[ACTION:SEND_GROUP\s+target=["']([^"']+)["']\]([\s\S]*?)\[\/ACTION\]/i;
-    const actionMatch = answer.match(actionPattern);
-    let finalAnswer = answer.replace(/\[ACTION:SEND_GROUP[\s\S]*?\[\/ACTION\]/gi, "").trim();
-    const explicitlyAskedToSendGroup =
-      isAdmin &&
-      /\b(?:gửi|bắn|đăng|chuyển)\b[\s\S]{0,160}\b(?:nhóm|group)\b/i.test(rawText) &&
-      !/\b(?:có thể|biết|được không|được ko|khả năng)\b/i.test(rawText);
-    if (isAdmin && explicitlyAskedToSendGroup) {
+    let finalAnswer = answer;
+    if (isAdmin) {
+      const actionMatch = answer.match(/\[ACTION:SEND_GROUP\s+target=["']([^"']+)["']\]([\s\S]*?)\[\/ACTION\]/i);
       if (actionMatch && actionMatch[1] && actionMatch[2]) {
         const targetGroupQuery = actionMatch[1].trim();
         const contentToSend = actionMatch[2].trim();
+        finalAnswer = answer.replace(/\[ACTION:SEND_GROUP[\s\S]*?\[\/ACTION\]/gi, "").trim();
 
         const target = findGroup(targetGroupQuery);
         if (target && contentToSend) {
@@ -1679,6 +1675,8 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
           }
         }
       }
+    } else {
+      finalAnswer = answer.replace(/\[ACTION:SEND_GROUP[\s\S]*?\[\/ACTION\]/gi, "").trim();
     }
 
     // Lưu vào lịch sử hội thoại nhiều lượt

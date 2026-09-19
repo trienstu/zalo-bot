@@ -6,6 +6,7 @@
  */
 
 import { callGemini } from "./gemini.js";
+import { config } from "./config.js";
 import {
   normalizeExecutionSignals,
   type ResponseMode,
@@ -338,6 +339,31 @@ export async function planSearchQueries(params: {
     }, question, quoteText);
   }
 
+  const executionPlannerContract = config.hybridAgent.enabled
+    ? `4. Đề xuất cách thực thi theo bốn trục tổng quát, không phụ thuộc lĩnh vực:\n` +
+      `   - responseMode: "fast" cho câu đơn giản/ổn định; "grounded" khi cần dữ liệu kiểm chứng; "deep" cho phân tích nhiều bước; "action" chỉ khi người dùng yêu cầu rõ việc đọc/tạo/chạy công cụ.\n` +
+      `   - complexity: "low" | "medium" | "high" theo số bước suy luận và phạm vi tổng hợp.\n` +
+      `   - toolIntent: "none" | "read" | "create" | "execute". Không tự suy diễn quyền thao tác nếu người dùng chỉ hỏi giải thích.\n` +
+      `   - riskLevel: "normal" | "high"; high cho dữ kiện biến động hoặc nội dung y tế, pháp lý, tài chính, an toàn/an ninh cần kiểm chứng.\n\n` +
+      `5. Xuất định dạng JSON duy nhất:\n` +
+      `{\n` +
+      `  "needsSearch": boolean,\n` +
+      `  "intent": "realtime_news" | "fact_check" | "knowledge" | "chat",\n` +
+      `  "queries": string[],\n` +
+      `  "summaryIntent": string,\n` +
+      `  "responseMode": "fast" | "grounded" | "deep" | "action",\n` +
+      `  "complexity": "low" | "medium" | "high",\n` +
+      `  "toolIntent": "none" | "read" | "create" | "execute",\n` +
+      `  "riskLevel": "normal" | "high"\n` +
+      `}`
+    : `4. Xuất định dạng JSON duy nhất:\n` +
+      `{\n` +
+      `  "needsSearch": boolean,\n` +
+      `  "intent": "realtime_news" | "fact_check" | "knowledge" | "chat",\n` +
+      `  "queries": string[],\n` +
+      `  "summaryIntent": string\n` +
+      `}`;
+
   const system =
     `${getSystemTemporalPrompt()}\n\n` +
     `Bạn là Bộ Điều Hướng Ngữ Nghĩa & Lập Kế Hoạch Tra Cứu (Semantic Router & Query Planner) chuyên bóc tách ý định người dùng.\n` +
@@ -375,22 +401,7 @@ export async function planSearchQueries(params: {
     `   - LOẠI BỎ TOÀN BỘ từ rác, xưng hô, mệnh lệnh (check, kiểm tra, xem, giúp, cho anh, sen chúa, mộc miên, kevin, bot ơi, nhé, nha, ạ, có ... chưa, rồi chưa...).\n` +
     `   - BẮT BUỘC giữ nguyên dấu tiếng Việt chuẩn xác (TUYỆT ĐỐI KHÔNG viết không dấu vì tiếng Việt không dấu sẽ làm sai lệch hoàn toàn kết quả tra cứu báo chí và văn bản pháp luật).\n` +
     `   - Giữ query ngắn gọn, tự nhiên, mang tính tra cứu thông tin khách quan.\n\n` +
-    `4. Đề xuất cách thực thi theo bốn trục tổng quát, không phụ thuộc lĩnh vực:\n` +
-    `   - responseMode: "fast" cho câu đơn giản/ổn định; "grounded" khi cần dữ liệu kiểm chứng; "deep" cho phân tích nhiều bước; "action" chỉ khi người dùng yêu cầu rõ việc đọc/tạo/chạy công cụ.\n` +
-    `   - complexity: "low" | "medium" | "high" theo số bước suy luận và phạm vi tổng hợp.\n` +
-    `   - toolIntent: "none" | "read" | "create" | "execute". Không tự suy diễn quyền thao tác nếu người dùng chỉ hỏi giải thích.\n` +
-    `   - riskLevel: "normal" | "high"; high cho dữ kiện biến động hoặc nội dung y tế, pháp lý, tài chính, an toàn/an ninh cần kiểm chứng.\n\n` +
-    `5. Xuất định dạng JSON duy nhất:\n` +
-    `{\n` +
-    `  "needsSearch": boolean,\n` +
-    `  "intent": "realtime_news" | "fact_check" | "knowledge" | "chat",\n` +
-    `  "queries": string[],\n` +
-    `  "summaryIntent": string,\n` +
-    `  "responseMode": "fast" | "grounded" | "deep" | "action",\n` +
-    `  "complexity": "low" | "medium" | "high",\n` +
-    `  "toolIntent": "none" | "read" | "create" | "execute",\n` +
-    `  "riskLevel": "normal" | "high"\n` +
-    `}`;
+    executionPlannerContract;
 
   const user =
     (recentContext ? `=== LỊCH SỬ THẢO LUẬN GẦN ĐÂY TRONG NHÓM: ===\n${recentContext.slice(-2000)}\n\n` : "") +

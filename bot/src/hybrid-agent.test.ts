@@ -219,6 +219,82 @@ test("provider timeout aborts and falls back without a late second result", asyn
   assert.ok(Date.now() - startedAt < 500);
 });
 
+test("malformed or empty provider payloads fail open to the existing fallback", async () => {
+  const responses = [
+    new Response("not-json", { status: 200 }),
+    new Response(JSON.stringify({ choices: [{ message: { content: "   " } }] }), { status: 200 }),
+  ];
+
+  for (const response of responses) {
+    let fallbackCalls = 0;
+    const runtime = new HybridAgentRuntime(enabledSettings(), {
+      fetchFn: async () => response.clone(),
+    });
+
+    const answer = await runtime.answer({
+      mode: "grounded",
+      systemPrompt: "system",
+      userPrompt: "question",
+      fallback: async () => {
+        fallbackCalls += 1;
+        return "fallback";
+      },
+    });
+
+    assert.equal(answer, "fallback");
+    assert.equal(fallbackCalls, 1);
+  }
+});
+
+test("deep mode falls through from Hermes to the configured 9Router deep model", async () => {
+  const calls: Array<{ url: string; model: string }> = [];
+  const runtime = new HybridAgentRuntime(enabledSettings(), {
+    fetchFn: async (url, init) => {
+      const body = JSON.parse(String(init?.body));
+      calls.push({ url: String(url), model: body.model });
+      return calls.length === 1
+        ? new Response("busy", { status: 503 })
+        : successResponse("router deep answer");
+    },
+  });
+
+  const answer = await runtime.answer({
+    mode: "deep",
+    systemPrompt: "system",
+    userPrompt: "deep question",
+    sessionKey: "group:123:user:456",
+    fallback: async () => "fallback",
+  });
+
+  assert.equal(answer, "router deep answer");
+  assert.deepEqual(calls, [
+    { url: "http://127.0.0.1:8642/v1/chat/completions", model: "hermes-agent" },
+    { url: "http://127.0.0.1:20128/v1/chat/completions", model: "deep-combo" },
+  ]);
+});
+
+test("rate-limit responses count toward the circuit breaker", async () => {
+  let fetchCalls = 0;
+  const runtime = new HybridAgentRuntime(enabledSettings(), {
+    fetchFn: async () => {
+      fetchCalls += 1;
+      return new Response("rate limited", { status: 429 });
+    },
+  });
+  const request = {
+    mode: "grounded" as const,
+    systemPrompt: "system",
+    userPrompt: "question",
+    fallback: async () => "fallback",
+  };
+
+  await runtime.answer(request);
+  await runtime.answer(request);
+  await runtime.answer(request);
+
+  assert.equal(fetchCalls, 2);
+});
+
 test("repeated failures open the circuit and cooldown permits a later probe", async () => {
   let now = 1_000;
   let fetchCalls = 0;
