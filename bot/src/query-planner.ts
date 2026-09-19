@@ -6,6 +6,13 @@
  */
 
 import { callGemini } from "./gemini.js";
+import {
+  normalizeExecutionSignals,
+  type ResponseMode,
+  type RiskLevel,
+  type TaskComplexity,
+  type ToolIntent,
+} from "./hybrid-routing.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
 
 export interface QueryPlanResult {
@@ -13,6 +20,29 @@ export interface QueryPlanResult {
   intent: "fact_check" | "realtime_news" | "project_qa" | "knowledge" | "chat";
   queries: string[];
   summaryIntent?: string;
+  responseMode?: ResponseMode;
+  complexity?: TaskComplexity;
+  toolIntent?: ToolIntent;
+  riskLevel?: RiskLevel;
+}
+
+/**
+ * Tín hiệu do planner sinh ra chỉ là đề xuất. Lớp policy xác định sẽ nâng mức
+ * an toàn khi cần và không cho planner tự cấp quyền gọi công cụ.
+ */
+export function applyExecutionSignals(
+  plan: QueryPlanResult,
+  question: string,
+  quoteText = "",
+  rawSignals?: Record<string, unknown> | null,
+): QueryPlanResult {
+  const signals = normalizeExecutionSignals(rawSignals, {
+    question,
+    quoteText,
+    needsSearch: plan.needsSearch,
+    intent: plan.intent,
+  });
+  return { ...plan, ...signals };
 }
 
 /**
@@ -92,12 +122,12 @@ function fallbackSafePlanner(question: string, quoteText = ""): QueryPlanResult 
   const signals = detectPlannerSignals(question, quoteText);
 
   if (signals.advisoryComparison) {
-    return {
+    return applyExecutionSignals({
       needsSearch: true,
       intent: signals.highStakes || signals.explicitlyCurrent ? "fact_check" : "knowledge",
       queries: uniqQueries(queries),
       summaryIntent: "Fallback comparison planner",
-    };
+    }, question, quoteText);
   }
 
   // Nếu câu hỏi về thể thao / bóng đá / lịch thi đấu
@@ -108,12 +138,12 @@ function fallbackSafePlanner(question: string, quoteText = ""): QueryPlanResult 
   }
 
   const needsSearch = signals.highStakes || signals.explicitlyCurrent || signals.inherentlyVolatile;
-  return {
+  return applyExecutionSignals({
     needsSearch,
     intent: needsSearch ? "fact_check" : "knowledge",
     queries: needsSearch ? uniqQueries(queries) : [],
     summaryIntent: needsSearch ? "Fallback verified planner" : "Fallback stable knowledge planner",
-  };
+  }, question, quoteText);
 }
 
 function normalizePlannerText(value: string): string {
@@ -301,11 +331,11 @@ export async function planSearchQueries(params: {
   // Nếu câu chào đơn giản hoặc quá ngắn, bỏ qua planner để tiết kiệm tài nguyên
   const trimmed = question.trim();
   if (/^(?:chào|hi|hello|alo|ê|cảm ơn|thanks|ok|oki|vâng|dạ)\b/i.test(trimmed) && trimmed.length < 20) {
-    return {
+    return applyExecutionSignals({
       needsSearch: false,
       intent: "chat",
       queries: [],
-    };
+    }, question, quoteText);
   }
 
   const system =
@@ -345,12 +375,21 @@ export async function planSearchQueries(params: {
     `   - LOẠI BỎ TOÀN BỘ từ rác, xưng hô, mệnh lệnh (check, kiểm tra, xem, giúp, cho anh, sen chúa, mộc miên, kevin, bot ơi, nhé, nha, ạ, có ... chưa, rồi chưa...).\n` +
     `   - BẮT BUỘC giữ nguyên dấu tiếng Việt chuẩn xác (TUYỆT ĐỐI KHÔNG viết không dấu vì tiếng Việt không dấu sẽ làm sai lệch hoàn toàn kết quả tra cứu báo chí và văn bản pháp luật).\n` +
     `   - Giữ query ngắn gọn, tự nhiên, mang tính tra cứu thông tin khách quan.\n\n` +
-    `4. Xuất định dạng JSON duy nhất:\n` +
+    `4. Đề xuất cách thực thi theo bốn trục tổng quát, không phụ thuộc lĩnh vực:\n` +
+    `   - responseMode: "fast" cho câu đơn giản/ổn định; "grounded" khi cần dữ liệu kiểm chứng; "deep" cho phân tích nhiều bước; "action" chỉ khi người dùng yêu cầu rõ việc đọc/tạo/chạy công cụ.\n` +
+    `   - complexity: "low" | "medium" | "high" theo số bước suy luận và phạm vi tổng hợp.\n` +
+    `   - toolIntent: "none" | "read" | "create" | "execute". Không tự suy diễn quyền thao tác nếu người dùng chỉ hỏi giải thích.\n` +
+    `   - riskLevel: "normal" | "high"; high cho dữ kiện biến động hoặc nội dung y tế, pháp lý, tài chính, an toàn/an ninh cần kiểm chứng.\n\n` +
+    `5. Xuất định dạng JSON duy nhất:\n` +
     `{\n` +
     `  "needsSearch": boolean,\n` +
     `  "intent": "realtime_news" | "fact_check" | "knowledge" | "chat",\n` +
     `  "queries": string[],\n` +
-    `  "summaryIntent": string\n` +
+    `  "summaryIntent": string,\n` +
+    `  "responseMode": "fast" | "grounded" | "deep" | "action",\n` +
+    `  "complexity": "low" | "medium" | "high",\n` +
+    `  "toolIntent": "none" | "read" | "create" | "execute",\n` +
+    `  "riskLevel": "normal" | "high"\n` +
     `}`;
 
   const user =
@@ -392,12 +431,13 @@ export async function planSearchQueries(params: {
         ? uniqQueries([rawClean, ...llmQueries])
         : llmQueries;
 
-      return normalizeQueryPlanIntent({
+      const normalizedPlan = normalizeQueryPlanIntent({
         needsSearch: needsSearch || queries.length > 0,
         intent,
         queries,
         summaryIntent: String(raw.summaryIntent || ""),
       }, question, quoteText);
+      return applyExecutionSignals(normalizedPlan, question, quoteText, raw);
     }
   } catch (err: any) {
     console.warn(`[query-planner] AI Planner fallback (${err?.message || err})`);

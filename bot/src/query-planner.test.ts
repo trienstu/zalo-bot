@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeQueryPlanIntent, extractCleanUserQuery, type QueryPlanResult } from "./query-planner.js";
+import {
+  applyExecutionSignals,
+  normalizeQueryPlanIntent,
+  extractCleanUserQuery,
+  type QueryPlanResult,
+} from "./query-planner.js";
 
 function factPlan(): QueryPlanResult {
   return {
@@ -246,4 +251,46 @@ test("preserveCoreUserEntities khôi phục thực thể viết hoa nếu planne
 
   const plan = normalizeQueryPlanIntent(rawPlan, "có lịch thi đấu FIFA ASEAN Cup 2026 chưa");
   assert.ok(plan.queries.some((q) => /FIFA/i.test(q) && /ASEAN/i.test(q)));
+});
+
+test("planner không thể hạ câu hỏi cần kiểm chứng xuống fast", () => {
+  const plan = applyExecutionSignals(
+    {
+      needsSearch: true,
+      intent: "fact_check",
+      queries: ["giá vàng SJC hôm nay"],
+    },
+    "giá vàng SJC hôm nay",
+    "",
+    {
+      responseMode: "fast",
+      complexity: "low",
+      toolIntent: "none",
+      riskLevel: "normal",
+    },
+  );
+
+  assert.equal(plan.responseMode, "grounded");
+  assert.equal(plan.riskLevel, "high");
+});
+
+test("planner không thể tự cấp action khi người dùng chỉ hỏi giải thích", () => {
+  const plan = applyExecutionSignals(
+    {
+      needsSearch: false,
+      intent: "knowledge",
+      queries: [],
+    },
+    "Giải thích cron hoạt động như thế nào",
+    "",
+    {
+      responseMode: "action",
+      complexity: "low",
+      toolIntent: "execute",
+      riskLevel: "normal",
+    },
+  );
+
+  assert.equal(plan.responseMode, "fast");
+  assert.equal(plan.toolIntent, "none");
 });
