@@ -31,9 +31,11 @@ import { handleSetReminder, handleListReminders, handleCancelReminder } from "./
 import { searchRealtimeNews } from "./realtime-search.js";
 import { refreshDynamicKnowledgeIfExpired, fetchGoogleContent, parseGoogleUrl } from "./google-sync.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
-import { planSearchQueries } from "./query-planner.js";
-import { defaultBotName } from "./config.js";
+import { planSearchQueries, type QueryPlanResult } from "./query-planner.js";
+import { config, defaultBotName } from "./config.js";
 import { finalizeGroundedAnswer } from "./search-evidence.js";
+import { answerWithHybridRouting } from "./hybrid-agent.js";
+import { normalizeExecutionSignals, selectResponseMode } from "./hybrid-routing.js";
 import { generateCloudflareImage, isCloudflareConfigured } from "./cloudflare-ai.js";
 import { formatRealEstateProjectProfileAnswer } from "./real-estate-profile.js";
 import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from "./grounding-quota.js";
@@ -1385,6 +1387,7 @@ async function handleHistoryQA(
 
     let quoteLiveNews = "";
     let quoteEvidenceRequired = false;
+    let quotePlan: QueryPlanResult | null = null;
     try {
       const plan = await planSearchQueries({
         question,
@@ -1392,6 +1395,7 @@ async function handleHistoryQA(
         recentContext: recentChatContext,
         displayName,
       });
+      quotePlan = plan;
 
       if (plan.needsSearch && plan.queries.length > 0) {
         quoteEvidenceRequired = plan.intent === "fact_check" || plan.intent === "realtime_news";
@@ -1469,10 +1473,35 @@ async function handleHistoryQA(
           },
         });
       } else {
-        answer = await callGemini(quoteSystemPrompt, quoteUserPrompt, {
-          model: "gemini-3.1-flash-lite-preview",
-          mediaParts: mediaPart ? [mediaPart] : undefined,
-          enableSearch: false,
+        const quoteNeedsSearch = Boolean(quotePlan?.needsSearch || quoteLiveNews);
+        const quoteSignals = normalizeExecutionSignals(
+          quotePlan ? { ...quotePlan } : null,
+          {
+            question,
+            quoteText: options.quote.text,
+            needsSearch: quoteNeedsSearch,
+            intent: quotePlan?.intent || (quoteNeedsSearch ? "fact_check" : "knowledge"),
+          },
+        );
+        const responseMode = selectResponseMode({
+          signals: quoteSignals,
+          needsSearch: quoteNeedsSearch,
+          explicitToolRequest: false,
+          hasMedia: Boolean(mediaPart),
+        });
+        answer = await answerWithHybridRouting(config.hybridAgent, {
+          mode: responseMode,
+          systemPrompt: quoteSystemPrompt,
+          userPrompt: quoteUserPrompt,
+          sessionKey: `${config.botId}:group:${threadId}:user:${options.sender || displayName}`,
+          isOwner: isSuperAdmin,
+          explicitToolRequest: false,
+          hasMedia: Boolean(mediaPart),
+          fallback: async () => await callGemini(quoteSystemPrompt, quoteUserPrompt, {
+            model: "gemini-3.1-flash-lite-preview",
+            mediaParts: mediaPart ? [mediaPart] : undefined,
+            enableSearch: false,
+          }),
         });
       }
       return finalizeGroundedAnswer(answer, quoteLiveNews, quoteEvidenceRequired);
@@ -1846,6 +1875,7 @@ async function handleHistoryQA(
   let liveNews = "";
   let evidenceRequired = false;
   let planNeedsSearch = false;
+  let queryPlan: QueryPlanResult | null = null;
 
   if (!isInternalGroupLookup) {
     try {
@@ -1863,6 +1893,7 @@ async function handleHistoryQA(
         recentContext: recentCtx,
         displayName,
       });
+      queryPlan = plan;
 
       planNeedsSearch = Boolean(plan.needsSearch);
 
@@ -2049,12 +2080,36 @@ async function handleHistoryQA(
       }
 
       const chosenModel = (needsSearch && canUseGrounding()) ? "gemini-2.5-flash" : "gemini-3.1-flash-lite-preview";
-      console.log(`[member-assistant] 🤖 Đang gọi AI sinh câu trả lời (model: ${chosenModel}, search: ${needsSearch})...`);
+      const routingSignals = normalizeExecutionSignals(
+        queryPlan ? { ...queryPlan } : null,
+        {
+          question,
+          quoteText: options?.quote?.text,
+          needsSearch,
+          intent: queryPlan?.intent || (needsSearch ? "fact_check" : "knowledge"),
+        },
+      );
+      const responseMode = selectResponseMode({
+        signals: routingSignals,
+        needsSearch,
+        explicitToolRequest: false,
+        hasMedia: Boolean(mediaPart),
+      });
+      console.log(`[member-assistant] 🤖 Đang gọi AI sinh câu trả lời (route: ${responseMode}, fallbackModel: ${chosenModel}, search: ${needsSearch})...`);
       const tAiStart = Date.now();
-      answer = await callGemini(systemPrompt, effectiveUserPrompt, {
-        model: chosenModel,
-        mediaParts: mediaPart ? [mediaPart] : undefined,
-        enableSearch: needsSearch,
+      answer = await answerWithHybridRouting(config.hybridAgent, {
+        mode: responseMode,
+        systemPrompt,
+        userPrompt: effectiveUserPrompt,
+        sessionKey: `${config.botId}:group:${threadId}:user:${options?.sender || displayName}`,
+        isOwner: isSuperAdmin,
+        explicitToolRequest: false,
+        hasMedia: Boolean(mediaPart),
+        fallback: async () => await callGemini(systemPrompt, effectiveUserPrompt, {
+          model: chosenModel,
+          mediaParts: mediaPart ? [mediaPart] : undefined,
+          enableSearch: needsSearch,
+        }),
       });
       console.log(`[member-assistant] ⚡ AI hoàn tất trong ${Date.now() - tAiStart}ms (kết quả: ${answer.length} ký tự)`);
     }

@@ -35,6 +35,10 @@ import {
   fetchGoogleContent,
   refreshDynamicKnowledgeIfExpired,
 } from "./google-sync.js";
+import { config } from "./config.js";
+import type { QueryPlanResult } from "./query-planner.js";
+import { answerWithHybridRouting } from "./hybrid-agent.js";
+import { normalizeExecutionSignals, selectResponseMode } from "./hybrid-routing.js";
 
 // Lưu lịch sử trò chuyện nhiều lượt (Multi-turn Chat) giữa Admin và Bot (Lưu tối đa 12 lượt gần nhất)
 const adminChatSessions = new Map<string, { role: "user" | "model"; text: string }[]>();
@@ -1387,12 +1391,14 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   let liveNews = "";
   let evidenceRequired = false;
   let planNeedsSearch = false;
+  let queryPlan: QueryPlanResult | null = null;
   try {
     const plan = await planSearchQueries({
       question: rawText,
       quoteText: event.quote?.text,
       displayName,
     });
+    queryPlan = plan;
 
     if (plan.needsSearch && plan.queries.length > 0) {
       planNeedsSearch = true;
@@ -1615,24 +1621,53 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       });
     } else {
       // ⚡ FAST-PATH: Trả lời siêu tốc trong 1 lượt duy nhất (~1 giây)
-      answer = await callGemini(fullSystemPrompt, effectiveUserPrompt, {
-        model: targetModel,
-        maxTokens: !isAdmin ? 600 : undefined,
-        mediaParts: mediaPart ? [mediaPart] : undefined,
-        enableSearch: needsSearch,
+      const routingSignals = normalizeExecutionSignals(
+        queryPlan ? { ...queryPlan } : null,
+        {
+          question: rawText,
+          quoteText: event.quote?.text,
+          needsSearch,
+          intent: queryPlan?.intent || (needsSearch ? "fact_check" : "knowledge"),
+        },
+      );
+      const responseMode = selectResponseMode({
+        signals: routingSignals,
+        needsSearch,
+        explicitToolRequest: false,
+        hasMedia: Boolean(mediaPart || fileTextContent || hasFile || hasImage),
+      });
+      console.log(`[admin-assistant] 🤖 Route sinh câu trả lời: ${responseMode} (fallbackModel: ${targetModel})`);
+      answer = await answerWithHybridRouting(config.hybridAgent, {
+        mode: responseMode,
+        systemPrompt: fullSystemPrompt,
+        userPrompt: effectiveUserPrompt,
+        sessionKey: `${config.botId}:direct:${sender}`,
+        isOwner: isAdmin,
+        explicitToolRequest: false,
+        hasMedia: Boolean(mediaPart || fileTextContent || hasFile || hasImage),
+        fallback: async () => await callGemini(fullSystemPrompt, effectiveUserPrompt, {
+          model: targetModel,
+          maxTokens: !isAdmin ? 600 : undefined,
+          mediaParts: mediaPart ? [mediaPart] : undefined,
+          enableSearch: needsSearch,
+        }),
       });
     }
 
     answer = finalizeGroundedAnswer(answer, liveNews, evidenceRequired);
 
     // Kiểm tra và thực thi thẻ hành động [ACTION:SEND_GROUP target="..."]...[/ACTION] CHỈ DÀNH CHO ADMIN
-    let finalAnswer = answer;
-    if (isAdmin) {
-      const actionMatch = answer.match(/\[ACTION:SEND_GROUP\s+target=["']([^"']+)["']\]([\s\S]*?)\[\/ACTION\]/i);
+    const actionPattern = /\[ACTION:SEND_GROUP\s+target=["']([^"']+)["']\]([\s\S]*?)\[\/ACTION\]/i;
+    const actionMatch = answer.match(actionPattern);
+    let finalAnswer = answer.replace(/\[ACTION:SEND_GROUP[\s\S]*?\[\/ACTION\]/gi, "").trim();
+    const explicitlyAskedToSendGroup =
+      isAdmin &&
+      /\b(?:gửi|bắn|đăng|chuyển)\b[\s\S]{0,160}\b(?:nhóm|group)\b/i.test(rawText) &&
+      !/\b(?:có thể|biết|được không|được ko|khả năng)\b/i.test(rawText);
+    if (isAdmin && explicitlyAskedToSendGroup) {
       if (actionMatch && actionMatch[1] && actionMatch[2]) {
         const targetGroupQuery = actionMatch[1].trim();
         const contentToSend = actionMatch[2].trim();
-        finalAnswer = answer.replace(/\[ACTION:SEND_GROUP[\s\S]*?\[\/ACTION\]/gi, "").trim();
 
         const target = findGroup(targetGroupQuery);
         if (target && contentToSend) {
@@ -1644,8 +1679,6 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
           }
         }
       }
-    } else {
-      finalAnswer = answer.replace(/\[ACTION:SEND_GROUP[\s\S]*?\[\/ACTION\]/gi, "").trim();
     }
 
     // Lưu vào lịch sử hội thoại nhiều lượt
