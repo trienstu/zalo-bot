@@ -86,6 +86,7 @@ test("grounded mode uses the configured 9Router OpenAI-compatible endpoint", asy
   assert.equal(capturedUrl, "http://127.0.0.1:20128/v1/chat/completions");
   const headers = new Headers(capturedInit?.headers);
   assert.equal(headers.get("authorization"), "Bearer router-secret");
+  assert.equal(capturedInit?.redirect, "error");
   const body = JSON.parse(String(capturedInit?.body));
   assert.equal(body.model, "grounded-combo");
   assert.equal(body.stream, false);
@@ -103,8 +104,8 @@ test("deep mode prefers Hermes and exposes only a hashed session id", async () =
 
   const answer = await runtime.answer({
     mode: "deep",
-    systemPrompt: "system",
-    userPrompt: "deep question",
+    systemPrompt: "system for group 123456",
+    userPrompt: "deep question from user 987654",
     sessionKey: rawSession,
     fallback: async () => "fallback",
   });
@@ -117,6 +118,9 @@ test("deep mode prefers Hermes and exposes only a hashed session id", async () =
   assert.equal(JSON.stringify(capturedInit).includes(rawSession), false);
   const body = JSON.parse(String(capturedInit?.body));
   assert.equal(body.tool_choice, "none");
+  assert.equal(JSON.stringify(body).includes("123456"), false);
+  assert.equal(JSON.stringify(body).includes("987654"), false);
+  assert.match(JSON.stringify(body), /\[REDACTED_ID\]/);
 });
 
 test("non-owner action never reaches Hermes", async () => {

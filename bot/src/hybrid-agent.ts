@@ -180,6 +180,23 @@ function hashSessionId(rawSessionKey: string): string {
   return `zalo-${digest}`;
 }
 
+function redactSessionIdentifiers(text: string, rawSessionKey?: string): string {
+  if (!rawSessionKey) return text;
+  const parts = rawSessionKey.split(":");
+  const labels = new Set(["direct", "group", "user"]);
+  const identifiers: string[] = [];
+
+  for (let index = 0; index < parts.length - 1; index += 1) {
+    if (!labels.has(parts[index]?.toLowerCase() || "")) continue;
+    const value = parts[index + 1]?.trim() || "";
+    if (value.length >= 4) identifiers.push(value);
+  }
+
+  return [...new Set(identifiers)]
+    .sort((left, right) => right.length - left.length)
+    .reduce((redacted, identifier) => redacted.split(identifier).join("[REDACTED_ID]"), text);
+}
+
 async function readBoundedText(response: Response, maxBytes: number): Promise<string> {
   const declaredLength = Number(response.headers.get("content-length") || 0);
   if (declaredLength > maxBytes) throw new ProviderRequestError("invalid_response", response.status);
@@ -415,10 +432,11 @@ export class HybridAgentRuntime {
             max_tokens: 4096,
             tool_choice: candidate.allowTools ? "auto" : "none",
             messages: [
-              { role: "system", content: request.systemPrompt },
-              { role: "user", content: request.userPrompt },
+              { role: "system", content: redactSessionIdentifiers(request.systemPrompt, request.sessionKey) },
+              { role: "user", content: redactSessionIdentifiers(request.userPrompt, request.sessionKey) },
             ],
           }),
+          redirect: "error",
           signal: controller.signal,
         });
       } catch {
