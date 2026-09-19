@@ -2,6 +2,8 @@ import dotenv from "dotenv";
 import path from "node:path";
 import fs from "node:fs";
 
+import type { HybridAgentSettings } from "./hybrid-agent.js";
+
 // Tự động nạp .env phù hợp theo botId (tránh bot 2 nạp đè session của bot 1)
 const initialBotId = process.env.BOT_ID || process.argv.find((a) => a.startsWith("--bot="))?.split("=")[1]?.trim() || "bot-1";
 
@@ -177,6 +179,41 @@ function resolvePaths(bId: string) {
 
 const resolvedPaths = resolvePaths(activeBotId);
 
+const hybridAgentSettings: HybridAgentSettings = {
+  /** Master switch: false giữ nguyên hoàn toàn luồng Gemini hiện tại. */
+  enabled: readBool("HYBRID_ROUTING_ENABLED", false),
+  /** Endpoint ngoài máy chỉ được phép khi bật rõ ràng; runtime vẫn bắt buộc HTTPS. */
+  allowRemoteEndpoints: readBool("HYBRID_ALLOW_REMOTE_ENDPOINTS", false),
+  /** Mac mini 16 GB dùng hằng ngày: mặc định chỉ một tác vụ nặng trong mỗi process. */
+  maxConcurrentHeavy: Math.min(8, Math.max(1, readInt("HYBRID_MAX_CONCURRENT_HEAVY", 1))),
+  failureThreshold: Math.min(20, Math.max(1, readInt("HYBRID_FAILURE_THRESHOLD", 2))),
+  circuitCooldownMs: Math.min(
+    3_600_000,
+    Math.max(1_000, readInt("HYBRID_CIRCUIT_COOLDOWN_MS", 60_000)),
+  ),
+  maxResponseBytes: Math.min(
+    1024 * 1024,
+    Math.max(4_096, readInt("HYBRID_MAX_RESPONSE_BYTES", 256 * 1024)),
+  ),
+  nineRouter: {
+    enabled: readBool("NINE_ROUTER_ENABLED", false),
+    baseUrl: process.env.NINE_ROUTER_BASE_URL?.trim() || "http://127.0.0.1:20128/v1",
+    apiKey: process.env.NINE_ROUTER_API_KEY?.trim() || "",
+    // Không đoán model/combo: để trống thì route tương ứng tự fallback Gemini.
+    groundedModel: process.env.NINE_ROUTER_GROUNDED_MODEL?.trim() || "",
+    deepModel: process.env.NINE_ROUTER_DEEP_MODEL?.trim() || "",
+    timeoutMs: Math.min(300_000, Math.max(1_000, readInt("NINE_ROUTER_TIMEOUT_MS", 45_000))),
+  },
+  hermes: {
+    enabled: readBool("HERMES_ENABLED", false),
+    baseUrl: process.env.HERMES_BASE_URL?.trim() || "http://127.0.0.1:8642/v1",
+    apiKey: process.env.HERMES_API_KEY?.trim() || "",
+    model: process.env.HERMES_MODEL?.trim() || "hermes-agent",
+    timeoutMs: Math.min(300_000, Math.max(1_000, readInt("HERMES_TIMEOUT_MS", 90_000))),
+    ownerActionsEnabled: readBool("HERMES_OWNER_ACTIONS_ENABLED", false),
+  },
+};
+
 export const config = {
   /** ID định danh bot trong hệ thống multi-bot */
   botId: activeBotId,
@@ -318,6 +355,9 @@ export const config = {
    * test hiểu ngữ cảnh hội thoại tốt; cần sâu hơn nữa thì deepseek-v4-pro.
    */
   deepseekModel: process.env.DEEPSEEK_MODEL?.trim() || "deepseek-v4-flash",
+
+  /** Điều phối text nâng cao qua 9Router/Hermes; toàn bộ mặc định tắt và fail-open. */
+  hybridAgent: hybridAgentSettings,
 
   /** Facebook Page nhận bản tin hằng ngày (Pages API). Rỗng cả 2 = tắt daily-fb-post. */
   fbPageId: process.env.FB_PAGE_ID?.trim() || "",
