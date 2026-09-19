@@ -414,5 +414,5 @@ test("rankEvidence loại bỏ hoàn toàn các trang wap tỷ số và cá cư�
 
   const ranked = rankEvidence(junkItems, "lịch thi đấu FIFA ASEAN Cup 2026", "realtime_news", NOW);
   assert.equal(ranked.length, 1);
-  assert.equal(ranked[0].url, "https://tuoitre.vn/lich-thi-dau-fifa-asean-cup-2026");
+  assert.equal(ranked[0]?.url, "https://tuoitre.vn/lich-thi-dau-fifa-asean-cup-2026");
 });
