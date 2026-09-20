@@ -167,17 +167,15 @@ function hasProjectToken(normalizedText: string, tokenSet: Set<string>, token: s
   return tokenSet.has(token) || (token.length >= 5 && normalizedText.includes(token));
 }
 
-function inferSourceTier(source: RealEstateSourceCandidate, query: string): RealEstateSource["tier"] {
+function inferSourceTier(source: RealEstateSourceCandidate, _query?: string): RealEstateSource["tier"] {
   const host = normalizeVi(hostnameOf(source.url || ""));
   const title = normalizeVi(source.title || "");
   const sourceName = normalizeVi(source.sourceName || "");
   const haystack = `${host} ${title} ${sourceName}`;
   const sourceIdentity = `${host} ${sourceName}`;
-  const tokens = projectTokens(query);
 
-  if (tokens.length > 0 && tokens.some((token) => host.includes(token))) return "primary";
-  if (/(?:chu dau tu|official|chinh thuc|website du an|tap doan|corp|jsc|land|group)/i.test(sourceIdentity)) return "primary";
   if (/(?:vnexpress|cafef|cafeland|vneconomy|baodautu|reatimes|vietnamnet|tuoitre|thanhnien|dantri|nguoi lao dong|batdongsan\.com\.vn)/i.test(haystack)) return "news";
+  if (/(?:chu dau tu|chinh thuc|official)/i.test(sourceIdentity) && /(?:tap doan|corp|jsc|group)/i.test(sourceIdentity)) return "primary";
   if (/(?:batdongsan|nhadat|property|land|realty|realestate|investment|canho|chungcu|apartment|residence|riverside|heights)/i.test(haystack)) return "market";
   return "web";
 }
@@ -425,7 +423,8 @@ function candidateScore(candidate: RealEstateSourceCandidate, query: string): nu
   const tierScore = tierRank(inferSourceTier(candidate, query));
   const detailScore = /\b(?:chu dau tu|vi tri|quy mo|phap ly|tien do|bang gia|gia ban|so can|mat bang|ban giao|can ho|block|tower)\b/i.test(haystack) ? 2 : 0;
   const host = normalizeVi(hostnameOf(candidate.url || ""));
-  const officialHostBonus = tokens.length > 0 && tokens.filter((token) => host.includes(token)).length >= Math.min(2, tokens.length) ? 6 : 0;
+  const isGuessedDomain = /Website\/landing page có khả năng thuộc dự án/i.test(candidate.snippet || "");
+  const officialHostBonus = !isGuessedDomain && tokens.length > 0 && tokens.filter((token) => host.includes(token)).length >= Math.min(2, tokens.length) ? 2 : 0;
   const aggregatorPenalty = /^(?:news\.google\.com|www\.google\.com|google\.com)$/i.test(host) ? 6 : 0;
   return tokenScore + tierScore + detailScore + officialHostBonus - aggregatorPenalty;
 }
@@ -631,9 +630,14 @@ export async function buildRealEstateProjectProfileContext(
     return cached.context;
   }
 
-  const queries = buildRealEstateProjectSearchQueries(query);
-  const searchSettled = await Promise.allSettled(queries.map((q) => webSearch(q, 5)));
-  const searchCandidates = searchSettled.flatMap((res) => (res.status === "fulfilled" ? res.value : []));
+  const validSeedCandidates = seedCandidates.filter((c) => c.url && /^https?:\/\//i.test(c.url));
+  let searchCandidates: RealEstateSourceCandidate[] = [];
+  if (validSeedCandidates.length < 3) {
+    const queries = buildRealEstateProjectSearchQueries(query);
+    const queriesToRun = validSeedCandidates.length > 0 ? queries.slice(2, 3) : queries;
+    const searchSettled = await Promise.allSettled(queriesToRun.map((q) => webSearch(q, 5)));
+    searchCandidates = searchSettled.flatMap((res) => (res.status === "fulfilled" ? res.value : []));
+  }
   const candidates = dedupeCandidates([
     ...seedCandidates,
     ...searchCandidates,

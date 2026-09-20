@@ -38,7 +38,7 @@ import { answerWithHybridRouting } from "./hybrid-agent.js";
 import { normalizeExecutionSignals, selectResponseMode } from "./hybrid-routing.js";
 import { generateCloudflareImage, isCloudflareConfigured } from "./cloudflare-ai.js";
 import { generateCodexImage, isCodexImageConfigured } from "./codex-image.js";
-import { formatRealEstateProjectProfileAnswer, isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
+import { isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
 import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from "./grounding-quota.js";
 import { githubSearch } from "./tools/vertical-tools.js";
 
@@ -1484,7 +1484,16 @@ async function handleHistoryQA(
       `       BẮT BUỘC sử dụng công cụ 'python_interpreter'.\n` +
       `     + Viết mã Python hoàn chỉnh (dùng matplotlib, seaborn, PIL), render đẹp mắt và lưu thành file .png (plt.savefig('ten_bieu_do.png', dpi=150, bbox_inches='tight')).\n` +
       `     + Hệ thống sẽ tự động bắt file ảnh PNG được tạo ra và gửi trực tiếp lên nhóm Zalo!\n` +
-      `     + TUYỆT ĐỐI CẤM từ chối hoặc nói rằng Zalo không hỗ trợ hình ảnh biểu đồ!`;
+      `     + TUYỆT ĐỐI CẤM từ chối hoặc nói rằng Zalo không hỗ trợ hình ảnh biểu đồ!\n` +
+      `   - [KHI CÂU HỎI LÀ TỔNG QUAN DỰ ÁN BẤT ĐỘNG SẢN / CÔNG TRÌNH / HỒ SƠ THƯƠNG MẠI]:\n` +
+      `     + BẮT BUỘC cấu trúc câu trả lời chuyên nghiệp, sắc nét, đầy đủ theo các phân mục rõ ràng:\n` +
+      `       • 🏢 TỔNG QUAN DỰ ÁN (Tên thương mại, Chủ đầu tư/đơn vị phát triển, Đơn vị thiết kế/thi công, Tổng vốn đầu tư, Mốc khởi công & dự kiến bàn giao).\n` +
+      `       • 📍 1. Vị trí đắc địa & Kết nối giao thông (Địa chỉ chi tiết, lợi thế ven sông/hồ, cự ly kết nối tới bệnh viện, TTTM, hạ tầng trọng điểm).\n` +
+      `       • 📐 2. Quy mô & Cơ cấu sản phẩm (Diện tích khu đất, số lượng tháp/tầng, chi tiết từng loại hình: Căn hộ ở 1-3PN, Căn hộ Officetel, Shophouse khối đế, diện tích từng loại).\n` +
+      `       • 🌿 3. Tiện ích & Phong cách sống (Phát triển theo phong cách gì, hồ bơi, gym, yoga, sauna, mảng xanh, tiện ích đặc quyền).\n` +
+      `       • 💰 4. Giá bán & Chính sách tham khảo (Giá rumor/dự kiến đợt 1 từng loại hình, chính sách bán hàng hoặc vay vốn nếu có).\n` +
+      `     + In đậm các số liệu quan trọng, trình bày gạch đầu dòng rõ ràng, mạch lạc, tối ưu hiển thị trên giao diện chat Zalo.\n` +
+      `   - [CHỐNG BẺ LÁI SANG BẤT ĐỘNG SẢN]: Khi người dùng hỏi về địa lý, xã hội, khoa học, chính trị, thể thao, công nghệ, lịch sử: PHẢI TRẢ LỜI ĐÚNG TRỌNG TÂM, CẤM tự ý suy diễn người hỏi đi du lịch hay lôi chuyện bất động sản/mua bán đất vào câu trả lời nếu người dùng không hỏi về BĐS!`;
 
     let quoteLiveNews = "";
     let quoteEvidenceRequired = false;
@@ -1556,14 +1565,6 @@ async function handleHistoryQA(
     const quoteLiveNewsSection = quoteLiveNews
       ? `\n=== DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT: ===\n${quoteLiveNews}\n`
       : "";
-
-    const quoteRealEstateProfileAnswer = formatRealEstateProjectProfileAnswer(
-      quoteLiveNews,
-      `${question} ${options.quote.text || ""}`,
-    );
-    if (quoteRealEstateProfileAnswer) {
-      return quoteRealEstateProfileAnswer;
-    }
 
     const quoteUserPrompt =
       `BẠN ĐANG TƯƠNG TÁC TẠI NHÓM "${currentGroupName}".\n` +
@@ -2280,11 +2281,6 @@ async function handleHistoryQA(
   const liveNewsSection = liveNews
     ? `\n=== DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT: ===\n${liveNews}\n`
     : "";
-
-  const realEstateProfileAnswer = formatRealEstateProjectProfileAnswer(liveNews, question);
-  if (realEstateProfileAnswer) {
-    return realEstateProfileAnswer;
-  }
 
   const searchInstruction =
     `\n=== TỔNG HỢP DỮ LIỆU THỜI GIAN THỰC & CÔNG CỤ TÌM KIẾM (REAL-TIME DATA) ===\n` +
