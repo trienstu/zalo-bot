@@ -38,7 +38,7 @@ import { answerWithHybridRouting } from "./hybrid-agent.js";
 import { normalizeExecutionSignals, selectResponseMode } from "./hybrid-routing.js";
 import { generateCloudflareImage, isCloudflareConfigured } from "./cloudflare-ai.js";
 import { generateCodexImage, isCodexImageConfigured } from "./codex-image.js";
-import { formatRealEstateProjectProfileAnswer } from "./real-estate-profile.js";
+import { formatRealEstateProjectProfileAnswer, isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
 import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from "./grounding-quota.js";
 import { githubSearch } from "./tools/vertical-tools.js";
 
@@ -1672,7 +1672,7 @@ async function handleHistoryQA(
 
   const isResourceQuery =
     isOnlyLinkQuery ||
-    /link|repo|github|tài liệu|tai lieu|dự án|du an|mã nguồn|source/i.test(question);
+    /link|repo|github|tài liệu|tai lieu|mã nguồn|source/i.test(question);
 
   // 2.2. Tra cứu sâu các đoạn thảo luận & hội thoại theo ngữ cảnh (Context Window 2 tin trước + 4 tin sau)
   let discussionThreads: DiscussionThreadSnippet[] = [];
@@ -2197,12 +2197,16 @@ async function handleHistoryQA(
     Boolean((groupSettings as any)?.enableSearch === 0) ||
     /tắt search|không tìm kiếm|không tra cứu/i.test(groupSettings.customPrompt || "");
 
+  const isExplicitInternalResourceQuery =
+    isOnlyLinkQuery ||
+    (/(?:link|repo|github|tài liệu|tai lieu|mã nguồn|source)/i.test(question) &&
+     /(?:trong nhóm|nhóm mình|nhóm này|ae|anh em|đã gửi|đã share|từ trước|ai gửi|ai share|cho xin|gửi link|tìm link)/i.test(question));
+
   const isInternalGroupLookup =
-    (isResourceQuery && relevantLinks.length > 0) ||
-    (isOnlyLinkQuery && relevantLinks.length > 0) ||
+    (isExplicitInternalResourceQuery && relevantLinks.length > 0) ||
     (isTargetMemberFound && isMemberOrGroupQuery) ||
     isMemberOrGroupQuery ||
-    (/(?:tin nhắn|nội dung|thảo luận|file|tệp).*(?:trong nhóm|nhóm mình|nhóm này|ae|anh em|bác|anh|chị|thành viên|đã gửi|đã share|từ trước)/i.test(question) && !isResourceQuery) ||
+    (/(?:tin nhắn|nội dung|thảo luận|file|tệp).*(?:trong nhóm|nhóm mình|nhóm này|ae|anh em|bác|anh|chị|thành viên|đã gửi|đã share|từ trước)/i.test(question) && !isExplicitInternalResourceQuery) ||
     /(?:ai|thành viên nào|người nào).*(?:nhắn|gửi|share|nói)/i.test(question);
 
   // 2.0. Đọc hiểu ngữ nghĩa & Lập kế hoạch tra cứu bằng Gemini Flash-Lite (Semantic Query Planner)
@@ -2375,6 +2379,14 @@ async function handleHistoryQA(
     `- KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
     `  + Khi người dùng yêu cầu vẽ biểu đồ (cột, tròn, đường, heatmap...), sơ đồ quy trình, mindmap hoặc đồ họa từ dữ liệu: BẮT BUỘC sử dụng công cụ 'python_interpreter'.\n` +
     `  + Viết mã Python hoàn chỉnh (dùng matplotlib, seaborn, PIL), render đẹp mắt và lưu thành file .png. Tuyệt đối cấm từ chối!\n` +
+    `- KHI CÂU HỎI LÀ TỔNG QUAN DỰ ÁN BẤT ĐỘNG SẢN / CÔNG TRÌNH / HỒ SƠ THƯƠNG MẠI:\n` +
+    `  + BẮT BUỘC cấu trúc câu trả lời chuyên nghiệp, sắc nét, đầy đủ theo các phân mục rõ ràng:\n` +
+    `    • 🏢 TỔNG QUAN DỰ ÁN (Tên thương mại, Chủ đầu tư/đơn vị phát triển, Đơn vị thiết kế/thi công, Tổng vốn đầu tư, Mốc khởi công & dự kiến bàn giao).\n` +
+    `    • 📍 1. Vị trí đắc địa & Kết nối giao thông (Địa chỉ chi tiết, lợi thế ven sông/hồ, cự ly kết nối tới bệnh viện, TTTM, hạ tầng trọng điểm).\n` +
+    `    • 📐 2. Quy mô & Cơ cấu sản phẩm (Diện tích khu đất, số lượng tháp/tầng, chi tiết từng loại hình: Căn hộ ở 1-3PN, Căn hộ Officetel, Shophouse khối đế, diện tích từng loại).\n` +
+    `    • 🌿 3. Tiện ích & Phong cách sống (Phát triển theo phong cách gì, hồ bơi, gym, yoga, sauna, mảng xanh, tiện ích đặc quyền).\n` +
+    `    • 💰 4. Giá bán & Chính sách tham khảo (Giá rumor/dự kiến đợt 1 từng loại hình, chính sách bán hàng hoặc vay vốn nếu có).\n` +
+    `  + In đậm các số liệu quan trọng, trình bày gạch đầu dòng rõ ràng, mạch lạc, tối ưu hiển thị trên giao diện chat Zalo.\n` +
     `- TỐI ƯU TỐC ĐỘ PHẢN HỒI: Nếu trong dữ liệu thời gian thực hoặc context đã có đủ thông tin để trả lời, PHẢI TẬP TRUNG TRẢ LỜI NGAY, không gọi thêm công cụ tìm kiếm lặp lại để tránh làm chậm phản hồi.\n` +
     searchInstruction +
     directAnswerInstruction;
@@ -2430,6 +2442,7 @@ async function handleHistoryQA(
       const needsSearch = !isSearchDisabled && !isInternalGroupLookup && (
         planNeedsSearch ||
         (isResourceQuery && relevantLinks.length === 0) ||
+        isRealEstateProjectProfileQuery(question) ||
         /(?:thời tiết|giá vàng|tỷ giá|chứng khoán|tin tức|mới nhất|khi nào|bao giờ|ai là|lịch thi đấu|tỉ số|kết quả|vừa ra mắt)/i.test(question)
       );
 

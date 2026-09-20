@@ -30,7 +30,7 @@ import { getDailyAiNewsBriefing } from "./ai-news.js";
 import { searchRealtimeNews } from "./realtime-search.js";
 import { planSearchQueries } from "./query-planner.js";
 import { finalizeGroundedAnswer } from "./search-evidence.js";
-import { formatRealEstateProjectProfileAnswer } from "./real-estate-profile.js";
+import { formatRealEstateProjectProfileAnswer, isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
 import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from "./grounding-quota.js";
 import {
   parseGoogleUrl,
@@ -1536,6 +1536,14 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `      + Định dạng chuẩn cho từng điểm tin:\n` +
     `        - Tên sự kiện / Dự án / Chủ đầu tư: [Tóm tắt căn bản 2-3 câu giải thích rõ: Cụ thể sự việc gì đang diễn ra? Doanh nghiệp/chủ đầu tư nào liên quan? Ở địa phương nào? Mức giá/diện tích/số căn cụ thể là bao nhiêu? Thay đổi hay tác động cụ thể ra sao?]\n` +
     `      + TUYỆT ĐỐI CẤM CHỈ LIỆT KÊ TIÊU ĐỀ MẬP MỜ KHÔNG CÓ NỘI DUNG (CẤM các câu viết lửng lơ như "có những thay đổi quan trọng lúc 9h", "dành 40% cho một hạng mục đặc biệt", "đại gia Singapore bán 10.000 căn" mà không nói rõ thay đổi gì, hạng mục gì, đại gia nào). Người đọc phải hiểu ngay bản chất sự việc một cách mạch lạc mà không cần phải đi tra lại báo!\n` +
+    `    - KHI HỎI TỔNG QUAN DỰ ÁN BẤT ĐỘNG SẢN / CÔNG TRÌNH / SẢN PHẨM THƯƠNG MẠI:\n` +
+    `      + BẮT BUỘC cấu trúc câu trả lời chuyên nghiệp, sắc nét, đầy đủ theo các phân mục rõ ràng:\n` +
+    `        • 🏢 TỔNG QUAN DỰ ÁN (Tên thương mại, Chủ đầu tư/đơn vị phát triển, Đơn vị thiết kế/thi công, Tổng vốn đầu tư, Mốc khởi công & dự kiến bàn giao).\n` +
+    `        • 📍 1. Vị trí đắc địa & Kết nối giao thông (Địa chỉ chi tiết, lợi thế ven sông/hồ, cự ly kết nối tới bệnh viện, TTTM, hạ tầng trọng điểm).\n` +
+    `        • 📐 2. Quy mô & Cơ cấu sản phẩm (Diện tích khu đất, số lượng tháp/tầng, chi tiết từng loại hình: Căn hộ ở 1-3PN, Căn hộ Officetel, Shophouse khối đế, diện tích từng loại).\n` +
+    `        • 🌿 3. Tiện ích & Phong cách sống (Phát triển theo phong cách gì, hồ bơi, gym, yoga, sauna, mảng xanh, tiện ích đặc quyền).\n` +
+    `        • 💰 4. Giá bán & Chính sách tham khảo (Giá rumor/dự kiến đợt 1 từng loại hình, chính sách bán hàng hoặc vay vốn nếu có).\n` +
+    `      + In đậm các số liệu quan trọng, trình bày gạch đầu dòng rõ ràng, mạch lạc, tối ưu hiển thị trên giao diện chat Zalo.\n` +
     `    - KHI HỎI VỀ CHÍNH TRỊ / THẾ GIỚI / PHÁT NGÔN LÃNH ĐẠO (Trump, Putin, Biden, Bầu cử, Chiến sự, Thuế quan):\n` +
     `      + BẮT BUỘC TRÍCH XUẤT CÁC PHÁT NGÔN / DIỄN BIẾN MỚI NHẤT từ dữ liệu thời gian thực được cung cấp (trong 24h - 7 ngày qua).\n` +
     `      + TRÍCH DẪN NGUYÊN VĂN: BẮT BUỘC đặt các phát ngôn, tuyên bố then chốt trong ngoặc kép "..." (ví dụ: "Sản phẩm của họ không đủ tốt!", "chuyện nhỏ").\n` +
@@ -1597,6 +1605,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
     const needsSearch = !isSearchDisabled && (
       planNeedsSearch ||
+      isRealEstateProjectProfileQuery(rawText) ||
       /(?:thời tiết|giá vàng|tỷ giá|chứng khoán|tin tức|mới nhất|khi nào|bao giờ|ai là|lịch thi đấu|tỉ số|kết quả|vừa ra mắt)/i.test(rawText)
     );
 
