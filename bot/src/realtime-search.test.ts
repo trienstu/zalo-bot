@@ -73,6 +73,12 @@ test("phân loại các nhu cầu cần dữ liệu mới theo lĩnh vực, khô
   assert.deepEqual(detectNewsCategories("Lịch thi đấu V-League hôm nay"), [
     "the-thao",
   ]);
+  assert.deepEqual(detectNewsCategories("tin mới nhất hôm nay về AI"), [
+    "so-hoa",
+  ]);
+  assert.deepEqual(detectNewsCategories("cập nhật thị trường xe điện mới nhất"), [
+    "xe-co",
+  ]);
 });
 
 test("lọc tin dài nhưng sai thuộc tính khỏi câu hỏi giá vàng", () => {

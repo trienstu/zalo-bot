@@ -251,16 +251,51 @@ export function extractQuote(payload: any): QuotedMessage | null {
   const quote = (parseObjectMaybe(quoteObj) || (typeof quoteObj === "object" ? quoteObj : null)) as Record<string, any> | null;
   if (!quote) return null;
 
-  const text =
-    typeof quote.msg === "string" && quote.msg.trim() !== ""
-      ? quote.msg.trim()
-      : typeof quote.text === "string" && quote.text.trim() !== ""
-        ? quote.text.trim()
-        : typeof quote.content === "string" && quote.content.trim() !== ""
-          ? quote.content.trim()
-          : typeof quote.title === "string" && quote.title.trim() !== ""
-            ? quote.title.trim()
-            : "";
+  function extractDeepQuoteText(q: Record<string, any>): string {
+    const direct =
+      typeof q.msg === "string" && q.msg.trim() !== ""
+        ? q.msg.trim()
+        : typeof q.text === "string" && q.text.trim() !== ""
+          ? q.text.trim()
+          : "";
+    if (direct) {
+      if (direct.startsWith("{") && direct.endsWith("}")) {
+        const parsed = parseObjectMaybe(direct);
+        if (parsed) {
+          const nested = extractDeepQuoteText(parsed);
+          if (nested) return nested;
+        }
+      }
+      return direct;
+    }
+
+    // Kiểm tra content (có thể là string hoặc object)
+    if (typeof q.content === "string" && q.content.trim() !== "") {
+      const trimmed = q.content.trim();
+      if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+        const parsed = parseObjectMaybe(trimmed);
+        if (parsed) {
+          const nested = extractDeepQuoteText(parsed);
+          if (nested) return nested;
+        }
+      }
+      return trimmed;
+    } else if (q.content && typeof q.content === "object") {
+      const nested = extractDeepQuoteText(q.content);
+      if (nested) return nested;
+    }
+
+    // Kiểm tra title, description từ q, params hoặc attach
+    const title = String(q.title || q.content?.title || q.params?.title || q.attach?.title || "").trim();
+    const desc = String(q.description || q.desc || q.content?.description || q.params?.description || q.attach?.description || "").trim();
+    if (title && desc && title !== desc) return `${title} — ${desc}`;
+    if (title) return title;
+    if (desc) return desc;
+
+    return "";
+  }
+
+  const text = extractDeepQuoteText(quote);
 
   const senderName = typeof quote.dName === "string" ? quote.dName : typeof quote.displayName === "string" ? quote.displayName : "";
   const senderId = typeof quote.ownerId === "string" ? String(quote.ownerId) : typeof quote.from === "string" ? String(quote.from) : "";

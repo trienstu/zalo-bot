@@ -416,3 +416,29 @@ test("rankEvidence loại bỏ hoàn toàn các trang wap tỷ số và cá cư�
   assert.equal(ranked.length, 1);
   assert.equal(ranked[0]?.url, "https://tuoitre.vn/lich-thi-dau-fifa-asean-cup-2026");
 });
+
+test("câu hỏi về AI giữ token ai và xếp bài báo quốc tế liên quan", () => {
+  const query = "tin mới nhất hôm nay về AI";
+  const items = [
+    evidence({
+      title: "OpenAI announces next-generation AI model with reasoning capabilities",
+      snippet: "The company unveiled new AI breakthroughs today.",
+      url: "https://techcrunch.com/openai-ai-model",
+      sourceName: "TechCrunch AI",
+      sourceType: "news",
+      publishedAt: NOW,
+    }),
+    evidence({
+      title: "Giá vàng hôm nay tiếp tục tăng kỷ lục",
+      snippet: "Thị trường vàng trong nước ghi nhận mức giá cao chưa từng có.",
+      url: "https://news.example/gold",
+      sourceName: "Báo Mới",
+      sourceType: "news",
+      publishedAt: NOW,
+    }),
+  ];
+
+  const ranked = rankEvidence(items, query, "realtime_news", NOW);
+  assert.equal(ranked[0]?.url, "https://techcrunch.com/openai-ai-model");
+  assert.ok(ranked[0]?.relevanceScore > 0.4);
+});

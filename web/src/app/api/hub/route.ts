@@ -423,11 +423,13 @@ export async function GET(request: Request) {
 
     // Kiểm tra bảo mật:
     // - Nếu có token: Cho phép thành viên vào nhóm riêng
-    // - Nếu không có token: Bắt buộc phải là Admin (đã đăng nhập)
+    // - Nếu không có token: Bắt buộc phải là Admin (đã đăng nhập) hoặc đang truy cập từ Localhost máy chủ
     const cookieHeader = request.headers.get("cookie") || "";
     const isAdminAuthenticated = cookieHeader.includes("admin_auth_session=authenticated_admin");
+    const host = request.headers.get("host") || "";
+    const isLocalhost = host.startsWith("localhost") || host.startsWith("127.0.0.1");
 
-    if (!token && !isAdminAuthenticated) {
+    if (!token && !isAdminAuthenticated && !isLocalhost) {
       return NextResponse.json(
         {
           error: "unauthorized",

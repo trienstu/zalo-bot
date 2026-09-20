@@ -1,0 +1,17 @@
+{
+  "name": "zalo-bot-suite",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "review": "node scripts/dual-review.mjs",
+    "review:preview": "node scripts/dual-review.mjs --preview",
+    "review:graph": "node .gitnexus/run.cjs detect-changes --scope all --repo .",
+    "review:ocr": "npx -y @alibaba-group/open-code-review review",
+    "review:scan": "npx -y @alibaba-group/open-code-review scan",
+    "bot:typecheck": "npm run typecheck --prefix bot",
+    "bot:test": "npm test --prefix bot",
+    "bot:build": "npm run build --prefix bot",
+    "web:build": "npm run build --prefix web"
+  }
+}

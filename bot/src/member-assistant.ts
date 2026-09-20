@@ -37,8 +37,10 @@ import { finalizeGroundedAnswer } from "./search-evidence.js";
 import { answerWithHybridRouting } from "./hybrid-agent.js";
 import { normalizeExecutionSignals, selectResponseMode } from "./hybrid-routing.js";
 import { generateCloudflareImage, isCloudflareConfigured } from "./cloudflare-ai.js";
+import { generateCodexImage, isCodexImageConfigured } from "./codex-image.js";
 import { formatRealEstateProjectProfileAnswer } from "./real-estate-profile.js";
 import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from "./grounding-quota.js";
+import { githubSearch } from "./tools/vertical-tools.js";
 
 export interface MemberMessageEvent {
   threadId: string;
@@ -79,6 +81,15 @@ export interface MemberMessageEvent {
 // User cooldown map to prevent spamming: userId -> lastResponseTimestamp
 const userCooldowns = new Map<string, number>();
 const COOLDOWN_MS = 500; // 0.5s cooldown to allow smooth conversation
+
+export function isStrictVerificationQuestion(text: string): boolean {
+  const norm = String(text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase();
+  return /\b(?:dung khong|dung k\b|co phai|co that khong|co that ko|co dung|xac minh|tin don|thuc hu|chinh xac khong|kiem chung|phai khong|phai ko|dung hay sai)\b/i.test(norm);
+}
 
 /**
  * Xây dựng object Quote tương thích chuẩn Zalo zca-js để hiển thị khung trích dẫn tin nhắn gốc.
@@ -526,7 +537,8 @@ export function searchRelevantLinksAndResources(
     "trong", "tài", "nguyên", "tai", "nguyen", "nhóm", "nhom", "giúp", "giup",
     "mình", "minh", "với", "voi", "nhé", "nhe", "ạ", "ơi", "oi", "hỏi", "cho", "em",
     "tìm", "tim", "lấy", "lay", "xin", "gửi", "gui", "xem", "của", "cua", "mà", "ma",
-    "đã", "da", "về", "ve", "ở", "o", "bác", "bac", "anh", "chị", "chi"
+    "đã", "da", "về", "ve", "ở", "o", "bác", "bac", "anh", "chị", "chi",
+    "chưa", "vậy", "vay", "thế", "the", "nào", "nao", "được", "duoc", "rồi", "roi", "nhỉ", "nhi", "chăng", "chang", "hả", "ha"
   ]);
 
   const authorHint = extractAuthorHint(query);
@@ -618,7 +630,7 @@ export function searchRelevantLinksAndResources(
 /**
  * Trích xuất danh sách link/tài liệu được chia sẻ gần nhất trong nhóm theo lệnh /link [từ khóa]
  */
-function handleLinksCommand(threadId: string, keywordFilter?: string): string {
+function handleLinksCommand(threadId: string, keywordFilter?: string, botName = defaultBotName): string {
   const links = searchRelevantLinksAndResources(threadId, keywordFilter || "", 15);
 
   if (links.length === 0) {
@@ -637,7 +649,7 @@ function handleLinksCommand(threadId: string, keywordFilter?: string): string {
   return (
     `🔗 TỔNG HỢP LINK & TÀI LIỆU TRONG NHÓM (${links.length} link tìm thấy)\n\n` +
     items.join("\n\n") +
-    `\n\n💡 Mẹo: Bạn có thể gõ /link [từ khóa] hoặc hỏi tự nhiên "@Sen Chúa tìm link..."!`
+    `\n\n💡 Mẹo: Bạn có thể gõ /link [từ khóa] hoặc hỏi tự nhiên "@${botName} tìm link..."!`
   );
 }
 
@@ -999,15 +1011,16 @@ function handleInactiveCommand(threadId: string): string {
 /**
  * Trả lời trợ giúp / danh sách lệnh.
  */
-function handleHelpCommand(): string {
+function handleHelpCommand(botName = defaultBotName): string {
+  const upperBotName = botName.toUpperCase();
   return (
-    `🤖 TRỢ LÝ CỘNG ĐỒNG — SEN CHÚA\n\n` +
+    `🤖 TRỢ LÝ CỘNG ĐỒNG — ${upperBotName}\n\n` +
     `Các lệnh bạn có thể sử dụng:\n` +
     `⏰ ĐẶT HẸN & BÁO THỨC:\n` +
     `🔹 /nhacnho [thời gian] [nội dung]: Đặt lịch hẹn nhắc việc (VD: /nhacnho 20p Đi họp, /hengio 17:30 Đón con, /hengio 8h tối mai Kèo bóng đá)\n` +
     `🔹 /dsnhac: Xem danh sách các lịch hẹn đang chờ của bạn\n` +
     `🔹 /huynhac [mã_số]: Hủy lịch hẹn theo mã\n` +
-    `🔹 Hoặc tag bot: "@Sen Chúa 8h tối mai nhắc cả nhóm có kèo bóng đá nhé"\n\n` +
+    `🔹 Hoặc tag bot: "@${botName} 8h tối mai nhắc cả nhóm có kèo bóng đá nhé"\n\n` +
     `☀️ THỜI TIẾT & BỤI MỊN (AQI):\n` +
     `🔹 /thoitiet: Xem thời tiết & bụi mịn PM2.5 hôm nay\n` +
     `🔹 /thoitiet [địa điểm]: Xem thời tiết TP.HCM, Hà Nội, Đà Lạt, Đà Nẵng...\n\n` +
@@ -1019,7 +1032,7 @@ function handleHelpCommand(): string {
     `🔹 /top: Xem Top 5 thành viên tích cực nhất nhóm\n` +
     `🔹 /taungam: Xem thống kê các thành viên nằm vùng / chưa từng gửi tin nhắn\n` +
     `🔹 /link [từ khóa]: Tổng hợp tất cả link/tài liệu/video đã chia sẻ trong nhóm\n` +
-    `🔹 /hoi [câu hỏi] hoặc tag @Sen Chúa: Hỏi đáp kiến thức tra cứu từ lịch sử chat của nhóm\n` +
+    `🔹 /hoi [câu hỏi] hoặc tag @${botName}: Hỏi đáp kiến thức tra cứu từ lịch sử chat của nhóm\n` +
     `🔹 /help: Hiển thị hướng dẫn này\n\n` +
     `🚫 QUẢN TRỊ VIÊN — ĐIỀU HÀNH NHÓM:\n` +
     `🔹 /chanbot: Quote tin nhắn người cần chặn rồi gõ /chanbot (hoặc /chanbot [Tên/ID])\n` +
@@ -1125,6 +1138,8 @@ async function handleHistoryQA(
     directDocContent?: string;
     sender?: string;
     isSuperAdmin?: boolean;
+    mentions?: MemberMessageEvent["mentions"];
+    rawText?: string;
   },
 ): Promise<string> {
   const db = getDb();
@@ -1217,18 +1232,70 @@ async function handleHistoryQA(
       `6. Trả lời chuẩn theo phong cách của bạn (${isSuperAdmin ? "chu đáo, chuyên nghiệp, thông minh" : "hóm hỉnh, chuyên nghiệp, thông minh"}).\n` +
       `7. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
       `   - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * để in đậm vì Zalo không hỗ trợ markdown (sẽ hiện nguyên văn hai dấu sao rất xấu). Hãy viết hoa chữ cái đầu hoặc viết hoa tiêu đề để làm nổi bật (ví dụ: '1. NHÂN VẬT CHÍNH:', '2. KHÁCH HÀNG:').\n` +
-      `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Giữ phong cách thanh lịch, gọn gàng. TUYỆT ĐỐI KHÔNG spam icon ở từng dòng hay từng gạch đầu dòng.`;
+      `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Giữ phong cách thanh lịch, gọn gàng. TUYỆT ĐỐI KHÔNG spam icon ở từng dòng hay từng gạch đầu dòng.\n` +
+      `8. KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
+      `   - Khi người dùng yêu cầu vẽ biểu đồ (cột, tròn, đường, phân bố...), đồ thị, sơ đồ từ tài liệu/file hoặc tính toán dữ liệu:\n` +
+      `     BẮT BUỘC sử dụng công cụ 'python_interpreter'.\n` +
+      `   - Viết mã Python hoàn chỉnh để xử lý dữ liệu và vẽ bằng matplotlib.pyplot (hoặc seaborn, pandas):\n` +
+      `     + Đặt plt.figure(figsize=(10, 6), dpi=150), tiêu đề rõ ràng, nhãn trục x, trục y, hiển thị giá trị số liệu trên từng cột/điểm.\n` +
+      `     + Lưu file dạng PNG: plt.savefig('ten_bieu_do.png', bbox_inches='tight', dpi=150) và plt.close().\n` +
+      `     + Hệ thống sẽ tự động bắt file ảnh PNG được tạo ra và gửi trực tiếp vào nhóm Zalo cho ${isSuperAdmin ? "Sếp" : "người dùng"}.\n` +
+      `   - TUYỆT ĐỐI CẤM từ chối hoặc nói rằng Zalo không hỗ trợ hiển thị hình ảnh biểu đồ! Hệ thống có khả năng xuất file ảnh thật và gửi thẳng lên Zalo!\n` +
+      `9. KỸ NĂNG XUẤT FILE TÀI LIỆU (generate_file):\n` +
+      `   - Khi người dùng yêu cầu xuất file Word (.docx), Excel (.xlsx), Markdown (.md): BẮT BUỘC gọi tool 'generate_file'. Tuyệt đối cấm bịa đặt tin nhắn đã xuất file khi chưa gọi tool!`;
 
     const fastUserPrompt =
       `${quoteTextSection}${fileContentSnippet}\n` +
       `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${question || "Hãy phân tích chi tiết hình ảnh/tài liệu này giúp tôi."}\n\n` +
       `HÃY TRẢ LỜI NGAY:`;
 
+    const isCodeOrChartQuery =
+      /(?:vẽ|tạo|vẽ\s*giúp|xuất|lập|thiết kế|làm)\s*(?:cho\s*.*?\s*)?(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|ảnh|hình|thiệp|quote|card)/i.test(question) ||
+      /(?:vẽ\s*ảnh|tạo\s*ảnh|vẽ\s*hình|tạo\s*hình|sinh\s*ảnh|vẽ\s*tranh)/i.test(question) ||
+      /(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ)/i.test(question) ||
+      /^[/!](?:taoanh|veanh|draw|plot|chart)\b/i.test(question) ||
+      /(?:chạy|viết|run|execute)\s*(?:code|mã|script)\s*(?:python|py)/i.test(question);
+
+    const isFileGenerationQuery =
+      /(?:tạo|xuất|làm|lưu|gửi|convert|chuyển|viết)\s*(?:thành\s*)?(?:file|tệp)?\s*(?:word|excel|docx|xlsx|doc|sheet|bảng|pdf|txt|md|code)/i.test(question) ||
+      /(?:file|tệp)\s*(?:word|excel|docx|xlsx)/i.test(question) ||
+      /(?:tạo|xuất|làm)\s*(?:file|tệp)/i.test(question) ||
+      isCodeOrChartQuery;
+
+    const needsAgentLoop = isFileGenerationQuery || isCodeOrChartQuery;
+
     try {
-      const answer = await callGemini(fastSystemPrompt, fastUserPrompt, {
-        mediaParts: mediaPart ? [mediaPart] : undefined,
-        enableSearch: false,
-      });
+      let answer = "";
+      if (needsAgentLoop) {
+        answer = await callGeminiAgentLoop(fastSystemPrompt, fastUserPrompt, {
+          model: "gemini-3.1-flash-lite-preview",
+          maxTurns: 3,
+          mediaParts: mediaPart ? [mediaPart] : undefined,
+          onFileGenerated: async (file) => {
+            try {
+              if (options?.api) {
+                const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
+                const caption = isImg
+                  ? `📊 Biểu đồ / Hình ảnh đã được vẽ xong cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!\n📁 Tệp: ${file.fileName}`
+                  : `📄 ${botName} đã tạo và gửi file [${file.fileName}] lên nhóm thành công! ${isSuperAdmin ? "Sếp" : "Bác"} tải về xem nhé.`;
+                await sendGroupFile(
+                  options.api,
+                  threadId,
+                  file.filePath,
+                  caption,
+                );
+              }
+            } catch (fileErr) {
+              console.warn("[member-assistant] Fast-path QA sendGroupFile error:", fileErr);
+            }
+          },
+        });
+      } else {
+        answer = await callGemini(fastSystemPrompt, fastUserPrompt, {
+          mediaParts: mediaPart ? [mediaPart] : undefined,
+          enableSearch: false,
+        });
+      }
 
       // Ghi nhớ vào tri thức nếu cần
       if (targetUrl) {
@@ -1331,6 +1398,34 @@ async function handleHistoryQA(
       return `⚠️ Em không tìm thấy tài liệu nào khớp với yêu cầu của bạn trong kho dữ liệu!\n\n👉 Để tra cứu chuẩn xác 100% không bịa đặt, bạn vui lòng:\n1. Gửi kèm link Google Doc/Sheet: /doc [link] [câu hỏi]\n2. Hoặc nhờ Admin nạp tài liệu vào kho bằng lệnh: /doc [tên_dự_án] [link] nhé!`;
     }
 
+    // 1b. Nếu câu hỏi có ý định xin link / repo / tài nguyên: Tra cứu kho link lịch sử nhóm
+    const isQuoteResourceQuery =
+      /(?:link|đường dẫn|repo|github|mã nguồn|source|tài liệu)/i.test(question) ||
+      /(?:cho xin|gửi|xin|danh sách|check|lấy|tìm|xem).*(?:link|đường dẫn|repo)/i.test(question);
+    let quoteRelevantLinks: FoundResource[] = [];
+    if (isQuoteResourceQuery) {
+      try {
+        quoteRelevantLinks = searchRelevantLinksAndResources(threadId, `${question} ${options.quote.text}`, 20);
+      } catch (e) {
+        console.warn("[member-assistant] Quote QA searchRelevantLinksAndResources error:", e);
+      }
+    }
+
+    let quoteLinksSection = "";
+    if (quoteRelevantLinks.length > 0) {
+      quoteLinksSection =
+        "\n=== KHO LINK & TÀI NGUYÊN ĐÃ TỪNG ĐƯỢC CHIA SẺ TRONG LỊCH SỬ NHÓM: ===\n" +
+        quoteRelevantLinks
+          .map((l, idx) => {
+            const d = new Date(l.ts + 7 * 3600 * 1000);
+            const timeStr = `${String(d.getUTCDate()).padStart(2, "0")}/${String(d.getUTCMonth() + 1).padStart(2, "0")}/${d.getUTCFullYear()} ${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+            return `${idx + 1}. URL: ${l.url}\n   Người chia sẻ: ${l.sender} (${timeStr})\n   Ngữ cảnh/tin nhắn đi kèm: ${l.context}`;
+          })
+          .join("\n\n") +
+        "\n\nCHỈ DẪN BẮT BUỘC: Thành viên hỏi xin link/tài nguyên. Trong lịch sử nhóm ĐÃ TỪNG CÓ thành viên chia sẻ các đường link ở trên! " +
+        "Bạn BẮT BUỘC phải trích xuất và cung cấp đầy đủ các đường link, ghi rõ người chia sẻ và ngày gửi từ danh sách trên để trả lời cho thành viên!\n";
+    }
+
     let personaIntro = "";
     switch (groupSettings.persona) {
       case "professional":
@@ -1383,7 +1478,13 @@ async function handleHistoryQA(
       `     + Khi người dùng yêu cầu tạo file, xuất file Word/Excel/tệp văn bản từ nội dung được trích dẫn (quote) hoặc từ yêu cầu của họ:\n` +
       `       * BẮT BUỘC PHẢI GỌI CÔNG CỤ (TOOL) 'generate_file' với đầy đủ tham số: fileType ('docx'/'xlsx'/'txt'/'md'), fileName (tên file viết liền không dấu, ví dụ: 'mua_thu_ha_noi'), title (tiêu đề bài viết), content (toàn bộ nội dung văn bản chi tiết đầy đủ lấy từ trích dẫn/yêu cầu).\n` +
       `       * Sau khi gọi tool thành công, hệ thống máy chủ sẽ tự động đính kèm và gửi file thật lên nhóm Zalo cho người dùng!\n` +
-      `       * TUYỆT ĐỐI CẤM TỰ Ý BỊA ĐẶT TIN NHẮN GIẢ MẠO rằng "em đã xuất xong file", "anh có thể bấm tải file ngay phía trên", "đã đóng gói hoàn tất" khi CHƯA THỰC SỰ GỌI TOOL generate_file! Mọi hành vi tự viết tin nhắn giả vờ đã gửi file mà không gọi tool là hành vi BỊ NGHIÊM CẤM HOÀN TOÀN!`;
+      `       * TUYỆT ĐỐI CẤM TỰ Ý BỊA ĐẶT TIN NHẮN GIẢ MẠO rằng "em đã xuất xong file", "anh có thể bấm tải file ngay phía trên", "đã đóng gói hoàn tất" khi CHƯA THỰC SỰ GỌI TOOL generate_file! Mọi hành vi tự viết tin nhắn giả vờ đã gửi file mà không gọi tool là hành vi BỊ NGHIÊM CẤM HOÀN TOÀN!\n` +
+      `   - [KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter)]:\n` +
+      `     + Khi người dùng yêu cầu vẽ biểu đồ (cột, tròn, đường, heatmap...), sơ đồ quy trình, mindmap hoặc đồ họa từ nội dung trích dẫn/dữ liệu:\n` +
+      `       BẮT BUỘC sử dụng công cụ 'python_interpreter'.\n` +
+      `     + Viết mã Python hoàn chỉnh (dùng matplotlib, seaborn, PIL), render đẹp mắt và lưu thành file .png (plt.savefig('ten_bieu_do.png', dpi=150, bbox_inches='tight')).\n` +
+      `     + Hệ thống sẽ tự động bắt file ảnh PNG được tạo ra và gửi trực tiếp lên nhóm Zalo!\n` +
+      `     + TUYỆT ĐỐI CẤM từ chối hoặc nói rằng Zalo không hỗ trợ hình ảnh biểu đồ!`;
 
     let quoteLiveNews = "";
     let quoteEvidenceRequired = false;
@@ -1398,7 +1499,7 @@ async function handleHistoryQA(
       quotePlan = plan;
 
       if (plan.needsSearch && plan.queries.length > 0) {
-        quoteEvidenceRequired = plan.intent === "fact_check" || plan.intent === "realtime_news";
+        quoteEvidenceRequired = plan.intent === "fact_check" && isStrictVerificationQuestion(`${question} ${options.quote.text || ""}`);
         const searchQueries = plan.queries.slice(0, 2);
         const searchPromises = Promise.all(
           searchQueries.map((q) => searchRealtimeNews(q, {
@@ -1421,6 +1522,37 @@ async function handleHistoryQA(
       console.warn("[member-assistant] Quote QA planSearchQueries error:", e);
     }
 
+    // Tra cứu bổ trợ GitHub nếu hỏi về link / repo / mã nguồn / thư viện / mô hình AI mà trong nhóm CHƯA có
+    let quoteGithubRepoResults: { title: string; snippet: string; url: string }[] = [];
+    const isResourceOrRepo = /(?:link|đường dẫn|repo|github|source|mã nguồn|thư viện|library|model|mô hình)/i.test(question) ||
+      /(?:zerotts|vieneu|vits|xtts|whisper|llama|deepseek|claude|gpt|kokoro|f5-tts)/i.test(`${question} ${options.quote.text}`);
+    if (isResourceOrRepo && quoteRelevantLinks.length === 0) {
+      try {
+        const cleanEntity = `${question} ${options.quote.text}`
+          .replace(/@[^\s,!?]+/g, " ")
+          .replace(/(?:mình|nhóm|có|chưa|vậy|cho|xin|link|của|đường dẫn|repo|mã nguồn|source|sen chúa|mộc miên|kevin|bot|ơi|nhé|nha|ạ|với|giúp|móa|nghe|con|hay|hơn|hẳn)/gi, " ")
+          .replace(/[?!,.:;"'()\[\]{}–—\-]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        const entityMatch = cleanEntity.match(/\b([A-Za-z0-9_.-]{2,30})\b/);
+        const searchKeyword = entityMatch ? entityMatch[1] : cleanEntity.slice(0, 30);
+        if (searchKeyword && searchKeyword.length >= 2) {
+          quoteGithubRepoResults = await githubSearch(searchKeyword, 3);
+          if (quoteGithubRepoResults.length > 0) {
+            const githubSection =
+              `=== KHO LƯU TRỮ MÃ NGUỒN CHÍNH THỨC TRÊN GITHUB (TRA CỨU THỜI GIAN THỰC): ===\n` +
+              quoteGithubRepoResults
+                .map((repo, idx) => `${idx + 1}. [${repo.title}](${repo.url})\n   Mô tả: ${repo.snippet}\n   URL: ${repo.url}`)
+                .join("\n\n") +
+              `\n\nCHỈ DẪN BẮT BUỘC: Thành viên hỏi link/mã nguồn của dự án này. BẮT BUỘC cung cấp link GitHub chính thức ở trên (${quoteGithubRepoResults[0]?.url || ""}) kèm các đường link trang chủ/demo khác (nếu có) cho thành viên ngay trong câu trả lời!`;
+            quoteLiveNews = quoteLiveNews ? `${githubSection}\n\n---\n\n${quoteLiveNews}` : githubSection;
+          }
+        }
+      } catch (e) {
+        console.warn("[member-assistant] Quote QA githubSearch error:", e);
+      }
+    }
+
     const quoteLiveNewsSection = quoteLiveNews
       ? `\n=== DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT: ===\n${quoteLiveNews}\n`
       : "";
@@ -1438,14 +1570,22 @@ async function handleHistoryQA(
       `${recentChatContext}\n` +
       `=== NỘI DUNG ĐƯỢC TRÍCH DẪN (TỪ ${options.quote.senderName || "THÀNH VIÊN"}): ===\n` +
       `"${options.quote.text}"\n` +
-      `${quoteDocSection}${quoteLiveNewsSection}\n` +
+      `${quoteDocSection}${quoteLinksSection}${quoteLiveNewsSection}\n` +
       `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${question || "Hãy giải thích ngắn gọn nội dung này giúp tôi."}\n\n` +
       `HÃY TRẢ LỜI NGAY DỰA TRÊN DỮ LIỆU MỚI NHẤT ĐƯỢC CUNG CẤP:`;
+
+    const isCodeOrChartQuery =
+      /(?:vẽ|tạo|vẽ\s*giúp|xuất|lập|thiết kế|làm)\s*(?:cho\s*.*?\s*)?(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|ảnh|hình|thiệp|quote|card)/i.test(question) ||
+      /(?:vẽ\s*ảnh|tạo\s*ảnh|vẽ\s*hình|tạo\s*hình|sinh\s*ảnh|vẽ\s*tranh)/i.test(question) ||
+      /(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ)/i.test(question) ||
+      /^[/!](?:taoanh|veanh|draw|plot|chart)\b/i.test(question) ||
+      /(?:chạy|viết|run|execute)\s*(?:code|mã|script)\s*(?:python|py)/i.test(question);
 
     const isFileGenerationQuery =
       /(?:tạo|xuất|làm|lưu|gửi|convert|chuyển|viết)\s*(?:thành\s*)?(?:file|tệp)?\s*(?:word|excel|docx|xlsx|doc|sheet|bảng|pdf|txt|md|code)/i.test(question) ||
       /(?:file|tệp)\s*(?:word|excel|docx|xlsx)/i.test(question) ||
-      /(?:tạo|xuất|làm)\s*(?:file|tệp)/i.test(question);
+      /(?:tạo|xuất|làm)\s*(?:file|tệp)/i.test(question) ||
+      isCodeOrChartQuery;
 
     let answer = "";
     const isGreetingQuote =
@@ -1455,16 +1595,20 @@ async function handleHistoryQA(
       if (needsAgentLoop && !isGreetingQuote) {
         answer = await callGeminiAgentLoop(quoteSystemPrompt, quoteUserPrompt, {
           model: "gemini-3.1-flash-lite-preview",
-          maxTurns: 2,
+          maxTurns: 3,
           mediaParts: mediaPart ? [mediaPart] : undefined,
           onFileGenerated: async (file) => {
             try {
               if (options?.api) {
+                const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
+                const caption = isImg
+                  ? `📊 Biểu đồ / Hình ảnh đã được vẽ xong cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!\n📁 Tệp: ${file.fileName}`
+                  : `📄 ${botName} đã tạo và gửi file [${file.fileName}] lên nhóm thành công! ${isSuperAdmin ? "Sếp" : "Bác"} tải về xem nhé.`;
                 await sendGroupFile(
                   options.api,
                   threadId,
                   file.filePath,
-                  `📄 ${botName} đã tạo và gửi file [${file.fileName}] lên nhóm thành công! ${isSuperAdmin ? "Sếp" : "Bác"} tải về xem nhé.`,
+                  caption,
                 );
               }
             } catch (fileErr) {
@@ -1553,6 +1697,31 @@ async function handleHistoryQA(
       relevantLinks = searchRelevantLinksAndResources(threadId, question, isOnlyLinkQuery ? 50 : 20);
     } catch (e) {
       console.warn("[handleHistoryQA] Lỗi searchRelevantLinksAndResources:", e);
+    }
+  }
+
+  // 2.4b. Nếu hỏi link / repo / mã nguồn mà trong nhóm chưa từng chia sẻ:
+  // Tự động kích hoạt GitHub API tra cứu mã nguồn mở bổ trợ (đối với câu hỏi công nghệ/thư viện/mô hình/tool)
+  let githubRepoResults: { title: string; snippet: string; url: string; date?: string }[] = [];
+  if (isResourceQuery && relevantLinks.length === 0) {
+    const isTechOrRepo =
+      /(?:repo|github|source|mã nguồn|thư viện|library|model|mô hình|tts|ai|bot|tool|framework|code|script|package)/i.test(question) ||
+      /(?:zerotts|vieneu|vits|xtts|whisper|llama|deepseek|claude|gpt|kokoro|f5-tts)/i.test(question);
+    if (isTechOrRepo) {
+      try {
+        const cleanEntity = question
+          .replace(/@[^\s,!?]+/g, " ")
+          .replace(/(?:mình|nhóm|có|chưa|vậy|cho|xin|link|của|đường dẫn|repo|mã nguồn|source|sen chúa|mộc miên|kevin|bot|ơi|nhé|nha|ạ|với|giúp)/gi, " ")
+          .replace(/[?!,.:;"'()\[\]{}–—\-]/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (cleanEntity.length >= 2) {
+          githubRepoResults = await githubSearch(cleanEntity, 3);
+          console.log(`[handleHistoryQA] 🐙 githubRepoResults found: ${githubRepoResults.length} for "${cleanEntity}"`);
+        }
+      } catch (e) {
+        console.warn("[handleHistoryQA] Lỗi githubSearch bổ trợ:", e);
+      }
     }
   }
 
@@ -1664,8 +1833,157 @@ async function handleHistoryQA(
     } catch { }
   }
 
+  // 6.5. Tra cứu dữ liệu thành viên & ban quản trị nhóm (Member & Group Administration Intelligence)
+  const memberDetailsLines: string[] = [];
+  let isTargetMemberFound = false;
+
+  const isMemberOrGroupQuery =
+    /(?:vào nhóm|tham gia nhóm|gia nhập nhóm|vào từ khi nào|tham gia từ khi nào|gia nhập từ khi nào|ở trong nhóm bao lâu|ở nhóm bao lâu)/i.test(question) ||
+    /(?:thành viên.*(?:nhóm|vào|tham gia|khi nào|bao giờ|mới|cũ|ai)|ai.*(?:vào nhóm|tham gia|mới vào))/i.test(question) ||
+    /(?:ai là|danh sách)?\s*(?:trưởng nhóm|phó nhóm|admin nhóm|quản trị viên|chủ phòng|chủ nhóm)/i.test(question) ||
+    /(?:nhóm|group).*(?:có bao nhiêu|mấy người|bao nhiêu thành viên|sĩ số|tổng số)/i.test(question);
+
+  try {
+    let fromTable = "members";
+    let groupFilter = "group_id = ?";
+    const hasGroupMembers = db.prepare(`SELECT 1 FROM group_members WHERE group_id = ? AND is_active = 1 LIMIT 1`).get(threadId);
+    if (hasGroupMembers) {
+      fromTable = "group_members";
+    }
+
+    const ownBotId = typeof options?.api?.getOwnId === "function" ? String(options.api.getOwnId()).trim() : "";
+    const matchedMembers: any[] = [];
+    const seenUids = new Set<string>();
+
+    // A. Tìm theo mention UID trong tin nhắn
+    if (options?.mentions && options.mentions.length > 0) {
+      for (const m of options.mentions) {
+        const uid = String((m as any)?.uid || (m as any)?.id || "").trim();
+        if (uid && uid !== ownBotId && !seenUids.has(uid)) {
+          seenUids.add(uid);
+          const row = db.prepare(`SELECT * FROM ${fromTable} WHERE ${groupFilter} AND zalo_user_id = ?`).get(threadId, uid) as any;
+          if (row) {
+            const dName = String(row.display_name || "").toLowerCase();
+            const isBotAccount =
+              dName.includes("sen chúa") ||
+              dName.includes("sen chua") ||
+              dName.includes("mộc miên") ||
+              dName.includes("moc mien") ||
+              dName.includes("kevin") ||
+              row.role === "bot";
+            if (!isBotAccount) {
+              matchedMembers.push(row);
+            }
+          }
+        }
+      }
+    }
+
+    // B. Tìm theo tên thành viên xuất hiện trong câu hỏi (hoặc rawText)
+    const textToSearch = `${question} ${options?.rawText || ""}`.toLowerCase();
+    try {
+      const allGMembers = db.prepare(`SELECT zalo_user_id, display_name, role, joined_at, first_seen_at, is_active, left_at FROM ${fromTable} WHERE ${groupFilter}`).all(threadId) as any[];
+      for (const gm of allGMembers) {
+        const dName = (gm.display_name || "").trim().toLowerCase();
+        if (dName.length >= 3 && !seenUids.has(gm.zalo_user_id) && textToSearch.includes(dName) && !dName.includes("sen chúa") && !dName.includes("mộc miên")) {
+          seenUids.add(gm.zalo_user_id);
+          matchedMembers.push(gm);
+        }
+      }
+    } catch {}
+
+    function formatVnDateTime(ts: number | null | undefined): string {
+      if (!ts || !Number.isFinite(ts)) return "Chưa có dữ liệu chính xác";
+      try {
+        const d = new Date(ts + 7 * 3600 * 1000);
+        const day = String(d.getUTCDate()).padStart(2, "0");
+        const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+        const year = d.getUTCFullYear();
+        const hours = String(d.getUTCHours()).padStart(2, "0");
+        const minutes = String(d.getUTCMinutes()).padStart(2, "0");
+        return `${hours}:${minutes} ngày ${day}/${month}/${year}`;
+      } catch {
+        return "Không xác định";
+      }
+    }
+
+    if (matchedMembers.length > 0) {
+      isTargetMemberFound = true;
+      memberDetailsLines.push("=== THÔNG TIN THÀNH VIÊN TRONG NHÓM (TRÍCH XUẤT CHÍNH XÁC TỪ CƠ SỞ DỮ LIỆU NỘI BỘ NHÓM) ===");
+      for (const gm of matchedMembers) {
+        let msgCount = 0;
+        let lastMsgTimeStr = "";
+        try {
+          const stats = db.prepare("SELECT COUNT(*) as count, MAX(ts) as lastMsg FROM group_messages WHERE thread_id = ? AND zalo_user_id = ?").get(threadId, gm.zalo_user_id) as any;
+          msgCount = stats?.count || 0;
+          if (stats?.lastMsg) {
+            lastMsgTimeStr = formatVnDateTime(stats.lastMsg);
+          }
+        } catch {}
+
+        const roleLabel = gm.role === "owner" ? "Trưởng nhóm (Chủ phòng)" : gm.role === "admin" ? "Quản trị viên (Phó nhóm)" : "Thành viên";
+        const statusLabel = gm.is_active === 1 ? "Đang là thành viên của nhóm" : `Đã rời nhóm (lúc ${formatVnDateTime(gm.left_at)})`;
+        const joinedStr = gm.joined_at ? formatVnDateTime(gm.joined_at) : (gm.first_seen_at ? `Khoảng ${formatVnDateTime(gm.first_seen_at)} (theo mốc ghi nhận của hệ thống)` : "Chưa có dữ liệu chính xác");
+        const firstSeenStr = gm.first_seen_at ? formatVnDateTime(gm.first_seen_at) : "Chưa rõ";
+
+        memberDetailsLines.push(
+          `- Thành viên: ${gm.display_name} (ID: ${gm.zalo_user_id})\n` +
+          `  + Vai trò: ${roleLabel}\n` +
+          `  + Trạng thái: ${statusLabel}\n` +
+          `  + Thời điểm gia nhập nhóm (Zalo ghi nhận): ${joinedStr}\n` +
+          `  + Thời điểm hệ thống bot ghi nhận lần đầu: ${firstSeenStr}\n` +
+          `  + Hoạt động trò chuyện: Đã gửi ${msgCount} tin nhắn trong nhóm ${msgCount === 0 ? "(chưa từng nhắn tin / thuộc diện thành viên tàu ngầm, nằm vùng)" : `(tin nhắn gần nhất: ${lastMsgTimeStr})`}`
+        );
+      }
+      memberDetailsLines.push(
+        "CHỈ DẪN BẮT BUỘC: Câu hỏi của thành viên đang hỏi về người có trong danh sách trên. BẮT BUỘC sử dụng các thông tin, thời điểm gia nhập và thống kê chính xác ở trên để trả lời. TUYỆT ĐỐI KHÔNG tự bịa đặt, TUYỆT ĐỐI KHÔNG dẫn nguồn báo chí/web ngoài lề!"
+      );
+    } else if (isMemberOrGroupQuery) {
+      // Nếu hỏi về thành viên mới nhất
+      if (/(?:mới vào|mới tham gia|mới gia nhập|gần đây)/i.test(question)) {
+        try {
+          const newest = db.prepare(`SELECT display_name, joined_at, first_seen_at FROM ${fromTable} WHERE ${groupFilter} AND is_active = 1 ORDER BY COALESCE(joined_at, first_seen_at) DESC LIMIT 5`).all(threadId) as any[];
+          if (newest.length > 0) {
+            memberDetailsLines.push("=== DANH SÁCH THÀNH VIÊN MỚI GIA NHẬP GẦN ĐÂY ===");
+            newest.forEach((m, idx) => {
+              memberDetailsLines.push(`${idx + 1}. ${m.display_name} - Gia nhập lúc: ${formatVnDateTime(m.joined_at || m.first_seen_at)}`);
+            });
+          }
+        } catch {}
+      }
+
+      // Nếu hỏi về ban quản trị / admin / trưởng nhóm
+      if (/(?:trưởng nhóm|phó nhóm|admin|quản trị viên|chủ phòng|chủ nhóm|ban quản trị)/i.test(question)) {
+        try {
+          const admins = db.prepare(`SELECT display_name, role FROM ${fromTable} WHERE ${groupFilter} AND role IN ('owner', 'admin') AND is_active = 1`).all(threadId) as any[];
+          if (admins.length > 0) {
+            memberDetailsLines.push("=== DANH SÁCH BAN QUẢN TRỊ NHÓM ===");
+            const owners = admins.filter(a => a.role === 'owner').map(a => a.display_name);
+            const subAdmins = admins.filter(a => a.role === 'admin').map(a => a.display_name);
+            if (owners.length > 0) memberDetailsLines.push(`- Trưởng nhóm / Chủ phòng: ${owners.join(', ')}`);
+            if (subAdmins.length > 0) memberDetailsLines.push(`- Phó nhóm / Quản trị viên: ${subAdmins.join(', ')}`);
+          }
+        } catch {}
+      }
+
+      // Nếu hỏi về quy mô / tổng số thành viên
+      if (/(?:bao nhiêu|mấy người|sĩ số|tổng số)/i.test(question)) {
+        try {
+          const totalActive = db.prepare(`SELECT COUNT(*) as count FROM ${fromTable} WHERE ${groupFilter} AND is_active = 1`).get(threadId) as any;
+          memberDetailsLines.push(`=== QUY MÔ THÀNH VIÊN NHÓM ===\n- Tổng số thành viên hiện tại: ${totalActive?.count || "Không rõ"} người.`);
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.warn("[handleHistoryQA] Lỗi tra cứu thông tin thành viên:", err);
+  }
+
   // Dựng ngữ cảnh dữ liệu lịch sử
   const contextLines: string[] = [];
+
+  if (memberDetailsLines.length > 0) {
+    contextLines.push(memberDetailsLines.join("\n"));
+  }
 
   // A. Đoạn thảo luận hội thoại thực tế (Context Window)
   if (discussionThreads && discussionThreads.length > 0) {
@@ -1785,9 +2103,23 @@ async function handleHistoryQA(
       );
     }
   } else if (isResourceQuery && !isDiscussionOrProcessQuery) {
-    contextLines.push(
-      "=== KẾT QUẢ TÌM KIẾM LINK TRONG LỊCH SỬ NHÓM ===\nHiện tại hệ thống đã quét toàn bộ lịch sử tin nhắn và kho tri thức nhưng chưa tìm thấy link nào khớp với từ khóa của thành viên. Hãy thông báo lịch sự rằng nhóm chưa từng chia sẻ link phù hợp."
-    );
+    if (githubRepoResults.length > 0) {
+      contextLines.push(
+        "=== KẾT QUẢ TÌM KIẾM MÃ NGUỒN CHÍNH THỨC TỪ GITHUB API (BỔ TRỢ TỰ ĐỘNG) ===\n" +
+        githubRepoResults
+          .map((repo, idx) => `${idx + 1}. [${repo.title}](${repo.url})\n   Mô tả: ${repo.snippet}\n   URL: ${repo.url}`)
+          .join("\n\n") +
+        "\n\nCHỈ DẪN QUAN TRỌNG: Trong lịch sử chat nhóm trước đó chưa có ai gửi link này (hoặc mới chỉ có file âm thanh/thảo luận liên quan nếu có trong ngữ cảnh trên). " +
+        "Bạn BẮT BUỘC CUNG CẤP TRỰC TIẾP link repository GitHub ở trên cho thành viên! Nêu rõ đây là kho mã nguồn chính thức của dự án. TUYỆT ĐỐI CẤM bảo người dùng tự đi tìm kiếm trên mạng hay tự gõ từ khóa trên GitHub!"
+      );
+    } else {
+      contextLines.push(
+        "=== KẾT QUẢ TÌM KIẾM LINK TRONG LỊCH SỬ NHÓM ===\n" +
+        "- Trong lịch sử tin nhắn và kho tri thức của nhóm, hiện CHƯA có thành viên nào chia sẻ đường link này (hoặc mới chỉ có file/thảo luận liên quan nếu có trong ngữ cảnh trên).\n" +
+        "- NGUYÊN TẮC HỖ TRỢ CHỦ ĐỘNG: Báo rõ cho thành viên biết trong nhóm chưa có ai gửi link, ĐỒNG THỜI sử dụng dữ liệu tra cứu ngoài (Web Search / Google Grounding / Bách khoa) để CUNG CẤP TRỰC TIẾP ĐƯỜNG LINK CHÍNH THỨC (Website, Repository, Portal hoặc Tài liệu) cho thành viên ngay trong câu trả lời!\n" +
+        "- TUYỆT ĐỐI CẤM trả lời suông rằng chưa có rồi bảo người dùng tự đi tìm kiếm trên mạng hay tự gõ từ khóa trên Google/GitHub!"
+      );
+    }
   }
 
   if (pastSummaries && pastSummaries.length > 0) {
@@ -1866,9 +2198,11 @@ async function handleHistoryQA(
     /tắt search|không tìm kiếm|không tra cứu/i.test(groupSettings.customPrompt || "");
 
   const isInternalGroupLookup =
-    isResourceQuery ||
-    isOnlyLinkQuery ||
-    /(?:link|đường dẫn|tin nhắn|nội dung|thảo luận|file|tệp|tài liệu).*(?:trong nhóm|nhóm mình|nhóm này|ae|anh em|bác|anh|chị|thành viên|đã gửi|đã share|từ trước)/i.test(question) ||
+    (isResourceQuery && relevantLinks.length > 0) ||
+    (isOnlyLinkQuery && relevantLinks.length > 0) ||
+    (isTargetMemberFound && isMemberOrGroupQuery) ||
+    isMemberOrGroupQuery ||
+    (/(?:tin nhắn|nội dung|thảo luận|file|tệp).*(?:trong nhóm|nhóm mình|nhóm này|ae|anh em|bác|anh|chị|thành viên|đã gửi|đã share|từ trước)/i.test(question) && !isResourceQuery) ||
     /(?:ai|thành viên nào|người nào).*(?:nhắn|gửi|share|nói)/i.test(question);
 
   // 2.0. Đọc hiểu ngữ nghĩa & Lập kế hoạch tra cứu bằng Gemini Flash-Lite (Semantic Query Planner)
@@ -1898,7 +2232,7 @@ async function handleHistoryQA(
       planNeedsSearch = Boolean(plan.needsSearch);
 
       if (plan.needsSearch && plan.queries.length > 0) {
-        evidenceRequired = plan.intent === "fact_check" || plan.intent === "realtime_news";
+        evidenceRequired = plan.intent === "fact_check" && isStrictVerificationQuestion(question);
         const searchQueries = plan.queries.slice(0, 2);
         console.log(`[member-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(searchQueries)}`);
 
@@ -1927,6 +2261,16 @@ async function handleHistoryQA(
     }
   } else {
     console.log(`[member-assistant] 🔒 Tra cứu dữ liệu nội bộ nhóm (link/nội dung), không kích hoạt tìm kiếm ngoài web.`);
+  }
+
+  if (githubRepoResults.length > 0) {
+    const githubSection =
+      `=== KHO LƯU TRỮ MÃ NGUỒN CHÍNH THỨC TRÊN GITHUB (TRA CỨU THỜI GIAN THỰC): ===\n` +
+      githubRepoResults
+        .map((repo, idx) => `${idx + 1}. [${repo.title}](${repo.url})\n   Mô tả: ${repo.snippet}\n   URL: ${repo.url}`)
+        .join("\n\n") +
+      `\n\nCHỈ DẪN BẮT BUỘC: Thành viên hỏi xin link/mã nguồn của dự án này. BẮT BUỘC cung cấp link GitHub chính thức ở trên (${githubRepoResults[0]?.url || ""}) cho thành viên ngay trong câu trả lời!`;
+    liveNews = liveNews ? `${githubSection}\n\n---\n\n${liveNews}` : githubSection;
   }
 
   const liveNewsSection = liveNews
@@ -1959,6 +2303,9 @@ async function handleHistoryQA(
     `   - Văn bản pháp quy / Hành chính / Thủ tục: Nêu rõ tên văn bản (Luật, Nghị quyết, Nghị định, Thông tư), số hiệu, thời điểm có hiệu lực và nội dung điều khoản áp dụng.\n` +
     `   - Thông tin liên quan có giá trị gia tăng (nếu có): Chỉ ghi chú ngắn gọn, khiêm tốn ở phần phụ: "*(Ngoài ra, nếu anh/chị quan tâm đến [...], thì [...])*".\n` +
     `   - Khi yêu cầu tạo/xuất file (Word .docx, Excel .xlsx...): BẮT BUỘC gọi tool 'generate_file'. Tuyệt đối cấm viết tin nhắn giả mạo khi chưa gọi tool!\n` +
+    `   - KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
+    `     + Khi người dùng yêu cầu vẽ biểu đồ (cột, tròn, đường, heatmap...), sơ đồ quy trình, mindmap hoặc đồ họa từ dữ liệu: BẮT BUỘC sử dụng công cụ 'python_interpreter'.\n` +
+    `     + Viết mã Python hoàn chỉnh (dùng matplotlib, seaborn, PIL), render đẹp mắt và lưu thành file .png. Tuyệt đối cấm từ chối!\n` +
     `3. DẪN NGUỒN THEO BẰNG CHỨNG ĐƯỢC CUNG CẤP (GROUNDING CITATION CHO MỌI LĨNH VỰC):\n` +
     `   - Khi câu trả lời sử dụng dữ liệu thời gian thực (tin tức, thể thao, văn bản pháp luật, đơn vị hành chính, giá cả thị trường, nghiên cứu khoa học):\n` +
     `     + Chỉ sử dụng các bản ghi [E#], URL và ngày công bố xuất hiện trong phần bằng chứng. Không tự thêm tên cơ quan, ngày hoặc URL.\n` +
@@ -1966,6 +2313,7 @@ async function handleHistoryQA(
     `     + Với câu hỏi "hiện nay/hiện tại là ai", chỉ trả lời danh tính được nguồn chính thức mới nhất xác nhận; không lấy người tiền nhiệm/người chỉ được nhắc tới và không tự thêm hoạt động nếu không được hỏi.\n` +
     `     + Nếu EVIDENCE_STATUS là INSUFFICIENT, phải nói rõ chưa đủ bằng chứng và không được đoán đáp án.\n` +
     `     + Giữ nguyên ngày của từng nguồn; thời điểm hệ thống hiện tại không phải ngày công bố của nguồn.\n` +
+    `     + KHI SỬ DỤNG NGUỒN TIN QUỐC TẾ (bằng tiếng Anh như TechCrunch, The Verge, MIT Tech Review, BBC, Reuters, CISA, WHO...): BẮT BUỘC TỰ ĐỘNG DỊCH VÀ BIÊN TẬP TOÀN BỘ SANG TIẾNG VIỆT CHUẨN XÁC, MẠCH LẠC, DỄ HIỂU; giữ nguyên tên riêng, thông số kỹ thuật và trích dẫn rõ tên nguồn (ví dụ: Nguồn: TechCrunch, The Verge...).\n` +
     `4. KẾT BÀI GỢI MỞ HOẶC LỜI CHÚC LỊCH THIỆP:\n` +
     `   - Có thể để lại 1 câu hỏi gợi mở ngắn gọn hoặc câu chúc tự nhiên, tinh tế (nếu phù hợp).\n`;
 
@@ -2024,22 +2372,34 @@ async function handleHistoryQA(
     `- CẬP NHẬT DỮ KIỆN THỜI GIAN THỰC & PHÁP LUẬT / HÀNH CHÍNH MỚI NHẤT: BẮT BUỘC ưu tiên dữ liệu mới nhất từ phần 'DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT'. Khi câu hỏi liên quan đến dữ kiện thực tế có tính biến động (chính sách, luật pháp, đơn vị hành chính, giá cả, số liệu): TUYỆT ĐỐI KHÔNG bám vào số liệu cũ trong trí nhớ đã lỗi thời nếu dữ liệu tra cứu cung cấp văn bản, nghị quyết hoặc số liệu mới hơn. Phải giải thích rõ ràng và cập nhật số liệu mới nhất cho người hỏi!\n` +
     `- KHI HỎI VỀ QUY TRÌNH, HƯỚNG DẪN HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Trích dẫn và diễn giải chi tiết từng bước (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến từ lịch sử chat. Không chỉ đưa mỗi link tài liệu.\n` +
     `- QUY TẮC CÔNG CỤ XUẤT FILE (generate_file): CHỈ gọi công cụ 'generate_file' khi người dùng có YÊU CẦU CỤ THỂ VỀ NỘI DUNG để tạo/xuất file (ví dụ: "soạn cho anh hợp đồng...", "tạo file docx quy trình...", "xuất bảng tính chi phí ra excel..."). TUYỆT ĐỐI CẤM TỰ Ý TẠO FILE khi người dùng chỉ hỏi thăm năng lực (ví dụ: "em biết tạo file docx không?", "bot có tạo file được không?"). Với câu hỏi hỏi thăm năng lực, CHỈ trả lời bằng lời nói giải thích năng lực và mời người dùng cung cấp nội dung cần tạo. Tuyệt đối cấm tạo file rỗng tự chế!\n` +
+    `- KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
+    `  + Khi người dùng yêu cầu vẽ biểu đồ (cột, tròn, đường, heatmap...), sơ đồ quy trình, mindmap hoặc đồ họa từ dữ liệu: BẮT BUỘC sử dụng công cụ 'python_interpreter'.\n` +
+    `  + Viết mã Python hoàn chỉnh (dùng matplotlib, seaborn, PIL), render đẹp mắt và lưu thành file .png. Tuyệt đối cấm từ chối!\n` +
     `- TỐI ƯU TỐC ĐỘ PHẢN HỒI: Nếu trong dữ liệu thời gian thực hoặc context đã có đủ thông tin để trả lời, PHẢI TẬP TRUNG TRẢ LỜI NGAY, không gọi thêm công cụ tìm kiếm lặp lại để tránh làm chậm phản hồi.\n` +
     searchInstruction +
     directAnswerInstruction;
 
   const userPrompt =
-    `${quotePromptSection}\n${fileContentSection}${liveNewsSection}\n` +
+    `${fileContentSection}${liveNewsSection}\n` +
     `DƯỚI ĐÂY LÀ DỮ LIỆU LỊCH SỬ CHAT NỘI BỘ CỦA CHÍNH NHÓM "${currentGroupName}" (ID: ${threadId}) ĐỂ THAM KHẢO:\n` +
     `<chat_history>\n${contextData}\n</chat_history>\n\n` +
+    `${quotePromptSection ? `${quotePromptSection}\n` : ""}` +
     `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${question || "Hãy phân tích tài liệu/hình ảnh/nội dung trên giúp tôi."}\n\n` +
     `HÃY TRẢ LỜI THẬT ${isSuperAdmin ? "CHU ĐÁO, CHUẨN XÁC VÀ TÔN TRỌNG SẾP" : "DUYÊN DÁNG, CHUẨN XÁC VÀ HÓM HỈNH"}:`;
 
   try {
+    const isCodeOrChartQuery =
+      /(?:vẽ|tạo|vẽ\s*giúp|xuất|lập|thiết kế|làm)\s*(?:cho\s*.*?\s*)?(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|ảnh|hình|thiệp|quote|card)/i.test(question) ||
+      /(?:vẽ\s*ảnh|tạo\s*ảnh|vẽ\s*hình|tạo\s*hình|sinh\s*ảnh|vẽ\s*tranh)/i.test(question) ||
+      /(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ)/i.test(question) ||
+      /^[/!](?:taoanh|veanh|draw|plot|chart)\b/i.test(question) ||
+      /(?:chạy|viết|run|execute)\s*(?:code|mã|script)\s*(?:python|py)/i.test(question);
+
     const isFileGenerationQuery =
       /(?:tạo|xuất|làm|lưu|gửi|convert|chuyển|viết)\s*(?:thành\s*)?(?:file|tệp)?\s*(?:word|excel|docx|xlsx|doc|sheet|bảng|pdf|txt|md|code)/i.test(question) ||
       /(?:file|tệp)\s*(?:word|excel|docx|xlsx)/i.test(question) ||
-      /(?:tạo|xuất|làm)\s*(?:file|tệp)/i.test(question);
+      /(?:tạo|xuất|làm)\s*(?:file|tệp)/i.test(question) ||
+      isCodeOrChartQuery;
 
     const needsAgentLoop = isFileGenerationQuery || /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(question);
 
@@ -2048,12 +2408,16 @@ async function handleHistoryQA(
       // 🚀 Chỉ khi người dùng thực sự yêu cầu gọi tool xuất file (Word, Excel) hoặc đọc link cụ thể mới chạy Agent Loop
       answer = await callGeminiAgentLoop(systemPrompt, userPrompt, {
         model: "gemini-3.1-flash-lite-preview",
-        maxTurns: 2,
+        maxTurns: 3,
         mediaParts: mediaPart ? [mediaPart] : undefined,
         onFileGenerated: async (file) => {
           try {
             if (options?.api) {
-              await sendGroupFile(options.api, threadId, file.filePath, `📄 ${botName} đã tạo và gửi file [${file.fileName}] lên nhóm thành công! ${isSuperAdmin ? "Sếp" : "Bác"} tải về xem nhé.`);
+              const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
+              const caption = isImg
+                ? `📊 Biểu đồ / Hình ảnh đã được vẽ xong cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!\n📁 Tệp: ${file.fileName}`
+                : `📄 ${botName} đã tạo và gửi file [${file.fileName}] lên nhóm thành công! ${isSuperAdmin ? "Sếp" : "Bác"} tải về xem nhé.`;
+              await sendGroupFile(options.api, threadId, file.filePath, caption);
             }
           } catch (fileErr) {
             console.warn("[member-assistant] sendGroupFile error:", fileErr);
@@ -2065,6 +2429,7 @@ async function handleHistoryQA(
       // Tự động kích hoạt Google Search Grounding với model gemini-2.5-flash khi câu hỏi cần dữ liệu thời gian thực
       const needsSearch = !isSearchDisabled && !isInternalGroupLookup && (
         planNeedsSearch ||
+        (isResourceQuery && relevantLinks.length === 0) ||
         /(?:thời tiết|giá vàng|tỷ giá|chứng khoán|tin tức|mới nhất|khi nào|bao giờ|ai là|lịch thi đấu|tỉ số|kết quả|vừa ra mắt)/i.test(question)
       );
 
@@ -2188,13 +2553,22 @@ export function extractImagePromptFromText(rawText: string, botName = ""): strin
   const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const botPart = botName ? `|${escapeRegex(botName.toLowerCase())}` : "";
   let clean = rawText
+    .replace(new RegExp(`(?:@\\s*)?(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot${botPart})(?=[^\\p{L}\\p{N}]|$)`, "giu"), " ")
     .replace(/@[^\s,!?]+/g, " ")
-    .replace(new RegExp(`\\b(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot${botPart})\\b`, "gi"), " ")
     .replace(/\s+/g, " ")
     .trim();
 
+  // BỎ QUA nếu là yêu cầu vẽ biểu đồ, đồ thị, sơ đồ, bảng dữ liệu hoặc từ file (để chuyển sang Python Sandbox)
+  if (
+    /(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic)/i.test(clean) ||
+    /(?:từ\s+file|từ\s+tệp|từ\s+bảng|từ\s+dữ\s+liệu|từ\s+danh\s+sách|theo\s+file|theo\s+bảng)/i.test(clean)
+  ) {
+    return null;
+  }
+
   function cleanExtractedPrompt(p: string): string {
     return p
+      .replace(/^(?:cho\s+)?(?:tôi|tao|mình|em|anh|chị|bác|nhóm)\s+/i, "")
       .replace(/^(?:về|với|cảnh|chủ đề|hình ảnh|bức ảnh|tấm ảnh)\s*[:\s]*/i, "")
       .replace(/^(?:một|vài|những)\s+/i, "")
       .replace(/^(?:con|cái|chiếc|bức|tấm|hình|ảnh)\s+/i, "")
@@ -2229,12 +2603,18 @@ export type AspectRatioType = "16:9" | "9:16" | "4:3" | "3:4" | "1:1";
 export interface ParsedImageRequest {
   prompt: string;
   aspectRatio: AspectRatioType;
+  referenceImageUrl?: string;
 }
 
 /**
  * Phân tích yêu cầu tạo ảnh: tách prompt sạch và tỉ lệ khung hình (16:9, 9:16, 4:3, 3:4, 1:1)
+ * Hỗ trợ bóc tách ngữ cảnh từ tin nhắn được trích dẫn (Quote) khi người dùng dùng đại từ chỉ định ("này đi e", "theo phương án này").
  */
-export function parseImagePromptAndRatio(rawText: string, botName = ""): ParsedImageRequest | null {
+export function parseImagePromptAndRatio(
+  rawText: string,
+  botName = "",
+  quote?: MemberMessageEvent["quote"] | null,
+): ParsedImageRequest | null {
   const extracted = extractImagePromptFromText(rawText, botName);
   if (!extracted) return null;
 
@@ -2270,12 +2650,43 @@ export function parseImagePromptAndRatio(rawText: string, botName = ""): ParsedI
   cleaned = cleaned
     .replace(/^[,;:\s-]+|[,;:\s-]+$/g, "")
     .replace(/\s+/g, " ")
-    .replace(/\s*(?:đi\s+nhé|đi\s+nha|đi\s+nào|đi|nhé|nha|với|giúp|giùm|nào|coi|xem)[.!?\s]*$/i, "")
+    .replace(/\s+(?:đi\s+e|đi\s+em|đi\s+bot|đi\s+nhé|đi\s+nha|đi\s+nào|đi|nhé|nha|với|giúp|giùm|nào|coi|xem|nè|e|em|bot)[.!?\s]*$/i, "")
     .trim();
 
+  // Nhận diện các đại từ chỉ định hoặc câu lệnh phụ thuộc vào ngữ cảnh trích dẫn
+  const isReferentialOnly =
+    /^(?:này|nay|cái này|ảnh này|hình này|bức này|như này|như vầy|theo cái này|theo phương án này|phương án này|nội dung này|đoạn này|bài này|bài viết này|ý tưởng này)(?:\s+(?:đi\s+e|đi\s+em|đi|nhé|nha|với|ạ|e|em|bot|nè))?$/i.test(cleaned) ||
+    /^(?:theo|dựa theo|dựa vào)\s+(?:phương án|ý tưởng|nội dung|mô tả|bài viết|cái|ảnh|hình)?\s*này(?:\s+(?:đi\s+e|đi\s+em|đi|nhé|nha|với|ạ|e|em|bot|nè))?$/i.test(cleaned);
+
+  let referenceImageUrl: string | undefined = undefined;
+  if (quote?.mediaUrl && (quote.mediaType === "image" || /\.(?:jpg|jpeg|png|webp|gif)/i.test(quote.mediaUrl))) {
+    referenceImageUrl = quote.mediaUrl;
+  }
+
+  let finalPrompt = cleaned || extracted;
+
+  if (quote?.text && quote.text.trim()) {
+    const qText = quote.text.trim();
+    if (isReferentialOnly) {
+      // Người dùng chỉ nói "tạo ảnh này đi e", "theo phương án này nè" -> lấy 100% nội dung quote làm prompt
+      finalPrompt = qText.slice(0, 500);
+    } else if (/\b(?:này|cái này|phương án này|dự án này|bài này|nội dung này)\b/i.test(cleaned)) {
+      // Người dùng bổ sung thêm yêu cầu (ví dụ: "vẽ phong cách anime cho nội dung này")
+      finalPrompt = `${cleaned} (Chi tiết từ nội dung trích dẫn: ${qText.slice(0, 350)})`;
+    }
+  } else if (isReferentialOnly) {
+    if (referenceImageUrl) {
+      finalPrompt = "Tạo biến thể hình ảnh chất lượng cao sắc nét dựa trên hình ảnh gốc";
+    } else {
+      // Người dùng nói "tạo ảnh này đi e" nhưng không có quote text lẫn ảnh -> không đủ dữ kiện làm prompt
+      return null;
+    }
+  }
+
   return {
-    prompt: cleaned || extracted,
+    prompt: finalPrompt,
     aspectRatio: ratio,
+    referenceImageUrl,
   };
 }
 
@@ -2375,7 +2786,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     userCooldowns.set(sender, now);
     void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.OK);
     void sendTyping(api, threadId);
-    const reply = handleHelpCommand();
+    const reply = handleHelpCommand(botName);
     await sendGroupText(api, threadId, reply);
     console.log(`[member-assistant] ✅ Đã phản hồi /help cho ${displayName}`);
     return;
@@ -2468,7 +2879,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       .replace(/^!links?\s*/i, "")
       .replace(/^\/(tonghoplink|tailieu)\s*/i, "")
       .trim();
-    const reply = handleLinksCommand(threadId, filter || undefined);
+    const reply = handleLinksCommand(threadId, filter || undefined, botName);
     await sendGroupText(api, threadId, reply);
     console.log(`[member-assistant] ✅ Đã phản hồi /link cho ${displayName}`);
     return;
@@ -2534,7 +2945,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   }
 
   // 6.2. Vệ Tinh 3: Lệnh /taoanh hoặc Yêu cầu vẽ ảnh bằng ngôn ngữ tự nhiên ("tạo cho tôi bức ảnh...", "vẽ giúp anh một...")
-  const imageReq = parseImagePromptAndRatio(rawText, botName);
+  const imageReq = parseImagePromptAndRatio(rawText, botName, event.quote);
   if (imageReq && imageReq.prompt.length >= 3) {
     const isExplicitCommand = /^[/!](?:taoanh|veanh|sinhdan|draw|imagine|image)\b/i.test(rawText.trim());
 
@@ -2544,44 +2955,75 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       const lowerBot = botName.toLowerCase().trim();
       const unaccentedBot = lowerBot.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
 
-      // Nếu thành viên tag người khác (ví dụ @Kevin, @Nam...) thì tuyệt đối không xen vào
-      const hasOtherMention = /@[^\s,!?]+/g.test(rawText) &&
-        !lowerRaw.includes(`@${lowerBot}`) &&
-        !lowerRaw.includes(`@${unaccentedBot}`) &&
-        !lowerRaw.includes("@bot") &&
-        !lowerRaw.includes("@sen chúa") &&
-        !lowerRaw.includes("@sen chua") &&
-        !lowerRaw.includes("@mộc miên") &&
-        !lowerRaw.includes("@moc mien");
+      // Kiểm tra xem bot có được tag trực tiếp qua UID không
+      const isTaggedByUid = Boolean(
+        ownId &&
+        Array.isArray(event.mentions) &&
+        event.mentions.some((m: any) => String(m?.uid || m?.id) === ownId)
+      );
 
-      if (hasOtherMention) {
-        // Người dùng đang tag người khác trong nhóm, bot tuyệt đối không xen vào
-        // Bỏ qua để tin nhắn tiếp tục chạy xuống luồng xử lý khác
+      // Kiểm tra xem người dùng có đang tag người khác qua UID không (tag người khác thì bot tuyệt đối không xen vào)
+      const isTaggedOtherUid = Boolean(
+        ownId &&
+        Array.isArray(event.mentions) &&
+        event.mentions.length > 0 &&
+        !isTaggedByUid
+      );
+
+      // Kiểm tra gọi đích danh bot này (bằng tên bot đã cấu hình hoặc không dấu)
+      const botParts = lowerBot.split(/\s+/).filter((p) => p.length >= 3);
+      const mentionsThisBotName =
+        lowerRaw.includes(`@${lowerBot}`) ||
+        lowerRaw.includes(`@${unaccentedBot}`) ||
+        lowerRaw.includes(lowerBot) ||
+        lowerRaw.includes(unaccentedBot) ||
+        lowerRaw.startsWith(lowerBot + " ") ||
+        lowerRaw.startsWith(unaccentedBot + " ") ||
+        lowerRaw.includes(`${lowerBot} ơi`) ||
+        lowerRaw.includes(`${unaccentedBot} oi`) ||
+        lowerRaw.includes(`nhờ ${lowerBot}`) ||
+        lowerRaw.includes(`nhờ ${unaccentedBot}`) ||
+        botParts.some((part) => {
+          const unacc = part.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
+          return (
+            lowerRaw.includes(`${part} ơi`) ||
+            lowerRaw.includes(`${unacc} oi`) ||
+            lowerRaw.includes(`nhờ ${part}`) ||
+            lowerRaw.includes(`nhờ ${unacc}`) ||
+            lowerRaw.startsWith(`${part} `) ||
+            lowerRaw.startsWith(`${unacc} `)
+          );
+        });
+
+      const mentionsGenericBot =
+        lowerRaw.includes("@bot") ||
+        lowerRaw.startsWith("bot ơi") ||
+        lowerRaw.startsWith("bot oi") ||
+        lowerRaw.startsWith("chào bot") ||
+        lowerRaw.startsWith("chao bot") ||
+        lowerRaw.includes("bot ơi") ||
+        lowerRaw.includes("bot oi") ||
+        lowerRaw.includes("nhờ bot") ||
+        lowerRaw.includes("hỏi bot") ||
+        lowerRaw.includes("cho bot") ||
+        lowerRaw.startsWith("bot ");
+
+      // Nếu thành viên tag người khác (UID khác hoặc @Tên khác bot) thì tuyệt đối không xen vào
+      const hasOtherMention =
+        isTaggedOtherUid ||
+        (/@[^\s,!?]+/g.test(rawText) &&
+          !lowerRaw.includes(`@${lowerBot}`) &&
+          !lowerRaw.includes(`@${unaccentedBot}`) &&
+          !lowerRaw.includes("@bot"));
+
+      const isBotCalled = (isTaggedByUid || mentionsThisBotName || mentionsGenericBot) && !hasOtherMention;
+
+      if (!isBotCalled) {
+        // Trong nhóm nếu không gọi tên bot thì không tự tiện tạo ảnh
       } else {
-        // Kiểm tra có gọi tên bot không
-        const isBotCalled =
-          lowerRaw.includes(lowerBot) ||
-          lowerRaw.includes(unaccentedBot) ||
-          lowerRaw.includes("sen chúa") ||
-          lowerRaw.includes("sen chua") ||
-          lowerRaw.includes("mộc miên") ||
-          lowerRaw.includes("moc mien") ||
-          lowerRaw.includes("bot ơi") ||
-          lowerRaw.includes("bot oi") ||
-          lowerRaw.includes("nhờ bot") ||
-          lowerRaw.includes("hỏi bot") ||
-          lowerRaw.includes("cho bot") ||
-          lowerRaw.startsWith("bot ") ||
-          lowerRaw.startsWith("chào bot") ||
-          lowerRaw.includes("@bot");
-
-        if (!isBotCalled) {
-          // Trong nhóm nếu không gọi tên bot thì không tự tiện tạo ảnh
-        } else {
-          // Đủ điều kiện tạo ảnh bằng ngôn ngữ tự nhiên
-          await executeGroupImageGen();
-          return;
-        }
+        // Đủ điều kiện tạo ảnh bằng ngôn ngữ tự nhiên
+        await executeGroupImageGen();
+        return;
       }
     } else {
       // Có lệnh rõ ràng (/taoanh, !veanh...)
@@ -2596,33 +3038,55 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.HEART);
     void sendTyping(api, threadId);
 
-    if (!isCloudflareConfigured()) {
-      await sendGroupText(
-        api,
-        threadId,
-        `⚠️ @${displayName} Tính năng vẽ ảnh AI (FLUX.1-schnell) chưa được cấu hình trên máy chủ (thiếu CLOUDFLARE_ACCOUNT_ID hoặc CLOUDFLARE_API_TOKEN trong file .env). Vui lòng liên hệ Quản trị viên để kích hoạt nhé!`,
-      );
-      return;
+    const isCodex = config.imageProvider === "codex";
+
+    if (isCodex) {
+      if (!isCodexImageConfigured()) {
+        await sendGroupText(
+          api,
+          threadId,
+          `⚠️ @${displayName} Tính năng vẽ ảnh AI (Codex) chưa được kích hoạt trên máy chủ (cần cấu hình NINE_ROUTER_API_KEY trong file .env). Vui lòng liên hệ Quản trị viên nhé!`,
+        );
+        return;
+      }
+    } else {
+      if (!isCloudflareConfigured()) {
+        await sendGroupText(
+          api,
+          threadId,
+          `⚠️ @${displayName} Tính năng vẽ ảnh AI (Cloudflare) chưa được cấu hình trên máy chủ. Vui lòng liên hệ Quản trị viên để kích hoạt nhé!`,
+        );
+        return;
+      }
     }
 
     const isSuperAdmin = isUserAdmin(sender);
     const ratioTag = aspectRatio !== "1:1" ? ` (tỉ lệ ${aspectRatio})` : "";
+    const providerLabel = isCodex ? "Codex (GPT-Image)" : "FLUX.1-schnell";
+    const waitHint = isCodex ? "khoảng 15-25 giây" : "khoảng 2 giây";
+
     await sendGroupText(
       api,
       threadId,
-      `🎨 ${isSuperAdmin ? "Em đang vẽ ảnh cho Sếp" : `${botName} đang vẽ ảnh`}: "${imagePrompt}"${ratioTag}... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em khoảng 2 giây nhé!`,
+      `🎨 ${isSuperAdmin ? "Em đang vẽ ảnh cho Sếp" : `${botName} đang vẽ ảnh`}: "${imagePrompt}"${ratioTag} bằng ${providerLabel}... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em ${waitHint} nhé!`,
     );
 
     try {
-      const imgRes = await generateCloudflareImage(imagePrompt, { aspectRatio });
+      const imgRes = isCodex
+        ? await generateCodexImage(imagePrompt, { aspectRatio })
+        : await generateCloudflareImage(imagePrompt, { aspectRatio });
+
       if (imgRes.success && imgRes.filePath) {
+        const extraPromptInfo = (isCodex && imgRes.translatedPrompt)
+          ? `\n🔍 Visual prompt: "${imgRes.translatedPrompt.slice(0, 120)}..."`
+          : "";
         await sendGroupFile(
           api,
           threadId,
           imgRes.filePath,
-          `🎨 Ảnh của ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} đây ạ!\n✨ Chủ đề: "${imagePrompt}"${ratioTag}`,
+          `🎨 Ảnh của ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} đây ạ!\n✨ Chủ đề: "${imagePrompt}"${ratioTag}\n🤖 Model: ${isCodex ? config.codexImageModel : "FLUX.1-schnell"}${extraPromptInfo}`,
         );
-        console.log(`[member-assistant] ✅ Đã gửi ảnh FLUX.1 thành công cho ${displayName} ("${imagePrompt}", ratio: ${aspectRatio})`);
+        console.log(`[member-assistant] ✅ Đã gửi ảnh ${isCodex ? "Codex" : "FLUX.1"} thành công cho ${displayName} ("${imagePrompt}", ratio: ${aspectRatio})`);
       } else {
         await sendGroupText(
           api,
@@ -2631,7 +3095,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         );
       }
     } catch (imgErr: any) {
-      console.error(`[member-assistant] ❌ Lỗi sinh/gửi ảnh FLUX.1:`, imgErr);
+      console.error(`[member-assistant] ❌ Lỗi sinh/gửi ảnh:`, imgErr);
       await sendGroupText(
         api,
         threadId,
@@ -3079,6 +3543,12 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     lower.includes(`cho ${unaccentedBotName}`) ||
     mentionsShortName;
 
+  const isTaggedByUid = Boolean(
+    ownId &&
+    Array.isArray(event.mentions) &&
+    event.mentions.some((m: any) => String(m?.uid || m?.id) === ownId)
+  );
+
   const mentionsGenericBot =
     lower.includes("@bot") ||
     lower.startsWith("bot ơi") ||
@@ -3095,7 +3565,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     lower.includes("cho bot") ||
     lower.startsWith("bot ");
 
-  const mentionsBot = mentionsThisBot || mentionsGenericBot;
+  const mentionsBot = isTaggedByUid || mentionsThisBot || mentionsGenericBot;
 
   const isDocCommand =
     lower.startsWith("/doc") ||
@@ -3151,16 +3621,17 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     const botNamePattern = new RegExp(`@?${escapeRegex(botName)}\\b`, "gi");
     const unaccBotNamePattern = new RegExp(`@?${escapeRegex(unaccentedBotName)}\\b`, "gi");
 
-    // Làm sạch câu hỏi
+    // Làm sạch câu hỏi nhưng GIỮ NGUYÊN tên thành viên được tag (chỉ bỏ @ ở trước tên thành viên khác)
     let question = rawText
       .replace(/^\/(?:doc-strict|doc|docs|tailieu|strict|hoi|dich|docanh|docfile|file|anh)\s*/i, "")
       .replace(/^!(?:doc-strict|doc|docs|tailieu|strict|hoi|dich|docanh|docfile|file|anh)\s*/i, "")
       .replace(botNamePattern, "")
       .replace(unaccBotNamePattern, "")
       .replace(/@bot\b/gi, "")
-      .replace(/@[^\s,!?]+/g, "")
       .replace(new RegExp(`^(?:bot|${escapeRegex(lowerBotName)}|${escapeRegex(unaccentedBotName)})\\s*(?:ơi|oi)?,?\\s*`, "i"), "")
       .replace(new RegExp(`^(?:chào|chao|alo|hi|hello)\\s+(?:bot|${escapeRegex(lowerBotName)}|${escapeRegex(unaccentedBotName)}|em)?,?\\s*`, "i"), "")
+      .replace(/@([^\s,!?]+)/g, "$1")
+      .replace(/^(?:ơi|oi)[,\s]*/i, "")
       .trim();
 
     // Loại bỏ tiền tố /doc hoặc doc: còn sót sau khi gọi bot (ví dụ: "bot /doc phương án...")
@@ -3291,6 +3762,8 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         directDocContent,
         sender,
         isSuperAdmin,
+        mentions: event.mentions,
+        rawText,
       });
       const groupSettings = getGroupSettings(threadId);
       const botName = (groupSettings.botName || defaultBotName).trim();

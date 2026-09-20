@@ -111,7 +111,7 @@ function GroupPersonaFormInner() {
   // Form state cho nhóm đang chọn
   const [persona, setPersona] = useState<GroupItem["persona"]>("humorous");
   const [customPrompt, setCustomPrompt] = useState("");
-  const [botName, setBotName] = useState("Sen Chúa");
+  const [botName, setBotName] = useState("");
   const [welcomeMsg, setWelcomeMsg] = useState("");
   const [mode, setMode] = useState<GroupItem["mode"]>("interactive");
   const [weatherAuto, setWeatherAuto] = useState<boolean>(false);
@@ -161,7 +161,7 @@ function GroupPersonaFormInner() {
   function applyGroupState(g: GroupItem) {
     setPersona(g.persona || "humorous");
     setCustomPrompt(g.customPrompt || "");
-    setBotName(g.botName || "Sen Chúa");
+    setBotName(g.botName || "");
     setWelcomeMsg(g.welcomeMsg || "");
     setMode(g.mode || "interactive");
     setWeatherAuto(Boolean(g.weatherAuto));
@@ -376,7 +376,7 @@ function GroupPersonaFormInner() {
                   type="text"
                   value={botName}
                   onChange={(e) => setBotName(e.target.value)}
-                  placeholder="Ví dụ: Sen Chúa, Trợ Lý AI, Giáo Sư..."
+                  placeholder="Ví dụ: Sen Chúa, Mộc Miên, Trợ Lý AI, Giáo Sư..."
                   className="w-full bg-slate-800/80 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500/60 transition-all"
                 />
                 <span className="text-[11px] text-slate-400 mt-1 block">

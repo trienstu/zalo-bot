@@ -110,6 +110,8 @@ const CATEGORY_FEEDS_REGISTRY: Record<string, FeedSource[]> = {
   ],
   "so-hoa": [
     { sourceName: "VnExpress Số Hóa", url: "https://vnexpress.net/rss/so-hoa.rss", lang: "vi" },
+    { sourceName: "TechCrunch AI", url: "https://techcrunch.com/category/artificial-intelligence/feed/", lang: "en" },
+    { sourceName: "MIT Tech Review AI", url: "https://www.technologyreview.com/topic/artificial-intelligence/feed/", lang: "en" },
     { sourceName: "The Verge", url: "https://theverge.com/rss/index.xml", lang: "en" },
     { sourceName: "TechCrunch", url: "https://techcrunch.com/feed/", lang: "en" },
     { sourceName: "BBC Tech", url: "https://feeds.bbci.co.uk/news/technology/rss.xml", lang: "en" },
@@ -216,13 +218,13 @@ export function detectNewsCategories(query: string): string[] {
   if (/(?:kinh doanh|kinh tế|chứng khoán|cổ phiếu|ngân hàng|doanh nghiệp|tài chính|giá vàng|giá xăng|lãi suất|vn-index|thị trường tài chính|fed\b)/i.test(query)) {
     cats.push("kinh-doanh");
   }
-  if (/(?:công nghệ|ai\b|mô hình|gpt|gemini|bán dẫn|chip|apple|iphone|macbook|số hóa|deepseek|claude|nintendo|switch|phần mềm|sora|openai|nvidia)/i.test(query)) {
+  if (/(?:công nghệ|ai\b|mô hình|gpt|gemini|bán dẫn|chip|apple|iphone|macbook|số hóa|deepseek|claude|anthropic|openai|nvidia|grok|llama|sora|qwen|trí tuệ nhân tạo|llm|nintendo|switch|phần mềm)/i.test(query)) {
     cats.push("so-hoa");
   }
   if (/(?:thể thao|bóng đá|đá banh|trận banh|lịch thi đấu|kết quả bóng đá|tỉ số|ngoại hạng anh|cúp c1|champions league|la liga|serie a|bundesliga|v-league|u23|world cup|cầu thủ|trận đấu|bảng xếp hạng bóng đá|trận cầu|derby)/i.test(query)) {
     cats.push("the-thao");
   }
-  if (/(?:ô tô|xe máy|xe hơi|xe điện|vinfast|toyota|honda|hyundai|kia\b|mazda|ford|mercedes|bmw|audi|porsche|tesla|byd|bằng lái|đăng kiểm|giá xe|phạt nguội|môtô|xe tải)/i.test(query)) {
+  if (/(?:ô tô|xe máy|xe hơi|xe điện|vinfast|toyota|honda|hyundai|kia\b|mazda|ford|mercedes|bmw|audi|porsche|tesla|byd|ev\b|bằng lái|đăng kiểm|giá xe|phạt nguội|môtô|xe tải)/i.test(query)) {
     cats.push("xe-co");
   }
   if (/(?:giải trí|showbiz|sao việt|nghệ sĩ|diễn viên|ca sĩ|phim\b|phim ảnh|rạp chiếu|oscar|grammy|cannes|venice|hoa hậu|blackpink|bts\b|taylor swift|concert|bài hát|mv\b|album|vpop|kpop)/i.test(query)) {
@@ -383,7 +385,7 @@ async function fetchMultiSourceRss(category: string, filterKeyword = ""): Promis
   const sources = CATEGORY_FEEDS_REGISTRY[category] || CATEGORY_FEEDS_REGISTRY["tin-moi-nhat"] || [];
   if (sources.length === 0) return [];
 
-  const feedPromises = sources.map((src) => fetchSingleRssFeed(src, 2500));
+  const feedPromises = sources.map((src) => fetchSingleRssFeed(src, 3500));
   const settled = await Promise.allSettled(feedPromises);
   const allItems: ParsedNewsItem[] = [];
 
@@ -398,16 +400,38 @@ async function fetchMultiSourceRss(category: string, filterKeyword = ""): Promis
     "những", "được", "người", "theo", "nhiều", "ngày", "năm", "tháng",
     "thông", "tin", "xem", "kiểm", "tra", "tổng", "dự", "án", "giúp",
     "nhé", "nha", "ạ", "em", "anh", "chị", "bác", "về", "lại", "đến",
-    "cho", "mình", "hỏi", "đang", "cũng", "như", "nào"
+    "cho", "mình", "hỏi", "đang", "cũng", "như", "nào", "hôm", "nay",
+    "mới", "nhất", "tức", "hot", "vừa", "xong", "gì", "sao", "thế",
+    "cập", "nhật", "có"
   ]);
 
   const rawTokens = filterKeyword
-    ? filterKeyword.toLowerCase().split(/\s+/).filter((t) => t.length > 2)
+    ? filterKeyword.toLowerCase().split(/\s+/).filter((t) => t.length > 1)
     : [];
   const meaningfulTokens = rawTokens.filter((t) => !STOP_WORDS.has(t));
-  if (category === "the-thao" && /(?:banh|bóng đá|lịch thi đấu|trận|kết quả)/i.test(filterKeyword)) {
-    meaningfulTokens.push("bóng đá", "lịch thi đấu", "v-league", "ngoại hạng", "trực tiếp");
+
+  // Ánh xạ và mở rộng từ khóa đa ngôn ngữ (Cross-lingual Query Expansion) theo từng chuyên mục:
+  // Cho phép quét chính xác tin tức từ cả nguồn báo tiếng Việt lẫn các đầu báo quốc tế uy tín (The Verge, TechCrunch, BBC, Reuters...)
+  if (category === "so-hoa" || /(?:ai\b|công nghệ|mô hình|gpt|gemini|claude|deepseek|openai|anthropic|nvidia|chip|bán dẫn)/i.test(filterKeyword)) {
+    if (/(?:ai\b|trí tuệ nhân tạo|mô hình|model|llm|gpt|gemini|claude|deepseek|openai|anthropic)/i.test(filterKeyword)) {
+      meaningfulTokens.push("ai", "model", "llm", "openai", "gemini", "claude", "deepseek", "anthropic", "nvidia", "artificial intelligence");
+    } else {
+      meaningfulTokens.push("tech", "technology", "apple", "google", "microsoft", "meta", "nvidia", "chip");
+    }
+  } else if (category === "crypto" || /(?:bitcoin|btc|eth|crypto|tiền ảo|tiền điện tử|solana|binance)/i.test(filterKeyword)) {
+    meaningfulTokens.push("crypto", "bitcoin", "btc", "ethereum", "eth", "binance", "blockchain", "solana");
+  } else if (category === "xe-co" || /(?:xe|ô tô|xe hơi|xe điện|vinfast|tesla|byd|toyota)/i.test(filterKeyword)) {
+    meaningfulTokens.push("car", "ev", "electric", "auto", "vehicle", "tesla", "toyota", "byd", "vinfast");
+  } else if (category === "the-thao" && /(?:banh|bóng đá|lịch thi đấu|trận|kết quả|ngoại hạng|v-league|c1|champions league)/i.test(filterKeyword)) {
+    meaningfulTokens.push("bóng đá", "lịch thi đấu", "v-league", "ngoại hạng", "trực tiếp", "football", "soccer", "match", "league");
+  } else if (category === "kinh-doanh" || /(?:kinh tế|chứng khoán|cổ phiếu|tài chính|fed\b|lãi suất|lạm phát)/i.test(filterKeyword)) {
+    meaningfulTokens.push("market", "economy", "stock", "fed", "inflation", "tariff", "interest");
+  } else if (category === "khoa-hoc" || /(?:khoa học|vũ trụ|thiên văn|nasa|sao hỏa)/i.test(filterKeyword)) {
+    meaningfulTokens.push("science", "space", "nasa", "astronomy", "research");
+  } else if (category === "an-ninh-mang" || /(?:an ninh mạng|bảo mật|hacker|mã độc|lỗ hổng)/i.test(filterKeyword)) {
+    meaningfulTokens.push("cyber", "security", "hacker", "vulnerability", "breach");
   }
+
   const filterTokens = meaningfulTokens.length > 0 ? meaningfulTokens : rawTokens;
 
   if (filterTokens.length === 0) {
@@ -416,7 +440,13 @@ async function fetchMultiSourceRss(category: string, filterKeyword = ""): Promis
 
   return allItems.filter((item) => {
     const full = (item.title + " " + (item.snippet || "")).toLowerCase();
-    return filterTokens.some((tok) => full.includes(tok));
+    return filterTokens.some((tok) => {
+      if (tok.length <= 3) {
+        const escaped = tok.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return new RegExp(`(?:^|[^a-z0-9])${escaped}(?:[^a-z0-9]|$)`, "i").test(full);
+      }
+      return full.includes(tok);
+    });
   });
 }
 
@@ -835,14 +865,23 @@ async function doSearchRealtimeNews(
     let enQueryStr = "";
     if (isTechAI) {
       enQueryStr = cleanQ
-        .replace(/(?:khi nào ra|bao giờ ra|khi nào có|bao giờ có|sắp ra|thời điểm phát hành|ngày ra mắt|lộ trình)/gi, "release date launch roadmap")
+        .replace(/(?:khi nào ra|bao giờ ra|khi nào có|bao giờ có|sắp ra|thời điểm phát hành|ngày ra mắt|lộ trình)/gi, "release date")
         .replace(/(?:so sánh|đối chiếu)/gi, "comparison vs")
-        .replace(/(?:mới nhất|tin mới|cập nhật)/gi, "latest news update")
+        .replace(/(?:mới nhất|tin mới|cập nhật|tin tức|tin|hôm nay|vừa xong|gần đây|nóng)/gi, "latest news")
         .replace(/(?:đánh giá|review)/gi, "review benchmark")
-        .replace(/(?:rò rỉ|tin đồn)/gi, "leaks rumors")
+        .replace(/(?:rò rỉ|tin đồn)/gi, "leaks")
         .replace(/(?:mô hình|mo hinh)/gi, "model")
+        .replace(/(?:trí tuệ nhân tạo|tri tue nhan tao)/gi, "AI")
+        .replace(/(?:công nghệ|cong nghe)/gi, "tech")
+        .replace(/(?:bán dẫn|ban dan)/gi, "semiconductor")
+        .replace(/(?:xe điện|xe dien)/gi, "EV")
+        .replace(/(?:về|của|cho|trong|tại|ở|các|những|có gì|thế nào|ra sao|là gì|xem)/gi, " ")
         .replace(/\s+/g, " ")
         .trim();
+
+      if (enQueryStr && !/(?:news|latest|update|model|release)/i.test(enQueryStr)) {
+        enQueryStr = `${enQueryStr} latest news`;
+      }
     } else if (isWorldPolitics) {
       enQueryStr = cleanQ
         .replace(/(?:ông|bà|ngài|tổng thống|chủ tịch|thủ tướng|ngoại trưởng)/gi, " ")
@@ -870,6 +909,29 @@ async function doSearchRealtimeNews(
       if (enQueryStr && !/(?:news|statement|speech|latest|war|election|tariffs)/i.test(enQueryStr)) {
         enQueryStr = `${enQueryStr} latest statement news`;
       }
+    } else if (categories.includes("crypto") || /(?:crypto|bitcoin|btc|ethereum|eth)/i.test(cleanQ)) {
+      enQueryStr = cleanQ
+        .replace(/(?:giá|biến động|mới nhất|hôm nay|tin|cập nhật)/gi, "price latest news")
+        .replace(/(?:tiền ảo|tiền điện tử)/gi, "crypto")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (enQueryStr && !/(?:news|price|crypto|bitcoin)/i.test(enQueryStr)) {
+        enQueryStr = `${enQueryStr} crypto news`;
+      }
+    } else if (categories.includes("xe-co")) {
+      enQueryStr = cleanQ
+        .replace(/(?:xe điện)/gi, "EV electric vehicle")
+        .replace(/(?:ô tô|xe hơi)/gi, "car")
+        .replace(/(?:mới nhất|ra mắt|giá xe|đánh giá)/gi, "latest review")
+        .replace(/\s+/g, " ")
+        .trim();
+    } else if (categories.includes("khoa-hoc")) {
+      enQueryStr = cleanQ
+        .replace(/(?:khoa học)/gi, "science")
+        .replace(/(?:vũ trụ|thiên văn)/gi, "space astronomy")
+        .replace(/(?:khám phá|phát hiện|mới nhất)/gi, "discovery latest")
+        .replace(/\s+/g, " ")
+        .trim();
     }
 
     // 5. Tạo truy vấn bổ trợ theo từng mảng chuyên sâu
@@ -942,19 +1004,19 @@ async function doSearchRealtimeNews(
         return bdsRegex.test(it.title);
       });
     } else if (categories.includes("kinh-doanh")) {
-      const kdRegex = /(?:kinh doanh|kinh tế|chứng khoán|cổ phiếu|ngân hàng|doanh nghiệp|tài chính|giá vàng|giá xăng|lãi suất|vn-index|thương mại|xuất khẩu|nhập khẩu|lợi nhuận|doanh thu)/i;
+      const kdRegex = /(?:kinh doanh|kinh tế|chứng khoán|cổ phiếu|ngân hàng|doanh nghiệp|tài chính|giá vàng|giá xăng|lãi suất|vn-index|thương mại|xuất khẩu|nhập khẩu|lợi nhuận|doanh thu|economy|market|stock|business|inflation|fed|tariff)/i;
       candidates = candidates.filter((it) => matchesVolatileTopic(it, rawQuery) && kdRegex.test(`${it.title} ${it.snippet || ""}`));
     } else if (categories.includes("so-hoa")) {
-      const techRegex = /(?:công nghệ|ai\b|mô hình|gpt|gemini|bán dẫn|chip|apple|iphone|macbook|số hóa|deepseek|claude|phần mềm|smartphone|điện thoại|máy tính)/i;
+      const techRegex = /(?:công nghệ|số hóa|phần mềm|smartphone|điện thoại|máy tính|bán dẫn|chip|ai\b|mô hình|model|llm|gpt|gemini|deepseek|claude|openai|anthropic|grok|llama|sora|nvidia|apple|iphone|macbook|google|microsoft|meta|tech|technology|semiconductor|cyber|robot)/i;
       candidates = candidates.filter((it) => {
         if (it.snippet && it.snippet.length > 25) return true;
         return techRegex.test(it.title);
       });
     } else if (categories.includes("the-thao")) {
-      const sportRegex = /(?:thể thao|bóng đá|đá banh|lịch thi đấu|kết quả|tỉ số|trận|v-league|ngoại hạng anh|cúp|champions league|la liga|serie a|bundesliga|clb|đội tuyển|huấn luyện viên|cầu thủ)/i;
+      const sportRegex = /(?:thể thao|bóng đá|đá banh|lịch thi đấu|kết quả|tỉ số|trận|v-league|ngoại hạng anh|cúp|champions league|la liga|serie a|bundesliga|clb|đội tuyển|huấn luyện viên|cầu thủ|sport|football|soccer|league|cup|match)/i;
       candidates = candidates.filter((it) => matchesVolatileTopic(it, rawQuery) && sportRegex.test(`${it.title} ${it.snippet || ""}`));
     } else if (categories.includes("xe-co")) {
-      const carRegex = /(?:ô tô|xe máy|xe hơi|xe điện|vinfast|toyota|honda|hyundai|kia|mazda|ford|mercedes|bmw|audi|tesla|byd|bằng lái|đăng kiểm|giá xe|phạt nguội|xe)/i;
+      const carRegex = /(?:ô tô|xe máy|xe hơi|xe điện|vinfast|toyota|honda|hyundai|kia|mazda|ford|mercedes|bmw|audi|tesla|byd|bằng lái|đăng kiểm|giá xe|phạt nguội|xe|car|ev\b|auto|vehicle|electric)/i;
       candidates = candidates.filter((it) => {
         if (it.snippet && it.snippet.length > 25) return true;
         return carRegex.test(it.title);
@@ -972,7 +1034,7 @@ async function doSearchRealtimeNews(
         return healthRegex.test(it.title);
       });
     } else if (categories.includes("khoa-hoc")) {
-      const sciRegex = /(?:khoa học|vũ trụ|thiên văn|nasa|sao hỏa|mặt trăng|nhật thực|nguyệt thực|sinh vật|khảo cổ|phát minh|khí hậu|môi trường|nghiên cứu)/i;
+      const sciRegex = /(?:khoa học|vũ trụ|thiên văn|nasa|sao hỏa|mặt trăng|nhật thực|nguyệt thực|sinh vật|khảo cổ|phát minh|khí hậu|môi trường|nghiên cứu|science|space|astronomy|physics|research)/i;
       candidates = candidates.filter((it) => {
         if (it.snippet && it.snippet.length > 25) return true;
         return sciRegex.test(it.title);
@@ -1211,7 +1273,6 @@ async function doSearchRealtimeNews(
     const isAskingNews = /(?:tin tức|tin mới|hôm nay|24h|nóng|thời sự|vừa xảy ra|diễn biến mới|trận banh|đá banh|bóng đá|thể thao)/i.test(rawQuery);
     if (
       intent !== "fact_check" &&
-      !options.requireEvidence &&
       mergedItems.length > 0 &&
       (isAskingNews || intent === "realtime_news" || !richSnippetsText)
     ) {

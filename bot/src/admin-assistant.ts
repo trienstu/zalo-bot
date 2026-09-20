@@ -20,7 +20,9 @@ import {
 import { sendDirectText, sendDirectFile, sendGroupText } from "./zalo/client.js";
 import { callGemini, callGeminiAgentLoop, downloadFileContent, type GeminiMediaPart } from "./gemini.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
+import { defaultBotName } from "./config.js";
 import { type MemberMessageEvent, parseImagePromptAndRatio } from "./member-assistant.js";
+import { generateCodexImage, isCodexImageConfigured } from "./codex-image.js";
 import { generateCloudflareImage, isCloudflareConfigured } from "./cloudflare-ai.js";
 import { getWeatherReport } from "./weather.js";
 import { handleSetReminder, handleListReminders, handleCancelReminder } from "./reminder.js";
@@ -320,7 +322,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   if (lower === "/clear" || lower === "/reset" || lower === "!clear" || lower === "!reset") {
     clearAdminHistory(sender);
     const reply = isAdmin
-      ? `🧹 Dạ em Sen Chúa đã làm sạch toàn bộ ngữ cảnh hội thoại 1:1 rồi Sếp ơi! Sếp có thể bắt đầu chủ đề mới tinh tươm nhé! ☘️`
+      ? `🧹 Dạ em ${defaultBotName} đã làm sạch toàn bộ ngữ cảnh hội thoại 1:1 rồi Sếp ơi! Sếp có thể bắt đầu chủ đề mới tinh tươm nhé! ☘️`
       : `🧹 Em đã làm sạch lịch sử trò chuyện rồi bạn nhé! Chúng mình bắt đầu cuộc trò chuyện mới nào. ☘️`;
     await sendDirectText(api, sender, reply);
     return;
@@ -446,50 +448,70 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   // 2. TRỢ LÝ ĐIỀU KHIỂN & RA LỆNH 1:1
   // =========================================================================
 
-  // 2.0. YÊU CẦU TẠO ẢNH NGHỆ THUẬT SIÊU TỐC (FLUX.1 QUA CLOUDFLARE AI)
-  const imageReq = parseImagePromptAndRatio(rawText, "sen chúa");
-  if (imageReq && imageReq.prompt.length >= 3) {
+  // 2.0. TẠO ẢNH BẰNG AI (Codex GPT-Image hoặc Cloudflare):
+  const imageReq = parseImagePromptAndRatio(rawText, defaultBotName, event.quote);
+  if (imageReq && imageReq.prompt.length >= 2) {
     const { prompt: imagePrompt, aspectRatio } = imageReq;
-    if (!isCloudflareConfigured()) {
-      await sendDirectText(
-        api,
-        sender,
-        `⚠️ Dạ Sếp ơi, tính năng tạo ảnh AI (FLUX.1) chưa được cấu hình key Cloudflare trong file .env!\n\n` +
-        `👉 Sếp vui lòng kiểm tra CLOUDFLARE_ACCOUNT_ID và CLOUDFLARE_API_TOKEN nhé!`
-      );
-      return;
-    }
-
+    const isCodex = config.imageProvider === "codex";
     const ratioTag = aspectRatio !== "1:1" ? ` (tỉ lệ ${aspectRatio})` : "";
-    await sendDirectText(
-      api,
-      sender,
-      `🎨 Dạ Sếp đợi em vài giây, em đang vẽ và tạo ảnh: "${imagePrompt}"${ratioTag}...`
-    );
+    const providerLabel = isCodex ? "Codex (GPT-Image)" : "FLUX.1-schnell";
+    const waitHint = isCodex ? "khoảng 15-25 giây" : "khoảng 2-3 giây";
 
-    const imgResult = await generateCloudflareImage(imagePrompt, { aspectRatio });
-    if (imgResult.success && imgResult.filePath) {
-      try {
-        await sendDirectFile(
-          api,
-          sender,
-          imgResult.filePath,
-          `🖼️ Tác phẩm của Sếp: "${imagePrompt}"${ratioTag}`
-        );
-      } catch (err) {
-        console.warn(`[admin-assistant] Gửi file ảnh tạo thất bại:`, err);
+    if (isCodex) {
+      if (!isCodexImageConfigured()) {
         await sendDirectText(
           api,
           sender,
-          `⚠️ Em đã tạo ảnh thành công nhưng gặp sự cố khi gửi file ảnh qua Zalo: ${String(err)}`
+          `⚠️ ${isAdmin ? "Sếp ơi, tính" : "Tính"} năng vẽ ảnh AI (Codex) chưa được kích hoạt trên máy chủ (cần cấu hình NINE_ROUTER_API_KEY trong file .env). Vui lòng kiểm tra lại cấu hình nhé!`,
         );
+        return;
       }
     } else {
+      if (!isCloudflareConfigured()) {
+        await sendDirectText(
+          api,
+          sender,
+          `⚠️ ${isAdmin ? "Sếp ơi, tính" : "Tính"} năng vẽ ảnh AI (Cloudflare) chưa được cấu hình trên máy chủ. Vui lòng liên hệ Quản trị viên để kích hoạt nhé!`,
+        );
+        return;
+      }
+    }
+
+    await sendDirectText(
+      api,
+      sender,
+      `🎨 ${isAdmin ? "Em đang vẽ ảnh cho Sếp" : "Em đang vẽ ảnh"}: "${imagePrompt}"${ratioTag} bằng ${providerLabel}... ${isAdmin ? "Sếp" : "Bạn"} chờ em ${waitHint} nhé!`,
+    );
+
+    try {
+      const imgRes = isCodex
+        ? await generateCodexImage(imagePrompt, { aspectRatio })
+        : await generateCloudflareImage(imagePrompt, { aspectRatio });
+
+      if (imgRes.success && imgRes.filePath) {
+        const extraPromptInfo = (isCodex && imgRes.translatedPrompt)
+          ? `\n🔍 Visual prompt: "${imgRes.translatedPrompt.slice(0, 120)}..."`
+          : "";
+        await sendDirectFile(
+          api,
+          sender,
+          imgRes.filePath,
+          `🎨 Ảnh của ${isAdmin ? "Sếp" : displayName} đây ạ!\n✨ Chủ đề: "${imagePrompt}"${ratioTag}\n🤖 Model: ${isCodex ? config.codexImageModel : "FLUX.1-schnell"}${extraPromptInfo}`,
+        );
+        console.log(`[admin-assistant] ✅ Đã gửi ảnh ${isCodex ? "Codex" : "FLUX.1"} thành công cho ${displayName} ("${imagePrompt}", ratio: ${aspectRatio})`);
+      } else {
+        await sendDirectText(
+          api,
+          sender,
+          `⚠️ Rất tiếc ${isAdmin ? "Sếp ơi" : displayName}, quá trình vẽ ảnh gặp sự cố: ${imgRes.error || "Lỗi máy chủ"}. ${isAdmin ? "Sếp" : "Bạn"} thử lại sau ít phút nhé!`,
+        );
+      }
+    } catch (imgErr: any) {
+      console.error(`[admin-assistant] ❌ Lỗi sinh/gửi ảnh 1:1:`, imgErr);
       await sendDirectText(
         api,
         sender,
-        `❌ Rất tiếc, quá trình tạo ảnh thất bại: ${imgResult.error || "Lỗi không xác định"}\n` +
-        `👉 Sếp thử lại với mô tả khác xem sao nhé!`
+        `⚠️ Rất tiếc ${isAdmin ? "Sếp ơi" : displayName}, đã có lỗi xảy ra khi tạo/gửi ảnh: ${imgErr?.message || String(imgErr)}`,
       );
     }
     return;
@@ -530,7 +552,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     } else {
       const memberHelpMsg =
         `👋 CHÀO BẠN ${displayName.toUpperCase()}!\n\n` +
-        `🤖 Em là Sen Chúa - Trợ lý AI đồng hành cùng bạn trên Zalo. Bạn có thể:\n\n` +
+        `🤖 Em là ${defaultBotName} - Trợ lý AI đồng hành cùng bạn trên Zalo. Bạn có thể:\n\n` +
         `💬 HỎI ĐÁP & TRÒ CHUYỆN TỰ NHIÊN:\n` +
         `🔹 Trò chuyện, giải đáp thắc mắc, tư vấn công việc, học tập, dịch thuật.\n` +
         `🔹 Tra cứu tin tức thời gian thực, trend AI, sự kiện hôm nay với Google Search thời gian thực.\n` +
@@ -548,7 +570,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
   // 2.2. Lệnh /bantin (Bản tin AI & Công nghệ 24h qua)
   if (lower === "/bantin" || lower === "!bantin" || lower === "bantin" || /bản tin (?:ai|sáng|công nghệ|hôm nay)/i.test(rawText)) {
-    const briefing = await getDailyAiNewsBriefing("AI & Công nghệ trên X", "Sen Chúa");
+    const briefing = await getDailyAiNewsBriefing("AI & Công nghệ trên X", defaultBotName);
     await sendDirectText(api, sender, briefing);
     return;
   }
@@ -767,7 +789,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       await sendDirectText(
         api,
         sender,
-        `⏳ Dạ em Sen Chúa đang kết nối và tải dữ liệu từ Google ${parsedGoogle.type === "google_sheet" ? "Sheet" : "Doc"} cho "${topicName}", Sếp đợi em vài giây nhé...`,
+        `⏳ Dạ em ${defaultBotName} đang kết nối và tải dữ liệu từ Google ${parsedGoogle.type === "google_sheet" ? "Sheet" : "Doc"} cho "${topicName}", Sếp đợi em vài giây nhé...`,
       );
 
       const fetchRes = await fetchGoogleContent(googleUrl);
@@ -1051,7 +1073,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     await sendDirectText(
       api,
       sender,
-      `⏳ Dạ em Sen Chúa đang đọc và nạp tài liệu "${topicName}" vào kho tri thức vĩnh viễn, Sếp đợi em vài giây nhé...`,
+      `⏳ Dạ em ${defaultBotName} đang đọc và nạp tài liệu "${topicName}" vào kho tri thức vĩnh viễn, Sếp đợi em vài giây nhé...`,
     );
 
     let summaryText = "";
@@ -1326,7 +1348,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   const historyText = history
     .map((h) => {
       const content = h.role === "model" ? sanitizeModelHistoryText(h.text) : h.text;
-      return `${h.role === "user" ? `${displayName}` : "Sen Chúa (Trợ lý)"}: ${content}`;
+      return `${h.role === "user" ? `${displayName}` : `${defaultBotName} (Trợ lý)`}: ${content}`;
     })
     .filter((line) => line.trim().length > 0)
     .join("\n\n");
@@ -1339,7 +1361,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
   const temporalPrompt = getSystemTemporalPrompt();
   const systemPrompt = `${temporalPrompt}\n\n` + (isAdmin
-    ? `Bạn là 'Sen Chúa' - Trợ lý AI cá nhân cao cấp, thông minh, tận tâm và hóm hỉnh phục vụ riêng cho Admin/Chủ bot (${displayName}).\n` +
+    ? `Bạn là '${defaultBotName}' - Trợ lý AI cá nhân cao cấp, thông minh, tận tâm và hóm hỉnh phục vụ riêng cho Admin/Chủ bot (${displayName}).\n` +
     `NHIỆM VỤ CỦA BẠN TRONG TIN NHẮN 1:1:\n` +
     `1. Nhớ kỹ toàn bộ ngữ cảnh hội thoại trước đó với Admin để tư vấn, hỗ trợ, sửa đổi bài viết, giải đáp liền mạch.\n` +
     `2. Nếu Admin gửi FILE TÀI LIỆU (PDF, Word, Excel, Code, TXT) hoặc HÌNH ẢNH: Đọc kỹ, trích xuất dữ liệu, dịch thuật, phân tích sâu, tìm lỗi code hoặc tóm tắt theo ý Admin.\n` +
@@ -1361,12 +1383,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `   - BẮT BUỘC ĐI THẲNG VÀO ĐÁP ÁN, SỐ LIỆU HOẶC THÔNG TIN CỐT LÕI ngay từ dòng đầu tiên.\n` +
     `   - TUYỆT ĐỐI CẤM mở bài bằng các câu chào hỏi rườm rà, cảm thán đùa cợt, phân trần giải thích lý do, hứa hẹn tương lai, tự kiểm điểm hoặc các câu chào báo cáo dài dòng làm loãng tin (CẤM các câu kiểu "em xin lỗi Sếp vì...", "thông tin trước đó chưa tập trung...", "em đang theo dõi sát sao...").\n` +
     `   - Dù ở lượt trước Sếp có nhắc nhở hay phàn nàn, lượt này PHẢI CUNG CẤP NGAY ĐÁP ÁN CHÍNH XÁC VÀ GỌN GÀNG, tuyệt đối không nhắc lại chuyện cũ hay phân trần.\n` +
-    `   - Xưng 'em' hoặc 'Sen Chúa', gọi Admin là 'Sếp' hoặc '${displayName}' một cách lịch thiệp, tôn trọng và chu đáo.\n` +
+    `   - Xưng 'em' hoặc '${defaultBotName}', gọi Admin là 'Sếp' hoặc '${displayName}' một cách lịch thiệp, tôn trọng và chu đáo.\n` +
     `8. ĐỘ DÀI & TỐC ĐỘ: Trả lời gãy gọn, đúng trọng tâm, súc tích (khoảng 300-800 ký tự). Tránh viết dài dòng lan man trừ khi được yêu cầu phân tích sâu.\n` +
     `9. NGUYÊN TẮC TRUNG THỰC & CHỐNG BỊA ĐẶT (ANTI-HALLUCINATION):\n` +
     `   - Nếu trong tài liệu, hình ảnh, trích dẫn hoặc dữ liệu không có thông tin chi tiết về điều Sếp hỏi, hãy thành thật trả lời là không có thông tin đó. Tuyệt đối cấm tự suy diễn hoặc bịa ra sự kiện, sản phẩm không có căn cứ.\n` +
     `   - KHI ADMIN YÊU CẦU KIỂM TRA / RÀ SOÁT / TÓM TẮT TÌNH HÌNH CÁC NHÓM: BẮT BUỘC chỉ được tổng hợp từ danh sách tin nhắn và tóm tắt thực tế được cung cấp trong mục [DỮ LIỆU HOẠT ĐỘNG THỰC TẾ TỪ CÁC NHÓM]. Nêu rõ tên nhóm và những ý chính CÓ THẬT. Nếu nhóm nào không có tin nhắn thảo luận mới, hãy báo trung thực là nhóm đó chưa có hoạt động mới. TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT chính sách, tài liệu hay sự kiện của nhóm!`
-    : `Bạn là 'Sen Chúa' - Trợ lý AI thông minh, thân thiện, duyên dáng và hóm hỉnh của Zalo đang trò chuyện 1:1 với bạn ${displayName}.\n` +
+    : `Bạn là '${defaultBotName}' - Trợ lý AI thông minh, thân thiện, duyên dáng và hóm hỉnh của Zalo đang trò chuyện 1:1 với bạn ${displayName}.\n` +
     `NHIỆM VỤ CỦA BẠN:\n` +
     `1. Trò chuyện tự nhiên, vui vẻ, giải đáp mọi câu hỏi, tư vấn học tập, công việc, tâm sự, dịch thuật, phân tích hình ảnh/tài liệu khi được gửi tới.\n` +
     `2. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
@@ -1557,7 +1579,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `    - Sau khi gọi công cụ, hệ thống sẽ tự động gửi file đính kèm trực tiếp vào Zalo. Hãy viết lời nhắn xác nhận ngắn gọn và tóm tắt nội dung file cho người dùng.\n` +
     `\n15. TỐI ƯU TỐC ĐỘ PHẢN HỒI (AGENT SPEED OPTIMIZATION):\n` +
     `    - Nếu trong phần [DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT] hoặc context bên dưới đã có đầy đủ thông tin/tin tức/số liệu để trả lời câu hỏi, bạn PHẢI TẬP TRUNG TRẢ LỜI NGAY TRONG VÒNG ĐẦU TIÊN, TUYỆT ĐỐI KHÔNG GỌI THÊM CÔNG CỤ TÌM KIẾM (web_search) LẶP LẠI để tránh làm chậm thời gian phản hồi của người dùng!\n` +
-    `    - Chỉ gọi công cụ (finance_market_lookup, web_search, generate_file, fetch_url) KHI dữ liệu cung cấp chưa có hoặc người dùng yêu cầu rõ việc tra cứu/tạo file.\n`;
+    `    - Chỉ gọi công cụ (finance_market_lookup, web_search, generate_file, fetch_url, python_interpreter) KHI dữ liệu cung cấp chưa có hoặc người dùng yêu cầu rõ việc tra cứu/tạo file/vẽ biểu đồ số liệu.\n` +
+    `\n16. KỸ NĂNG VẼ BIỂU ĐỒ SỐ LIỆU & SƠ ĐỒ BẰNG PYTHON (python_interpreter):\n` +
+    `    - CHỈ sử dụng công cụ 'python_interpreter' khi người dùng yêu cầu vẽ biểu đồ số liệu (cột, tròn, đường, nến Nhật, heatmap, radar...), sơ đồ thuật toán, quy trình, mindmap phân tích dữ liệu.\n` +
+    `    - TUYỆT ĐỐI KHÔNG dùng Python (PIL/matplotlib) để vẽ tranh ảnh nghệ thuật, chân dung người, phong cảnh hoặc nhân vật (hệ thống có module sinh ảnh nghệ thuật riêng).\n` +
+    `    - Viết mã Python hoàn chỉnh và tự thực thi bằng matplotlib.pyplot hoặc seaborn. Định dạng trực quan, font rõ ràng, tự lưu file .png.\n` +
+    `    - Hệ thống sẽ tự động bắt file ảnh biểu đồ được tạo ra và gửi trực tiếp vào Zalo cho Sếp/người dùng.\n`;
 
   const userPrompt =
     (historyText ? `LỊCH SỬ TRÒ CHUYỆN TRƯỚC ĐÓ:\n${historyText}\n\n` : "") +
@@ -1599,21 +1626,31 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       claimGroundingInstruction;
 
     // 🧠 FAST-PATH HOẶC AGENTIC BRAIN:
+    const isCodeOrChartQuery =
+      /(?:vẽ|tạo|vẽ\s*giúp|xuất|lập|thiết kế|làm)\s*(?:cho\s*.*?\s*)?(?:biểu đồ|đồ thị|chart|plot|sơ đồ|lưu đồ|flowchart|mindmap|infographic)/i.test(rawText) ||
+      /^[/!](?:plot|chart)\b/i.test(rawText) ||
+      /(?:chạy|viết|run|execute)\s*(?:code|mã|script)\s*(?:python|py)/i.test(rawText);
+
     const isFileGenerationQuery =
       /(?:tạo|xuất|làm|lưu|gửi|convert|chuyển|viết)\s*(?:thành\s*)?(?:file|tệp)?\s*(?:word|excel|docx|xlsx|doc|sheet|bảng|pdf|txt|md|code)/i.test(rawText) ||
       /(?:file|tệp)\s*(?:word|excel|docx|xlsx)/i.test(rawText) ||
-      /(?:tạo|xuất|làm)\s*(?:file|tệp)/i.test(rawText);
+      /(?:tạo|xuất|làm)\s*(?:file|tệp)/i.test(rawText) ||
+      isCodeOrChartQuery;
     const needsAgentLoop = isFileGenerationQuery || /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(rawText);
 
     let answer = "";
     if (needsAgentLoop && !isSearchDisabled) {
-      // 🚀 AGENT LOOP (Chỉ dùng khi cần tạo/xuất file hoặc tải link)
+      // 🚀 AGENT LOOP (Chỉ dùng khi cần tạo/xuất file, vẽ ảnh/biểu đồ hoặc tải link)
       answer = await callGeminiAgentLoop(fullSystemPrompt, effectiveUserPrompt, {
         model: targetModel,
         mediaParts: mediaPart ? [mediaPart] : undefined,
         onFileGenerated: async (file) => {
           try {
-            await sendDirectFile(api, sender, file.filePath, `📄 Sen Chúa đã tạo file [${file.fileName}] thành công!`);
+            const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
+            const caption = isImg
+              ? `🎨 ${defaultBotName} đã vẽ và tạo ảnh [${file.fileName}] thành công cho Sếp đây ạ!`
+              : `📄 ${defaultBotName} đã tạo file [${file.fileName}] thành công!`;
+            await sendDirectFile(api, sender, file.filePath, caption);
           } catch (fileErr) {
             console.warn("[admin-assistant] sendDirectFile error:", fileErr);
           }
@@ -1691,7 +1728,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       api,
       sender,
       isAdmin
-        ? `🤖 Dạ câu hỏi của Sếp ${displayName} làm em Sen Chúa xém khét CPU 😄! Sếp cho em vài giây thở oxy rồi hỏi lại thử nhé!`
+        ? `🤖 Dạ câu hỏi của Sếp ${displayName} làm em ${defaultBotName} xém khét CPU 😄! Sếp cho em vài giây thở oxy rồi hỏi lại thử nhé!`
         : `🤖 Dạ câu hỏi của bạn ${displayName} làm em xém khét CPU 😄! Bạn chờ vài giây rồi nhắn lại giúp em nhé!`,
     );
   }

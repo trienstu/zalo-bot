@@ -31,6 +31,7 @@ export interface CloudflareImageResult {
   fileName: string;
   fileSize: number;
   error?: string;
+  translatedPrompt?: string;
 }
 
 export interface CloudflareTranscriptionResult {

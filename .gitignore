@@ -58,3 +58,4 @@ _templates/
 .aider*
 CLAUDE.md
 windows-portable/
+*.zip

@@ -23,8 +23,8 @@ export interface EvidenceSufficiency {
 
 const RELEVANCE_STOP_WORDS = new Set([
   "a", "ai", "anh", "ba", "ban", "bay", "biet", "can", "cau", "cho", "co", "cua", "duoc", "em",
-  "giup", "hay", "hoi", "hien", "la", "moi", "mot", "nao", "nay", "nhe", "nhat", "nhung", "o", "ra",
-  "tai", "the", "thi", "thong", "tin", "toi", "trong", "ve", "voi", "vay", "va", "vua", "current",
+  "giup", "hay", "hoi", "hien", "hom", "la", "moi", "mot", "nao", "nay", "nhe", "nhat", "nhung", "o", "ra",
+  "tai", "the", "thi", "thong", "tin", "toi", "trong", "tuc", "ve", "voi", "vay", "va", "vua", "current",
   "latest", "news", "now", "please", "today", "what", "who",
 ]);
 
@@ -58,10 +58,23 @@ export function normalizeSearchText(value: string): string {
     .trim();
 }
 
+export function isAiTechnologyQuery(query: string): boolean {
+  if (/\bAI\b/.test(query)) return true;
+  const normalized = normalizeSearchText(query);
+  return (
+    /(?:tri tue nhan tao|mo hinh|cong nghe|chatgpt|openai|gemini|claude|deepseek|anthropic|nvidia|llm|genai|robot|machine learning|deep learning)/i.test(normalized) ||
+    /(?:ve|tin|hoi|ve con|ung dung|phat trien|nghien cuu)\s+ai\b/i.test(normalized)
+  );
+}
+
 function queryTokens(query: string): string[] {
+  const isAiTech = isAiTechnologyQuery(query);
   const tokens = normalizeSearchText(query)
     .split(" ")
-    .filter((token) => token.length >= 2 && !RELEVANCE_STOP_WORDS.has(token));
+    .filter((token) => {
+      if (token === "ai" && isAiTech) return true;
+      return token.length >= 2 && !RELEVANCE_STOP_WORDS.has(token);
+    });
   return [...new Set(tokens)];
 }
 
@@ -75,9 +88,10 @@ function normalizedContainsPhrase(normalizedText: string, tokens: string[]): boo
 }
 
 function entityAnchorTokens(query: string): string[] {
+  const isAiTech = isAiTechnologyQuery(query);
   const tokens = queryTokens(query)
     .filter((token) =>
-      token.length >= 3 &&
+      (token.length >= 3 || (token === "ai" && isAiTech)) &&
       !ENTITY_ANCHOR_STOP_WORDS.has(token) &&
       !/^\d{4}$/.test(token)
     );
@@ -145,6 +159,7 @@ function isBroadQuery(query: string, tokens: string[]): boolean {
 }
 
 function isIdentityQuery(query: string): boolean {
+  if (isAiTechnologyQuery(query)) return false;
   return /\b(?:ai|who|whom)\b/i.test(normalizeSearchText(query));
 }
 
@@ -174,13 +189,37 @@ export function scoreEvidence(
   intent: SearchIntent = "knowledge",
   now = Date.now(),
 ): SearchEvidence & Required<Pick<SearchEvidence, "relevanceScore" | "authorityScore" | "totalScore">> {
+  const isAiTech = isAiTechnologyQuery(query);
   const tokens = queryTokens(query);
   const haystack = normalizeSearchText(`${item.title} ${item.snippet}`);
   const title = normalizeSearchText(item.title);
+
+  // Xử lý chống nhiễu (False-positive filter) cho từ khóa công nghệ AI:
+  // Loại bỏ các trường hợp chữ 'ai' chỉ là tiếng Việt (Ai Cập, không ai, chẳng ai, ai nấy, ai biết, ai nên, ai là, ai sẽ, ai được, ai có...) mà không có bất kỳ thuật ngữ công nghệ/AI nào
+  let isAiSpurious = false;
+  if (isAiTech) {
+    const strippedHaystack = haystack.replace(/\b(?:ai cap|khong ai|chang ai|ai cung|ai do|ai biet|ai nay|ai ai|ai nen|ai la|ai se|ai duoc|ai co|ai muon|ai phai|ai can|ai thich)\b/gi, " ");
+    const hasAiTechTerm = /\b(?:ai|tri tue nhan tao|artificial intelligence|mo hinh ai|ai model|llm|openai|gemini|claude|deepseek|anthropic|nvidia|chip|robot|chatgpt|machine learning)\b/i.test(
+      strippedHaystack
+    );
+    if (!hasAiTechTerm) {
+      isAiSpurious = true;
+    }
+  }
+
   const haystackTokens = normalizedTokenSet(`${item.title} ${item.snippet}`);
   const titleTokens = normalizedTokenSet(item.title);
-  const matched = tokens.filter((token) => haystackTokens.has(token));
-  const titleMatched = tokens.filter((token) => titleTokens.has(token));
+
+  const isTokenMatched = (tok: string, tokenSet: Set<string>, rawText: string) => {
+    if (tokenSet.has(tok)) return true;
+    if (tok === "ai" && isAiTech) {
+      return /\b(?:ai|openai|anthropic|deepseek|claude|gemini|llm|chatgpt|artificial intelligence)\b/i.test(rawText);
+    }
+    return false;
+  };
+
+  const matched = isAiSpurious ? [] : tokens.filter((token) => isTokenMatched(token, haystackTokens, haystack));
+  const titleMatched = isAiSpurious ? [] : tokens.filter((token) => isTokenMatched(token, titleTokens, title));
   const coverage = tokens.length > 0 ? matched.length / tokens.length : 0;
   const titleCoverage = tokens.length > 0 ? titleMatched.length / tokens.length : 0;
   const phrase = tokens.length >= 2 && normalizedContainsPhrase(haystack, tokens) ? 1 : 0;
@@ -498,11 +537,16 @@ export function finalizeGroundedAnswer(answer: string, evidenceContext: string, 
 
   // Nếu câu trả lời có context dữ liệu thời gian thực (liveNews) và câu trả lời chưa có trích dẫn nguồn
   if (evidenceContext && evidenceContext.trim().length > 0) {
-    const allowedSources = extractEvidenceSources(evidenceContext);
-    const alreadyHasCitation = /(?:nguồn(?:\s+kiểm\s+chứng)?|source)\s*:/i.test(answer) || /\*\(nguồn/i.test(answer);
-    if (allowedSources.length > 0 && !alreadyHasCitation) {
-      const cleaned = stripTrailingSourceBlock(answer);
-      return `${cleaned}\n\n*(Nguồn: ${allowedSources.join(", ")})*`.trim();
+    // Không tự ý gắn nguồn tin tức ngoài lề nếu câu trả lời thuộc dữ liệu nội bộ nhóm hoặc nêu không tìm thấy/chưa có dữ liệu
+    const isInternalOrNegativeAnswer =
+      /(?:trong nhóm|nhóm mình|nội bộ|thành viên.*nhóm|không tìm thấy|chưa tìm thấy|chưa có thông tin|không có dữ liệu|chưa đủ bằng chứng)/i.test(answer);
+    if (!isInternalOrNegativeAnswer) {
+      const allowedSources = extractEvidenceSources(evidenceContext);
+      const alreadyHasCitation = /(?:nguồn(?:\s+kiểm\s+chứng)?|source)\s*:/i.test(answer) || /\*\(nguồn/i.test(answer);
+      if (allowedSources.length > 0 && !alreadyHasCitation) {
+        const cleaned = stripTrailingSourceBlock(answer);
+        return `${cleaned}\n\n*(Nguồn: ${allowedSources.join(", ")})*`.trim();
+      }
     }
   }
 

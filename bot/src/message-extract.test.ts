@@ -208,4 +208,28 @@ test("quote file dạng 'File · Ten_File.pdf': bóc tách đúng tên file", ()
   assert.equal(fileAtt.extension, "pdf");
 });
 
+test("quote dạng object content có title/description: rút text đầy đủ", () => {
+  const quotePayload = {
+    data: {
+      msgType: "chat.quote",
+      content: {
+        msg: "Xem cái này",
+        quote: {
+          content: {
+            title: "Bản tin AI hôm nay",
+            description: "Claude 3.7 và GPT-4o ra mắt nhiều tính năng mới",
+          },
+          ownerId: "123456",
+          dName: "Sếp",
+        },
+      },
+    },
+  };
+
+  const quote = extractQuote(quotePayload);
+  assert.ok(quote);
+  assert.equal(quote.text, "Bản tin AI hôm nay — Claude 3.7 và GPT-4o ra mắt nhiều tính năng mới");
+});
+
+
 

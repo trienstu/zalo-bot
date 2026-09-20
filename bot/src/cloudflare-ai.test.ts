@@ -37,12 +37,17 @@ test("extractImagePromptFromText nhận diện ngôn ngữ tự nhiên yêu cầ
   );
 });
 
-test("extractImagePromptFromText KHÔNG bắt nhầm các yêu cầu tạo văn bản / file docx / câu hỏi thường", () => {
+test("extractImagePromptFromText KHÔNG bắt nhầm các yêu cầu tạo văn bản / file docx / vẽ biểu đồ / câu hỏi thường", () => {
   // Không được bắt nhầm file word/excel/pdf
   assert.equal(extractImagePromptFromText("tạo cho tôi file word kế hoạch kinh doanh"), null);
   assert.equal(extractImagePromptFromText("tạo báo cáo doanh thu tuần này giúp tôi"), null);
   assert.equal(extractImagePromptFromText("hôm nay thời tiết Hà Nội thế nào"), null);
   assert.equal(extractImagePromptFromText("tóm tắt tin tức giúp tôi"), null);
+  // Không được bắt nhầm yêu cầu vẽ biểu đồ/đồ thị/sơ đồ (để nhường cho Python Sandbox)
+  assert.equal(extractImagePromptFromText("vẽ biểu đồ từ file này đi"), null);
+  assert.equal(extractImagePromptFromText("vẽ biểu đồ cột lương"), null);
+  assert.equal(extractImagePromptFromText("vẽ đồ thị tăng trưởng doanh số"), null);
+  assert.equal(extractImagePromptFromText("vẽ chart so sánh chi phí"), null);
 });
 
 test("parseImagePromptAndRatio bóc tách sạch sẽ prompt và tỉ lệ 16:9, 9:16, 4:3, 1:1", async () => {
@@ -67,6 +72,33 @@ test("parseImagePromptAndRatio bóc tách sạch sẽ prompt và tỉ lệ 16:9,
   const r5 = parseImagePromptAndRatio("tạo ảnh 2 người đang ngồi trong quán cafe sen chúa");
   assert.equal(r5?.prompt, "2 người đang ngồi trong quán cafe");
   assert.equal(r5?.aspectRatio, "1:1");
+
+  const r6 = parseImagePromptAndRatio("Tạo ảnh cho tao 100 poster @Mộc Miên", "Mộc Miên");
+  assert.equal(r6?.prompt, "100 poster");
+  assert.equal(r6?.aspectRatio, "1:1");
+
+  // Kiểm tra xử lý Quote khi dùng đại từ chỉ định:
+  const rQuoteText = parseImagePromptAndRatio("@Sen Chúa tạo ảnh này đi e", "Sen Chúa", {
+    text: "Phối cảnh tòa tháp 30 tầng ven sông Sài Gòn",
+  } as any);
+  assert.equal(rQuoteText?.prompt, "Phối cảnh tòa tháp 30 tầng ven sông Sài Gòn");
+
+  const rQuoteMethod = parseImagePromptAndRatio("@Sen Chúa tạo ảnh theo phương án này nè", "Sen Chúa", {
+    text: "Thiết kế phòng ngủ phong cách Bắc Âu hiện đại",
+  } as any);
+  assert.equal(rQuoteMethod?.prompt, "Thiết kế phòng ngủ phong cách Bắc Âu hiện đại");
+
+  // Nếu nói "tạo ảnh này đi e" nhưng KHÔNG có quote -> trả về null để không vẽ chữ "này đi e"
+  const rNoQuote = parseImagePromptAndRatio("@Sen Chúa tạo ảnh này đi e", "Sen Chúa", null);
+  assert.equal(rNoQuote, null);
+
+  // Nếu quote một hình ảnh
+  const rQuoteImage = parseImagePromptAndRatio("@Sen Chúa tạo ảnh này đi e", "Sen Chúa", {
+    mediaUrl: "https://example.com/input.png",
+    mediaType: "image",
+  } as any);
+  assert.ok(rQuoteImage);
+  assert.equal(rQuoteImage?.referenceImageUrl, "https://example.com/input.png");
 });
 
 test("isCloudflareConfigured hoạt động không crash", () => {

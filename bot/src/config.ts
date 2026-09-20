@@ -4,7 +4,20 @@ import fs from "node:fs";
 
 import type { HybridAgentSettings } from "./hybrid-agent.js";
 
-// Tự động nạp .env phù hợp theo botId (tránh bot 2 nạp đè session của bot 1)
+// 1. Luôn nạp file .env cơ sở của project/bot hiện tại
+const baseEnvPaths = [
+  path.resolve(process.cwd(), ".env"),
+  path.resolve(process.cwd(), "bot/.env"),
+  path.resolve(process.cwd(), "../.env"),
+  path.resolve(process.cwd(), "../bot/.env"),
+];
+for (const p of baseEnvPaths) {
+  if (fs.existsSync(p)) {
+    dotenv.config({ path: p, override: true });
+  }
+}
+
+// 2. Nếu là môi trường VPS mono-folder có thư mục data/bots/<botId>/.env riêng, nạp override
 const initialBotId = process.env.BOT_ID || process.argv.find((a) => a.startsWith("--bot="))?.split("=")[1]?.trim() || "bot-1";
 
 if (initialBotId && initialBotId !== "bot-1") {
@@ -14,23 +27,12 @@ if (initialBotId && initialBotId !== "bot-1") {
     path.resolve(home, "zalo-bot", "bot", "data", "bots", initialBotId, ".env"),
     path.resolve(process.cwd(), "data", "bots", initialBotId, ".env"),
     path.resolve(process.cwd(), "..", "data", "bots", initialBotId, ".env"),
+    path.resolve(process.cwd(), "bot", "data", "bots", initialBotId, ".env"),
   ];
   for (const p of botEnvCandidates) {
     if (fs.existsSync(p)) {
       dotenv.config({ path: p, override: true });
       break;
-    }
-  }
-} else {
-  const envPaths = [
-    path.resolve(process.cwd(), ".env"),
-    path.resolve(process.cwd(), "bot/.env"),
-    path.resolve(process.cwd(), "../.env"),
-    path.resolve(process.cwd(), "../bot/.env"),
-  ];
-  for (const p of envPaths) {
-    if (fs.existsSync(p)) {
-      dotenv.config({ path: p, override: true });
     }
   }
 }
@@ -79,10 +81,21 @@ export function getActiveBotId(): string {
 }
 
 export const activeBotId = getActiveBotId();
-export const defaultBotName = process.env.BOT_NAME?.trim() || (activeBotId === "bot-2" ? "Mộc Miên" : "Sen Chúa");
+export const defaultBotName = process.env.BOT_NAME?.trim() || "Sen Chúa";
 
 // Xác định thư mục session và db theo botId một cách thông minh và linh hoạt
 function resolvePaths(bId: string) {
+  // 0. Nếu đã được chỉ định rõ ràng qua ENV (khi chạy độc lập theo thư mục riêng)
+  if (process.env.SQLITE_DB_PATH?.trim()) {
+    const customDb = path.resolve(process.cwd(), process.env.SQLITE_DB_PATH.trim());
+    return {
+      dbPath: customDb,
+      sessionDir: process.env.SESSION_DIR?.trim()
+        ? path.resolve(process.cwd(), process.env.SESSION_DIR.trim())
+        : path.join(path.dirname(customDb), "session"),
+    };
+  }
+
   // Danh sách các thư mục gốc có thể chứa data
   const home = process.env.HOME || "/home/congtrien125";
   const candidateRoots = [
@@ -179,7 +192,7 @@ function resolvePaths(bId: string) {
 
 const resolvedPaths = resolvePaths(activeBotId);
 
-const hybridAgentSettings: HybridAgentSettings = {
+export const hybridAgentSettings: HybridAgentSettings = {
   /** Master switch: false giữ nguyên hoàn toàn luồng Gemini hiện tại. */
   enabled: readBool("HYBRID_ROUTING_ENABLED", false),
   /** Endpoint ngoài máy chỉ được phép khi bật rõ ràng; runtime vẫn bắt buộc HTTPS. */
@@ -375,6 +388,10 @@ export const config = {
   cloudflareLlmModel: process.env.CLOUDFLARE_LLM_MODEL?.trim() || "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
   cloudflareImageModel: process.env.CLOUDFLARE_IMAGE_MODEL?.trim() || "@cf/black-forest-labs/flux-1-schnell",
   cloudflareWhisperModel: process.env.CLOUDFLARE_WHISPER_MODEL?.trim() || "@cf/openai/whisper",
+
+  /** Cấu hình sinh ảnh: "codex" (mặc định qua 9Router/Hermes) hoặc "cloudflare" */
+  imageProvider: (process.env.IMAGE_PROVIDER?.trim() || "codex").toLowerCase(),
+  codexImageModel: process.env.CODEX_IMAGE_MODEL?.trim() || "cx/gpt-image-1.5",
 
   /**
    * Thư mục ảnh bản tin công khai (bản WebP nhẹ) để nginx serve thẳng cho

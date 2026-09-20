@@ -294,3 +294,22 @@ test("planner không thể tự cấp action khi người dùng chỉ hỏi gi�
   assert.equal(plan.responseMode, "fast");
   assert.equal(plan.toolIntent, "none");
 });
+
+test("câu hỏi chất vấn/phản biện meta (sao em nhầm vậy, bot nói sai rồi) luôn là chat, needsSearch: false", async () => {
+  const { planSearchQueries } = await import("./query-planner.js");
+  const cases = [
+    "Sen chúa sao e nhầm vậy",
+    "Sao lại nói sai thế bot",
+    "Em nhầm rồi",
+    "Sao bot ngáo vậy",
+    "Tại sao lại sai thế",
+  ];
+
+  for (const q of cases) {
+    const res = await planSearchQueries({ question: q, quoteText: "Nội dung cũ" });
+    assert.equal(res.needsSearch, false, `Failed on: ${q}`);
+    assert.equal(res.intent, "chat", `Failed on: ${q}`);
+    assert.deepEqual(res.queries, [], `Failed on: ${q}`);
+  }
+});
+

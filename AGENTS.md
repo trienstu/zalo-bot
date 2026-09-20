@@ -43,6 +43,14 @@ This project is indexed by GitNexus as **zalo-bot** (4345 symbols, 10609 relatio
 
 <!-- gitnexus:end -->
 
+# Quy Trình Code Review 2 Tầng (Dual-Layer Code Review)
+
+Dự án áp dụng quy trình kiểm tra chất lượng mã nguồn 2 tầng kết hợp:
+1. **Tầng 1 - GitNexus (Kiến trúc & Đồ thị)**: Chạy `npm run review:graph` (hoặc MCP `detect_changes`). Phân tích blast radius, phát hiện đứt gãy quan hệ execution flow và cảnh báo rủi ro vĩ mô trước khi commit.
+2. **Tầng 2 - Alibaba OpenCodeReview (Dòng mã & Lỗi logic/Bảo mật)**: Chạy `npm run review:ocr` (hoặc script `npm run review`). Áp dụng bộ quy tắc deterministic của Alibaba kết hợp LLM để soi lỗi chi tiết: Null safety, race condition, async leak, security (XSS/SQLi), React/TS standards.
+- **Lệnh chạy toàn diện cả 2 tầng**: `npm run review` (hoặc xem trước với `npm run review:preview`).
+
+
 # Quy Tắc Cập Nhật & Triển Khai (Deployment Rules)
 
 - **LUÔN CẬP NHẬT ĐỒNG THỜI CẢ 2 BOT**: Trên VPS (`zalo-bot-free`), hệ thống chạy mô hình 2 bot độc lập:

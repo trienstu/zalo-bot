@@ -62,7 +62,10 @@ export function extractCleanUserQuery(question: string, quoteText = ""): string 
     .replace(/\s+/g, " ")
     .trim();
 
-  if (clean.length < 3 && quoteText) {
+  const isPureFeedbackOrQuestionParticle =
+    /^(?:e\s+nhầm|em\s+nhầm|nhầm|sai|sai\s+rồi|nhầm\s+rồi|bị\s+lú|bị\s+ngáo|lú|ngáo|nhầm\s+vậy)$/i.test(clean);
+
+  if ((clean.length < 3 || isPureFeedbackOrQuestionParticle) && quoteText) {
     clean = quoteText
       .replace(/@\S+/g, "")
       .replace(/[\/?.!,]+/g, " ")
@@ -138,12 +141,13 @@ function fallbackSafePlanner(question: string, quoteText = ""): QueryPlanResult 
     queries.push(`${query} hôm nay`.slice(0, 80));
   }
 
+  const isNews = /\b(?:tin|tin tuc|tin moi|cap nhat|diem tin|thoi su|ban tin|su kien|hom nay co gi|hot)\b/i.test(normalizePlannerText(question));
   const needsSearch = signals.highStakes || signals.explicitlyCurrent || signals.inherentlyVolatile;
   return applyExecutionSignals({
     needsSearch,
-    intent: needsSearch ? "fact_check" : "knowledge",
+    intent: isNews ? "realtime_news" : (needsSearch ? "fact_check" : "knowledge"),
     queries: needsSearch ? uniqQueries(queries) : [],
-    summaryIntent: needsSearch ? "Fallback verified planner" : "Fallback stable knowledge planner",
+    summaryIntent: isNews ? "Fallback realtime news planner" : (needsSearch ? "Fallback verified planner" : "Fallback stable knowledge planner"),
   }, question, quoteText);
 }
 
@@ -171,8 +175,10 @@ function uniqQueries(queries: string[]): string[] {
 
 function buildContextualFallbackQuery(question: string, quoteText = ""): string {
   const cleanQuestion = extractCleanUserQuery(question, quoteText);
-  const isFollowUp = /^(?:còn|con|vậy|vay|thế|the|nó|no|người này|nguoi nay|cái này|cai nay|trường hợp này|truong hop nay)\b/i
-    .test(normalizePlannerText(question.trim()));
+  const normalized = normalizePlannerText(question.trim());
+  const isFollowUp =
+    /^(?:còn|con|vậy|vay|thế|the|nó|no|người này|nguoi nay|cái này|cai nay|trường hợp này|truong hop nay|ông này|ong nay|bà này|ba nay|dự án này|du an nay|chỗ này|cho nay|đoạn này|doan nay|thế còn|the con)\b/i.test(normalized) ||
+    /\b(?:này|cái này|dự án này|vụ này|trường hợp này)\b/i.test(normalized);
   if (isFollowUp && quoteText.trim()) {
     const cleanQuote = extractCleanUserQuery(quoteText);
     return `${cleanQuote} ${cleanQuestion}`.replace(/\s+/g, " ").trim().slice(0, 180);
@@ -339,6 +345,20 @@ export async function planSearchQueries(params: {
     }, question, quoteText);
   }
 
+  // Nhận diện câu phản biện / chất vấn / thắc mắc meta về câu trả lời trước đó (Feedback / Critique)
+  // Các câu như: "sao em nhầm vậy", "sao lại sai thế", "bot nói sai rồi", "em nhầm rồi", "sao e biết"
+  // BẮT BUỘC là hội thoại chat, đối thoại dựa trên ngữ cảnh lịch sử chat, KHÔNG search báo chí RSS!
+  const isMetaCritique =
+    /(?:sao\s+(?:lại\s+|e\s+|em\s+|bot\s+|mày\s+)?(?:nhầm|sai|lộn|bậy|ngáo|lú)|nói\s+sai|nhầm\s+rồi|bị\s+(?:ngáo|lú|nhầm)|trả\s+lời\s+sai|tại\s+sao\s+(?:lại\s+)?(?:sai|nhầm)|nhầm\s+to\s+rồi|sai\s+bét|sai\s+rồi)/i.test(trimmed);
+  if (isMetaCritique) {
+    return applyExecutionSignals({
+      needsSearch: false,
+      intent: "chat",
+      queries: [],
+      summaryIntent: "Người dùng chất vấn / phản biện về câu trả lời trước đó",
+    }, question, quoteText);
+  }
+
   const executionPlannerContract = config.hybridAgent.enabled
     ? `4. Đề xuất cách thực thi theo bốn trục tổng quát, không phụ thuộc lĩnh vực:\n` +
       `   - responseMode: "fast" cho câu đơn giản/ổn định; "grounded" khi cần dữ liệu kiểm chứng; "deep" cho phân tích nhiều bước; "action" chỉ khi người dùng yêu cầu rõ việc đọc/tạo/chạy công cụ.\n` +
@@ -377,6 +397,7 @@ export async function planSearchQueries(params: {
     `      - Lịch sử cổ - trung đại đã cố định (các cuộc chiến lịch sử, triều đại phong kiến, năm diễn ra sự kiện lịch sử cố định hàng chục/trăm năm trước).\n` +
     `      - Văn hóa, nghệ thuật, triết học, giải thích khái niệm trừu tượng, sáng tác, dịch thuật, soạn email.\n` +
     `      - Chào hỏi xã giao, khen ngợi, đùa vui thông thường.\n` +
+    `      - Phản biện, chất vấn, góp ý câu trả lời trước đó (ví dụ: "sao em nhầm vậy", "sao nói sai thế", "nhầm rồi", "sao em biết"): dùng ngữ cảnh lịch sử chat để đối thoại, nhận lỗi hoặc giải thích, TUYỆT ĐỐI KHÔNG search báo chí.\n` +
     `      => KHÔNG tìm kiếm bên ngoài, dùng 100% bộ não tri thức có sẵn: needsSearch: false, intent: "knowledge" hoặc "chat", queries: []\n\n` +
     `   B) 8 MẢNG DỮ LIỆU THỰC TẾ BIẾN ĐỘNG (BẮT BUỘC needsSearch: true - KỂ CẢ KHI CÂU HỎI KHÔNG CÓ TỪ 'CHECK' HAY 'HIỆN NAY'):\n` +
     `      1. Thể chế, Địa giới & Hạ tầng quốc gia: Số lượng/cơ cấu tỉnh, thành phố, đặc khu, quận, huyện, xã, phường, sáp nhập, quy hoạch cao tốc, sân bay, vành đai...\n` +

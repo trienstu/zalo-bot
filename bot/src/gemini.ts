@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import { config } from "./config.js";
 import {
   webSearch,
@@ -14,6 +15,7 @@ import {
   generateTextFile,
   type GeneratedFileResult,
 } from "./tools/file-generator.js";
+import { runPythonCode } from "./tools/python-runner.js";
 import {
   getCryptoTicker,
   getFearAndGreedIndex,
@@ -829,6 +831,20 @@ const AGENT_TOOLS_DECLARATION = {
         required: ["location"],
       },
     },
+    {
+      name: "python_interpreter",
+      description: "Thực thi mã nguồn Python trực tiếp trên môi trường máy chủ Mac mini để giải toán phức tạp, phân tích dữ liệu, xử lý thuật toán hoặc VẼ BIỂU ĐỒ, TẠO HÌNH ẢNH, SƠ ĐỒ QUY TRÌNH, INFOGRAPHIC, QUOTE CARD, THIỆP/BẢNG BIỂU (bằng matplotlib, seaborn, PIL/Pillow). BẮT BUỘC DÙNG khi người dùng yêu cầu tính toán, vẽ biểu đồ/đồ thị, tạo sơ đồ, flow chart, mindmap, infographic hoặc vẽ ảnh đồ họa/danh ngôn/thẻ thông tin.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          code: {
+            type: "STRING",
+            description: "Đoạn code Python hoàn chỉnh để thực thi. Nếu vẽ biểu đồ/đồ thị/sơ đồ: Dùng matplotlib.pyplot (plt.title, plt.xlabel, plt.ylabel, plt.show() hoặc plt.savefig('ten_file.png', dpi=150, bbox_inches='tight')). Nếu tạo thiệp/quote card/infographic: Dùng PIL (Image, ImageDraw, ImageFont) và lưu thành file .png. Hệ thống sẽ tự động bắt file ảnh được tạo ra và gửi trực tiếp cho người dùng.",
+          },
+        },
+        required: ["code"],
+      },
+    },
   ],
 };
 
@@ -926,6 +942,12 @@ async function executeAgentTool(name: string, args: Record<string, any>): Promis
         const result = await generateTextFile(fileName, content, ext);
         return result;
       }
+    }
+    case "python_interpreter": {
+      const code = String(args?.code || "").trim();
+      if (!code) return { error: "Không có mã code Python nào để chạy" };
+      const res = await runPythonCode(code);
+      return res;
     }
     default:
       return { error: `Công cụ ${name} không tồn tại` };
@@ -1098,6 +1120,21 @@ export async function callGeminiAgentLoop(
               await options.onFileGenerated(result);
             } catch (fileErr) {
               console.warn("[gemini-agent] onFileGenerated callback error:", fileErr);
+            }
+          }
+          if (fc.name === "python_interpreter" && result?.success && options?.onFileGenerated) {
+            const allFiles = [...(result.generatedImages || []), ...(result.generatedFiles || [])];
+            for (const itemPath of allFiles) {
+              try {
+                await options.onFileGenerated({
+                  success: true,
+                  filePath: itemPath,
+                  fileName: path.basename(itemPath),
+                  fileSize: fs.existsSync(itemPath) ? fs.statSync(itemPath).size : 0,
+                });
+              } catch (fileErr) {
+                console.warn("[gemini-agent] onFileGenerated python runner error:", fileErr);
+              }
             }
           }
           return {

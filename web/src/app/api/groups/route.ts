@@ -127,6 +127,7 @@ export async function GET(request: Request) {
     }
 
     const dbPath = await getActiveBotDbPath(botId, reqUrl, hostHeader);
+    const isBot2 = botId === "bot-2" || dbPath.includes("bot-2") || process.env.BOT_ID === "bot-2";
     if (!fs.existsSync(dbPath)) {
       return NextResponse.json({ groups: [] });
     }
@@ -215,12 +216,13 @@ export async function GET(request: Request) {
         )
         .all() as { group_id: string; name: string; total_members: number }[];
 
+      const defaultName = process.env.BOT_NAME?.trim() || (isBot2 ? "Mộc Miên" : "Sen Chúa");
       if (syncRuns.length > 0) {
         for (const sr of syncRuns) {
           db.prepare(
             `INSERT OR REPLACE INTO bot_groups (group_id, name, total_members, mode, persona, custom_prompt, bot_name, welcome_msg, weather_auto, weather_time, weather_city, is_active, updated_at)
-             VALUES (?, ?, ?, 'interactive', 'humorous', '', 'Sen Chúa', '', 0, '07:00', 'Hồ Chí Minh', 0, ?)`,
-          ).run(sr.group_id, sr.name || `Nhóm ${sr.group_id.slice(-4)}`, sr.total_members || 0, Date.now());
+             VALUES (?, ?, ?, 'interactive', 'humorous', '', ?, '', 0, '07:00', 'Hồ Chí Minh', 0, ?)`,
+          ).run(sr.group_id, sr.name || `Nhóm ${sr.group_id.slice(-4)}`, sr.total_members || 0, defaultName, Date.now());
         }
         savedGroups = db.prepare("SELECT * FROM bot_groups ORDER BY total_members DESC").all() as any[];
       }
@@ -228,6 +230,7 @@ export async function GET(request: Request) {
 
     // 3. Nếu vẫn rỗng, tìm các thread_id trong group_messages
     if (savedGroups.length === 0) {
+      const defaultName = process.env.BOT_NAME?.trim() || (isBot2 ? "Mộc Miên" : "Sen Chúa");
       const msgThreads = db
         .prepare(
           `SELECT DISTINCT thread_id as group_id
@@ -239,14 +242,15 @@ export async function GET(request: Request) {
       for (const mt of msgThreads) {
         db.prepare(
           `INSERT OR IGNORE INTO bot_groups (group_id, name, total_members, mode, persona, custom_prompt, bot_name, welcome_msg, weather_auto, weather_time, weather_city, is_active, updated_at)
-           VALUES (?, ?, 0, 'interactive', 'humorous', '', 'Sen Chúa', '', 0, '07:00', 'Hồ Chí Minh', 0, ?)`,
-        ).run(mt.group_id, `Nhóm Zalo ${mt.group_id.slice(-6)}`, Date.now());
+           VALUES (?, ?, 0, 'interactive', 'humorous', '', ?, '', 0, '07:00', 'Hồ Chí Minh', 0, ?)`,
+        ).run(mt.group_id, `Nhóm Zalo ${mt.group_id.slice(-6)}`, defaultName, Date.now());
       }
       savedGroups = db.prepare("SELECT * FROM bot_groups ORDER BY total_members DESC").all() as any[];
     }
 
     db.close();
 
+    const fallbackBotName = process.env.BOT_NAME?.trim() || (isBot2 ? "Mộc Miên" : "Sen Chúa");
     const formatted = savedGroups.map((g) => ({
       id: g.group_id,
       name: g.name,
@@ -256,7 +260,7 @@ export async function GET(request: Request) {
       mode: (g.mode as "interactive" | "silent" | "disabled") || "interactive",
       persona: (g.persona as "humorous" | "professional" | "friendly" | "strict" | "custom") || "humorous",
       customPrompt: g.custom_prompt || "",
-      botName: g.bot_name || "Sen Chúa",
+      botName: (g.bot_name && g.bot_name.trim()) ? g.bot_name.trim() : fallbackBotName,
       welcomeMsg: g.welcome_msg || "",
       weatherAuto: Boolean(g.weather_auto),
       weatherTime: g.weather_time || "07:00",
@@ -312,6 +316,7 @@ export async function POST(request: Request) {
     }
 
     const dbPath = await getActiveBotDbPath(botId, reqUrl, hostHeader);
+    const isBot2 = botId === "bot-2" || dbPath.includes("bot-2") || process.env.BOT_ID === "bot-2";
     if (!fs.existsSync(dbPath)) {
       return NextResponse.json({ ok: false, error: "Chưa có database bot" }, { status: 400 });
     }
@@ -538,6 +543,7 @@ export async function POST(request: Request) {
       // Đợi bot quét xong trong 1.5s
       await new Promise((r) => setTimeout(r, 1500));
 
+      const fallbackBotName = process.env.BOT_NAME?.trim() || (isBot2 ? "Mộc Miên" : "Sen Chúa");
       const updated = db.prepare("SELECT * FROM bot_groups ORDER BY total_members DESC").all() as any[];
       db.close();
       const formatted = updated.map((g) => ({
@@ -549,7 +555,7 @@ export async function POST(request: Request) {
         mode: g.mode || "interactive",
         persona: g.persona || "humorous",
         customPrompt: g.custom_prompt || "",
-        botName: g.bot_name || "Sen Chúa",
+        botName: (g.bot_name && g.bot_name.trim()) ? g.bot_name.trim() : fallbackBotName,
         welcomeMsg: g.welcome_msg || "",
         isActive: g.is_active === 1,
       }));
@@ -588,10 +594,11 @@ export async function POST(request: Request) {
     }
 
     if (body.groupId && body.groupName) {
+      const fallbackBotName = process.env.BOT_NAME?.trim() || (isBot2 ? "Mộc Miên" : "Sen Chúa");
       db.prepare(
         `INSERT OR REPLACE INTO bot_groups (group_id, name, total_members, mode, persona, custom_prompt, bot_name, welcome_msg, is_active, updated_at)
-         VALUES (?, ?, ?, 'interactive', 'humorous', '', 'Sen Chúa', '', 1, ?)`,
-      ).run(body.groupId, body.groupName, 0, Date.now());
+         VALUES (?, ?, ?, 'interactive', 'humorous', '', ?, '', 1, ?)`,
+      ).run(body.groupId, body.groupName, 0, fallbackBotName, Date.now());
     }
 
     db.close();
