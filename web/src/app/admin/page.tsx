@@ -48,6 +48,9 @@ export default function AdminLoginPage() {
       const data = await res.json();
       if (data.ok) {
         localStorage.setItem("admin_auth", "true");
+        if (typeof document !== "undefined") {
+          document.cookie = "admin_auth_session=authenticated_admin; path=/; max-age=2592000; SameSite=Lax";
+        }
         router.push("/");
       } else {
         setError(data.error || "Mật khẩu Admin không chính xác");

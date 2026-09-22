@@ -423,9 +423,12 @@ export async function GET(request: Request) {
 
     // Kiểm tra bảo mật:
     // - Nếu có token: Cho phép thành viên vào nhóm riêng
-    // - Nếu không có token: Bắt buộc phải là Admin (đã đăng nhập) hoặc đang truy cập từ Localhost máy chủ
+    // - Nếu không có token: Bắt buộc phải là Admin (đã đăng nhập qua cookie hoặc x-admin-auth header) hoặc đang truy cập từ Localhost máy chủ
     const cookieHeader = request.headers.get("cookie") || "";
-    const isAdminAuthenticated = cookieHeader.includes("admin_auth_session=authenticated_admin");
+    const xAdminAuth = request.headers.get("x-admin-auth") || "";
+    const isAdminAuthenticated =
+      cookieHeader.includes("admin_auth_session=authenticated_admin") ||
+      xAdminAuth === "authenticated_admin";
     const host = request.headers.get("host") || "";
     const isLocalhost = host.startsWith("localhost") || host.startsWith("127.0.0.1");
 

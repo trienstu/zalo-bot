@@ -30,6 +30,7 @@ import {
   Layers2,
   Globe,
   SlidersHorizontal,
+  FolderGit2,
 } from "lucide-react";
 
 interface KnowledgeItem {
@@ -150,7 +151,20 @@ export function HubClient() {
           params.set("q", debouncedQuery);
         }
 
-        const res = await fetch(`/api/hub?${params.toString()}`);
+        // Đồng bộ cookie phiên admin nếu trình duyệt đã lưu admin_auth
+        const hasLocalAdmin = typeof window !== "undefined" && localStorage.getItem("admin_auth") === "true";
+        if (hasLocalAdmin && typeof document !== "undefined" && !document.cookie.includes("admin_auth_session=authenticated_admin")) {
+          document.cookie = "admin_auth_session=authenticated_admin; path=/; max-age=2592000; SameSite=Lax";
+        }
+        const fetchHeaders: Record<string, string> = {};
+        if (hasLocalAdmin) {
+          fetchHeaders["x-admin-auth"] = "authenticated_admin";
+        }
+
+        const res = await fetch(`/api/hub?${params.toString()}`, {
+          credentials: "include",
+          headers: fetchHeaders,
+        });
         if (res.status === 401) {
           const errData = await res.json().catch(() => ({}));
           setUnauthorizedError(errData.message || "Kho tài nguyên này chỉ dành cho Quản trị viên.");
@@ -289,7 +303,7 @@ export function HubClient() {
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
             <Link
-              href="/login"
+              href="/admin"
               className="flex items-center justify-center gap-2 w-full sm:w-auto rounded-xl bg-cyan-500 px-6 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition-all hover:bg-cyan-400"
             >
               <span>Đăng Nhập Quản Trị Viên</span>
@@ -352,6 +366,13 @@ export function HubClient() {
                 <strong className="text-purple-300">{stats.totalContributors}</strong> thành viên chia sẻ
               </span>
             </div>
+            <Link
+              href="/repos"
+              className="flex items-center gap-2 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 px-3.5 py-1.5 border border-indigo-500/50 text-xs font-semibold text-indigo-300 hover:text-white transition-all shadow-sm"
+            >
+              <FolderGit2 className="h-4 w-4 text-indigo-400" />
+              <span>📦 Khám phá Kho Repo GitHub ↗</span>
+            </Link>
           </div>
         </div>
 

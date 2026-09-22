@@ -32,6 +32,7 @@ import {
   PanelLeftOpen,
   ChevronDown,
   Terminal,
+  FolderGit2,
 } from "lucide-react";
 import { BotSwitcher } from "@/components/bot-switcher";
 
@@ -48,6 +49,7 @@ interface GroupItem {
 const NAV = [
   { href: "/", label: "Tổng quan", shortLabel: "Tổng quan", icon: LayoutDashboard },
   { href: "/hub", label: "Kho Kiến Thức", shortLabel: "Kiến thức", icon: Sparkles },
+  { href: "/repos", label: "Kho GitHub Repo", shortLabel: "GitHub", icon: FolderGit2 },
   { href: "/members", label: "Thành viên", shortLabel: "Thành viên", icon: Users },
   { href: "/friends", label: "Bạn bè & Chat 1:1", shortLabel: "Bạn bè", icon: UserCheck },
   { href: "/leaderboard", label: "Xếp hạng", shortLabel: "Top", icon: Trophy },
@@ -193,15 +195,23 @@ function AppShellInner({
   useEffect(() => {
     async function checkAuth() {
       try {
-        const res = await fetch("/api/auth");
+        const hasLocalAuth = typeof window !== "undefined" && localStorage.getItem("admin_auth") === "true";
+        if (hasLocalAuth && typeof document !== "undefined" && !document.cookie.includes("admin_auth_session=authenticated_admin")) {
+          document.cookie = "admin_auth_session=authenticated_admin; path=/; max-age=2592000; SameSite=Lax";
+        }
+        const headers: Record<string, string> = {};
+        if (hasLocalAuth) {
+          headers["x-admin-auth"] = "authenticated_admin";
+        }
+        const res = await fetch("/api/auth", { headers });
         if (res.ok) {
           const data = await res.json();
-          setIsAdminAuthenticated(data.authenticated === true || localStorage.getItem("admin_auth") === "true");
+          setIsAdminAuthenticated(data.authenticated === true || hasLocalAuth);
         } else {
-          setIsAdminAuthenticated(localStorage.getItem("admin_auth") === "true");
+          setIsAdminAuthenticated(hasLocalAuth);
         }
       } catch {
-        setIsAdminAuthenticated(localStorage.getItem("admin_auth") === "true");
+        setIsAdminAuthenticated(typeof window !== "undefined" && localStorage.getItem("admin_auth") === "true");
       }
     }
     checkAuth();
@@ -213,6 +223,9 @@ function AppShellInner({
       await fetch("/api/auth", { method: "DELETE" });
     } catch {}
     localStorage.removeItem("admin_auth");
+    if (typeof document !== "undefined") {
+      document.cookie = "admin_auth_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax";
+    }
     setIsAdminAuthenticated(false);
   }
 
@@ -244,9 +257,14 @@ function AppShellInner({
     return `${pathname}?${qs.toString()}`;
   };
 
-  // 1. TRANG CÔNG KHAI THUẦN TÚY: Kho Kiến Thức (/hub)
-  const isHubPublicPage = pathname === "/hub" || pathname.startsWith("/hub/");
-  if (isHubPublicPage) {
+  // 1. TRANG CÔNG KHAI THUẦN TÚY: Kho Kiến Thức (/hub) & Kho GitHub Repo (/repos)
+  const isPublicResourcePage =
+    pathname === "/hub" ||
+    pathname.startsWith("/hub/") ||
+    pathname === "/repos" ||
+    pathname.startsWith("/repos/");
+
+  if (isPublicResourcePage) {
     return (
       <div className="min-h-screen flex flex-col bg-slate-950 text-slate-100">
         <header className="sticky top-0 z-40 border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md px-4 py-3">
@@ -259,10 +277,37 @@ function AppShellInner({
             </Link>
 
             <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/20 px-3 py-1 text-xs font-semibold text-cyan-300">
+              {isAdminAuthenticated && (
+                <Link
+                  href="/"
+                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/20 transition-all"
+                >
+                  <LayoutDashboard className="h-3.5 w-3.5" />
+                  <span>Về Dashboard</span>
+                </Link>
+              )}
+              <Link
+                href="/hub"
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                  pathname.startsWith("/hub")
+                    ? "bg-cyan-500/20 border border-cyan-500/40 text-cyan-300"
+                    : "text-slate-400 hover:text-white hover:bg-slate-900 border border-transparent"
+                }`}
+              >
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>Kho Kiến Thức & Tài Nguyên</span>
-              </span>
+                <span>Kho Kiến Thức</span>
+              </Link>
+              <Link
+                href="/repos"
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                  pathname.startsWith("/repos")
+                    ? "bg-indigo-500/20 border border-indigo-500/40 text-indigo-300"
+                    : "text-slate-400 hover:text-white hover:bg-slate-900 border border-transparent"
+                }`}
+              >
+                <FolderGit2 className="h-3.5 w-3.5" />
+                <span>Kho GitHub Repo</span>
+              </Link>
             </div>
           </div>
         </header>

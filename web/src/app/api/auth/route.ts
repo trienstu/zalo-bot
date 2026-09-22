@@ -12,11 +12,14 @@ export async function POST(request: Request) {
     const password = body.password || "";
 
     if (password === ADMIN_PASSWORD) {
+      const proto = request.headers.get("x-forwarded-proto") || "";
+      const isHttps = proto === "https" || request.url.startsWith("https:");
+
       const cookieStore = await cookies();
       cookieStore.set(COOKIE_NAME, "authenticated_admin", {
         path: "/",
         httpOnly: false, // Cho phép client đọc trạng thái
-        secure: process.env.NODE_ENV === "production",
+        secure: isHttps,
         maxAge: 60 * 60 * 24 * 30, // 30 ngày
         sameSite: "lax",
       });
@@ -30,10 +33,11 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const cookieStore = await cookies();
   const session = cookieStore.get(COOKIE_NAME);
-  const isAuthenticated = session?.value === "authenticated_admin";
+  const authHeader = request.headers.get("x-admin-auth");
+  const isAuthenticated = session?.value === "authenticated_admin" || authHeader === "authenticated_admin";
 
   return NextResponse.json({ authenticated: isAuthenticated });
 }
