@@ -32,6 +32,7 @@ export interface CloudflareImageResult {
   fileSize: number;
   error?: string;
   translatedPrompt?: string;
+  tierUsed?: string;
 }
 
 export interface CloudflareTranscriptionResult {
@@ -72,9 +73,10 @@ export async function callCloudflareLlm(
 
   const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/${model}`;
 
+  const maxTokens = Math.min(Math.max(options?.maxTokens || 1500, 256), 4096);
   const body = {
     messages,
-    max_tokens: options?.maxTokens || 1500,
+    max_tokens: maxTokens,
     temperature: options?.temperature ?? 0.3,
   };
 
@@ -162,7 +164,7 @@ export async function generateCloudflareImage(
           `You are an expert AI visual prompt engineer for FLUX.1 text-to-image models.\n` +
           `Convert the user's Vietnamese request into a natural, vivid English image prompt (25 to 45 words).\n` +
           `CRITICAL RULES:\n` +
-          `1. SUBJECT & AGE ACCURACY: In Vietnamese, "cô gái" means a young adult woman (around 20-25 years old), NOT a child or little girl. "chàng trai" means a young man. Accurately capture who they are.\n` +
+          `1. SUBJECT & AGE ACCURACY: In Vietnamese, "cô gái" means a young adult woman (around 20-25 years old), NOT a child or little girl. "chàng trai" means a young man. Accurately capture who they are. DO NOT invent people or draw humans merely because the request contains conversational pronouns ("em", "anh", "tôi") or quoted conversation text. Only depict people if the user explicitly requested a person.\n` +
           `2. CULTURAL AUTHENTICITY: If the request refers to Vietnamese regions (e.g., "miền tây" = Mekong Delta, traditional rustic ao ba ba blouse, lush river or village setting), depict them accurately and naturally.\n` +
           `3. AVOID STYLE LOCK (NO FAKE WATERCOLOR / CGI): DO NOT force digital art, CGI, 3D render, cartoonish colors, or heavy yellow/golden color grading. Keep the style clean, authentic, lifelike photography, or follow whatever artistic style the user specifically requested (such as anime, sketch, 3D, oil painting).\n` +
           `4. NO BUZZWORDS: Do NOT include buzzwords like "masterpiece, 8k, cinematic lighting, soft shadows, ultra realistic". Describe concrete visual elements instead (natural daylight, genuine expressions, crisp focus, lifelike skin texture).\n` +
@@ -260,6 +262,7 @@ export async function generateCloudflareImage(
       filePath: targetPath,
       fileName,
       fileSize: finalBuffer.length,
+      tierUsed: "Cloudflare (FLUX.1-schnell)",
     };
   } catch (err: any) {
     console.error("[cloudflare-ai] ❌ Lỗi tạo ảnh:", err);

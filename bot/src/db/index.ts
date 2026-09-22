@@ -18,7 +18,8 @@ export function getDb(): Database.Database {
   if (db) return db;
 
   fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
-  db = new Database(config.dbPath);
+  db = new Database(config.dbPath, { timeout: 10000 });
+  db.pragma("busy_timeout = 10000");
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
 
@@ -142,6 +143,23 @@ function runColumnMigrations(database: Database.Database): void {
       updated_at     INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_bot_friends_allow ON bot_friends(allow_direct);
+
+    CREATE TABLE IF NOT EXISTS user_memories (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id        TEXT NOT NULL,
+      thread_id      TEXT NOT NULL DEFAULT '',
+      user_name      TEXT NOT NULL DEFAULT '',
+      category       TEXT NOT NULL,
+      memory_key     TEXT NOT NULL,
+      memory_value   TEXT NOT NULL,
+      source_snippet TEXT NOT NULL DEFAULT '',
+      confidence     REAL NOT NULL DEFAULT 1.0,
+      created_at     INTEGER NOT NULL,
+      updated_at     INTEGER NOT NULL,
+      UNIQUE(user_id, memory_key)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_memories_user ON user_memories(user_id, category);
+    CREATE INDEX IF NOT EXISTS idx_user_memories_updated ON user_memories(user_id, updated_at);
   `);
 }
 
@@ -2411,15 +2429,17 @@ export function searchPermanentKnowledge(
       const keywordsLower = (item.keywords || "").toLowerCase();
       const summaryLower = (item.summary || "").toLowerCase();
 
-      // Điểm từ keywords được định nghĩa trước
+      // Điểm từ keywords được định nghĩa trước (Tách theo dấu phẩy để giữ nguyên cụm danh từ chuyên môn)
       const definedKws = keywordsLower
-        .split(/[,\s]+/)
-        .map((k) => k.trim())
-        .filter((k) => k.length >= 2 && !stopWords.has(k));
+        .split(",")
+        .map((k) => k.trim().replace(/\s+/g, " "))
+        .filter((k) => k.length >= 3 && !stopWords.has(k));
 
       for (const kw of definedKws) {
+        // Chỉ cộng điểm cao cho cụm từ khóa chuyên môn/thực thể cụ thể
+        const isGenericTerm = /^(?:bất động sản|du an|dự án|đầu tư|dau tu|mua bán|kinh doanh)$/i.test(kw);
         if (fullText.includes(kw)) {
-          score += 15;
+          score += isGenericTerm ? 3 : 20;
         }
       }
 
@@ -2427,13 +2447,13 @@ export function searchPermanentKnowledge(
       for (const w of words) {
         if (topicLower.includes(w)) score += 10;
         if (titleLower.includes(w)) score += 8;
-        if (keywordsLower.includes(w)) score += 5;
-        if (summaryLower.includes(w)) score += 3;
+        if (keywordsLower.includes(w)) score += 3;
+        if (summaryLower.includes(w)) score += 2;
       }
 
-      // Ngưỡng tối thiểu >= 15 để kích hoạt: phải trùng tên topic hoặc nhiều từ khóa chuyên môn
-      // Không bao giờ match bừa bãi content_text để tránh nuốt nhầm chat thường ngày
-      if (score >= 15) {
+      // Ngưỡng tối thiểu >= 20 để kích hoạt: phải trùng tên topic/title hoặc cụm từ khóa chuyên môn thực sự
+      // Tuyệt đối không để các từ ngữ chung chung làm rò rỉ dữ liệu của dự án khác vào prompt
+      if (score >= 20) {
         scoredItems.push({ item, score });
       }
     }
@@ -2443,6 +2463,93 @@ export function searchPermanentKnowledge(
   } catch (e) {
     console.warn(`[db] searchPermanentKnowledge error: ${String(e)}`);
     return [];
+  }
+}
+
+/**
+ * Tự động tìm và khâu nối các mảnh tin nhắn liên tiếp (multi-chunk) khi người dùng quote một tin nhắn bị Zalo chia nhỏ.
+ * Áp dụng cho cả tin nhắn do Bot gửi (is_self = 1) hoặc tin nhắn dài của thành viên.
+ */
+export function stitchMultiChunkQuote(threadId: string, quoteText: string): string {
+  if (!quoteText || quoteText.length < 50) return quoteText;
+  try {
+    const db = getDb();
+    const cleanQuote = quoteText.trim();
+    // Lấy 100 tin nhắn gần nhất của thread
+    const recent = db
+      .prepare(
+        `SELECT id, text, ts, is_self, display_name
+         FROM group_messages
+         WHERE thread_id = ?
+           AND text IS NOT NULL
+           AND deleted_at IS NULL
+         ORDER BY id DESC
+         LIMIT 100`,
+      )
+      .all(threadId) as { id: number; text: string; ts: number; is_self: number; display_name: string }[];
+
+    if (!recent || recent.length === 0) return quoteText;
+
+    // Tìm tin nhắn khớp trong danh sách
+    let matchIdx = recent.findIndex((m) => {
+      const t = m.text.trim();
+      return t === cleanQuote || t.startsWith(cleanQuote) || cleanQuote.startsWith(t.slice(0, 80));
+    });
+
+    if (matchIdx === -1) {
+      const prefix = cleanQuote.slice(0, 50);
+      matchIdx = recent.findIndex((m) => m.text.includes(prefix));
+    }
+
+    if (matchIdx === -1) return quoteText;
+
+    const matchedMsg = recent[matchIdx];
+    if (!matchedMsg) return quoteText;
+
+    // Sắp xếp lại theo thứ tự thời gian chuẩn (id tăng dần)
+    const chronological = [...recent].reverse();
+    const chronoIdx = chronological.findIndex((m) => m.id === matchedMsg.id);
+    if (chronoIdx === -1) return quoteText;
+
+    let startIdx = chronoIdx;
+    let endIdx = chronoIdx;
+
+    // Quét ngược về trước tìm các mảnh cùng burst (cùng người gửi, cách nhau <= 10s, tin nhắn dài)
+    while (
+      startIdx > 0 &&
+      chronological[startIdx - 1]?.is_self === matchedMsg.is_self &&
+      Math.abs((chronological[startIdx]?.ts ?? 0) - (chronological[startIdx - 1]?.ts ?? 0)) <= 10000 &&
+      ((chronological[startIdx - 1]?.text?.length ?? 0) > 300 || (chronological[startIdx]?.text?.length ?? 0) > 300)
+    ) {
+      startIdx--;
+    }
+
+    // Quét xuôi về sau tìm các mảnh kế tiếp
+    while (
+      endIdx < chronological.length - 1 &&
+      chronological[endIdx + 1]?.is_self === matchedMsg.is_self &&
+      Math.abs((chronological[endIdx + 1]?.ts ?? 0) - (chronological[endIdx]?.ts ?? 0)) <= 10000 &&
+      ((chronological[endIdx + 1]?.text?.length ?? 0) > 300 || (chronological[endIdx]?.text?.length ?? 0) > 300)
+    ) {
+      endIdx++;
+    }
+
+    if (startIdx === endIdx) {
+      return quoteText;
+    }
+
+    const stitched = chronological
+      .slice(startIdx, endIdx + 1)
+      .map((m) => m.text)
+      .join("\n\n");
+
+    console.log(
+      `[stitchMultiChunkQuote] 🧵 Đã khâu nối ${endIdx - startIdx + 1} mảnh tin nhắn liên tiếp (tổng: ${stitched.length} ký tự, gốc: ${quoteText.length} ký tự)`
+    );
+    return stitched;
+  } catch (e) {
+    console.warn("[stitchMultiChunkQuote] Lỗi khi khâu nối tin nhắn quote:", e);
+    return quoteText;
   }
 }
 
@@ -2549,6 +2656,142 @@ export function getRecentDirectDocument(userId: string): { fileName: string; tex
   }
 }
 
+// ==========================================
+// BỘ NHỚ DÀI HẠN TỪNG THÀNH VIÊN (USER LONG-TERM MEMORY)
+// ==========================================
+
+export type UserMemoryCategory = "preference" | "fact" | "task";
+
+export interface UserMemoryItem {
+  id: number;
+  user_id: string;
+  thread_id: string;
+  user_name: string;
+  category: UserMemoryCategory;
+  memory_key: string;
+  memory_value: string;
+  source_snippet: string;
+  confidence: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface UpsertUserMemoryInput {
+  userId: string;
+  threadId?: string;
+  userName?: string;
+  category: UserMemoryCategory;
+  memoryKey: string;
+  memoryValue: string;
+  sourceSnippet?: string;
+  confidence?: number;
+}
+
+export function upsertUserMemory(input: UpsertUserMemoryInput): void {
+  try {
+    const db = getDb();
+    const now = Date.now();
+    const trimmedKey = input.memoryKey.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
+    if (!trimmedKey || !input.memoryValue.trim() || !input.userId.trim()) return;
+
+    db.prepare(`
+      INSERT INTO user_memories (
+        user_id, thread_id, user_name, category, memory_key, memory_value, source_snippet, confidence, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id, memory_key) DO UPDATE SET
+        thread_id = CASE WHEN excluded.thread_id != '' THEN excluded.thread_id ELSE user_memories.thread_id END,
+        user_name = CASE WHEN excluded.user_name != '' THEN excluded.user_name ELSE user_memories.user_name END,
+        category = excluded.category,
+        memory_value = excluded.memory_value,
+        source_snippet = excluded.source_snippet,
+        confidence = excluded.confidence,
+        updated_at = excluded.updated_at
+    `).run(
+      input.userId.trim(),
+      input.threadId?.trim() || "",
+      input.userName?.trim() || "",
+      input.category,
+      trimmedKey,
+      input.memoryValue.trim(),
+      input.sourceSnippet?.trim() || "",
+      input.confidence ?? 1.0,
+      now,
+      now,
+    );
+  } catch (e) {
+    console.warn(`[db] upsertUserMemory error:`, e);
+  }
+}
+
+export function getUserMemories(userId: string, limit = 10): UserMemoryItem[] {
+  try {
+    if (!userId || !userId.trim()) return [];
+    const db = getDb();
+    return db
+      .prepare(`
+        SELECT * FROM user_memories
+        WHERE user_id = ?
+        ORDER BY updated_at DESC
+        LIMIT ?
+      `)
+      .all(userId.trim(), limit) as UserMemoryItem[];
+  } catch (e) {
+    console.warn(`[db] getUserMemories error:`, e);
+    return [];
+  }
+}
+
+export function searchUserMemories(userId: string, query: string, limit = 5): UserMemoryItem[] {
+  try {
+    if (!userId || !userId.trim() || !query || !query.trim()) return [];
+    const db = getDb();
+    const pattern = `%${query.trim().toLowerCase()}%`;
+    return db
+      .prepare(`
+        SELECT * FROM user_memories
+        WHERE user_id = ? AND (
+          LOWER(memory_key) LIKE ? OR
+          LOWER(memory_value) LIKE ? OR
+          LOWER(source_snippet) LIKE ?
+        )
+        ORDER BY updated_at DESC
+        LIMIT ?
+      `)
+      .all(userId.trim(), pattern, pattern, pattern, limit) as UserMemoryItem[];
+  } catch (e) {
+    console.warn(`[db] searchUserMemories error:`, e);
+    return [];
+  }
+}
+
+export function deleteUserMemory(userId: string, memoryKey: string): boolean {
+  try {
+    if (!userId || !memoryKey) return false;
+    const db = getDb();
+    const res = db
+      .prepare(`DELETE FROM user_memories WHERE user_id = ? AND memory_key = ?`)
+      .run(userId.trim(), memoryKey.trim().toLowerCase());
+    return res.changes > 0;
+  } catch (e) {
+    console.warn(`[db] deleteUserMemory error:`, e);
+    return false;
+  }
+}
+
+export function clearUserMemories(userId: string): number {
+  try {
+    if (!userId) return 0;
+    const db = getDb();
+    const res = db
+      .prepare(`DELETE FROM user_memories WHERE user_id = ?`)
+      .run(userId.trim());
+    return res.changes;
+  } catch (e) {
+    console.warn(`[db] clearUserMemories error:`, e);
+    return 0;
+  }
+}
+
 
 export interface AdminUserInfo {
   zaloUserId: string;
@@ -2558,6 +2801,19 @@ export interface AdminUserInfo {
 
 export function isUserAdmin(zaloUserId: string): boolean {
   try {
+    if (!zaloUserId) return false;
+
+    // Các tài khoản Super Admin mặc định
+    const defaultSuperAdminIds = ["3501936437672262924", "7946525001172739016"];
+    if (defaultSuperAdminIds.includes(zaloUserId)) return true;
+
+    // Cấu hình qua biến môi trường ADMIN_USER_IDS hoặc ADMIN_ZALO_IDS
+    const envAdminIds = (process.env.ADMIN_USER_IDS || process.env.ADMIN_ZALO_IDS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (envAdminIds.includes(zaloUserId)) return true;
+
     const rawState = getBotState("admin_user_ids");
     if (!rawState) return false;
     const list = JSON.parse(rawState) as AdminUserInfo[];
@@ -3168,3 +3424,182 @@ export function setAutoFriendSettings(settings: Partial<AutoFriendSettings>): vo
     console.error("[db] setAutoFriendSettings error:", e);
   }
 }
+
+export interface GroupRepoItem {
+  id?: number;
+  thread_id: string;
+  repo_url: string;
+  owner: string;
+  repo_name: string;
+  full_name: string;
+  description?: string;
+  stars?: number;
+  forks?: number;
+  language?: string;
+  category: string;
+  summary_vi: string;
+  target_audience?: string;
+  shared_by_uid?: string;
+  shared_by_name?: string;
+  created_at?: number;
+  updated_at?: number;
+}
+
+export function ensureGroupReposTable(database: Database.Database): void {
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS group_repos (
+        id                INTEGER PRIMARY KEY AUTOINCREMENT,
+        thread_id         TEXT NOT NULL,
+        repo_url          TEXT NOT NULL,
+        owner             TEXT NOT NULL,
+        repo_name         TEXT NOT NULL,
+        full_name         TEXT NOT NULL,
+        description       TEXT,
+        stars             INTEGER DEFAULT 0,
+        forks             INTEGER DEFAULT 0,
+        language          TEXT,
+        category          TEXT NOT NULL,
+        summary_vi        TEXT NOT NULL,
+        target_audience   TEXT,
+        shared_by_uid     TEXT,
+        shared_by_name    TEXT,
+        created_at        INTEGER NOT NULL,
+        updated_at        INTEGER NOT NULL,
+        UNIQUE(thread_id, full_name)
+      );
+      CREATE INDEX IF NOT EXISTS idx_group_repos_thread ON group_repos(thread_id);
+      CREATE INDEX IF NOT EXISTS idx_group_repos_category ON group_repos(category);
+      CREATE INDEX IF NOT EXISTS idx_group_repos_created ON group_repos(created_at DESC);
+    `);
+  } catch {}
+}
+
+export function saveGroupRepo(item: GroupRepoItem): boolean {
+  try {
+    const db = getDb();
+    ensureGroupReposTable(db);
+    const now = Date.now();
+    db.prepare(`
+      INSERT INTO group_repos (
+        thread_id, repo_url, owner, repo_name, full_name, description,
+        stars, forks, language, category, summary_vi, target_audience,
+        shared_by_uid, shared_by_name, created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?
+      )
+      ON CONFLICT(thread_id, full_name) DO UPDATE SET
+        repo_url = excluded.repo_url,
+        description = excluded.description,
+        stars = excluded.stars,
+        forks = excluded.forks,
+        language = excluded.language,
+        category = excluded.category,
+        summary_vi = excluded.summary_vi,
+        target_audience = excluded.target_audience,
+        shared_by_uid = excluded.shared_by_uid,
+        shared_by_name = excluded.shared_by_name,
+        updated_at = excluded.updated_at
+    `).run(
+      item.thread_id,
+      item.repo_url,
+      item.owner,
+      item.repo_name,
+      item.full_name,
+      item.description || "",
+      item.stars ?? 0,
+      item.forks ?? 0,
+      item.language || "",
+      item.category,
+      item.summary_vi,
+      item.target_audience || "",
+      item.shared_by_uid || "",
+      item.shared_by_name || "",
+      item.created_at || now,
+      item.updated_at || now
+    );
+    return true;
+  } catch (e) {
+    console.error("[db] saveGroupRepo error:", e);
+    return false;
+  }
+}
+
+export function getGroupRepos(
+  threadIdOrOptions?: string | { threadId?: string; category?: string; search?: string; query?: string; limit?: number; offset?: number },
+  maybeOptions: { category?: string; search?: string; query?: string; limit?: number; offset?: number } = {}
+): GroupRepoItem[] {
+  try {
+    const db = getDb();
+    ensureGroupReposTable(db);
+
+    let threadId: string | undefined;
+    let category: string | undefined;
+    let search: string | undefined;
+    let limit = 50;
+    let offset = 0;
+
+    if (typeof threadIdOrOptions === "object" && threadIdOrOptions !== null) {
+      threadId = threadIdOrOptions.threadId;
+      category = threadIdOrOptions.category;
+      search = threadIdOrOptions.search || threadIdOrOptions.query;
+      limit = threadIdOrOptions.limit || 50;
+      offset = threadIdOrOptions.offset || 0;
+    } else {
+      threadId = threadIdOrOptions;
+      category = maybeOptions.category;
+      search = maybeOptions.search || maybeOptions.query;
+      limit = maybeOptions.limit || 50;
+      offset = maybeOptions.offset || 0;
+    }
+
+    const conditions: string[] = [];
+    const params: any[] = [];
+
+    if (threadId && threadId !== "all") {
+      conditions.push("thread_id = ?");
+      params.push(threadId);
+    }
+    if (category && category !== "all") {
+      conditions.push("category = ?");
+      params.push(category);
+    }
+    if (search?.trim()) {
+      conditions.push("(full_name LIKE ? OR description LIKE ? OR summary_vi LIKE ? OR language LIKE ?)");
+      const term = `%${search.trim()}%`;
+      params.push(term, term, term, term);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const sql = `
+      SELECT * FROM group_repos
+      ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT ? OFFSET ?
+    `;
+    params.push(limit, offset);
+    return db.prepare(sql).all(...params) as GroupRepoItem[];
+  } catch (e) {
+    console.error("[db] getGroupRepos error:", e);
+    return [];
+  }
+}
+
+export function isRepoRecentlyShared(threadId: string, fullName: string, windowMs = 10 * 60 * 1000): boolean {
+  try {
+    const db = getDb();
+    ensureGroupReposTable(db);
+    const since = Date.now() - windowMs;
+    const row = db.prepare(`
+      SELECT id FROM group_repos
+      WHERE thread_id = ? AND LOWER(full_name) = ? AND updated_at >= ?
+      LIMIT 1
+    `).get(threadId, fullName.toLowerCase(), since) as { id: number } | undefined;
+    return Boolean(row);
+  } catch {
+    return false;
+  }
+}
+

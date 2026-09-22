@@ -160,5 +160,5 @@ main().catch((e) => {
     // Nếu DB cũng lỗi, vẫn in fatal ra stderr.
   }
   console.error("[fatal]", e);
-  process.exitCode = 1;
+  process.exit(1);
 });
