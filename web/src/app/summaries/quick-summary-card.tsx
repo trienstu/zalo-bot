@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Sparkles, Send, Clock, Check, Copy, RefreshCw, AlertCircle, Cpu, Database, CheckCircle2 } from "lucide-react";
 import { Card, CardTitle, Button, Input, Badge } from "@/components/ui";
+import { copyToClipboard as copyText } from "@/lib/utils";
 
 function QuickSummaryCardInner() {
   const router = useRouter();
@@ -159,11 +160,13 @@ function QuickSummaryCardInner() {
     }
   }
 
-  function copyToClipboard() {
+  async function copyToClipboard() {
     if (!result?.fullMessage) return;
-    navigator.clipboard.writeText(result.fullMessage);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+    const ok = await copyText(result.fullMessage);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    }
   }
 
   return (

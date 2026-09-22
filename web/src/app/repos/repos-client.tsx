@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { copyToClipboard } from "@/lib/utils";
 import {
   Search,
   ExternalLink,
@@ -152,6 +153,8 @@ export function ReposClient() {
 
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [copiedGroupLink, setCopiedGroupLink] = useState(false);
+  const [copiedLinkInfo, setCopiedLinkInfo] = useState<{ name: string; url: string } | null>(null);
+  const [showShareModal, setShowShareModal] = useState(false);
 
   // Debounce search
   useEffect(() => {
@@ -226,19 +229,27 @@ export function ReposClient() {
     fetchRepos(pagination.page);
   }, [fetchRepos, pagination.page]);
 
-  function handleCopy(url: string) {
-    navigator.clipboard.writeText(url);
-    setCopiedUrl(url);
-    setTimeout(() => setCopiedUrl(null), 2000);
+  async function handleCopy(url: string) {
+    const ok = await copyToClipboard(url);
+    if (ok) {
+      setCopiedUrl(url);
+      setTimeout(() => setCopiedUrl(null), 2000);
+    }
   }
 
-  function handleCopyGroupShareLink() {
-    const g = groups.find((grp) => grp.id === selectedGroupId) || currentGroup;
-    if (!g) return;
-    const shareUrl = `${window.location.origin}/repos?groupId=${g.id}&token=${g.token}`;
-    navigator.clipboard.writeText(shareUrl);
-    setCopiedGroupLink(true);
-    setTimeout(() => setCopiedGroupLink(false), 2500);
+  async function handleCopyGroupShareLink(groupToCopy?: GroupInfo) {
+    const g = groupToCopy || groups.find((grp) => grp.id === selectedGroupId) || currentGroup;
+    if (!g || !g.token) return;
+    const shareUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/repos?groupId=${g.id}&token=${g.token}`;
+    const ok = await copyToClipboard(shareUrl);
+    if (ok) {
+      setCopiedGroupLink(true);
+      setCopiedLinkInfo({ name: g.name, url: shareUrl });
+      setTimeout(() => {
+        setCopiedGroupLink(false);
+        setCopiedLinkInfo(null);
+      }, 5000);
+    }
   }
 
   async function handleSyncHistoricRepos() {
@@ -418,13 +429,30 @@ export function ReposClient() {
             </select>
 
             {/* Nút Copy Link Chia Sẻ Nhóm (kèm Token an toàn cho thành viên) */}
-            {selectedGroupId !== "all" && (
+            {selectedGroupId !== "all" ? (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleCopyGroupShareLink()}
+                  className="flex items-center gap-1.5 rounded-xl border border-indigo-500/40 bg-indigo-500/15 px-3 py-2 text-xs font-bold text-indigo-300 hover:bg-indigo-500/25 transition-all shadow-sm cursor-pointer"
+                >
+                  {copiedGroupLink ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Share2 className="h-3.5 w-3.5" />}
+                  <span>{copiedGroupLink ? "Đã chép link bảo mật!" : "Copy link nhóm này"}</span>
+                </button>
+                <button
+                  onClick={() => setShowShareModal(true)}
+                  className="flex items-center gap-1 rounded-xl border border-slate-700 bg-slate-900 px-2.5 py-2 text-xs text-slate-300 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
+                  title="Xem và copy link chia sẻ của tất cả các nhóm khác"
+                >
+                  <span>Link các nhóm khác ({groups.length})</span>
+                </button>
+              </div>
+            ) : (
               <button
-                onClick={handleCopyGroupShareLink}
-                className="flex items-center gap-1.5 rounded-xl border border-indigo-500/40 bg-indigo-500/15 px-3 py-2 text-xs font-bold text-indigo-300 hover:bg-indigo-500/25 transition-all shadow-sm"
+                onClick={() => setShowShareModal(true)}
+                className="flex items-center gap-1.5 rounded-xl border border-indigo-500/40 bg-indigo-500/15 px-3.5 py-2 text-xs font-bold text-indigo-300 hover:bg-indigo-500/25 transition-all shadow-sm cursor-pointer"
               >
-                {copiedGroupLink ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Share2 className="h-3.5 w-3.5" />}
-                <span>{copiedGroupLink ? "Đã chép link bảo mật!" : "Copy link chia sẻ cho nhóm này"}</span>
+                <Share2 className="h-3.5 w-3.5 text-indigo-400" />
+                <span>📋 Lấy link chia sẻ nhóm ({groups.length})</span>
               </button>
             )}
 
@@ -751,6 +779,93 @@ export function ReposClient() {
             <span>Trang sau</span>
             <ChevronRight className="h-4 w-4" />
           </button>
+        </div>
+      )}
+
+      {/* 📋 MODAL TẤT CẢ LINK CHIA SẺ NHÓM */}
+      {showShareModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="relative w-full max-w-2xl max-h-[85vh] overflow-hidden rounded-2xl border border-indigo-500/30 bg-slate-900 p-6 shadow-2xl flex flex-col space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-500/15 border border-indigo-500/30 text-indigo-400">
+                  <Share2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Link Chia Sẻ Kho Repo Từng Nhóm</h3>
+                  <p className="text-xs text-slate-400">Tổng cộng {groups.length} nhóm Zalo có mã bảo mật riêng</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowShareModal(false)}
+                className="rounded-xl p-2 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed bg-slate-950/60 p-3 rounded-xl border border-slate-800/80">
+              💡 <strong>Lưu ý bảo mật:</strong> Mỗi nhóm Zalo sở hữu một đường link kèm token xác thực riêng. Thành viên khi truy cập qua link này chỉ xem được đúng kho repo của nhóm mình và hoàn toàn không thấy các nút quản trị hay kho của nhóm khác.
+            </p>
+
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+              {groups.map((g) => {
+                const shareUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/repos?groupId=${g.id}&token=${g.token}`;
+                const isCopied = copiedLinkInfo?.name === g.name;
+                return (
+                  <div
+                    key={g.id}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-slate-950/80 border border-slate-800/80 hover:border-indigo-500/40 transition-all"
+                  >
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-xs text-white truncate">{g.name}</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-950/80 border border-indigo-500/30 text-indigo-300 font-semibold">
+                          {g.repoCount} repos
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-slate-400 font-mono select-all break-all bg-slate-900/90 px-2 py-1 rounded-lg border border-slate-800">
+                        {shareUrl}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleCopyGroupShareLink(g)}
+                      className={`flex-shrink-0 flex items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition-all shadow-sm cursor-pointer ${
+                        isCopied
+                          ? "bg-emerald-500 text-slate-950"
+                          : "bg-indigo-600/30 text-indigo-300 hover:bg-indigo-600/60 border border-indigo-500/40 hover:text-white"
+                      }`}
+                    >
+                      {isCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                      <span>{isCopied ? "Đã copy!" : "Copy link"}</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="pt-2 border-t border-slate-800 flex justify-end">
+              <button
+                onClick={() => setShowShareModal(false)}
+                className="rounded-xl bg-slate-800 hover:bg-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 transition-colors"
+              >
+                Đóng cửa sổ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🔔 FLOATING TOAST THÔNG BÁO COPY THÀNH CÔNG */}
+      {copiedLinkInfo && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-2xl border border-emerald-500/50 bg-slate-900/95 p-4 shadow-2xl backdrop-blur-xl text-xs text-emerald-200 animate-in fade-in slide-in-from-bottom-5">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/20 text-emerald-400">
+            <Check className="h-5 w-5" />
+          </div>
+          <div className="space-y-0.5 max-w-sm">
+            <div className="font-bold text-white">Đã sao chép link nhóm &quot;{copiedLinkInfo.name}&quot;!</div>
+            <div className="text-[11px] text-slate-400 font-mono truncate">{copiedLinkInfo.url}</div>
+          </div>
         </div>
       )}
     </div>

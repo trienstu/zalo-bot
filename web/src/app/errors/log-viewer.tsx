@@ -20,7 +20,7 @@ import {
   Clock,
   Filter,
 } from "lucide-react";
-import { fmtDateTime } from "@/lib/utils";
+import { fmtDateTime, copyToClipboard } from "@/lib/utils";
 import type { LogLine, LogStreamInfo } from "@/lib/logs";
 
 interface DbErrorItem {
@@ -143,11 +143,13 @@ export function LogViewer({ initialDbErrors, initialMigrations }: LogViewerProps
   };
 
   // Copy logs
-  const handleCopyLogs = () => {
+  const handleCopyLogs = async () => {
     const text = filteredLogs.map((l) => l.raw).join("\n");
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   // Download logs
@@ -717,7 +719,7 @@ export function LogViewer({ initialDbErrors, initialMigrations }: LogViewerProps
                   <button
                     type="button"
                     onClick={() => {
-                      navigator.clipboard.writeText(
+                      copyToClipboard(
                         `[${selectedError.source}] ${selectedError.message}\n${selectedError.detail || ""}`
                       );
                     }}
