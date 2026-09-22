@@ -13,8 +13,17 @@ import {
   generateWordDoc,
   generateExcelFile,
   generateTextFile,
+  generatePowerPointFile,
+  generateCsvFile,
+  generateHtmlFile,
+  parseMarkdownToSlides,
   type GeneratedFileResult,
+  type ThemeName,
 } from "./tools/file-generator.js";
+import {
+  synthesizeSpeech,
+  synthesizeDialogue,
+} from "./tools/voice-generator.js";
 import { runPythonCode } from "./tools/python-runner.js";
 import {
   getCryptoTicker,
@@ -426,7 +435,7 @@ export async function callGemini(
 
   let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-3.1-flash-lite-preview";
   if (isSearchEnabled) {
-    primaryModel = "gemini-2.5-flash";
+    primaryModel = "gemini-3-flash-preview";
   } else if (!primaryModel || !primaryModel.includes("lite")) {
     primaryModel = "gemini-3.1-flash-lite-preview";
   }
@@ -435,6 +444,7 @@ export async function callGemini(
   const candidateFallbacks = [
     "gemini-3.1-flash-lite-preview",
     "gemini-3.1-flash-lite",
+    "gemini-3-flash-preview",
     "gemini-flash-lite-latest",
   ].filter((m) => m !== primaryModel);
 
@@ -762,30 +772,105 @@ const AGENT_TOOLS_DECLARATION = {
     },
     {
       name: "generate_file",
-      description: "Tạo và xuất file tài liệu thực tế (Word .docx, Excel .xlsx, Markdown .md, Text .txt, Code .py/.js/.sh) khi người dùng RA LỆNH VÀ CÓ NỘI DUNG CỤ THỂ để soạn thảo văn bản, báo cáo, SOP, hợp đồng, bảng tính, báo giá. LƯU Ý QUAN TRỌNG: TUYỆT ĐỐI KHÔNG ĐƯỢC GỌI công cụ này khi người dùng chỉ đang hỏi thăm năng lực/tính năng (ví dụ: 'em biết tạo file docx không?', 'bot có xuất được file excel không?'). Với câu hỏi hỏi thăm năng lực, CHỈ trả lời bình thường bằng văn bản để giải thích và hướng dẫn người dùng cung cấp đề bài.",
+      description: "Tạo và xuất file tài liệu thực tế (PowerPoint .pptx, Word .docx, Excel .xlsx, CSV .csv, HTML .html, Markdown .md, Text .txt, Code .py/.js/.sh) khi người dùng RA LỆNH VÀ CÓ NỘI DUNG CỤ THỂ để soạn thảo bài thuyết trình, văn bản hành chính, báo cáo, SOP, hợp đồng, bảng tính, báo giá. LƯU Ý: Không gọi khi người dùng chỉ hỏi thăm tính năng chung.",
       parameters: {
         type: "OBJECT",
         properties: {
           fileType: {
             type: "STRING",
-            description: "Định dạng file cần xuất: 'docx' (Word), 'xlsx' (Excel), 'md' (Markdown/SOP), 'txt' (văn bản thuần), 'code' (mã nguồn)",
+            enum: ["pptx", "docx", "xlsx", "csv", "html", "md", "txt", "code"],
+            description: "Định dạng file: 'pptx' (PowerPoint slide), 'docx' (Word), 'xlsx' (Excel), 'csv' (CSV BOM tiếng Việt), 'html' (HTML web report), 'md' (Markdown/SOP), 'txt' (văn bản thuần), 'code' (mã nguồn)",
           },
           fileName: {
             type: "STRING",
-            description: "Tên file viết liền không dấu, ví dụ: 'sop_xay_dung_bot_zalo', 'bao_gia_thiet_bi'",
+            description: "Tên file viết liền không dấu, ví dụ: 'bai_thuyet_trinh_du_an', 'bao_gia_thiet_bi', 'cong_van_hanh_chinh'",
           },
           title: {
             type: "STRING",
-            description: "Tiêu đề chính của tài liệu hoặc văn bản",
+            description: "Tiêu đề chính của tài liệu hoặc bài thuyết trình",
+          },
+          theme: {
+            type: "STRING",
+            enum: ["navy", "blue", "green", "burgundy", "slate", "teal", "emerald", "luxury"],
+            description: "Bảng màu mỹ thuật (áp dụng cho pptx và xlsx): navy (trang trọng), blue (tài chính), green (tăng trưởng), burgundy (cảnh báo/pháp lý), slate (kỹ thuật), teal (y tế/giáo dục), emerald (sang trọng sinh thái), luxury (hoàng gia/vàng đen)",
           },
           content: {
             type: "STRING",
-            description: "Toàn bộ nội dung văn bản chi tiết đầy đủ (dành cho file docx, md, txt, code)",
+            description: "Toàn bộ nội dung văn bản chi tiết đầy đủ (dành cho file docx, html, md, txt, code, hoặc nội dung markdown để tự động phân tích thành slides thuyết trình nếu không truyền mảng slides)",
+          },
+          slides: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                title: { type: "STRING", description: "Tiêu đề slide" },
+                subtitle: { type: "STRING", description: "Phụ đề slide (dành cho slide bìa title)" },
+                kicker: { type: "STRING", description: "Huy hiệu / Badge danh mục nhỏ phía trên tiêu đề (ví dụ: 'CHIẾN LƯỢC 2026', 'TỔNG QUAN')" },
+                takeaway: { type: "STRING", description: "Thông điệp đúc kết / Key takeaway hoặc lưu ý nổi bật ở chân trang slide" },
+                layout: {
+                  type: "STRING",
+                  enum: ["title", "bullets", "table", "two_content", "three_column", "timeline", "stats"],
+                  description: "Bố cục slide: 'title' (bìa lớn), 'bullets' (thẻ ý hoặc danh sách), 'stats' (các thẻ chỉ số lớn nổi bật), 'timeline' (quy trình/lộ trình các bước nằm ngang có mũi tên kết nối), 'three_column' (3 cột thẻ), 'two_content' (2 cột so sánh), 'table' (bảng dữ liệu)",
+                },
+                bullets: { type: "ARRAY", items: { type: "STRING" }, description: "Các ý gạch đầu dòng (tối đa 8 dòng, nếu <= 4 ý sẽ tự động chuyển thành dải thẻ ngang cực đẹp)" },
+                tableHeaders: { type: "ARRAY", items: { type: "STRING" }, description: "Tên các cột (nếu layout là table)" },
+                tableRows: { type: "ARRAY", items: { type: "ARRAY", items: { type: "STRING" } }, description: "Các dòng dữ liệu (nếu layout là table)" },
+                col1Title: { type: "STRING", description: "Tiêu đề cột 1 (nếu layout là two_content hoặc three_column)" },
+                col1Bullets: { type: "ARRAY", items: { type: "STRING" }, description: "Gạch đầu dòng cột 1" },
+                col2Title: { type: "STRING", description: "Tiêu đề cột 2 (nếu layout là two_content hoặc three_column)" },
+                col2Bullets: { type: "ARRAY", items: { type: "STRING" }, description: "Gạch đầu dòng cột 2" },
+                col3Title: { type: "STRING", description: "Tiêu đề cột 3 (nếu layout là three_column)" },
+                col3Bullets: { type: "ARRAY", items: { type: "STRING" }, description: "Gạch đầu dòng cột 3" },
+                steps: {
+                  type: "ARRAY",
+                  items: {
+                    type: "OBJECT",
+                    properties: {
+                      number: { type: "STRING", description: "Số thứ tự bước (ví dụ: '01', '02')" },
+                      title: { type: "STRING", description: "Tên bước / giai đoạn" },
+                      desc: { type: "STRING", description: "Mô tả chi tiết bước" },
+                    },
+                    required: ["title", "desc"],
+                  },
+                  description: "Danh sách 3-4 bước quy trình / lộ trình (khi layout là timeline)",
+                },
+                stats: {
+                  type: "ARRAY",
+                  items: {
+                    type: "OBJECT",
+                    properties: {
+                      value: { type: "STRING", description: "Con số / chỉ số nổi bật (ví dụ: '1.175 TỶ', '622 CĂN', '35%', 'Q4/2028')" },
+                      label: { type: "STRING", description: "Tên chỉ số / hạng mục" },
+                      desc: { type: "STRING", description: "Mô tả phụ ngắn gọn" },
+                    },
+                    required: ["value", "label"],
+                  },
+                  description: "Danh sách 2-4 chỉ số ấn tượng (khi layout là stats)",
+                },
+              },
+              required: ["title"],
+            },
+            description: "Danh sách các slide thuyết trình (tùy chọn; nếu không truyền thì bot tự động phân tích content thành slides)",
+          },
+          sheets: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                name: { type: "STRING", description: "Tên sheet Excel" },
+                subtitle: { type: "STRING", description: "Phụ đề hoặc phạm vi báo cáo" },
+                headers: { type: "ARRAY", items: { type: "STRING" }, description: "Tên các cột" },
+                rows: { type: "ARRAY", items: { type: "ARRAY", items: { type: "STRING" } }, description: "Ma trận dữ liệu" },
+                note: { type: "STRING", description: "Ghi chú chân bảng" },
+              },
+              required: ["name", "headers", "rows"],
+            },
+            description: "Cấu hình nhiều sheet cho file Excel (tùy chọn)",
           },
           excelHeaders: {
             type: "ARRAY",
             items: { type: "STRING" },
-            description: "Danh sách tên cột cho file Excel (chỉ dùng khi fileType là xlsx)",
+            description: "Danh sách tên cột cho file Excel/CSV đơn giản",
           },
           excelRows: {
             type: "ARRAY",
@@ -793,10 +878,44 @@ const AGENT_TOOLS_DECLARATION = {
               type: "ARRAY",
               items: { type: "STRING" },
             },
-            description: "Mảng 2 chiều chứa các dòng dữ liệu cho file Excel (chỉ dùng khi fileType là xlsx)",
+            description: "Mảng 2 chiều chứa các dòng dữ liệu cho file Excel/CSV đơn giản",
           },
         },
         required: ["fileType", "fileName", "title"],
+      },
+    },
+    {
+      name: "create_voice",
+      description: "Chuyển văn bản thành giọng nói AI (Text-to-Speech) hoặc tạo Podcast đối đáp 2 người (đối thoại Nam - Nữ) và gửi file âm thanh (.m4a Voice Bubble) trực tiếp vào Zalo.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          text: {
+            type: "STRING",
+            description: "Nội dung cần đọc. Nếu là Podcast/đối thoại thì viết theo cấu trúc: 'Tên: Lời thoại' cho mỗi lượt nói.",
+          },
+          voice: {
+            type: "STRING",
+            description: "Tên giọng đọc: 'vi-VN-Neural2-A' (Nữ Neural2 tự nhiên, chuẩn truyền hình), 'vi-VN-Wavenet-B' (Nam trầm ấm, phát thanh viên), hoặc 'nữ' / 'nam'. Tự động hỗ trợ Google Cloud TTS cao cấp.",
+          },
+          speakers: {
+            type: "ARRAY",
+            items: {
+              type: "OBJECT",
+              properties: {
+                speaker: { type: "STRING", description: "Tên nhân vật khớp trong text (ví dụ: 'MC Nam', 'Chuyên gia')" },
+                voice: { type: "STRING", description: "Giọng đọc tương ứng ('vi-VN-Wavenet-B' hoặc 'vi-VN-Neural2-A', hoặc 'nam' / 'nữ')" },
+              },
+              required: ["speaker", "voice"],
+            },
+            description: "Cấu hình phân vai giọng đọc cho hội thoại Podcast 2 người (Nam/Nữ)",
+          },
+          caption: {
+            type: "STRING",
+            description: "Lời nhắn chữ ngắn gọn gửi kèm voice message.",
+          },
+        },
+        required: ["text"],
       },
     },
     {
@@ -833,13 +952,13 @@ const AGENT_TOOLS_DECLARATION = {
     },
     {
       name: "python_interpreter",
-      description: "Thực thi mã nguồn Python trực tiếp trên môi trường máy chủ Mac mini để giải toán phức tạp, phân tích dữ liệu, xử lý thuật toán hoặc VẼ BIỂU ĐỒ, TẠO HÌNH ẢNH, SƠ ĐỒ QUY TRÌNH, INFOGRAPHIC, QUOTE CARD, THIỆP/BẢNG BIỂU (bằng matplotlib, seaborn, PIL/Pillow). BẮT BUỘC DÙNG khi người dùng yêu cầu tính toán, vẽ biểu đồ/đồ thị, tạo sơ đồ, flow chart, mindmap, infographic hoặc vẽ ảnh đồ họa/danh ngôn/thẻ thông tin.",
+      description: "Thực thi mã nguồn Python trực tiếp trên máy chủ để tính toán, phân tích số liệu, hoặc VẼ BIỂU ĐỒ SỐ LIỆU & THIẾT KẾ INFOGRAPHIC/POSTER/CARD ĐỒ HỌA CHUYÊN NGHIỆP (bằng PIL/Pillow hoặc matplotlib). BẮT BUỘC DÙNG khi người dùng yêu cầu vẽ biểu đồ, đồ thị, tạo infographic, poster lịch thi đấu, bảng xếp hạng, timeline, roadmap, thẻ danh ngôn hoặc khi người dùng yêu cầu làm lại/sửa lại ảnh/biểu đồ trước đó.",
       parameters: {
         type: "OBJECT",
         properties: {
           code: {
             type: "STRING",
-            description: "Đoạn code Python hoàn chỉnh để thực thi. Nếu vẽ biểu đồ/đồ thị/sơ đồ: Dùng matplotlib.pyplot (plt.title, plt.xlabel, plt.ylabel, plt.show() hoặc plt.savefig('ten_file.png', dpi=150, bbox_inches='tight')). Nếu tạo thiệp/quote card/infographic: Dùng PIL (Image, ImageDraw, ImageFont) và lưu thành file .png. Hệ thống sẽ tự động bắt file ảnh được tạo ra và gửi trực tiếp cho người dùng.",
+            description: "Đoạn mã Python hoàn chỉnh để thực thi.\n1. NẾU LÀ INFOGRAPHIC, POSTER LỊCH THI ĐẤU, BẢNG XẾP HẠNG, ROADMAP, CARD THÔNG BÁO: BẮT BUỘC dùng PIL (Image, ImageDraw, ImageFont) thiết kế Card Layout chuyên nghiệp khổ dọc (W=720, H=1100-1400):\n  - Nền tối cao cấp: Thể thao dùng đỏ rượu/burgundy (#42030D); Công nghệ/Doanh nghiệp dùng Navy (#0B132B) hoặc Slate (#0F172A); Tài chính dùng Midnight đen ngọc.\n  - Tiêu đề chính vàng kim (#FFD700/#FBBF24, 28-32px bold) căn giữa; phụ đề trắng.\n  - Đặt từng mục vào thẻ bo góc (draw.rounded_rectangle, radius=12-16) có viền mảnh, kèm badge pill trạng thái ở góc phải ([CHÍNH THỨC], [GIAO HỮU], [LỘ TRÌNH]...).\n  - Mỗi dòng sự kiện có ô con bo góc, hiển thị ngày giờ vàng rực, tiêu đề trắng đậm, địa điểm căn phải.\n  - Chân trang có slogan và nguồn rõ ràng. Dùng get_font(size, bold) chuẩn tiếng Việt.\n2. NẾU LÀ BIỂU ĐỒ SỐ LIỆU ĐỊNH LƯỢNG (doanh thu, %, thống kê): Dùng matplotlib (plt.style.use('dark_background'), plt.savefig('chart.png', dpi=150, bbox_inches='tight')). TUYỆT ĐỐI KHÔNG dùng biểu đồ cột cho lịch thi đấu!",
           },
         },
         required: ["code"],
@@ -848,7 +967,7 @@ const AGENT_TOOLS_DECLARATION = {
   ],
 };
 
-async function executeAgentTool(name: string, args: Record<string, any>): Promise<any> {
+export async function executeAgentTool(name: string, args: Record<string, any>): Promise<any> {
   switch (name) {
     case "weather_forecast": {
       const loc = String(args?.location || "Hồ Chí Minh").trim();
@@ -917,19 +1036,33 @@ async function executeAgentTool(name: string, args: Record<string, any>): Promis
       const fileName = String(args?.fileName || "tai_lieu").trim();
       const title = String(args?.title || "Tài liệu").trim();
       const content = String(args?.content || "").trim();
+      const theme = (args?.theme || "navy") as ThemeName;
 
-      if (fileType === "xlsx") {
-        const headers = Array.isArray(args?.excelHeaders) ? args.excelHeaders.map(String) : ["STT", "Nội dung", "Ghi chú"];
-        const rows = Array.isArray(args?.excelRows) ? args.excelRows : [];
-        const result = await generateExcelFile(fileName, title || "Sheet1", headers, rows);
+      if (fileType === "pptx") {
+        let slides = Array.isArray(args?.slides) ? (args.slides as any) : [];
+        if (slides.length === 0 && content) {
+          slides = parseMarkdownToSlides(content, title);
+        }
+        const result = await generatePowerPointFile(fileName, title, slides, theme);
         return result;
+      } else if (fileType === "xlsx") {
+        if (Array.isArray(args?.sheets) && args.sheets.length > 0) {
+          const result = await generateExcelFile(fileName, args.sheets as any, theme);
+          return result;
+        } else {
+          const headers = Array.isArray(args?.excelHeaders) ? args.excelHeaders.map(String) : ["STT", "Nội dung", "Ghi chú"];
+          const rows = Array.isArray(args?.excelRows) ? (args.excelRows as any) : [];
+          const result = await generateExcelFile(fileName, title || "Sheet1", headers, rows, theme);
+          return result;
+        }
       } else if (fileType === "docx") {
-        const rawSections = content.split(/\n(?=#{1,3}\s|[A-Z0-9IVX]+\.\s)/g);
+        const headingPattern = /^(?:#{1,4}\s*|[A-Z0-9IVX]+[\.:\)]\s*|(?:KỊCH BẢN|PHẦN|CHƯƠNG|MỤC|BÀI|ĐIỀU|KHOẢN|GIAI ĐOẠN|THÁNG)\s+[0-9IVX]+[:\.\s])/iu;
+        const rawSections = content.split(/\n(?=#{1,4}\s|[A-Z0-9IVX]+[\.:\)]\s|(?:KỊCH BẢN|PHẦN|CHƯƠNG|MỤC|BÀI|ĐIỀU|KHOẢN|GIAI ĐOẠN|THÁNG)\s+[0-9IVX]+[:\.\s])/giu);
         const sections = rawSections.map((sec) => {
           const lines = sec.trim().split("\n");
           let heading = "";
           let paras = lines;
-          if (lines[0] && (lines[0].startsWith("#") || /^[A-Z0-9IVX]+\.\s/.test(lines[0]))) {
+          if (lines[0] && headingPattern.test(lines[0])) {
             heading = lines[0].replace(/^#+\s*/, "").trim();
             paras = lines.slice(1);
           }
@@ -937,9 +1070,33 @@ async function executeAgentTool(name: string, args: Record<string, any>): Promis
         });
         const result = await generateWordDoc(fileName, title, sections);
         return result;
+      } else if (fileType === "csv") {
+        const headers = Array.isArray(args?.excelHeaders) ? args.excelHeaders.map(String) : ["STT", "Nội dung", "Ghi chú"];
+        const rows = Array.isArray(args?.excelRows) ? (args.excelRows as any) : [];
+        const result = await generateCsvFile(fileName, headers, rows);
+        return result;
+      } else if (fileType === "html") {
+        const result = await generateHtmlFile(fileName, title, content);
+        return result;
       } else {
         const ext = fileType === "code" ? (args?.fileExt || "txt") : fileType;
         const result = await generateTextFile(fileName, content, ext);
+        return result;
+      }
+    }
+    case "create_voice": {
+      const text = String(args?.text || "").trim();
+      const voice = args?.voice ? String(args.voice) : undefined;
+      const caption = args?.caption ? String(args.caption) : undefined;
+      const speakers = Array.isArray(args?.speakers) ? (args.speakers as any) : undefined;
+
+      const isDialogue = (speakers && speakers.length > 0) || text.includes("\n") && /^[^:：\n]+[:：]/.test(text);
+
+      if (isDialogue) {
+        const result = await synthesizeDialogue({ text, speakers, caption });
+        return result;
+      } else {
+        const result = await synthesizeSpeech({ text, voice, caption });
         return result;
       }
     }
@@ -1115,11 +1272,11 @@ export async function callGeminiAgentLoop(
         functionCalls.map(async (fc: any) => {
           options?.onToolCall?.(fc.name, fc.args || {});
           const result = await executeAgentTool(fc.name, fc.args || {});
-          if (fc.name === "generate_file" && result?.success && options?.onFileGenerated) {
+          if ((fc.name === "generate_file" || fc.name === "create_voice") && result?.success && options?.onFileGenerated) {
             try {
               await options.onFileGenerated(result);
             } catch (fileErr) {
-              console.warn("[gemini-agent] onFileGenerated callback error:", fileErr);
+              console.warn(`[gemini-agent] onFileGenerated for ${fc.name} error:`, fileErr);
             }
           }
           if (fc.name === "python_interpreter" && result?.success && options?.onFileGenerated) {

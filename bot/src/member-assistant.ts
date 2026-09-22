@@ -16,8 +16,10 @@ import {
   isUserAdmin,
   getRecentGroupImage,
   getMediaByMessageId,
+  getUserMemories,
+  stitchMultiChunkQuote,
 } from "./db/index.js";
-import { sendGroupText, sendGroupFile, sendReaction, sendTyping, Reactions, sleep, cleanZaloText } from "./zalo/client.js";
+import { sendGroupText, sendGroupFile, sendGroupVoice, sendReaction, sendTyping, Reactions, sleep, cleanZaloText } from "./zalo/client.js";
 import { formatAndChunkZaloMarkdown, pickSmartReaction } from "./zalo-formatter.js";
 import {
   callGemini,
@@ -32,15 +34,31 @@ import { searchRealtimeNews } from "./realtime-search.js";
 import { refreshDynamicKnowledgeIfExpired, fetchGoogleContent, parseGoogleUrl } from "./google-sync.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
 import { planSearchQueries, type QueryPlanResult } from "./query-planner.js";
+import fs from "node:fs";
 import { config, defaultBotName } from "./config.js";
 import { finalizeGroundedAnswer } from "./search-evidence.js";
 import { answerWithHybridRouting } from "./hybrid-agent.js";
 import { normalizeExecutionSignals, selectResponseMode } from "./hybrid-routing.js";
 import { generateCloudflareImage, isCloudflareConfigured } from "./cloudflare-ai.js";
-import { generateCodexImage, isCodexImageConfigured } from "./codex-image.js";
+import { generateCodexImage, isCodexImageConfigured, prepareImageDataUrl } from "./codex-image.js";
+import { collectCandidateUrls } from "./message-extract.js";
 import { isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
 import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from "./grounding-quota.js";
 import { githubSearch } from "./tools/vertical-tools.js";
+import { checkIsFileOrVoiceGeneration } from "./tools/file-generator.js";
+import { interceptAndExecuteSimulatedTool } from "./tools/simulated-tool-interceptor.js";
+import {
+  isMemoryControlCommand,
+  handleMemoryControlCommand,
+  extractAndSaveUserMemories,
+  formatUserMemoriesForPrompt,
+} from "./user-memory.js";
+import {
+  processGithubReposInMessage,
+  extractGithubRepoUrls,
+} from "./github-enricher.js";
+
+export { checkIsFileOrVoiceGeneration };
 
 export interface MemberMessageEvent {
   threadId: string;
@@ -1234,35 +1252,29 @@ async function handleHistoryQA(
       `   - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * để in đậm vì Zalo không hỗ trợ markdown (sẽ hiện nguyên văn hai dấu sao rất xấu). Hãy viết hoa chữ cái đầu hoặc viết hoa tiêu đề để làm nổi bật (ví dụ: '1. NHÂN VẬT CHÍNH:', '2. KHÁCH HÀNG:').\n` +
       `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Giữ phong cách thanh lịch, gọn gàng. TUYỆT ĐỐI KHÔNG spam icon ở từng dòng hay từng gạch đầu dòng.\n` +
       `8. KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
-      `   - Khi người dùng yêu cầu vẽ biểu đồ (cột, tròn, đường, phân bố...), đồ thị, sơ đồ từ tài liệu/file hoặc tính toán dữ liệu:\n` +
-      `     BẮT BUỘC sử dụng công cụ 'python_interpreter'.\n` +
-      `   - Viết mã Python hoàn chỉnh để xử lý dữ liệu và vẽ bằng matplotlib.pyplot (hoặc seaborn, pandas):\n` +
-      `     + Đặt plt.figure(figsize=(10, 6), dpi=150), tiêu đề rõ ràng, nhãn trục x, trục y, hiển thị giá trị số liệu trên từng cột/điểm.\n` +
-      `     + Lưu file dạng PNG: plt.savefig('ten_bieu_do.png', bbox_inches='tight', dpi=150) và plt.close().\n` +
-      `     + Hệ thống sẽ tự động bắt file ảnh PNG được tạo ra và gửi trực tiếp vào nhóm Zalo cho ${isSuperAdmin ? "Sếp" : "người dùng"}.\n` +
-      `   - TUYỆT ĐỐI CẤM từ chối hoặc nói rằng Zalo không hỗ trợ hiển thị hình ảnh biểu đồ! Hệ thống có khả năng xuất file ảnh thật và gửi thẳng lên Zalo!\n` +
-      `9. KỸ NĂNG XUẤT FILE TÀI LIỆU (generate_file):\n` +
-      `   - Khi người dùng yêu cầu xuất file Word (.docx), Excel (.xlsx), Markdown (.md): BẮT BUỘC gọi tool 'generate_file'. Tuyệt đối cấm bịa đặt tin nhắn đã xuất file khi chưa gọi tool!`;
+      `   - Khi người dùng yêu cầu vẽ biểu đồ, đồ thị, sơ đồ, tạo infographic, poster lịch thi đấu, bảng xếp hạng, timeline, roadmap, HOẶC yêu cầu làm lại/sửa lại ảnh/biểu đồ trước đó:\n` +
+      `     BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM gõ code Python bằng chữ vào tin nhắn chat Zalo!\n` +
+      `   - Phân biệt rõ hai phong cách thiết kế đồ họa:\n` +
+      `     + VỚI LỊCH THI ĐẤU, BẢNG XẾP HẠNG, ROADMAP, DANH SÁCH SỰ KIỆN: BẮT BUỘC dùng Pillow (PIL) thiết kế INFOGRAPHIC POSTER DẠNG CARD LAYOUT khổ dọc (W=720, H=1100-1400), nền tối sang trọng (thể thao dùng đỏ rượu/burgundy #42030D, công nghệ/doanh nghiệp dùng Navy #0B132B), các thẻ bo góc (draw.rounded_rectangle), huy hiệu trạng thái ([CHÍNH THỨC], [GIAO HỮU]), tiêu đề vàng kim #FFD700 rực rỡ, hàng dữ liệu sắc nét. TUYỆT ĐỐI KHÔNG vẽ biểu đồ cột cho lịch thi đấu!\n` +
+      `     + VỚI BIỂU ĐỒ SỐ LIỆU ĐỊNH LƯỢNG (doanh thu, phần trăm, biến động giá, thống kê): Dùng matplotlib.pyplot với dark theme (plt.style.use('dark_background')), nhãn trục rõ ràng, lưu PNG DPI=150.\n` +
+      `   - Hệ thống tự động cung cấp font tiếng Việt chuẩn Unicode qua hàm get_font(size, bold=True/False) và tự động bắt file ảnh PNG gửi trực tiếp lên Zalo cho ${isSuperAdmin ? "Sếp" : "người dùng"}.\n` +
+      `   - TUYỆT ĐỐI CẤM từ chối hoặc bảo người dùng nhờ designer vẽ lại!\n` +
+      `9. KỸ NĂNG XUẤT FILE TÀI LIỆU, SLIDE VÀ VOICE (generate_file & create_voice):\n` +
+      `   - Khi người dùng yêu cầu tạo bài thuyết trình / slide PowerPoint (.pptx), tài liệu Word (.docx), Excel (.xlsx), hoặc tạo giọng đọc / voice / podcast (.m4a), HOẶC giục 'soạn luôn đi', 'làm luôn đi':\n` +
+      `     * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_file' (fileType='pptx' cho slide, 'docx' cho word, 'xlsx' cho excel) HOẶC 'create_voice' để xuất file thực tế gửi lên Zalo!\n` +
+      `     * TUYỆT ĐỐI CẤM CHỈ GÕ DÀN Ý BẰNG CHỮ RỒI HỎI NGƯỢC LẠI NGƯỜI DÙNG có muốn soạn không. Hãy hành động và xuất file ngay lập tức!\n` +
+      `     * [QUY TẮC BẢO LƯU NGUYÊN VẸN TRI THỨC KHI ĐÓNG GÓI / XUẤT FILE ĐA LĨNH VỰC]:\n` +
+      `       + Khi người dùng yêu cầu 'đóng gói', 'xuất file', 'lưu vào file', 'chuyển thành file' (Word/docx, Excel/xlsx, PowerPoint/pptx, PDF, CSV, TXT...) từ nội dung tin nhắn được trích dẫn (quote) hoặc nội dung đã bàn luận trước đó:\n` +
+      `       + BẮT BUỘC PHẢI BẢO LƯU NGUYÊN VẸN 100% TOÀN BỘ NỘI DUNG CHI TIẾT GỐC VÀO THAM SỐ 'content' CỦA TOOL 'generate_file' (bao gồm đầy đủ căn cứ/điều khoản pháp luật, bảng biểu/số liệu tài chính - BĐS, toàn bộ lời thoại/phân cảnh kịch bản media, mã nguồn/kiến trúc kỹ thuật, quy chế doanh nghiệp...). TUYỆT ĐỐI CẤM tự ý tóm tắt thành dàn ý gạch đầu dòng sơ sài làm mất mát dữ liệu và tri thức chuyên sâu của người dùng!\n` +
+      `     * Sau khi gọi công cụ thành công, câu trả lời bằng chữ của bạn chỉ cần NGẮN GỌN 1-3 DÒNG tóm tắt chính và thông báo file đã gửi. TUYỆT ĐỐI KHÔNG lặp lại toàn bộ nội dung dài dòng trong tin nhắn chat Zalo!\n` +
+      `     * Tuyệt đối cấm bịa đặt tin nhắn đã xuất file khi chưa gọi tool!`;
 
     const fastUserPrompt =
       `${quoteTextSection}${fileContentSnippet}\n` +
       `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${question || "Hãy phân tích chi tiết hình ảnh/tài liệu này giúp tôi."}\n\n` +
       `HÃY TRẢ LỜI NGAY:`;
 
-    const isCodeOrChartQuery =
-      /(?:vẽ|tạo|vẽ\s*giúp|xuất|lập|thiết kế|làm)\s*(?:cho\s*.*?\s*)?(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|ảnh|hình|thiệp|quote|card)/i.test(question) ||
-      /(?:vẽ\s*ảnh|tạo\s*ảnh|vẽ\s*hình|tạo\s*hình|sinh\s*ảnh|vẽ\s*tranh)/i.test(question) ||
-      /(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ)/i.test(question) ||
-      /^[/!](?:taoanh|veanh|draw|plot|chart)\b/i.test(question) ||
-      /(?:chạy|viết|run|execute)\s*(?:code|mã|script)\s*(?:python|py)/i.test(question);
-
-    const isFileGenerationQuery =
-      /(?:tạo|xuất|làm|lưu|gửi|convert|chuyển|viết)\s*(?:thành\s*)?(?:file|tệp)?\s*(?:word|excel|docx|xlsx|doc|sheet|bảng|pdf|txt|md|code)/i.test(question) ||
-      /(?:file|tệp)\s*(?:word|excel|docx|xlsx)/i.test(question) ||
-      /(?:tạo|xuất|làm)\s*(?:file|tệp)/i.test(question) ||
-      isCodeOrChartQuery;
-
-    const needsAgentLoop = isFileGenerationQuery || isCodeOrChartQuery;
+    const needsAgentLoop = checkIsFileOrVoiceGeneration(question, options?.quote?.text);
 
     try {
       let answer = "";
@@ -1274,16 +1286,33 @@ async function handleHistoryQA(
           onFileGenerated: async (file) => {
             try {
               if (options?.api) {
+                const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
                 const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
-                const caption = isImg
-                  ? `📊 Biểu đồ / Hình ảnh đã được vẽ xong cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!\n📁 Tệp: ${file.fileName}`
-                  : `📄 ${botName} đã tạo và gửi file [${file.fileName}] lên nhóm thành công! ${isSuperAdmin ? "Sếp" : "Bác"} tải về xem nhé.`;
-                await sendGroupFile(
-                  options.api,
-                  threadId,
-                  file.filePath,
-                  caption,
+                const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+                const caption = file.caption || (
+                  isSlide
+                    ? `📊 ${botName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+                    : isImg
+                      ? `📊 Biểu đồ / Hình ảnh đã hoàn tất cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+                      : isVoice
+                        ? `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`
+                        : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
                 );
+                if (isVoice) {
+                  await sendGroupVoice(
+                    options.api,
+                    threadId,
+                    file.filePath,
+                    caption,
+                  );
+                } else {
+                  await sendGroupFile(
+                    options.api,
+                    threadId,
+                    file.filePath,
+                    caption,
+                  );
+                }
               }
             } catch (fileErr) {
               console.warn("[member-assistant] Fast-path QA sendGroupFile error:", fileErr);
@@ -1294,6 +1323,16 @@ async function handleHistoryQA(
         answer = await callGemini(fastSystemPrompt, fastUserPrompt, {
           mediaParts: mediaPart ? [mediaPart] : undefined,
           enableSearch: false,
+        });
+        answer = await interceptAndExecuteSimulatedTool(answer, async (file) => {
+          if (options?.api) {
+            await sendGroupFile(
+              options.api,
+              threadId,
+              file.filePath,
+              file.caption || `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`,
+            );
+          }
         });
       }
 
@@ -1325,32 +1364,26 @@ async function handleHistoryQA(
     const groupSettings = getGroupSettings(threadId);
     const botName = groupSettings.botName || defaultBotName;
 
-    // 0. Lấy 15 tin nhắn gần nhất trong nhóm để tái hiện trọn vẹn ngữ cảnh hội thoại đa lượt (multi-turn quote chain)
+    // Tự động khâu nối các mảnh tin nhắn bị Zalo chia nhỏ nếu tin nhắn được quote là tin dài
+    options.quote.text = stitchMultiChunkQuote(threadId, options.quote.text);
+
+    // 0. Lấy 20 tin nhắn gần nhất trong nhóm để tái hiện trọn vẹn ngữ cảnh hội thoại đa lượt (kể cả các câu trả lời trước đó của bot)
     let recentChatContext = "";
     try {
       const recentMsgs = db
         .prepare(
-          `SELECT display_name, text, ts
+          `SELECT display_name, text, ts, is_self
            FROM group_messages
            WHERE thread_id = ?
              AND text IS NOT NULL
              AND text != ''
              AND deleted_at IS NULL
-             AND is_self = 0
-             AND LOWER(display_name) NOT LIKE '%sen chúa%'
-             AND LOWER(display_name) NOT LIKE '%sen chua%'
-             AND LOWER(display_name) NOT LIKE '%mộc miên%'
-             AND LOWER(display_name) NOT LIKE '%moc mien%'
-             AND LOWER(display_name) NOT LIKE '%kevin%'
-             AND LOWER(display_name) NOT LIKE 'bot%'
-             AND LOWER(text) NOT LIKE '%sen chúa%'
-             AND LOWER(text) NOT LIKE '%sen chua%'
              AND text NOT LIKE '/%'
              AND text NOT LIKE '!%'
            ORDER BY ts DESC
-           LIMIT 15`,
+           LIMIT 20`,
         )
-        .all(threadId) as { display_name: string; text: string; ts: number }[];
+        .all(threadId) as { display_name: string; text: string; ts: number; is_self: number }[];
 
       if (recentMsgs && recentMsgs.length > 0) {
         recentMsgs.reverse();
@@ -1362,7 +1395,9 @@ async function handleHistoryQA(
           } catch {
             timeStr = "";
           }
-          return `[${timeStr}] ${m.display_name || "Thành viên"}: ${m.text}`;
+          const isBot = m.is_self === 1 || /(?:sen chúa|sen chua|mộc miên|kevin|bot)/i.test(m.display_name || "");
+          const senderLabel = isBot ? `${botName} (Trợ lý AI)` : (m.display_name || "Thành viên");
+          return `[${timeStr}] ${senderLabel}: ${m.text}`;
         });
         recentChatContext = `\n=== LỊCH SỬ THẢO LUẬN GẦN ĐÂY TRONG NHÓM (NGỮ CẢNH HỘI THOẠI ĐA LƯỢT / CÁC LƯỢT QUOTE TRƯỚC ĐÓ): ===\n${formatted.join("\n")}\n`;
       }
@@ -1474,17 +1509,23 @@ async function handleHistoryQA(
           `     + Duyên dáng, mặn mà, hóm hỉnh, tôn trọng nhưng cực kỳ uy tín về tri thức. Không xưng 'tôi', không gọi 'bạn'.\n`) +
       `   - [NGUYÊN TẮC 5 - CÔ LẬP DỮ LIỆU & ĐỘ ƯU TIÊN THỜI GIAN THỰC]: Dữ liệu thời gian thực tra cứu được (Live News, Web Search, Bách khoa toàn thư) CÓ ĐỘ ƯU TIÊN CAO NHẤT, ĐÈ LÊN MỌI LẬP LUẬN CŨ TRONG LỊCH SỬ CHAT VÀ DỮ LIỆU LỖI THỜI TRONG TRÍ NHỚ. Tuyệt đối không lặp lại số liệu cũ nếu có thông tin mới hơn!\n` +
       `   - [CẬP NHẬT DỮ KIỆN THỜI GIAN THỰC & PHÁP LUẬT / HÀNH CHÍNH MỚI NHẤT]: BẮT BUỘC ưu tiên dữ liệu mới nhất từ phần 'DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT'. Khi câu hỏi liên quan đến dữ kiện thực tế có tính biến động (chính sách, luật pháp, đơn vị hành chính, giá cả, số liệu): TUYỆT ĐỐI KHÔNG bám vào số liệu cũ trong trí nhớ đã lỗi thời hay câu trả lời cũ trong lịch sử chat nếu dữ liệu tra cứu cung cấp văn bản, nghị quyết hoặc số liệu mới hơn. Phải giải thích rõ ràng và cập nhật số liệu mới nhất cho người hỏi!\n` +
-      `   - [QUY TẮC BẮT BUỘC KHI XUẤT / TẠO FILE TÀI LIỆU (Word .docx, Excel .xlsx, Markdown .md, Text .txt)]:\n` +
-      `     + Khi người dùng yêu cầu tạo file, xuất file Word/Excel/tệp văn bản từ nội dung được trích dẫn (quote) hoặc từ yêu cầu của họ:\n` +
-      `       * BẮT BUỘC PHẢI GỌI CÔNG CỤ (TOOL) 'generate_file' với đầy đủ tham số: fileType ('docx'/'xlsx'/'txt'/'md'), fileName (tên file viết liền không dấu, ví dụ: 'mua_thu_ha_noi'), title (tiêu đề bài viết), content (toàn bộ nội dung văn bản chi tiết đầy đủ lấy từ trích dẫn/yêu cầu).\n` +
-      `       * Sau khi gọi tool thành công, hệ thống máy chủ sẽ tự động đính kèm và gửi file thật lên nhóm Zalo cho người dùng!\n` +
-      `       * TUYỆT ĐỐI CẤM TỰ Ý BỊA ĐẶT TIN NHẮN GIẢ MẠO rằng "em đã xuất xong file", "anh có thể bấm tải file ngay phía trên", "đã đóng gói hoàn tất" khi CHƯA THỰC SỰ GỌI TOOL generate_file! Mọi hành vi tự viết tin nhắn giả vờ đã gửi file mà không gọi tool là hành vi BỊ NGHIÊM CẤM HOÀN TOÀN!\n` +
-      `   - [KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter)]:\n` +
-      `     + Khi người dùng yêu cầu vẽ biểu đồ (cột, tròn, đường, heatmap...), sơ đồ quy trình, mindmap hoặc đồ họa từ nội dung trích dẫn/dữ liệu:\n` +
-      `       BẮT BUỘC sử dụng công cụ 'python_interpreter'.\n` +
-      `     + Viết mã Python hoàn chỉnh (dùng matplotlib, seaborn, PIL), render đẹp mắt và lưu thành file .png (plt.savefig('ten_bieu_do.png', dpi=150, bbox_inches='tight')).\n` +
+      `   - [QUY TẮC BẮT BUỘC KHI TẠO SLIDE THUYẾT TRÌNH, XUẤT FILE TÀI LIỆU HOẶC TẠO VOICE]:\n` +
+      `     + Khi người dùng yêu cầu tạo bài thuyết trình / slide PowerPoint (.pptx), xuất file Word (.docx), Excel (.xlsx), hoặc tạo giọng đọc / voice (.m4a), HOẶC giục 'soạn luôn đi', 'làm luôn đi':\n` +
+      `       * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_file' (fileType='pptx' cho slide, 'docx' cho word, 'xlsx' cho excel) HOẶC 'create_voice' để xuất file thực tế gửi lên Zalo!\n` +
+      `       * Với slide PowerPoint (.pptx): Phải chia nội dung thành các slide rõ ràng bằng các tiêu đề markdown '# Tiêu đề slide' và nội dung gạch đầu dòng chi tiết cho từng slide.\n` +
+      `       * TUYỆT ĐỐI CẤM CHỈ GÕ DÀN Ý BẰNG CHỮ RỒI HỎI NGƯỢC LẠI NGƯỜI DÙNG có muốn soạn không. Hãy hành động và xuất file ngay lập tức!\n` +
+      `       * [QUY TẮC BẢO LƯU NGUYÊN VẸN TRI THỨC KHI ĐÓNG GÓI / XUẤT FILE ĐA LĨNH VỰC]:\n` +
+      `         - Khi người dùng yêu cầu 'đóng gói', 'xuất file', 'lưu vào file', 'chuyển thành file' (Word/docx, Excel/xlsx, PowerPoint/pptx, PDF, CSV, TXT...) từ nội dung tin nhắn được trích dẫn (quote) hoặc nội dung đã bàn luận trước đó:\n` +
+      `         - BẮT BUỘC PHẢI BẢO LƯU NGUYÊN VẸN 100% TOÀN BỘ NỘI DUNG CHI TIẾT GỐC VÀO THAM SỐ 'content' CỦA TOOL 'generate_file' (bao gồm đầy đủ căn cứ/điều khoản pháp luật, bảng biểu/số liệu tài chính - BĐS, toàn bộ lời thoại/phân cảnh kịch bản media, mã nguồn/kiến trúc kỹ thuật, quy chế doanh nghiệp...). TUYỆT ĐỐI CẤM tự ý tóm tắt thành dàn ý gạch đầu dòng sơ sài làm mất mát dữ liệu và tri thức chuyên sâu của người dùng!\n` +
+      `       * Sau khi gọi công cụ thành công, câu trả lời bằng chữ của bạn chỉ cần NGẮN GỌN 1-3 DÒNG tóm tắt chính và thông báo file đã gửi. TUYỆT ĐỐI KHÔNG lặp lại toàn bộ nội dung dài dòng trong tin nhắn chat Zalo!\n` +
+      `       * TUYỆT ĐỐI CẤM TỰ Ý BỊA ĐẶT TIN NHẮN GIẢ MẠO rằng "em đã xuất xong file", "đã gửi file" khi CHƯA THỰC SỰ GỌI TOOL!\n` +
+      `   - [KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ, POSTER & ĐỒ HỌA BẰNG PYTHON (python_interpreter)]:\n` +
+      `     + Khi người dùng yêu cầu vẽ biểu đồ, sơ đồ quy trình, mindmap hoặc thiết kế đồ họa / poster / bảng lịch thi đấu / bảng xếp hạng, HOẶC khi người dùng chê ảnh xấu/lỗi font và yêu cầu làm lại cẩn thận:\n` +
+      `       BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM gõ code Python bằng chữ vào tin nhắn chat Zalo!\n` +
+      `     + VỚI LỊCH THI ĐẤU, BẢNG XẾP HẠNG, SƠ ĐỒ, ROADMAP: BẮT BUỘC dùng PIL thiết kế INFOGRAPHIC POSTER CARD LAYOUT khổ dọc (W=720, H=1100-1400), nền tối sang trọng (thể thao dùng burgundy #42030D, doanh nghiệp dùng navy #0B132B), thẻ bo góc rounded_rectangle, badge trạng thái ([CHÍNH THỨC], [GIAO HỮU], [LỘ TRÌNH]), tiêu đề vàng kim #FFD700 nổi bật, hàng dữ liệu phân tầng rõ ràng, dùng get_font(size, bold) chuẩn tiếng Việt 100% không lỗi ô vuông. TUYỆT ĐỐI KHÔNG vẽ biểu đồ cột [1, 1, 1] cho lịch thi đấu!\n` +
+      `     + VỚI SỐ LIỆU ĐỊNH LƯỢNG (% tăng trưởng, doanh thu, giá cả): Dùng matplotlib với plt.style.use('dark_background') và plt.savefig('chart.png', dpi=150, bbox_inches='tight').\n` +
       `     + Hệ thống sẽ tự động bắt file ảnh PNG được tạo ra và gửi trực tiếp lên nhóm Zalo!\n` +
-      `     + TUYỆT ĐỐI CẤM từ chối hoặc nói rằng Zalo không hỗ trợ hình ảnh biểu đồ!\n` +
+      `     + TUYỆT ĐỐI CẤM từ chối hoặc bảo người dùng nhờ designer vẽ lại! Hãy chủ động viết code Python tự vẽ và xuất file ảnh ngay lập tức!\n` +
       `   - [KHI CÂU HỎI LÀ TỔNG QUAN DỰ ÁN BẤT ĐỘNG SẢN / CÔNG TRÌNH / HỒ SƠ THƯƠNG MẠI]:\n` +
       `     + BẮT BUỘC cấu trúc câu trả lời chuyên nghiệp, sắc nét, đầy đủ theo các phân mục rõ ràng:\n` +
       `       • 🏢 TỔNG QUAN DỰ ÁN (Tên thương mại, Chủ đầu tư/đơn vị phát triển, Đơn vị thiết kế/thi công, Tổng vốn đầu tư, Mốc khởi công & dự kiến bàn giao).\n` +
@@ -1498,6 +1539,7 @@ async function handleHistoryQA(
     let quoteLiveNews = "";
     let quoteEvidenceRequired = false;
     let quotePlan: QueryPlanResult | null = null;
+    const isFileOrVoiceReq = checkIsFileOrVoiceGeneration(question, options.quote.text);
     try {
       const plan = await planSearchQueries({
         question,
@@ -1507,8 +1549,8 @@ async function handleHistoryQA(
       });
       quotePlan = plan;
 
-      if (plan.needsSearch && plan.queries.length > 0) {
-        quoteEvidenceRequired = plan.intent === "fact_check" && isStrictVerificationQuestion(`${question} ${options.quote.text || ""}`);
+      if (!isFileOrVoiceReq && plan.needsSearch && plan.queries.length > 0) {
+        quoteEvidenceRequired = plan.intent === "fact_check" && isStrictVerificationQuestion(question);
         const searchQueries = plan.queries.slice(0, 2);
         const searchPromises = Promise.all(
           searchQueries.map((q) => searchRealtimeNews(q, {
@@ -1575,24 +1617,11 @@ async function handleHistoryQA(
       `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${question || "Hãy giải thích ngắn gọn nội dung này giúp tôi."}\n\n` +
       `HÃY TRẢ LỜI NGAY DỰA TRÊN DỮ LIỆU MỚI NHẤT ĐƯỢC CUNG CẤP:`;
 
-    const isCodeOrChartQuery =
-      /(?:vẽ|tạo|vẽ\s*giúp|xuất|lập|thiết kế|làm)\s*(?:cho\s*.*?\s*)?(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|ảnh|hình|thiệp|quote|card)/i.test(question) ||
-      /(?:vẽ\s*ảnh|tạo\s*ảnh|vẽ\s*hình|tạo\s*hình|sinh\s*ảnh|vẽ\s*tranh)/i.test(question) ||
-      /(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ)/i.test(question) ||
-      /^[/!](?:taoanh|veanh|draw|plot|chart)\b/i.test(question) ||
-      /(?:chạy|viết|run|execute)\s*(?:code|mã|script)\s*(?:python|py)/i.test(question);
-
-    const isFileGenerationQuery =
-      /(?:tạo|xuất|làm|lưu|gửi|convert|chuyển|viết)\s*(?:thành\s*)?(?:file|tệp)?\s*(?:word|excel|docx|xlsx|doc|sheet|bảng|pdf|txt|md|code)/i.test(question) ||
-      /(?:file|tệp)\s*(?:word|excel|docx|xlsx)/i.test(question) ||
-      /(?:tạo|xuất|làm)\s*(?:file|tệp)/i.test(question) ||
-      isCodeOrChartQuery;
-
     let answer = "";
     const isGreetingQuote =
       /^(?:chào|hi|hello|alo|ê|cảm ơn|thanks|ok)\b/i.test(question.trim()) && question.trim().length < 25;
     try {
-      const needsAgentLoop = isFileGenerationQuery || /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(question);
+      const needsAgentLoop = checkIsFileOrVoiceGeneration(question, options.quote.text) || /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(question);
       if (needsAgentLoop && !isGreetingQuote) {
         answer = await callGeminiAgentLoop(quoteSystemPrompt, quoteUserPrompt, {
           model: "gemini-3.1-flash-lite-preview",
@@ -1601,16 +1630,33 @@ async function handleHistoryQA(
           onFileGenerated: async (file) => {
             try {
               if (options?.api) {
+                const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
                 const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
-                const caption = isImg
-                  ? `📊 Biểu đồ / Hình ảnh đã được vẽ xong cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!\n📁 Tệp: ${file.fileName}`
-                  : `📄 ${botName} đã tạo và gửi file [${file.fileName}] lên nhóm thành công! ${isSuperAdmin ? "Sếp" : "Bác"} tải về xem nhé.`;
-                await sendGroupFile(
-                  options.api,
-                  threadId,
-                  file.filePath,
-                  caption,
+                const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+                const caption = file.caption || (
+                  isSlide
+                    ? `📊 ${botName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+                    : isImg
+                      ? `📊 Biểu đồ / Hình ảnh đã hoàn tất cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+                      : isVoice
+                        ? `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`
+                        : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
                 );
+                if (isVoice) {
+                  await sendGroupVoice(
+                    options.api,
+                    threadId,
+                    file.filePath,
+                    caption,
+                  );
+                } else {
+                  await sendGroupFile(
+                    options.api,
+                    threadId,
+                    file.filePath,
+                    caption,
+                  );
+                }
               }
             } catch (fileErr) {
               console.warn("[member-assistant] Quote QA sendGroupFile error:", fileErr);
@@ -1649,7 +1695,20 @@ async function handleHistoryQA(
           }),
         });
       }
-      return finalizeGroundedAnswer(answer, quoteLiveNews, quoteEvidenceRequired);
+      answer = await interceptAndExecuteSimulatedTool(answer, async (file) => {
+        if (options?.api) {
+          await sendGroupFile(
+            options.api,
+            threadId,
+            file.filePath,
+            file.caption || `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`,
+          );
+        }
+      });
+      return finalizeGroundedAnswer(answer, quoteLiveNews, quoteEvidenceRequired, {
+        intent: quotePlan?.intent,
+        question,
+      });
     } catch (e) {
       console.warn("[member-assistant] Fast-path Quote QA error:", e);
     }
@@ -1737,21 +1796,10 @@ async function handleHistoryQA(
            AND text IS NOT NULL
            AND text != ''
            AND deleted_at IS NULL
-           AND is_self = 0
-           AND LOWER(display_name) NOT LIKE '%sen chúa%'
-           AND LOWER(display_name) NOT LIKE '%sen chua%'
-           AND LOWER(display_name) NOT LIKE '%mộc miên%'
-           AND LOWER(display_name) NOT LIKE '%moc mien%'
-           AND LOWER(display_name) NOT LIKE '%kevin%'
-           AND LOWER(display_name) NOT LIKE 'bot%'
-           AND LOWER(text) NOT LIKE '%sen chúa%'
-           AND LOWER(text) NOT LIKE '%sen chua%'
-           AND LOWER(text) NOT LIKE '%mộc miên%'
-           AND LOWER(text) NOT LIKE '%moc mien%'
            AND text NOT LIKE '/%'
            AND text NOT LIKE '!%'
          ORDER BY ts DESC
-         LIMIT 15`,
+         LIMIT 20`,
       )
       .all(threadId) as any[];
     relevantMessages.reverse();
@@ -2068,6 +2116,19 @@ async function handleHistoryQA(
     return `⚠️ Em không tìm thấy tài liệu nào khớp với yêu cầu của bạn trong kho tri thức!\n\n👉 Để tra cứu chuẩn xác 100% không bịa đặt, bạn vui lòng:\n1. Gửi kèm link Google Doc/Sheet: /doc [link] [câu hỏi]\n2. Hoặc nhờ Admin nạp tài liệu vào kho bằng lệnh: /doc [tên_dự_án] [link] nhé!`;
   }
 
+  // C3. Hồ sơ & Bộ nhớ dài hạn của thành viên đang hỏi (User Long-term Memory)
+  let userMemorySection = "";
+  if (options?.sender) {
+    try {
+      const userMemories = getUserMemories(options.sender, 6);
+      if (userMemories.length > 0) {
+        userMemorySection = formatUserMemoriesForPrompt(userMemories, displayName);
+      }
+    } catch (e) {
+      console.warn("[handleHistoryQA] Lỗi getUserMemories:", e);
+    }
+  }
+
   if (topMembers && topMembers.length > 0) {
     contextLines.push("=== BẢNG XẾP HẠNG & THÀNH VIÊN TÍCH CỰC NHẤT NHÓM ===");
     topMembers.forEach((m, idx) => {
@@ -2130,6 +2191,8 @@ async function handleHistoryQA(
     }
   }
 
+  const botName = groupSettings.botName || defaultBotName;
+
   contextLines.push("=== TIN NHẮN THẢO LUẬN CỦA CÁC THÀNH VIÊN ===");
   if (relevantMessages && relevantMessages.length > 0) {
     for (const m of relevantMessages.slice(0, 80)) {
@@ -2140,7 +2203,9 @@ async function handleHistoryQA(
       } catch {
         dateStr = "";
       }
-      contextLines.push(`${dateStr} | ${m.display_name || "Thành viên"}: ${m.text}`);
+      const isBot = m.is_self === 1 || /(?:sen chúa|sen chua|mộc miên|kevin|bot)/i.test(m.display_name || "");
+      const senderLabel = isBot ? `${botName} (Trợ lý AI)` : (m.display_name || "Thành viên");
+      contextLines.push(`${dateStr} | ${senderLabel}: ${m.text}`);
     }
   }
 
@@ -2148,6 +2213,7 @@ async function handleHistoryQA(
 
   let quotePromptSection = "";
   if (options?.quote?.text) {
+    options.quote.text = stitchMultiChunkQuote(threadId, options.quote.text);
     quotePromptSection = `\n=== NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE TỪ ${options.quote.senderName || "THÀNH VIÊN"}): ===\n"${options.quote.text}"\n`;
   }
 
@@ -2155,8 +2221,6 @@ async function handleHistoryQA(
   if (fileTextContent) {
     fileContentSection = `\n=== NỘI DUNG TÀI LIỆU ĐÍNH KÈM (${fileName || "File"}): ===\n${fileTextContent.slice(0, 40000)}\n`;
   }
-
-  const botName = groupSettings.botName || defaultBotName;
 
   let personaIntro = "";
   switch (groupSettings.persona) {
@@ -2221,8 +2285,12 @@ async function handleHistoryQA(
       const recentCtx =
         relevantMessages.length > 0
           ? relevantMessages
-            .slice(-5)
-            .map((m) => `${m.display_name}: ${m.text}`)
+            .slice(-8)
+            .map((m) => {
+              const isBot = m.is_self === 1 || /(?:sen chúa|sen chua|mộc miên|kevin|bot)/i.test(m.display_name || "");
+              const senderLabel = isBot ? `${botName} (Trợ lý AI)` : (m.display_name || "Thành viên");
+              return `${senderLabel}: ${m.text}`;
+            })
             .join("\n")
           : undefined;
 
@@ -2234,9 +2302,10 @@ async function handleHistoryQA(
       });
       queryPlan = plan;
 
-      planNeedsSearch = Boolean(plan.needsSearch);
+      const isFileOrVoiceReq = checkIsFileOrVoiceGeneration(question, options?.quote?.text);
+      planNeedsSearch = Boolean(plan.needsSearch) && !isFileOrVoiceReq;
 
-      if (plan.needsSearch && plan.queries.length > 0) {
+      if (planNeedsSearch && plan.queries.length > 0) {
         evidenceRequired = plan.intent === "fact_check" && isStrictVerificationQuestion(question);
         const searchQueries = plan.queries.slice(0, 2);
         console.log(`[member-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(searchQueries)}`);
@@ -2252,9 +2321,9 @@ async function handleHistoryQA(
         let searchTimer: NodeJS.Timeout | undefined;
         const searchTimeout = new Promise<string[]>((resolve) => {
           searchTimer = setTimeout(() => {
-            console.warn(`[member-assistant] ⏱️ Timeout quét tìm kiếm (6s), tiếp tục với dữ liệu sẵn có`);
+            console.warn(`[member-assistant] ⏱️ Timeout quét tìm kiếm (8s), tiếp tục với dữ liệu sẵn có`);
             resolve([]);
-          }, 6000);
+          }, 8000);
         });
         const searchResults = await Promise.race([searchPromises, searchTimeout]);
         if (searchTimer) clearTimeout(searchTimer);
@@ -2297,15 +2366,16 @@ async function handleHistoryQA(
     `   - Dùng gạch đầu dòng rõ ràng, **in đậm** ngày giờ, số liệu, tên đơn vị, văn bản hoặc từ khóa then chốt.\n` +
     `2. QUY CHUẨN TRÌNH BÀY CHO CÁC DẠNG DỮ LIỆU ĐẶC THÙ:\n` +
     `   - Lịch trình / Sự kiện / Thể thao có mốc thời gian (lịch thi đấu, giải đấu, hội nghị, sự kiện, chuyến bay...):\n` +
-    `     + BẮT BUỘC liệt kê danh sách chi tiết: Ngày thi đấu/diễn ra, Giờ cụ thể (theo giờ VN), Cặp đấu đối đầu (Đội A vs Đội B), Vòng đấu / Bảng đấu.\n` +
-    `     + TUYỆT ĐỐI KHÔNG chỉ nói chung chung 2-3 đội rồi dừng lại mà phải cung cấp lịch thi đấu cụ thể, chi tiết nhất từ dữ liệu tra cứu.\n` +
+    `     + BẮT BUỘC liệt kê danh sách chi tiết: Ngày thi đấu/diễn ra, Giờ cụ thể (theo giờ VN), Cặp đấu đối đầu (Đội A vs Đội B), Vòng đấu / Bảng đấu, Kênh trực tiếp.\n` +
+    `     + TUYỆT ĐỐI KHÔNG chỉ nói chung chung 1-2 câu rồi dừng lại mà phải cung cấp lịch thi đấu cụ thể, đầy đủ nhất từ dữ liệu tra cứu.\n` +
+    `     + Khi câu hỏi về đội tuyển/thể thao có nhiều cấp độ (ví dụ: ĐTQG, U23, Tuyển Nữ...): BẮT BUỘC liệt kê chi tiết từng cấp độ có trận đấu sắp tới (thời gian, đối thủ, giải đấu). TUYỆT ĐỐI CẤM trả lời sơ sài 1 dòng rồi hỏi ngược lại người dùng có muốn xem thêm không!\n` +
     `   - Chỉ số / Giá cả / Thị trường (vàng, ngoại tệ, chứng khoán, crypto, nhiên liệu...): Nêu thẳng con số giá niêm yết hiện tại kèm đơn vị tính rõ ràng.\n` +
     `   - Văn bản pháp quy / Hành chính / Thủ tục: Nêu rõ tên văn bản (Luật, Nghị quyết, Nghị định, Thông tư), số hiệu, thời điểm có hiệu lực và nội dung điều khoản áp dụng.\n` +
     `   - Thông tin liên quan có giá trị gia tăng (nếu có): Chỉ ghi chú ngắn gọn, khiêm tốn ở phần phụ: "*(Ngoài ra, nếu anh/chị quan tâm đến [...], thì [...])*".\n` +
     `   - Khi yêu cầu tạo/xuất file (Word .docx, Excel .xlsx...): BẮT BUỘC gọi tool 'generate_file'. Tuyệt đối cấm viết tin nhắn giả mạo khi chưa gọi tool!\n` +
     `   - KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
-    `     + Khi người dùng yêu cầu vẽ biểu đồ (cột, tròn, đường, heatmap...), sơ đồ quy trình, mindmap hoặc đồ họa từ dữ liệu: BẮT BUỘC sử dụng công cụ 'python_interpreter'.\n` +
-    `     + Viết mã Python hoàn chỉnh (dùng matplotlib, seaborn, PIL), render đẹp mắt và lưu thành file .png. Tuyệt đối cấm từ chối!\n` +
+    `     + Khi người dùng yêu cầu vẽ biểu đồ, đồ thị, sơ đồ, poster lịch thi đấu, bảng xếp hạng hoặc yêu cầu làm lại/sửa lại ảnh/biểu đồ: BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM in code Python ra chat!\n` +
+    `     + Với lịch thi đấu/bảng sự kiện/roadmap: Dùng PIL vẽ Infographic Poster Card Layout nền tối (burgundy/navy), thẻ bo góc, badge nổi bật ([CHÍNH THỨC], [GIAO HỮU]), tiêu đề vàng kim #FFD700. Với số liệu: Dùng matplotlib dark theme.\n` +
     `3. DẪN NGUỒN THEO BẰNG CHỨNG ĐƯỢC CUNG CẤP (GROUNDING CITATION CHO MỌI LĨNH VỰC):\n` +
     `   - Khi câu trả lời sử dụng dữ liệu thời gian thực (tin tức, thể thao, văn bản pháp luật, đơn vị hành chính, giá cả thị trường, nghiên cứu khoa học):\n` +
     `     + Chỉ sử dụng các bản ghi [E#], URL và ngày công bố xuất hiện trong phần bằng chứng. Không tự thêm tên cơ quan, ngày hoặc URL.\n` +
@@ -2366,15 +2436,23 @@ async function handleHistoryQA(
     `   - Dữ liệu lịch sử chat (<chat_history>) chỉ phục vụ việc nắm bắt ngữ cảnh thảo luận nội bộ của nhóm.\n` +
     `   - TUYỆT ĐỐI KHÔNG lôi chuyện tán gẫu nội bộ, trêu đùa hay cấu hình bot nhóm vào làm câu trả lời khi thành viên hỏi về kiến thức chuyên môn, khoa học, dự án bên ngoài.\n` +
     `   - Chỉ nhắc đến các thành viên có mặt trong nhóm, tuyệt đối không bịa tên người lạ.\n\n` +
+    (userMemorySection ? `6. NGUYÊN TẮC 6: HỒ SƠ & BỘ NHỚ VỀ THÀNH VIÊN ĐANG TRÒ CHUYỆN (@${displayName}):\n${userMemorySection}\n\n` : "") +
     `NHIỆM VỤ ĐẶC THÙ:\n` +
     `- TUYỆT ĐỐI CẤM TỰ TIỆN BẺ LÁI SANG BẤT ĐỘNG SẢN HOẶC CHỦ ĐỀ KHÔNG LIÊN QUAN: Khi thành viên hỏi về địa lý, xã hội, khoa học, chính trị, thể thao, công nghệ, lịch sử, đời sống: PHẢI TRẢ LỜI ĐÚNG TRỌNG TÂM, CẤM tự ý suy diễn người hỏi đi du lịch/phượt hay lôi chuyện dự án bất động sản/mua bán nhà đất vào câu trả lời nếu người dùng không hề hỏi về BĐS!\n` +
     `- KHI CÂU HỎI LÀ TRA CỨU SỰ KIỆN / SỐ LIỆU / DỮ KIỆN THỰC TẾ: Đi thẳng vào câu trả lời và số liệu rõ ràng, không mở bài bằng các câu chào hỏi hay cảm thán sáo rỗng dài dòng làm loãng thông tin, KHÔNG chèn thông tin bổ trợ bên lề.\n` +
     `- CẬP NHẬT DỮ KIỆN THỜI GIAN THỰC & PHÁP LUẬT / HÀNH CHÍNH MỚI NHẤT: BẮT BUỘC ưu tiên dữ liệu mới nhất từ phần 'DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT'. Khi câu hỏi liên quan đến dữ kiện thực tế có tính biến động (chính sách, luật pháp, đơn vị hành chính, giá cả, số liệu): TUYỆT ĐỐI KHÔNG bám vào số liệu cũ trong trí nhớ đã lỗi thời nếu dữ liệu tra cứu cung cấp văn bản, nghị quyết hoặc số liệu mới hơn. Phải giải thích rõ ràng và cập nhật số liệu mới nhất cho người hỏi!\n` +
     `- KHI HỎI VỀ QUY TRÌNH, HƯỚNG DẪN HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Trích dẫn và diễn giải chi tiết từng bước (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến từ lịch sử chat. Không chỉ đưa mỗi link tài liệu.\n` +
-    `- QUY TẮC CÔNG CỤ XUẤT FILE (generate_file): CHỈ gọi công cụ 'generate_file' khi người dùng có YÊU CẦU CỤ THỂ VỀ NỘI DUNG để tạo/xuất file (ví dụ: "soạn cho anh hợp đồng...", "tạo file docx quy trình...", "xuất bảng tính chi phí ra excel..."). TUYỆT ĐỐI CẤM TỰ Ý TẠO FILE khi người dùng chỉ hỏi thăm năng lực (ví dụ: "em biết tạo file docx không?", "bot có tạo file được không?"). Với câu hỏi hỏi thăm năng lực, CHỈ trả lời bằng lời nói giải thích năng lực và mời người dùng cung cấp nội dung cần tạo. Tuyệt đối cấm tạo file rỗng tự chế!\n` +
+    `- QUY TẮC BẮT BUỘC KHI TẠO SLIDE THUYẾT TRÌNH, XUẤT FILE TÀI LIỆU HOẶC TẠO VOICE:\n` +
+    `  + Khi người dùng yêu cầu tạo bài thuyết trình / slide PowerPoint (.pptx), xuất file Word (.docx), Excel (.xlsx), hoặc tạo giọng đọc / voice (.m4a), HOẶC giục 'soạn luôn đi', 'làm luôn đi':\n` +
+    `    * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_file' (fileType='pptx' cho slide, 'docx' cho word, 'xlsx' cho excel) HOẶC 'create_voice' để xuất file thực tế gửi lên Zalo!\n` +
+    `    * Với slide PowerPoint (.pptx): Phải chia nội dung thành các slide rõ ràng bằng các tiêu đề markdown '# Tiêu đề slide' và nội dung gạch đầu dòng chi tiết cho từng slide.\n` +
+    `    * TUYỆT ĐỐI CẤM CHỈ GÕ DÀN Ý BẰNG CHỮ RỒI HỎI NGƯỢC LẠI NGƯỜI DÙNG có muốn soạn không. Hãy hành động và xuất file ngay lập tức!\n` +
+    `    * [QUY TẮC BẢO LƯU NGUYÊN VẸN TRI THỨC KHI ĐÓNG GÓI / XUẤT FILE ĐA LĨNH VỰC]: Khi người dùng yêu cầu 'đóng gói', 'xuất file', 'lưu vào file', 'chuyển thành file' (Word/docx, Excel/xlsx, PowerPoint/pptx, PDF, CSV, TXT...) từ nội dung tin nhắn được trích dẫn (quote) hoặc nội dung đã bàn luận trước đó: BẮT BUỘC PHẢI BẢO LƯU NGUYÊN VẸN 100% TOÀN BỘ NỘI DUNG CHI TIẾT GỐC VÀO THAM SỐ 'content' CỦA TOOL 'generate_file' (đầy đủ căn cứ/điều khoản pháp luật, bảng biểu/số liệu tài chính - BĐS, toàn bộ lời thoại/phân cảnh kịch bản media, mã nguồn/kiến trúc kỹ thuật...). TUYỆT ĐỐI CẤM tự ý tóm tắt thành dàn ý gạch đầu dòng sơ sài làm mất mát dữ liệu và tri thức chuyên sâu của người dùng!\n` +
+    `    * CHỈ từ chối tạo file khi người dùng chỉ hỏi thăm năng lực (ví dụ: 'em biết tạo slide không?'). Khi đó chỉ giải thích năng lực và mời người dùng yêu cầu cụ thể.\n` +
+    `    * Sau khi gọi công cụ thành công, câu trả lời bằng chữ của bạn chỉ cần NGẮN GỌN 1-3 DÒNG tóm tắt chính và thông báo file đã gửi. TUYỆT ĐỐI KHÔNG lặp lại toàn bộ nội dung dài dòng trong tin nhắn chat Zalo!\n` +
     `- KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
-    `  + Khi người dùng yêu cầu vẽ biểu đồ (cột, tròn, đường, heatmap...), sơ đồ quy trình, mindmap hoặc đồ họa từ dữ liệu: BẮT BUỘC sử dụng công cụ 'python_interpreter'.\n` +
-    `  + Viết mã Python hoàn chỉnh (dùng matplotlib, seaborn, PIL), render đẹp mắt và lưu thành file .png. Tuyệt đối cấm từ chối!\n` +
+    `  + Khi người dùng yêu cầu vẽ biểu đồ, đồ thị, sơ đồ, poster lịch thi đấu, bảng xếp hạng hoặc yêu cầu làm lại/sửa lại ảnh/biểu đồ: BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM in code Python ra chat!\n` +
+    `  + Với lịch thi đấu/bảng sự kiện/roadmap: Dùng PIL vẽ Infographic Poster Card Layout nền tối (burgundy/navy), thẻ bo góc, badge nổi bật ([CHÍNH THỨC], [GIAO HỮU]), tiêu đề vàng kim #FFD700. Với số liệu: Dùng matplotlib dark theme.\n` +
     `- KHI CÂU HỎI LÀ TỔNG QUAN DỰ ÁN BẤT ĐỘNG SẢN / CÔNG TRÌNH / HỒ SƠ THƯƠNG MẠI:\n` +
     `  + BẮT BUỘC cấu trúc câu trả lời chuyên nghiệp, sắc nét, đầy đủ theo các phân mục rõ ràng:\n` +
     `    • 🏢 TỔNG QUAN DỰ ÁN (Tên thương mại, Chủ đầu tư/đơn vị phát triển, Đơn vị thiết kế/thi công, Tổng vốn đầu tư, Mốc khởi công & dự kiến bàn giao).\n` +
@@ -2396,24 +2474,11 @@ async function handleHistoryQA(
     `HÃY TRẢ LỜI THẬT ${isSuperAdmin ? "CHU ĐÁO, CHUẨN XÁC VÀ TÔN TRỌNG SẾP" : "DUYÊN DÁNG, CHUẨN XÁC VÀ HÓM HỈNH"}:`;
 
   try {
-    const isCodeOrChartQuery =
-      /(?:vẽ|tạo|vẽ\s*giúp|xuất|lập|thiết kế|làm)\s*(?:cho\s*.*?\s*)?(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|ảnh|hình|thiệp|quote|card)/i.test(question) ||
-      /(?:vẽ\s*ảnh|tạo\s*ảnh|vẽ\s*hình|tạo\s*hình|sinh\s*ảnh|vẽ\s*tranh)/i.test(question) ||
-      /(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ)/i.test(question) ||
-      /^[/!](?:taoanh|veanh|draw|plot|chart)\b/i.test(question) ||
-      /(?:chạy|viết|run|execute)\s*(?:code|mã|script)\s*(?:python|py)/i.test(question);
-
-    const isFileGenerationQuery =
-      /(?:tạo|xuất|làm|lưu|gửi|convert|chuyển|viết)\s*(?:thành\s*)?(?:file|tệp)?\s*(?:word|excel|docx|xlsx|doc|sheet|bảng|pdf|txt|md|code)/i.test(question) ||
-      /(?:file|tệp)\s*(?:word|excel|docx|xlsx)/i.test(question) ||
-      /(?:tạo|xuất|làm)\s*(?:file|tệp)/i.test(question) ||
-      isCodeOrChartQuery;
-
-    const needsAgentLoop = isFileGenerationQuery || /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(question);
+    const needsAgentLoop = checkIsFileOrVoiceGeneration(question, options?.quote?.text) || /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(question);
 
     let answer = "";
     if (needsAgentLoop && !isSearchDisabled) {
-      // 🚀 Chỉ khi người dùng thực sự yêu cầu gọi tool xuất file (Word, Excel) hoặc đọc link cụ thể mới chạy Agent Loop
+      // 🚀 Chỉ khi người dùng thực sự yêu cầu gọi tool xuất file, voice hoặc đọc link cụ thể mới chạy Agent Loop
       answer = await callGeminiAgentLoop(systemPrompt, userPrompt, {
         model: "gemini-3.1-flash-lite-preview",
         maxTurns: 3,
@@ -2421,11 +2486,23 @@ async function handleHistoryQA(
         onFileGenerated: async (file) => {
           try {
             if (options?.api) {
+              const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
               const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
-              const caption = isImg
-                ? `📊 Biểu đồ / Hình ảnh đã được vẽ xong cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!\n📁 Tệp: ${file.fileName}`
-                : `📄 ${botName} đã tạo và gửi file [${file.fileName}] lên nhóm thành công! ${isSuperAdmin ? "Sếp" : "Bác"} tải về xem nhé.`;
-              await sendGroupFile(options.api, threadId, file.filePath, caption);
+              const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+              const caption = file.caption || (
+                isSlide
+                  ? `📊 ${botName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+                  : isImg
+                    ? `📊 Biểu đồ / Hình ảnh đã hoàn tất cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+                    : isVoice
+                      ? `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`
+                      : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+              );
+              if (isVoice) {
+                await sendGroupVoice(options.api, threadId, file.filePath, caption);
+              } else {
+                await sendGroupFile(options.api, threadId, file.filePath, caption);
+              }
             }
           } catch (fileErr) {
             console.warn("[member-assistant] sendGroupFile error:", fileErr);
@@ -2453,7 +2530,7 @@ async function handleHistoryQA(
         }
       }
 
-      const chosenModel = (needsSearch && canUseGrounding()) ? "gemini-2.5-flash" : "gemini-3.1-flash-lite-preview";
+      const chosenModel = (needsSearch && canUseGrounding()) ? "gemini-3-flash-preview" : "gemini-3.1-flash-lite-preview";
       const routingSignals = normalizeExecutionSignals(
         queryPlan ? { ...queryPlan } : null,
         {
@@ -2488,7 +2565,21 @@ async function handleHistoryQA(
       console.log(`[member-assistant] ⚡ AI hoàn tất trong ${Date.now() - tAiStart}ms (kết quả: ${answer.length} ký tự)`);
     }
 
-    answer = finalizeGroundedAnswer(answer, liveNews, evidenceRequired);
+    answer = await interceptAndExecuteSimulatedTool(answer, async (file) => {
+      if (options?.api) {
+        await sendGroupFile(
+          options.api,
+          threadId,
+          file.filePath,
+          file.caption || `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`,
+        );
+      }
+    });
+
+    answer = finalizeGroundedAnswer(answer, liveNews, evidenceRequired, {
+      intent: queryPlan?.intent,
+      question,
+    });
 
     // 🧠 TỰ ĐỘNG GHI NHỚ VÀO BỘ NHỚ DÀI HẠN NẾU ĐÂY LÀ TÀI LIỆU/FILE PHÂN TÍCH
     if (targetUrl && fileName) {
@@ -2567,10 +2658,11 @@ export function extractImagePromptFromText(rawText: string, botName = ""): strin
     .replace(/\s+/g, " ")
     .trim();
 
-  // BỎ QUA nếu là yêu cầu vẽ biểu đồ, đồ thị, sơ đồ, bảng dữ liệu hoặc từ file (để chuyển sang Python Sandbox)
+  // BỎ QUA nếu là yêu cầu vẽ biểu đồ, đồ thị, sơ đồ, bảng dữ liệu, bảng thi đấu, lịch thi đấu, bảng xếp hạng (để chuyển sang Python Sandbox hoặc trả lời Markdown/Text)
   if (
     /(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic)/i.test(clean) ||
-    /(?:từ\s+file|từ\s+tệp|từ\s+bảng|từ\s+dữ\s+liệu|từ\s+danh\s+sách|theo\s+file|theo\s+bảng)/i.test(clean)
+    /(?:từ\s+file|từ\s+tệp|từ\s+bảng|từ\s+dữ\s+liệu|từ\s+danh\s+sách|theo\s+file|theo\s+bảng|theo\s+lịch|theo\s+danh\s+sách)/i.test(clean) ||
+    /(?:bảng\s+(?:thi\s*đấu|đấu|lịch|xếp\s*hạng|điểm|so\s*sánh|tính|dữ\s*liệu|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình|làm\s*việc|hẹn))/i.test(clean)
   ) {
     return null;
   }
@@ -2584,13 +2676,28 @@ export function extractImagePromptFromText(rawText: string, botName = ""): strin
       .trim();
   }
 
-  // 1. Cú pháp lệnh: /taoanh, !taoanh, /veanh, /draw, /image, /sinhdan
+  // 1. Cú pháp lệnh tạo ảnh: /taoanh, !taoanh, /veanh, /draw, /image, /sinhdan
   const cmdMatch = clean.match(/^[/!](?:taoanh|veanh|sinhdan|draw|imagine|image)\s*(?:[:\s-]\s*)?(.+)$/i);
   if (cmdMatch && cmdMatch[1]?.trim()) {
     return cleanExtractedPrompt(cmdMatch[1]);
   }
 
-  // 2. Ngôn ngữ tự nhiên có từ khóa ảnh/hình/tranh/họa:
+  // 1.1 Cú pháp lệnh sửa ảnh: /suaanh, !suaanh, /chinhanh, !chinhanh, /chinhsuaanh, !chinhsuaanh, /editanh, !editanh, /editimage, /modifyimage
+  const editCmdMatch = clean.match(/^[/!](?:suaanh|chinhanh|chinhsuaanh|editanh|editimage|modifyimage)\s*(?:[:\s-]\s*)?(.*)$/i);
+  if (editCmdMatch) {
+    const p = editCmdMatch[1]?.trim();
+    return p ? cleanExtractedPrompt(p) : "nâng cấp chất lượng và tối ưu hóa chi tiết hình ảnh";
+  }
+
+  // 2. Ngôn ngữ tự nhiên sửa / chỉnh ảnh:
+  // "sửa ảnh này thành tóc ngắn", "chỉnh sửa giúp anh tấm ảnh này", "edit ảnh này theo phong cách anime", "thay nền ảnh này..."
+  const naturalEditPattern = /^(?:hãy\s+|nhờ\s+|cho\s+)?(?:sửa|chỉnh\s*sửa|chỉnh|edit|biến\s*đổi|chuyển\s*đổi|làm\s*lại)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:giúp\s+)?(?:một\s+)?(?:bức\s+|tấm\s+|cái\s+|chiếc\s+)?(?:ảnh|hình|tranh)\s*(?:này|đó)?\s*(?:thành|sang|thêm|thay|bỏ|đổi|cho)?\s*[:\s]*(.+)$/i;
+  const editMatch = clean.match(naturalEditPattern);
+  if (editMatch && editMatch[1]?.trim()) {
+    return cleanExtractedPrompt(editMatch[1]);
+  }
+
+  // 2.1 Ngôn ngữ tự nhiên có từ khóa ảnh/hình/tranh/họa:
   const naturalPhotoPattern = /^(?:hãy\s+|nhờ\s+|cho\s+)?(?:tạo|vẽ|sinh|làm)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:giúp\s+)?(?:một\s+)?(?:bức\s+|tấm\s+|cái\s+|chiếc\s+)?(?:ảnh|hình|tranh|họa)\s*(?:về|với|cảnh|chủ đề|một)?\s*[:\s]*(.+)$/i;
   const photoMatch = clean.match(naturalPhotoPattern);
   if (photoMatch && photoMatch[1]?.trim()) {
@@ -2613,11 +2720,13 @@ export interface ParsedImageRequest {
   prompt: string;
   aspectRatio: AspectRatioType;
   referenceImageUrl?: string;
+  isEdit?: boolean;
 }
 
 /**
- * Phân tích yêu cầu tạo ảnh: tách prompt sạch và tỉ lệ khung hình (16:9, 9:16, 4:3, 3:4, 1:1)
- * Hỗ trợ bóc tách ngữ cảnh từ tin nhắn được trích dẫn (Quote) khi người dùng dùng đại từ chỉ định ("này đi e", "theo phương án này").
+ * Phân tích yêu cầu tạo hoặc sửa ảnh: tách prompt sạch và tỉ lệ khung hình (16:9, 9:16, 4:3, 3:4, 1:1)
+ * Hỗ trợ bóc tách ngữ cảnh từ tin nhắn được trích dẫn (Quote) khi người dùng dùng đại từ chỉ định ("này đi e", "theo phương án này")
+ * hoặc yêu cầu sửa ảnh ("đổi nền thành bãi biển", "thêm kính mắt", "sửa thành tóc vàng").
  */
 export function parseImagePromptAndRatio(
   rawText: string,
@@ -2625,9 +2734,31 @@ export function parseImagePromptAndRatio(
   quote?: MemberMessageEvent["quote"] | null,
 ): ParsedImageRequest | null {
   const extracted = extractImagePromptFromText(rawText, botName);
-  if (!extracted) return null;
 
-  let cleaned = extracted;
+  const cleanForDetect = rawText
+    .replace(new RegExp(`(?:@\\s*)?(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot)(?=[^\\p{L}\\p{N}]|$)`, "giu"), " ")
+    .replace(/@[^\s,!?]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // Nhận diện lệnh hoặc câu nói sửa ảnh
+  const isExplicitEditCmd = /^[/!](?:suaanh|chinhanh|chinhsuaanh|editanh|editimage|modifyimage)\b/i.test(rawText.trim());
+  const isNaturalEdit = /^(?:hãy\s+|nhờ\s+|cho\s+)?(?:sửa|chỉnh\s*sửa|chỉnh|edit|biến\s*đổi|chuyển\s*đổi|làm\s*lại)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:giúp\s+)?(?:một\s+)?(?:bức\s+|tấm\s+|cái\s+|chiếc\s+)?(?:ảnh|hình|tranh)\b/i.test(cleanForDetect);
+
+  // Nhận diện trường hợp quote ảnh kèm chỉ dẫn thay đổi (VD: "đổi màu tóc thành vàng", "thêm kính mắt", "thay nền sang ban đêm")
+  const hasImageInQuote = Boolean(quote?.mediaUrl && (quote.mediaType === "image" || /\.(?:jpg|jpeg|png|webp|gif)/i.test(quote.mediaUrl)));
+  let quoteImageEditPrompt = "";
+  if (!extracted && hasImageInQuote) {
+    const actionMatch = cleanForDetect.match(/^(?:hãy\s+|nhờ\s+|cho\s+)?(?:sửa|chỉnh\s*sửa|chỉnh|edit|thay\s*đổi|đổi|thêm|bớt|xóa|làm\s*nét|làm\s*rõ|biến\s*thành|chuyển\s*(?:sang|thành)|thay)\s+(.+)$/i);
+    if (actionMatch && actionMatch[1]?.trim()) {
+      quoteImageEditPrompt = actionMatch[1].trim();
+    }
+  }
+
+  const promptCandidate = quoteImageEditPrompt || extracted;
+  if (!promptCandidate) return null;
+
+  let cleaned = promptCandidate;
   let ratio: AspectRatioType = "1:1";
 
   // Nhận diện 16:9 (ngang)
@@ -2672,7 +2803,7 @@ export function parseImagePromptAndRatio(
     referenceImageUrl = quote.mediaUrl;
   }
 
-  let finalPrompt = cleaned || extracted;
+  let finalPrompt = cleaned || promptCandidate;
 
   if (quote?.text && quote.text.trim()) {
     const qText = quote.text.trim();
@@ -2692,10 +2823,13 @@ export function parseImagePromptAndRatio(
     }
   }
 
+  const isEdit = isExplicitEditCmd || isNaturalEdit || Boolean(quoteImageEditPrompt);
+
   return {
     prompt: finalPrompt,
     aspectRatio: ratio,
     referenceImageUrl,
+    isEdit,
   };
 }
 
@@ -2798,6 +2932,18 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     const reply = handleHelpCommand(botName);
     await sendGroupText(api, threadId, reply);
     console.log(`[member-assistant] ✅ Đã phản hồi /help cho ${displayName}`);
+    return;
+  }
+
+  // 1b. Lệnh quản lý trí nhớ cá nhân: !xemtrinho, !xoatrinho, bot nhớ gì về tôi, v.v.
+  const memoryAction = isMemoryControlCommand(rawText);
+  if (memoryAction) {
+    userCooldowns.set(sender, now);
+    void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.OK);
+    void sendTyping(api, threadId);
+    const reply = handleMemoryControlCommand(memoryAction, sender, displayName);
+    await sendGroupText(api, threadId, reply);
+    console.log(`[member-assistant] 🧠 Đã phản hồi lệnh trí nhớ (${memoryAction}) cho ${displayName}`);
     return;
   }
 
@@ -2953,10 +3099,10 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
-  // 6.2. Vệ Tinh 3: Lệnh /taoanh hoặc Yêu cầu vẽ ảnh bằng ngôn ngữ tự nhiên ("tạo cho tôi bức ảnh...", "vẽ giúp anh một...")
+  // 6.2. Vệ Tinh 3: Lệnh /taoanh, /suaanh hoặc Yêu cầu vẽ/sửa ảnh bằng ngôn ngữ tự nhiên ("tạo cho tôi bức ảnh...", "sửa ảnh này thành...")
   const imageReq = parseImagePromptAndRatio(rawText, botName, event.quote);
-  if (imageReq && imageReq.prompt.length >= 3) {
-    const isExplicitCommand = /^[/!](?:taoanh|veanh|sinhdan|draw|imagine|image)\b/i.test(rawText.trim());
+  if (imageReq && (imageReq.prompt.length >= 2 || imageReq.isEdit)) {
+    const isExplicitCommand = /^[/!](?:taoanh|veanh|sinhdan|draw|imagine|image|suaanh|chinhanh|chinhsuaanh|editanh|editimage|modifyimage)\b/i.test(rawText.trim());
 
     if (!isExplicitCommand) {
       // Trong nhóm: Nếu không phải lệnh /taoanh rõ ràng thì BẮT BUỘC người dùng phải gọi tên Bot hoặc tag Bot
@@ -3017,7 +3163,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         lowerRaw.includes("cho bot") ||
         lowerRaw.startsWith("bot ");
 
-      // Nếu thành viên tag người khác (UID khác hoặc @Tên khác bot) thì tuyệt đối không xen vào
+      // Nếu thành viên tag người khác (UID khác hoặc @Tên khác bot)
       const hasOtherMention =
         isTaggedOtherUid ||
         (/@[^\s,!?]+/g.test(rawText) &&
@@ -3025,15 +3171,20 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
           !lowerRaw.includes(`@${unaccentedBot}`) &&
           !lowerRaw.includes("@bot"));
 
-      const isBotCalled = (isTaggedByUid || mentionsThisBotName || mentionsGenericBot) && !hasOtherMention;
+      // Bot được gọi nếu:
+      // 1. Tag trực tiếp bằng UID của bot này (isTaggedByUid)
+      // 2. Hoặc người dùng gọi đích danh tên bot này trong văn bản (mentionsThisBotName)
+      // 3. Hoặc người dùng gọi chung chung "bot ơi", "@bot" (mentionsGenericBot) VÀ không tag đích danh người khác (!hasOtherMention)
+      const isBotCalled = isTaggedByUid || mentionsThisBotName || (mentionsGenericBot && !hasOtherMention);
 
       if (!isBotCalled) {
-        // Trong nhóm nếu không gọi tên bot thì không tự tiện tạo ảnh
-      } else {
-        // Đủ điều kiện tạo ảnh bằng ngôn ngữ tự nhiên
-        await executeGroupImageGen();
+        // Trong nhóm: yêu cầu tạo ảnh nhưng không gọi đích danh bot này -> bỏ qua hoàn toàn, KHÔNG để rơi xuống QA
         return;
       }
+
+      // Đủ điều kiện tạo ảnh bằng ngôn ngữ tự nhiên
+      await executeGroupImageGen();
+      return;
     } else {
       // Có lệnh rõ ràng (/taoanh, !veanh...)
       await executeGroupImageGen();
@@ -3042,7 +3193,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   }
 
   async function executeGroupImageGen(): Promise<void> {
-    const { prompt: imagePrompt, aspectRatio } = imageReq!;
+    const { prompt: imagePrompt, aspectRatio, isEdit } = imageReq!;
     userCooldowns.set(sender, now);
     void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.HEART);
     void sendTyping(api, threadId);
@@ -3054,7 +3205,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         await sendGroupText(
           api,
           threadId,
-          `⚠️ @${displayName} Tính năng vẽ ảnh AI (Codex) chưa được kích hoạt trên máy chủ (cần cấu hình NINE_ROUTER_API_KEY trong file .env). Vui lòng liên hệ Quản trị viên nhé!`,
+          `⚠️ @${displayName} Tính năng tạo/sửa ảnh AI (Codex) chưa được kích hoạt trên máy chủ (cần cấu hình NINE_ROUTER_API_KEY trong file .env). Vui lòng liên hệ Quản trị viên nhé!`,
         );
         return;
       }
@@ -3069,46 +3220,103 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       }
     }
 
+    // Tìm ảnh tham chiếu nếu có (từ quote, event media, file đính kèm, raw payload, database, hoặc ảnh gần nhất trong nhóm)
+    let targetImagePathOrUrl: string | undefined =
+      imageReq?.referenceImageUrl ||
+      event.mediaUrl ||
+      event.quote?.mediaUrl ||
+      (event.fileAttachment?.url && /\.(?:jpg|jpeg|png|webp|gif|bmp)$/i.test(event.fileAttachment.name || event.fileAttachment.url)
+        ? event.fileAttachment.url
+        : undefined) ||
+      undefined;
+
+    if (!targetImagePathOrUrl && event.rawMessage) {
+      const candidateUrls = collectCandidateUrls([event.rawMessage]);
+      const imageCandidate = candidateUrls.find((u) => /\.(?:jpe?g|png|webp|gif|bmp)(?:\?|$)/i.test(u) || /photo|image|zdn\.vn/i.test(u));
+      if (imageCandidate) {
+        targetImagePathOrUrl = imageCandidate;
+      }
+    }
+
+    if (!targetImagePathOrUrl && event.quote) {
+      const quoteId = event.quote.msgId || event.quote.cliMsgId || event.quote.globalMsgId;
+      if (quoteId) {
+        const media = getMediaByMessageId(threadId, quoteId);
+        if (media) {
+          targetImagePathOrUrl = media.local_path || media.media_url || undefined;
+        }
+      }
+    }
+
+    if (!targetImagePathOrUrl && isEdit) {
+      const recentImg = getRecentGroupImage(threadId, 10 * 60 * 1000);
+      if (recentImg) {
+        targetImagePathOrUrl = recentImg.local_path || recentImg.media_url || undefined;
+      }
+    }
+
+    let inputImageDataUrl: string | null = null;
+    if (targetImagePathOrUrl) {
+      if (fs.existsSync(targetImagePathOrUrl)) {
+        inputImageDataUrl = prepareImageDataUrl(targetImagePathOrUrl);
+      } else {
+        const fileRes = await downloadFileContent(targetImagePathOrUrl);
+        if (fileRes?.mediaPart?.data) {
+          inputImageDataUrl = `data:${fileRes.mediaPart.mimeType || "image/png"};base64,${fileRes.mediaPart.data}`;
+        }
+      }
+    }
+
+    // Nếu người dùng yêu cầu sửa ảnh mà hoàn toàn không tìm thấy ảnh nào
+    if (isEdit && !inputImageDataUrl) {
+      await sendGroupText(
+        api,
+        threadId,
+        `⚠️ @${displayName} Bác vui lòng trích dẫn (quote) một bức ảnh trong nhóm hoặc gửi kèm ảnh để em sửa nhé! ✨`,
+      );
+      return;
+    }
+
     const isSuperAdmin = isUserAdmin(sender);
-    const ratioTag = aspectRatio !== "1:1" ? ` (tỉ lệ ${aspectRatio})` : "";
-    const providerLabel = isCodex ? "Codex (GPT-Image)" : "FLUX.1-schnell";
-    const waitHint = isCodex ? "khoảng 15-25 giây" : "khoảng 2 giây";
+    const ratioTag = aspectRatio !== "1:1" ? ` (${aspectRatio})` : "";
+    const promptPreview = imagePrompt.length > 50 ? `${imagePrompt.slice(0, 47)}...` : imagePrompt;
+    const actionVerb = isEdit ? "chỉnh sửa ảnh" : "vẽ ảnh";
 
     await sendGroupText(
       api,
       threadId,
-      `🎨 ${isSuperAdmin ? "Em đang vẽ ảnh cho Sếp" : `${botName} đang vẽ ảnh`}: "${imagePrompt}"${ratioTag} bằng ${providerLabel}... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em ${waitHint} nhé!`,
+      `🎨 ${isSuperAdmin ? `Em đang ${actionVerb} cho Sếp` : `${botName} đang ${actionVerb}`}: "${promptPreview}"${ratioTag}... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em xíu nhé! ✨`,
     );
 
     try {
       const imgRes = isCodex
-        ? await generateCodexImage(imagePrompt, { aspectRatio })
+        ? await generateCodexImage(imagePrompt, { aspectRatio, image: inputImageDataUrl, isEdit })
         : await generateCloudflareImage(imagePrompt, { aspectRatio });
 
       if (imgRes.success && imgRes.filePath) {
-        const extraPromptInfo = (isCodex && imgRes.translatedPrompt)
-          ? `\n🔍 Visual prompt: "${imgRes.translatedPrompt.slice(0, 120)}..."`
-          : "";
+        const shortNote = imagePrompt.length <= 35 ? ` ("${imagePrompt}"${ratioTag})` : "";
+        const resultLabel = isEdit ? "Ảnh sau khi chỉnh sửa của" : "Ảnh của";
+        const modelTag = imgRes.tierUsed ? `\n🤖 Model: ${imgRes.tierUsed}` : "";
         await sendGroupFile(
           api,
           threadId,
           imgRes.filePath,
-          `🎨 Ảnh của ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} đây ạ!\n✨ Chủ đề: "${imagePrompt}"${ratioTag}\n🤖 Model: ${isCodex ? config.codexImageModel : "FLUX.1-schnell"}${extraPromptInfo}`,
+          `🎨 ${resultLabel} ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} đây ạ!${shortNote} ✨${modelTag}`,
         );
-        console.log(`[member-assistant] ✅ Đã gửi ảnh ${isCodex ? "Codex" : "FLUX.1"} thành công cho ${displayName} ("${imagePrompt}", ratio: ${aspectRatio})`);
+        console.log(`[member-assistant] ✅ Đã gửi ảnh thành công cho ${displayName} ("${imagePrompt}", ratio: ${aspectRatio}, isEdit: ${Boolean(isEdit)}, model: ${imgRes.tierUsed || "N/A"})`);
       } else {
         await sendGroupText(
           api,
           threadId,
-          `⚠️ Rất tiếc ${isSuperAdmin ? "Sếp ơi" : `@${displayName}`}, quá trình vẽ ảnh gặp sự cố: ${imgRes.error || "Lỗi máy chủ"}. ${isSuperAdmin ? "Sếp" : "Bác"} thử lại sau ít phút nhé!`,
+          `⚠️ Rất tiếc ${isSuperAdmin ? "Sếp ơi" : `@${displayName}`}, quá trình ${actionVerb} gặp sự cố: ${imgRes.error || "Lỗi máy chủ"}. ${isSuperAdmin ? "Sếp" : "Bác"} thử lại sau ít phút nhé!`,
         );
       }
     } catch (imgErr: any) {
-      console.error(`[member-assistant] ❌ Lỗi sinh/gửi ảnh:`, imgErr);
+      console.error(`[member-assistant] ❌ Lỗi sinh/sửa/gửi ảnh:`, imgErr);
       await sendGroupText(
         api,
         threadId,
-        `⚠️ Rất tiếc @${displayName}, đã có lỗi xảy ra khi tạo/gửi ảnh: ${imgErr?.message || String(imgErr)}`,
+        `⚠️ Rất tiếc @${displayName}, đã có lỗi xảy ra khi ${actionVerb}: ${imgErr?.message || String(imgErr)}`,
       );
     }
     return;
@@ -3795,6 +4003,26 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         quote: buildQuoteObject(event),
       });
       console.log(`[member-assistant] ✅ Đã gửi câu trả lời thành công vào nhóm`);
+
+      // 🧠 Trích xuất và cập nhật bộ nhớ dài hạn người dùng ở background (zero latency)
+      setImmediate(() => {
+        extractAndSaveUserMemories({
+          userId: sender,
+          threadId,
+          userName: displayName,
+          text: question || rawText,
+        }).catch(() => {});
+
+        // Tự động lưu repo nếu câu hỏi có chứa link GitHub
+        if (rawText.includes("github.com")) {
+          processGithubReposInMessage({
+            threadId,
+            text: rawText,
+            senderUid: sender,
+            senderName: displayName,
+          }).catch(() => {});
+        }
+      });
     } catch (err) {
       console.error(`[member-assistant] ❌ Lỗi xử lý câu hỏi:`, err);
       const lowerDisplay = displayName.toLowerCase();
@@ -3813,6 +4041,33 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
           { jitter: false, quote: buildQuoteObject(event) },
         );
       }
+    }
+    return;
+  }
+
+  // 6. Phát hiện và phân loại liên kết GitHub Repository chia sẻ tự do trong nhóm (không cần tag bot)
+  const repoCandidates = extractGithubRepoUrls(rawText);
+  if (repoCandidates.length > 0) {
+    try {
+      void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.HEART);
+      const { cards } = await processGithubReposInMessage({
+        threadId,
+        text: rawText,
+        senderUid: sender,
+        senderName: displayName,
+      });
+
+      if (cards.length > 0) {
+        for (const card of cards) {
+          await sendGroupReplyWithMention(api, threadId, botName, displayName, sender, card, {
+            jitter: false,
+            quote: buildQuoteObject(event),
+          });
+        }
+        console.log(`[member-assistant] 📦 Đã gửi ${cards.length} thẻ tóm tắt GitHub repo (kèm quote) cho ${displayName} trong nhóm [${threadId}]`);
+      }
+    } catch (err) {
+      console.warn(`[member-assistant] ⚠️ Lỗi khi bóc tách & gửi thẻ GitHub repo:`, err);
     }
     return;
   }

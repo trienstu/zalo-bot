@@ -16,14 +16,17 @@ import {
   upsertBotFriend,
   setFriendAllowDirect,
   getBotFriend,
+  getUserMemories,
 } from "./db/index.js";
-import { sendDirectText, sendDirectFile, sendGroupText } from "./zalo/client.js";
+import { sendDirectText, sendDirectFile, sendDirectVoice, sendGroupText } from "./zalo/client.js";
 import { callGemini, callGeminiAgentLoop, downloadFileContent, type GeminiMediaPart } from "./gemini.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
 import { defaultBotName } from "./config.js";
+import fs from "node:fs";
 import { type MemberMessageEvent, parseImagePromptAndRatio } from "./member-assistant.js";
-import { generateCodexImage, isCodexImageConfigured } from "./codex-image.js";
+import { generateCodexImage, isCodexImageConfigured, prepareImageDataUrl } from "./codex-image.js";
 import { generateCloudflareImage, isCloudflareConfigured } from "./cloudflare-ai.js";
+import { collectCandidateUrls } from "./message-extract.js";
 import { getWeatherReport } from "./weather.js";
 import { handleSetReminder, handleListReminders, handleCancelReminder } from "./reminder.js";
 import { getDailyAiNewsBriefing } from "./ai-news.js";
@@ -41,6 +44,14 @@ import { config } from "./config.js";
 import type { QueryPlanResult } from "./query-planner.js";
 import { answerWithHybridRouting } from "./hybrid-agent.js";
 import { normalizeExecutionSignals, selectResponseMode } from "./hybrid-routing.js";
+import { checkIsFileOrVoiceGeneration } from "./tools/file-generator.js";
+import { interceptAndExecuteSimulatedTool } from "./tools/simulated-tool-interceptor.js";
+import {
+  isMemoryControlCommand,
+  handleMemoryControlCommand,
+  extractAndSaveUserMemories,
+  formatUserMemoriesForPrompt,
+} from "./user-memory.js";
 
 // Lưu lịch sử trò chuyện nhiều lượt (Multi-turn Chat) giữa Admin và Bot (Lưu tối đa 12 lượt gần nhất)
 const adminChatSessions = new Map<string, { role: "user" | "model"; text: string }[]>();
@@ -328,6 +339,14 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     return;
   }
 
+  // Lệnh quản lý trí nhớ cá nhân: !xemtrinho, !xoatrinho, bot nhớ gì về tôi, v.v.
+  const memoryAction = isMemoryControlCommand(rawText);
+  if (memoryAction) {
+    const reply = handleMemoryControlCommand(memoryAction, sender, displayName);
+    await sendDirectText(api, sender, reply);
+    return;
+  }
+
   // =========================================================================
   // 1.1. PHÂN QUYỀN TƯƠNG TÁC 1:1 (ADMIN & BẠN BÈ ĐƯỢC PHÉP)
   // =========================================================================
@@ -448,21 +467,19 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   // 2. TRỢ LÝ ĐIỀU KHIỂN & RA LỆNH 1:1
   // =========================================================================
 
-  // 2.0. TẠO ẢNH BẰNG AI (Codex GPT-Image hoặc Cloudflare):
+  // 2.0. TẠO HOẶC SỬA ẢNH BẰNG AI (Codex GPT-Image hoặc Cloudflare):
   const imageReq = parseImagePromptAndRatio(rawText, defaultBotName, event.quote);
-  if (imageReq && imageReq.prompt.length >= 2) {
-    const { prompt: imagePrompt, aspectRatio } = imageReq;
+  if (imageReq && (imageReq.prompt.length >= 2 || imageReq.isEdit)) {
+    const { prompt: imagePrompt, aspectRatio, isEdit } = imageReq;
     const isCodex = config.imageProvider === "codex";
-    const ratioTag = aspectRatio !== "1:1" ? ` (tỉ lệ ${aspectRatio})` : "";
-    const providerLabel = isCodex ? "Codex (GPT-Image)" : "FLUX.1-schnell";
-    const waitHint = isCodex ? "khoảng 15-25 giây" : "khoảng 2-3 giây";
+    const ratioTag = aspectRatio !== "1:1" ? ` (${aspectRatio})` : "";
 
     if (isCodex) {
       if (!isCodexImageConfigured()) {
         await sendDirectText(
           api,
           sender,
-          `⚠️ ${isAdmin ? "Sếp ơi, tính" : "Tính"} năng vẽ ảnh AI (Codex) chưa được kích hoạt trên máy chủ (cần cấu hình NINE_ROUTER_API_KEY trong file .env). Vui lòng kiểm tra lại cấu hình nhé!`,
+          `⚠️ ${isAdmin ? "Sếp ơi, tính" : "Tính"} năng tạo/sửa ảnh AI (Codex) chưa được kích hoạt trên máy chủ (cần cấu hình NINE_ROUTER_API_KEY trong file .env). Vui lòng kiểm tra lại cấu hình nhé!`,
         );
         return;
       }
@@ -477,41 +494,82 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       }
     }
 
+    // Tìm ảnh tham chiếu nếu có (từ quote, event media, file attachment, raw payload)
+    let rawTargetUrl =
+      imageReq?.referenceImageUrl ||
+      event.mediaUrl ||
+      event.quote?.mediaUrl ||
+      (event.fileAttachment?.url && /\.(?:jpg|jpeg|png|webp|gif|bmp)$/i.test(event.fileAttachment.name || event.fileAttachment.url)
+        ? event.fileAttachment.url
+        : undefined);
+
+    if (!rawTargetUrl && (event as any)?.rawMessage) {
+      const candidateUrls = collectCandidateUrls([(event as any).rawMessage]);
+      const imageCandidate = candidateUrls.find((u) => /\.(?:jpe?g|png|webp|gif|bmp)(?:\?|$)/i.test(u) || /photo|image|zdn\.vn/i.test(u));
+      if (imageCandidate) {
+        rawTargetUrl = imageCandidate;
+      }
+    }
+
+    let inputImageDataUrl: string | null = null;
+    if (rawTargetUrl) {
+      if (fs.existsSync(rawTargetUrl)) {
+        inputImageDataUrl = prepareImageDataUrl(rawTargetUrl);
+      } else {
+        const fileRes = await downloadFileContent(rawTargetUrl);
+        if (fileRes?.mediaPart?.data) {
+          inputImageDataUrl = `data:${fileRes.mediaPart.mimeType || "image/png"};base64,${fileRes.mediaPart.data}`;
+        }
+      }
+    }
+
+    // Nếu yêu cầu sửa ảnh nhưng không có ảnh nào
+    if (isEdit && !inputImageDataUrl) {
+      await sendDirectText(
+        api,
+        sender,
+        `⚠️ ${isAdmin ? "Sếp ơi, Sếp" : "Bạn"} vui lòng trích dẫn (quote) một bức ảnh hoặc gửi kèm ảnh để em chỉnh sửa nhé! ✨`,
+      );
+      return;
+    }
+
+    const actionVerb = isEdit ? "chỉnh sửa ảnh" : "vẽ ảnh";
+    const promptPreview = imagePrompt.length > 50 ? `${imagePrompt.slice(0, 47)}...` : imagePrompt;
     await sendDirectText(
       api,
       sender,
-      `🎨 ${isAdmin ? "Em đang vẽ ảnh cho Sếp" : "Em đang vẽ ảnh"}: "${imagePrompt}"${ratioTag} bằng ${providerLabel}... ${isAdmin ? "Sếp" : "Bạn"} chờ em ${waitHint} nhé!`,
+      `🎨 ${isAdmin ? `Em đang ${actionVerb} cho Sếp` : `Em đang ${actionVerb}`}: "${promptPreview}"${ratioTag}... ${isAdmin ? "Sếp" : "Bạn"} chờ em xíu nhé! ✨`,
     );
 
     try {
       const imgRes = isCodex
-        ? await generateCodexImage(imagePrompt, { aspectRatio })
+        ? await generateCodexImage(imagePrompt, { aspectRatio, image: inputImageDataUrl, isEdit })
         : await generateCloudflareImage(imagePrompt, { aspectRatio });
 
       if (imgRes.success && imgRes.filePath) {
-        const extraPromptInfo = (isCodex && imgRes.translatedPrompt)
-          ? `\n🔍 Visual prompt: "${imgRes.translatedPrompt.slice(0, 120)}..."`
-          : "";
+        const shortNote = imagePrompt.length <= 35 ? ` ("${imagePrompt}"${ratioTag})` : "";
+        const resultLabel = isEdit ? "Ảnh sau khi chỉnh sửa của" : "Ảnh của";
+        const modelTag = imgRes.tierUsed ? `\n🤖 Model: ${imgRes.tierUsed}` : "";
         await sendDirectFile(
           api,
           sender,
           imgRes.filePath,
-          `🎨 Ảnh của ${isAdmin ? "Sếp" : displayName} đây ạ!\n✨ Chủ đề: "${imagePrompt}"${ratioTag}\n🤖 Model: ${isCodex ? config.codexImageModel : "FLUX.1-schnell"}${extraPromptInfo}`,
+          `🎨 ${resultLabel} ${isAdmin ? "Sếp" : displayName} đây ạ!${shortNote} ✨${modelTag}`,
         );
-        console.log(`[admin-assistant] ✅ Đã gửi ảnh ${isCodex ? "Codex" : "FLUX.1"} thành công cho ${displayName} ("${imagePrompt}", ratio: ${aspectRatio})`);
+        console.log(`[admin-assistant] ✅ Đã gửi ảnh thành công cho ${displayName} ("${imagePrompt}", ratio: ${aspectRatio}, isEdit: ${Boolean(isEdit)}, model: ${imgRes.tierUsed || "N/A"})`);
       } else {
         await sendDirectText(
           api,
           sender,
-          `⚠️ Rất tiếc ${isAdmin ? "Sếp ơi" : displayName}, quá trình vẽ ảnh gặp sự cố: ${imgRes.error || "Lỗi máy chủ"}. ${isAdmin ? "Sếp" : "Bạn"} thử lại sau ít phút nhé!`,
+          `⚠️ Rất tiếc ${isAdmin ? "Sếp ơi" : displayName}, quá trình ${actionVerb} gặp sự cố: ${imgRes.error || "Lỗi máy chủ"}. ${isAdmin ? "Sếp" : "Bạn"} thử lại sau ít phút nhé!`,
         );
       }
     } catch (imgErr: any) {
-      console.error(`[admin-assistant] ❌ Lỗi sinh/gửi ảnh 1:1:`, imgErr);
+      console.error(`[admin-assistant] ❌ Lỗi sinh/sửa/gửi ảnh 1:1:`, imgErr);
       await sendDirectText(
         api,
         sender,
-        `⚠️ Rất tiếc ${isAdmin ? "Sếp ơi" : displayName}, đã có lỗi xảy ra khi tạo/gửi ảnh: ${imgErr?.message || String(imgErr)}`,
+        `⚠️ Rất tiếc ${isAdmin ? "Sếp ơi" : displayName}, đã có lỗi xảy ra khi ${actionVerb}: ${imgErr?.message || String(imgErr)}`,
       );
     }
     return;
@@ -1418,6 +1476,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
   let quoteSection = "";
   if (event.quote?.text) {
+    const qText = event.quote.text;
+    const userHistory = getAdminHistory(sender);
+    const matchedHistory = userHistory.find((h) => h.text.includes(qText) || qText.includes(h.text.slice(0, 80)));
+    if (matchedHistory && matchedHistory.text.length > qText.length) {
+      event.quote.text = matchedHistory.text;
+    }
     quoteSection = `\n=== NỘI DUNG TRÍCH DẪN: ===\n"${event.quote.text}"\n`;
   }
 
@@ -1430,11 +1494,13 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     const plan = await planSearchQueries({
       question: rawText,
       quoteText: event.quote?.text,
+      recentContext: historyText,
       displayName,
     });
     queryPlan = plan;
 
-    if (plan.needsSearch && plan.queries.length > 0) {
+    const isFileOrVoiceReq = checkIsFileOrVoiceGeneration(rawText, event.quote?.text);
+    if (!isFileOrVoiceReq && plan.needsSearch && plan.queries.length > 0) {
       planNeedsSearch = true;
       evidenceRequired = plan.intent === "fact_check" || plan.intent === "realtime_news";
       const searchQueries = plan.queries.slice(0, 2);
@@ -1449,9 +1515,9 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       let searchTimer: NodeJS.Timeout | undefined;
       const searchTimeout = new Promise<string[]>((resolve) => {
         searchTimer = setTimeout(() => {
-          console.warn(`[admin-assistant] ⏱️ Timeout quét tìm kiếm (6s), tiếp tục với dữ liệu sẵn có`);
+          console.warn(`[admin-assistant] ⏱️ Timeout quét tìm kiếm (8s), tiếp tục với dữ liệu sẵn có`);
           resolve([]);
-        }, 6000);
+        }, 8000);
       });
       const searchResults = await Promise.race([searchPromises, searchTimeout]);
       if (searchTimer) clearTimeout(searchTimer);
@@ -1567,8 +1633,9 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `    - KHI HỎI VỀ THỂ THAO / LỊCH THI ĐẤU / SỰ KIỆN CÓ MỐC THỜI GIAN:\n` +
     `      + BẮT BUỘC phân chia khối thẻ rõ ràng, trực quan:\n` +
     `        🔥 Các trận cầu đinh không thể bỏ lỡ (hoặc Trận cầu tâm điểm)\n` +
-    `        📅 Lịch chi tiết các cặp đấu còn lại (hoặc Lịch chi tiết phân nhóm theo từng ngày Thứ Bảy, Chủ nhật, Thứ Hai kèm giờ VN, cặp đối đầu Đội A vs Đội B, vòng đấu).\n` +
-    `      + TUYỆT ĐỐI KHÔNG chỉ nói chung chung 2-3 đội rồi dừng lại mà phải cung cấp lịch thi đấu cụ thể, chi tiết nhất từ dữ liệu tra cứu.\n` +
+    `        📅 Lịch chi tiết các cặp đấu còn lại (hoặc Lịch chi tiết phân nhóm theo từng ngày kèm giờ VN, cặp đối đầu Đội A vs Đội B, vòng đấu, kênh trực tiếp).\n` +
+    `      + Khi hỏi về đội tuyển/thể thao nhiều cấp độ (ĐTQG, U23, Tuyển Nữ...): BẮT BUỘC liệt kê đầy đủ từng cấp độ với các trận đấu sắp tới. TUYỆT ĐỐI CẤM trả lời sơ sài 1 dòng rồi hỏi ngược lại người dùng!\n` +
+    `      + TUYỆT ĐỐI KHÔNG chỉ nói chung chung 1-2 câu rồi dừng lại mà phải cung cấp lịch thi đấu cụ thể, chi tiết nhất từ dữ liệu tra cứu.\n` +
     `    - KHI HỎI VỀ ĐỊNH NGHĨA / LỊCH SỬ / KHOA HỌC / ĐỜI SỐNG:\n` +
     `      + Giải thích bản chất một cách dễ hiểu, sinh động, chuẩn xác như bách khoa toàn thư.\n` +
     `    - CẬP NHẬT DỮ KIỆN THỜI GIAN THỰC & PHÁP LUẬT / HÀNH CHÍNH MỚI NHẤT:\n` +
@@ -1582,19 +1649,22 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `      + Với câu hỏi "hiện nay/hiện tại là ai", chỉ trả lời danh tính được nguồn chính thức mới nhất xác nhận; không lấy người tiền nhiệm/người chỉ được nhắc tới và không tự thêm danh sách hoạt động nếu không được hỏi.\n` +
     `      + Nếu EVIDENCE_STATUS là INSUFFICIENT hoặc thông tin chỉ là đồn đoán: nói rõ chưa đủ xác nhận, tuyệt đối không đoán hoặc tự bịa mốc thời gian.\n` +
     `      + Tuyệt đối không tạo tên nguồn, ngày hoặc URL không có trong dữ liệu bằng chứng.\n` +
-    `\n14. KỸ NĂNG XUẤT TÀI LIỆU THÀNH FILE THẬT (.DOCX, .XLSX, .MD, .TXT):\n` +
-    `    - QUY TẮC CÔNG CỤ generate_file: CHỈ GỌI CÔNG CỤ 'generate_file' khi người dùng có YÊU CẦU CỤ THỂ VỀ NỘI DUNG để tạo/xuất file (ví dụ: "soạn cho anh hợp đồng...", "tạo file docx quy trình...", "xuất bảng tính chi phí ra excel...").\n` +
-    `    - TUYỆT ĐỐI CẤM TỰ Ý TẠO FILE khi người dùng chỉ hỏi thăm năng lực (ví dụ: "em biết tạo file docx không?", "bot có tạo file được không?"). Với câu hỏi hỏi thăm năng lực, CHỈ trả lời bằng lời nói giải thích năng lực và mời người dùng cung cấp nội dung cần tạo. Tuyệt đối cấm tạo file rỗng tự chế!\n` +
-    `    - Với báo cáo, SOP, đề xuất, hợp đồng, tài liệu dài: Chọn fileType="docx" hoặc "md", truyền đầy đủ nội dung chi tiết trong 'content'.\n` +
-    `    - Với bảng tính, báo giá, chấm công, số liệu: Chọn fileType="xlsx", cung cấp excelHeaders và excelRows (có thể chứa công thức tính như =SUM(...)).\n` +
-    `    - Sau khi gọi công cụ, hệ thống sẽ tự động gửi file đính kèm trực tiếp vào Zalo. Hãy viết lời nhắn xác nhận ngắn gọn và tóm tắt nội dung file cho người dùng.\n` +
+    `\n14. KỸ NĂNG XUẤT TÀI LIỆU, SLIDE VÀ VOICE THẬT (.PPTX, .DOCX, .XLSX, .M4A, .MD, .TXT):\n` +
+    `    - QUY TẮC BẮT BUỘC: Khi người dùng yêu cầu tạo bài thuyết trình / slide PowerPoint (.pptx), xuất file Word (.docx), Excel (.xlsx), hoặc tạo giọng đọc / voice / podcast (.m4a), HOẶC giục 'soạn luôn đi', 'làm luôn đi':\n` +
+    `      * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_file' (fileType='pptx' cho slide, 'docx' cho word, 'xlsx' cho excel) HOẶC 'create_voice' để xuất file thực tế gửi lên Zalo!\n` +
+    `      * Với slide PowerPoint (.pptx): Phải chia nội dung thành các slide rõ ràng bằng các tiêu đề markdown '# Tiêu đề slide' và nội dung gạch đầu dòng chi tiết cho từng slide.\n` +
+    `      * TUYỆT ĐỐI CẤM CHỈ GÕ DÀN Ý BẰNG CHỮ RỒI HỎI NGƯỢC LẠI NGƯỜI DÙNG có muốn soạn không. Hãy hành động và xuất file ngay lập tức!\n` +
+    `      * [QUY TẮC BẢO LƯU NGUYÊN VẸN TRI THỨC KHI ĐÓNG GÓI / XUẤT FILE ĐA LĨNH VỰC]: Khi người dùng yêu cầu 'đóng gói', 'xuất file', 'lưu vào file', 'chuyển thành file' (Word/docx, Excel/xlsx, PowerPoint/pptx, PDF, CSV, TXT...) từ nội dung tin nhắn được trích dẫn (quote) hoặc nội dung đã bàn luận trước đó: BẮT BUỘC PHẢI BẢO LƯU NGUYÊN VẸN 100% TOÀN BỘ NỘI DUNG CHI TIẾT GỐC VÀO THAM SỐ 'content' CỦA TOOL 'generate_file' (bao gồm đầy đủ căn cứ/điều khoản pháp luật, bảng biểu/số liệu tài chính - BĐS, toàn bộ lời thoại/phân cảnh kịch bản media, mã nguồn/kiến trúc kỹ thuật, quy chế doanh nghiệp...). TUYỆT ĐỐI CẤM tự ý tóm tắt thành dàn ý gạch đầu dòng sơ sài làm mất mát dữ liệu và tri thức chuyên sâu của người dùng!\n` +
+    `      * CHỈ từ chối tạo file khi người dùng chỉ hỏi thăm năng lực (ví dụ: 'em biết tạo slide không?'). Khi đó chỉ giải thích năng lực và mời người dùng yêu cầu cụ thể.\n` +
+    `      * Sau khi gọi công cụ thành công, câu trả lời bằng chữ của bạn chỉ cần NGẮN GỌN 1-3 DÒNG tóm tắt chính và thông báo file đã gửi. TUYỆT ĐỐI KHÔNG lặp lại toàn bộ nội dung dài dòng trong tin nhắn chat Zalo!\n` +
+    `      * Tuyệt đối cấm bịa đặt tin nhắn đã gửi file khi chưa gọi tool!\n` +
     `\n15. TỐI ƯU TỐC ĐỘ PHẢN HỒI (AGENT SPEED OPTIMIZATION):\n` +
     `    - Nếu trong phần [DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT] hoặc context bên dưới đã có đầy đủ thông tin/tin tức/số liệu để trả lời câu hỏi, bạn PHẢI TẬP TRUNG TRẢ LỜI NGAY TRONG VÒNG ĐẦU TIÊN, TUYỆT ĐỐI KHÔNG GỌI THÊM CÔNG CỤ TÌM KIẾM (web_search) LẶP LẠI để tránh làm chậm thời gian phản hồi của người dùng!\n` +
     `    - Chỉ gọi công cụ (finance_market_lookup, web_search, generate_file, fetch_url, python_interpreter) KHI dữ liệu cung cấp chưa có hoặc người dùng yêu cầu rõ việc tra cứu/tạo file/vẽ biểu đồ số liệu.\n` +
-    `\n16. KỸ NĂNG VẼ BIỂU ĐỒ SỐ LIỆU & SƠ ĐỒ BẰNG PYTHON (python_interpreter):\n` +
-    `    - CHỈ sử dụng công cụ 'python_interpreter' khi người dùng yêu cầu vẽ biểu đồ số liệu (cột, tròn, đường, nến Nhật, heatmap, radar...), sơ đồ thuật toán, quy trình, mindmap phân tích dữ liệu.\n` +
-    `    - TUYỆT ĐỐI KHÔNG dùng Python (PIL/matplotlib) để vẽ tranh ảnh nghệ thuật, chân dung người, phong cảnh hoặc nhân vật (hệ thống có module sinh ảnh nghệ thuật riêng).\n` +
-    `    - Viết mã Python hoàn chỉnh và tự thực thi bằng matplotlib.pyplot hoặc seaborn. Định dạng trực quan, font rõ ràng, tự lưu file .png.\n` +
+    `\n16. KỸ NĂNG VẼ BIỂU ĐỒ SỐ LIỆU, INFOGRAPHIC & SƠ ĐỒ BẰNG PYTHON (python_interpreter):\n` +
+    `    - Sử dụng công cụ 'python_interpreter' khi người dùng yêu cầu vẽ biểu đồ số liệu, infographic, poster lịch thi đấu, bảng xếp hạng, timeline, sơ đồ thuật toán, quy trình, mindmap hoặc yêu cầu làm lại/sửa lại ảnh/biểu đồ trước đó. TUYỆT ĐỐI CẤM in code Python ra chat!\n` +
+    `    - VỚI LỊCH THI ĐẤU, BẢNG XẾP HẠNG, ROADMAP: Bắt buộc dùng PIL thiết kế INFOGRAPHIC POSTER dạng CARD LAYOUT nền tối sang trọng (burgundy/navy), thẻ bo góc (rounded_rectangle), huy hiệu trạng thái, tiêu đề vàng kim #FFD700, font Unicode get_font(size, bold) chuẩn tiếng Việt.\n` +
+    `    - VỚI BIỂU ĐỒ SỐ LIỆU ĐỊNH LƯỢNG: Viết mã Python vẽ bằng matplotlib.pyplot với dark theme (plt.style.use('dark_background')), định dạng trực quan, tự lưu file .png.\n` +
     `    - Hệ thống sẽ tự động bắt file ảnh biểu đồ được tạo ra và gửi trực tiếp vào Zalo cho Sếp/người dùng.\n`;
 
   const userPrompt =
@@ -1627,10 +1697,21 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       ? (process.env.USER_DIRECT_GEMINI_MODEL?.trim() || "gemini-3.1-flash-lite-preview")
       : (process.env.ADMIN_DIRECT_GEMINI_MODEL?.trim() || "gemini-3.1-flash-lite-preview");
 
-    const targetModel = (needsSearch && canUseGrounding()) ? "gemini-2.5-flash" : defaultFastModel;
+    const targetModel = (needsSearch && canUseGrounding()) ? "gemini-3-flash-preview" : defaultFastModel;
+
+    let userMemorySection = "";
+    try {
+      const userMemories = getUserMemories(sender, 6);
+      if (userMemories.length > 0) {
+        userMemorySection = `\n\n` + formatUserMemoriesForPrompt(userMemories, displayName);
+      }
+    } catch (e) {
+      console.warn("[admin-assistant] Lỗi getUserMemories:", e);
+    }
 
     const fullSystemPrompt =
       systemPrompt +
+      userMemorySection +
       searchInstruction +
       groupInstruction +
       knowledgeInstruction +
@@ -1638,31 +1719,33 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       claimGroundingInstruction;
 
     // 🧠 FAST-PATH HOẶC AGENTIC BRAIN:
-    const isCodeOrChartQuery =
-      /(?:vẽ|tạo|vẽ\s*giúp|xuất|lập|thiết kế|làm)\s*(?:cho\s*.*?\s*)?(?:biểu đồ|đồ thị|chart|plot|sơ đồ|lưu đồ|flowchart|mindmap|infographic)/i.test(rawText) ||
-      /^[/!](?:plot|chart)\b/i.test(rawText) ||
-      /(?:chạy|viết|run|execute)\s*(?:code|mã|script)\s*(?:python|py)/i.test(rawText);
-
-    const isFileGenerationQuery =
-      /(?:tạo|xuất|làm|lưu|gửi|convert|chuyển|viết)\s*(?:thành\s*)?(?:file|tệp)?\s*(?:word|excel|docx|xlsx|doc|sheet|bảng|pdf|txt|md|code)/i.test(rawText) ||
-      /(?:file|tệp)\s*(?:word|excel|docx|xlsx)/i.test(rawText) ||
-      /(?:tạo|xuất|làm)\s*(?:file|tệp)/i.test(rawText) ||
-      isCodeOrChartQuery;
-    const needsAgentLoop = isFileGenerationQuery || /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(rawText);
+    const needsAgentLoop = checkIsFileOrVoiceGeneration(rawText, event.quote?.text) || /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(rawText);
 
     let answer = "";
     if (needsAgentLoop && !isSearchDisabled) {
-      // 🚀 AGENT LOOP (Chỉ dùng khi cần tạo/xuất file, vẽ ảnh/biểu đồ hoặc tải link)
+      // 🚀 AGENT LOOP (Chỉ dùng khi cần tạo/xuất file, vẽ ảnh/biểu đồ, voice hoặc tải link)
       answer = await callGeminiAgentLoop(fullSystemPrompt, effectiveUserPrompt, {
         model: targetModel,
         mediaParts: mediaPart ? [mediaPart] : undefined,
         onFileGenerated: async (file) => {
           try {
+            const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
             const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
-            const caption = isImg
-              ? `🎨 ${defaultBotName} đã vẽ và tạo ảnh [${file.fileName}] thành công cho Sếp đây ạ!`
-              : `📄 ${defaultBotName} đã tạo file [${file.fileName}] thành công!`;
-            await sendDirectFile(api, sender, file.filePath, caption);
+            const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+            const caption = file.caption || (
+              isSlide
+                ? `📊 ${defaultBotName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho Sếp!`
+                : isImg
+                  ? `🎨 ${defaultBotName} đã tạo ảnh [${file.fileName}] thành công cho Sếp!`
+                  : isVoice
+                    ? `🎙️ ${defaultBotName} gửi voice cho Sếp nghe đây ạ!`
+                    : `📄 ${defaultBotName} đã tạo file [${file.fileName}] thành công cho Sếp!`
+            );
+            if (isVoice) {
+              await sendDirectVoice(api, sender, file.filePath, caption);
+            } else {
+              await sendDirectFile(api, sender, file.filePath, caption);
+            }
           } catch (fileErr) {
             console.warn("[admin-assistant] sendDirectFile error:", fileErr);
           }
@@ -1703,7 +1786,23 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       });
     }
 
-    answer = finalizeGroundedAnswer(answer, liveNews, evidenceRequired);
+    answer = await interceptAndExecuteSimulatedTool(answer, async (file) => {
+      try {
+        const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+        if (isVoice) {
+          await sendDirectVoice(api, sender, file.filePath, file.caption || `🎙️ ${defaultBotName} gửi voice cho Sếp nghe nhé!`);
+        } else {
+          await sendDirectFile(api, sender, file.filePath, file.caption || `📄 ${defaultBotName} gửi file [${file.fileName}] cho Sếp!`);
+        }
+      } catch (fileErr) {
+        console.warn("[admin-assistant] Interceptor sendDirectFile error:", fileErr);
+      }
+    });
+
+    answer = finalizeGroundedAnswer(answer, liveNews, evidenceRequired, {
+      intent: queryPlan?.intent,
+      question: rawText,
+    });
 
     // Kiểm tra và thực thi thẻ hành động [ACTION:SEND_GROUP target="..."]...[/ACTION] CHỈ DÀNH CHO ADMIN
     let finalAnswer = answer;
@@ -1734,6 +1833,16 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
     await sendDirectText(api, sender, finalAnswer);
     console.log(`[admin-assistant] ✅ Đã phản hồi 1:1 cho ${isAdmin ? "Admin" : "User"} ${displayName}`);
+
+    // 🧠 Trích xuất và cập nhật bộ nhớ dài hạn người dùng ở background (zero latency)
+    setImmediate(() => {
+      extractAndSaveUserMemories({
+        userId: sender,
+        threadId: sender,
+        userName: displayName,
+        text: rawText,
+      }).catch(() => {});
+    });
   } catch (err) {
     console.error(`[admin-assistant] ❌ Lỗi xử lý AI 1:1:`, err);
     await sendDirectText(
