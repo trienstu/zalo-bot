@@ -25,6 +25,8 @@ import {
   ShieldCheck,
   Zap,
   Building2,
+  Lock,
+  ArrowRight,
 } from "lucide-react";
 
 export interface GroupRepo {
@@ -127,6 +129,8 @@ export function ReposClient() {
   const [groups, setGroups] = useState<GroupInfo[]>([]);
   const [isLockedGroup, setIsLockedGroup] = useState(false);
   const [currentGroup, setCurrentGroup] = useState<GroupInfo | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [unauthorizedError, setUnauthorizedError] = useState<string | null>(null);
 
   const [stats, setStats] = useState({ totalRepos: 0, totalStars: 0 });
   const [loading, setLoading] = useState(true);
@@ -170,9 +174,39 @@ export function ReposClient() {
       params.set("page", String(page));
       params.set("limit", "24");
 
-      const res = await fetch(`/api/repos?${params.toString()}`);
+      // Đồng bộ cookie phiên admin nếu trình duyệt đã lưu admin_auth
+      const hasLocalAdmin = typeof window !== "undefined" && localStorage.getItem("admin_auth") === "true";
+      if (hasLocalAdmin && typeof document !== "undefined" && !document.cookie.includes("admin_auth_session=authenticated_admin")) {
+        document.cookie = "admin_auth_session=authenticated_admin; path=/; max-age=2592000; SameSite=Lax";
+      }
+      const fetchHeaders: Record<string, string> = {};
+      if (hasLocalAdmin) {
+        fetchHeaders["x-admin-auth"] = "authenticated_admin";
+      }
+
+      const res = await fetch(`/api/repos?${params.toString()}`, {
+        credentials: "include",
+        headers: fetchHeaders,
+      });
+
+      if (res.status === 401) {
+        const errData = await res.json().catch(() => ({}));
+        setUnauthorizedError(errData.message || "Kho tài nguyên GitHub chỉ dành cho Quản trị viên.");
+        setLoading(false);
+        return;
+      }
+
+      if (res.status === 403) {
+        const errData = await res.json().catch(() => ({}));
+        setUnauthorizedError(errData.error || "Đường link không hợp lệ hoặc bạn không có quyền truy cập nhóm này.");
+        setLoading(false);
+        return;
+      }
+
       if (res.ok) {
+        setUnauthorizedError(null);
         const data = await res.json();
+        setIsAdmin(!!data.isAdmin || hasLocalAdmin);
         setRepos(data.repos || []);
         setCategories(data.categories || []);
         setGroups(data.groups || []);
@@ -212,14 +246,23 @@ export function ReposClient() {
     setSyncing(true);
     setSyncMessage(null);
     try {
+      const hasLocalAdmin = typeof window !== "undefined" && localStorage.getItem("admin_auth") === "true";
+      const syncHeaders: Record<string, string> = {};
+      if (hasLocalAdmin) {
+        syncHeaders["x-admin-auth"] = "authenticated_admin";
+      }
       const qs = selectedGroupId && selectedGroupId !== "all" ? `?groupId=${selectedGroupId}` : "";
-      const res = await fetch(`/api/repos/sync${qs}`, { method: "POST" });
+      const res = await fetch(`/api/repos/sync${qs}`, {
+        method: "POST",
+        credentials: "include",
+        headers: syncHeaders,
+      });
       const data = await res.json();
       if (res.ok) {
         setSyncMessage(data.message || `Đồng bộ thành công! Thêm ${data.newReposFound} repo mới.`);
         await fetchRepos(1);
       } else {
-        setSyncMessage(`Lỗi đồng bộ: ${data.error || "Thất bại"}`);
+        setSyncMessage(`Lỗi đồng bộ: ${data.message || data.error || "Thất bại"}`);
       }
     } catch (err: any) {
       setSyncMessage(`Lỗi mạng: ${err.message}`);
@@ -244,6 +287,42 @@ export function ReposClient() {
     const found = groups.find((g) => g.id === selectedGroupId);
     return found?.name || "Nhóm đã chọn";
   }, [isLockedGroup, currentGroup, selectedGroupId, groups]);
+
+  if (unauthorizedError) {
+    return (
+      <div className="flex min-h-[70vh] items-center justify-center px-4 py-16">
+        <div className="relative overflow-hidden w-full max-w-lg rounded-2xl border border-rose-500/30 bg-gradient-to-b from-slate-900 via-slate-900/90 to-slate-950 p-8 shadow-2xl backdrop-blur-xl text-center space-y-6">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-rose-500/10 border border-rose-500/30 text-rose-400 shadow-inner">
+            <Lock className="h-10 w-10 text-rose-400" />
+          </div>
+
+          <div className="space-y-3">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-xs font-semibold text-rose-300">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              <span>Khu Vực Được Bảo Vệ</span>
+            </span>
+            <h2 className="text-2xl font-bold text-white tracking-tight">Yêu Cầu Quyền Truy Cập</h2>
+            <p className="text-sm text-slate-300 leading-relaxed max-w-md mx-auto">
+              {unauthorizedError}
+            </p>
+            <p className="text-xs text-slate-400 leading-relaxed bg-slate-950/80 p-3 rounded-xl border border-slate-800">
+              💡 <strong>Dành cho thành viên:</strong> Vui lòng sử dụng đường link chia sẻ bảo mật do Trưởng nhóm Zalo cung cấp để vào thẳng kho repo của nhóm mình.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+            <Link
+              href="/admin"
+              className="flex items-center justify-center gap-2 w-full sm:w-auto rounded-xl bg-indigo-500 px-6 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-indigo-500/20 transition-all hover:bg-indigo-400"
+            >
+              <span>Đăng Nhập Quản Trị Viên</span>
+              <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen space-y-8 pb-20 text-slate-100">
@@ -294,15 +373,17 @@ export function ReposClient() {
               </span>
             </div>
 
-            <div className="flex items-center gap-2 rounded-xl bg-slate-800/80 px-4 py-2 border border-slate-700/60 text-xs font-medium text-slate-200 shadow-sm">
-              <Building2 className="h-4 w-4 text-purple-400" />
-              <span>
-                <strong className="text-purple-300 font-bold">{groups.length}</strong> nhóm Zalo kết nối
-              </span>
-            </div>
+            {isAdmin && (
+              <div className="flex items-center gap-2 rounded-xl bg-slate-800/80 px-4 py-2 border border-slate-700/60 text-xs font-medium text-slate-200 shadow-sm">
+                <Building2 className="h-4 w-4 text-purple-400" />
+                <span>
+                  <strong className="text-purple-300 font-bold">{groups.length}</strong> nhóm Zalo kết nối
+                </span>
+              </div>
+            )}
 
             <Link
-              href="/hub"
+              href={isLockedGroup && currentGroup?.token ? `/hub?groupId=${currentGroup.id}&token=${currentGroup.token}` : "/hub"}
               className="ml-auto inline-flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 transition-colors font-medium"
             >
               <span>Về Kho Kiến Thức</span>
@@ -311,8 +392,8 @@ export function ReposClient() {
           </div>
         </div>
 
-        {/* 🏢 GROUP SELECTION BAR & SYNC BUTTON */}
-        {!isLockedGroup && groups.length > 0 && (
+        {/* 🏢 GROUP SELECTION BAR & SYNC BUTTON (CHỈ HIỂN THỊ CHO ADMIN) */}
+        {isAdmin && groups.length > 0 && (
           <div className="relative z-10 mt-6 flex flex-wrap items-center gap-3 p-3 rounded-2xl bg-slate-950/70 border border-slate-800/90 backdrop-blur-md">
             <div className="flex items-center gap-2 text-xs font-bold text-slate-300">
               <Building2 className="h-4 w-4 text-indigo-400" />
@@ -484,26 +565,42 @@ export function ReposClient() {
               : "Khi thành viên trong nhóm chia sẻ liên kết GitHub, bot sẽ tự động phân loại và lưu trữ tại đây!"}
           </p>
           <div className="flex items-center justify-center gap-3 pt-2">
-            {(searchQuery || selectedCategory !== "all" || selectedGroupId !== "all") && (
-              <button
-                onClick={() => {
-                  setSearchQuery("");
-                  setSelectedCategory("all");
-                  setSelectedGroupId("all");
-                }}
-                className="rounded-xl bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700 transition-colors"
-              >
-                Xem tất cả các nhóm
-              </button>
+            {isAdmin ? (
+              <>
+                {(searchQuery || selectedCategory !== "all" || selectedGroupId !== "all") && (
+                  <button
+                    onClick={() => {
+                      setSearchQuery("");
+                      setSelectedCategory("all");
+                      setSelectedGroupId("all");
+                    }}
+                    className="rounded-xl bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700 transition-colors"
+                  >
+                    Xem tất cả các nhóm
+                  </button>
+                )}
+                <button
+                  onClick={handleSyncHistoricRepos}
+                  disabled={syncing}
+                  className="flex items-center gap-1.5 rounded-xl bg-emerald-600/30 border border-emerald-500/40 px-4 py-2 text-xs font-bold text-emerald-300 hover:bg-emerald-600/50 transition-all"
+                >
+                  <Zap className="h-3.5 w-3.5" />
+                  <span>Quét link repo cũ ngay</span>
+                </button>
+              </>
+            ) : (
+              (searchQuery || selectedCategory !== "all") && (
+                <button
+                  onClick={() => {
+                    setSearchQuery("");
+                    setSelectedCategory("all");
+                  }}
+                  className="rounded-xl bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700 transition-colors"
+                >
+                  Xóa bộ lọc tìm kiếm
+                </button>
+              )
             )}
-            <button
-              onClick={handleSyncHistoricRepos}
-              disabled={syncing}
-              className="flex items-center gap-1.5 rounded-xl bg-emerald-600/30 border border-emerald-500/40 px-4 py-2 text-xs font-bold text-emerald-300 hover:bg-emerald-600/50 transition-all"
-            >
-              <Zap className="h-3.5 w-3.5" />
-              <span>Quét link repo cũ ngay</span>
-            </button>
           </div>
         </div>
       ) : (

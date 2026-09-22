@@ -430,9 +430,11 @@ export async function GET(request: Request) {
       cookieHeader.includes("admin_auth_session=authenticated_admin") ||
       xAdminAuth === "authenticated_admin";
     const host = request.headers.get("host") || "";
-    const isLocalhost = host.startsWith("localhost") || host.startsWith("127.0.0.1");
+    const isDevLocalhost =
+      process.env.NODE_ENV === "development" &&
+      (host.startsWith("localhost") || host.startsWith("127.0.0.1"));
 
-    if (!token && !isAdminAuthenticated && !isLocalhost) {
+    if (!token && !isAdminAuthenticated && !isDevLocalhost) {
       return NextResponse.json(
         {
           error: "unauthorized",

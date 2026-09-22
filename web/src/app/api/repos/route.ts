@@ -70,7 +70,40 @@ export async function GET(request: Request) {
         pagination: { page: 1, limit, total: 0, totalPages: 0 },
         stats: { totalRepos: 0, totalStars: 0 },
         isLockedGroup: false,
+        isAdmin: false,
       });
+    }
+
+    // Kiểm tra bảo mật:
+    // - Nếu có token: Cho phép thành viên vào nhóm riêng được ủy quyền
+    // - Nếu không có token: Bắt buộc phải là Admin (đã đăng nhập qua cookie hoặc x-admin-auth header) hoặc đang truy cập từ Localhost máy chủ
+    const cookieHeader = request.headers.get("cookie") || "";
+    const xAdminAuth = request.headers.get("x-admin-auth") || "";
+    const isAdminAuthenticated =
+      cookieHeader.includes("admin_auth_session=authenticated_admin") ||
+      xAdminAuth === "authenticated_admin";
+    const host = request.headers.get("host") || "";
+    const isDevLocalhost =
+      process.env.NODE_ENV === "development" &&
+      (host.startsWith("localhost") || host.startsWith("127.0.0.1"));
+    const isAdmin = isAdminAuthenticated || isDevLocalhost;
+
+    if (!token && !isAdmin) {
+      return NextResponse.json(
+        {
+          error: "unauthorized",
+          message: "Kho tài nguyên GitHub chỉ dành cho Quản trị viên. Thành viên vui lòng dùng link chia sẻ riêng của nhóm.",
+          repos: [],
+          categories: [],
+          groups: [],
+          pagination: { page: 1, limit, total: 0, totalPages: 0 },
+          stats: { totalRepos: 0, totalStars: 0 },
+          isLockedGroup: true,
+          needAdminAuth: true,
+          isAdmin: false,
+        },
+        { status: 401 }
+      );
     }
 
     const db = new Database(dbPath, { readonly: false });
@@ -80,23 +113,36 @@ export async function GET(request: Request) {
     let isLockedGroup = false;
     let currentGroup: { id: string; name: string; token: string } | null = null;
 
-    if (token && requestedGroupId && requestedGroupId !== "all") {
-      const isValid = verifyGroupHubToken(requestedGroupId, token);
-      if (isValid) {
-        isLockedGroup = true;
-        const gRow: any = db.prepare("SELECT group_id, name FROM bot_groups WHERE group_id = ?").get(requestedGroupId);
-        currentGroup = {
-          id: requestedGroupId,
-          name: gRow?.name || "Nhóm riêng",
-          token,
-        };
+    if (token) {
+      if (!requestedGroupId || requestedGroupId === "all" || !verifyGroupHubToken(requestedGroupId, token)) {
+        db.close();
+        return NextResponse.json(
+          {
+            error: "Đường link không hợp lệ hoặc bạn không có quyền truy cập nhóm này.",
+            repos: [],
+            categories: [],
+            groups: [],
+            pagination: { page: 1, limit, total: 0, totalPages: 0 },
+            stats: { totalRepos: 0, totalStars: 0 },
+            isLockedGroup: true,
+            isAdmin,
+          },
+          { status: 403 }
+        );
       }
+      isLockedGroup = true;
+      const gRow: any = db.prepare("SELECT group_id, name FROM bot_groups WHERE group_id = ?").get(requestedGroupId);
+      currentGroup = {
+        id: requestedGroupId,
+        name: gRow?.name || "Nhóm riêng",
+        token,
+      };
     }
 
     const conditions: string[] = [];
     const params: any[] = [];
 
-    // Nếu có khóa nhóm hoặc người dùng chọn nhóm cụ thể
+    // Nếu có khóa nhóm (thành viên) hoặc admin chọn nhóm cụ thể
     const effectiveGroupId = isLockedGroup ? requestedGroupId : requestedGroupId;
     if (effectiveGroupId && effectiveGroupId !== "all") {
       conditions.push("gr.thread_id = ?");
@@ -184,21 +230,34 @@ export async function GET(request: Request) {
       ? db.prepare(catSql).all(effectiveGroupId)
       : db.prepare(catSql).all();
 
-    // Thống kê danh sách các nhóm Zalo có repos hoặc đang quản lý
-    const groupSql = `
-      SELECT bg.group_id as id, bg.name, COUNT(DISTINCT LOWER(gr.full_name)) as repoCount
-      FROM bot_groups bg
-      LEFT JOIN group_repos gr ON gr.thread_id = bg.group_id
-      GROUP BY bg.group_id
-      ORDER BY repoCount DESC, bg.name ASC
-    `;
-    const rawGroups: any[] = db.prepare(groupSql).all();
-    const groups = rawGroups.map((g) => ({
-      id: g.id,
-      name: g.name,
-      repoCount: Number(g.repoCount) || 0,
-      token: getGroupHubToken(g.id),
-    }));
+    // Thống kê danh sách các nhóm Zalo có repos hoặc đang quản lý (Chỉ tiết lộ cho Admin)
+    let groups: { id: string; name: string; repoCount: number; token?: string }[] = [];
+    if (isAdmin) {
+      const groupSql = `
+        SELECT bg.group_id as id, bg.name, COUNT(DISTINCT LOWER(gr.full_name)) as repoCount
+        FROM bot_groups bg
+        LEFT JOIN group_repos gr ON gr.thread_id = bg.group_id
+        GROUP BY bg.group_id
+        ORDER BY repoCount DESC, bg.name ASC
+      `;
+      const rawGroups: any[] = db.prepare(groupSql).all();
+      groups = rawGroups.map((g) => ({
+        id: g.id,
+        name: g.name,
+        repoCount: Number(g.repoCount) || 0,
+        token: getGroupHubToken(g.id),
+      }));
+    } else if (isLockedGroup && currentGroup) {
+      // Thành viên xem qua link nhóm chỉ nhận thông tin của nhóm mình được cấp phép
+      groups = [
+        {
+          id: currentGroup.id,
+          name: currentGroup.name,
+          repoCount: total,
+          token: currentGroup.token,
+        },
+      ];
+    }
 
     // Thống kê tổng số repo duy nhất và tổng stars
     const statRow: any = db.prepare(`
@@ -219,6 +278,7 @@ export async function GET(request: Request) {
       groups,
       isLockedGroup,
       currentGroup,
+      isAdmin,
       pagination: {
         page,
         limit,

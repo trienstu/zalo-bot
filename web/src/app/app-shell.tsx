@@ -286,28 +286,37 @@ function AppShellInner({
                   <span>Về Dashboard</span>
                 </Link>
               )}
-              <Link
-                href="/hub"
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
-                  pathname.startsWith("/hub")
-                    ? "bg-cyan-500/20 border border-cyan-500/40 text-cyan-300"
-                    : "text-slate-400 hover:text-white hover:bg-slate-900 border border-transparent"
-                }`}
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                <span>Kho Kiến Thức</span>
-              </Link>
-              <Link
-                href="/repos"
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
-                  pathname.startsWith("/repos")
-                    ? "bg-indigo-500/20 border border-indigo-500/40 text-indigo-300"
-                    : "text-slate-400 hover:text-white hover:bg-slate-900 border border-transparent"
-                }`}
-              >
-                <FolderGit2 className="h-3.5 w-3.5" />
-                <span>Kho GitHub Repo</span>
-              </Link>
+              {(() => {
+                const currentToken = searchParams.get("token");
+                const currentGroupId = searchParams.get("groupId") || searchParams.get("group");
+                const groupQuery = currentToken && currentGroupId ? `?groupId=${currentGroupId}&token=${currentToken}` : "";
+                return (
+                  <>
+                    <Link
+                      href={`/hub${groupQuery}`}
+                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                        pathname.startsWith("/hub")
+                          ? "bg-cyan-500/20 border border-cyan-500/40 text-cyan-300"
+                          : "text-slate-400 hover:text-white hover:bg-slate-900 border border-transparent"
+                      }`}
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      <span>Kho Kiến Thức</span>
+                    </Link>
+                    <Link
+                      href={`/repos${groupQuery}`}
+                      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all ${
+                        pathname.startsWith("/repos")
+                          ? "bg-indigo-500/20 border border-indigo-500/40 text-indigo-300"
+                          : "text-slate-400 hover:text-white hover:bg-slate-900 border border-transparent"
+                      }`}
+                    >
+                      <FolderGit2 className="h-3.5 w-3.5" />
+                      <span>Kho GitHub Repo</span>
+                    </Link>
+                  </>
+                );
+              })()}
             </div>
           </div>
         </header>

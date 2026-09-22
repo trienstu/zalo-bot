@@ -399,6 +399,24 @@ Mô tả gốc: "${meta.description || "No description"}"`;
 
 export async function POST(request: Request) {
   try {
+    // Kiểm tra quyền Admin trước khi cho phép quét / đồng bộ
+    const cookieHeader = request.headers.get("cookie") || "";
+    const xAdminAuth = request.headers.get("x-admin-auth") || "";
+    const isAdminAuthenticated =
+      cookieHeader.includes("admin_auth_session=authenticated_admin") ||
+      xAdminAuth === "authenticated_admin";
+    const host = request.headers.get("host") || "";
+    const isDevLocalhost =
+      process.env.NODE_ENV === "development" &&
+      (host.startsWith("localhost") || host.startsWith("127.0.0.1"));
+
+    if (!isAdminAuthenticated && !isDevLocalhost) {
+      return NextResponse.json(
+        { error: "unauthorized", message: "Chức năng đồng bộ repo chỉ dành riêng cho Quản trị viên." },
+        { status: 401 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const groupId = searchParams.get("groupId") || "all";
 

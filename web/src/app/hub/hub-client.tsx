@@ -367,7 +367,7 @@ export function HubClient() {
               </span>
             </div>
             <Link
-              href="/repos"
+              href={isLockedGroup && currentGroup?.token ? `/repos?groupId=${currentGroup.id}&token=${currentGroup.token}` : "/repos"}
               className="flex items-center gap-2 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 px-3.5 py-1.5 border border-indigo-500/50 text-xs font-semibold text-indigo-300 hover:text-white transition-all shadow-sm"
             >
               <FolderGit2 className="h-4 w-4 text-indigo-400" />
