@@ -442,3 +442,27 @@ test("câu hỏi về AI giữ token ai và xếp bài báo quốc tế liên qu
   assert.equal(ranked[0]?.url, "https://techcrunch.com/openai-ai-model");
   assert.ok(ranked[0]?.relevanceScore > 0.4);
 });
+
+test("finalizeGroundedAnswer TUYỆT ĐỐI KHÔNG gắn nguồn khi câu hỏi là hỏi thăm trạng thái / giục ảnh bot (ảnh đâu)", () => {
+  const dummyContext = "Nguồn: Tuổi Trẻ, Báo Nhân Dân, Lao Động\n\nTin tức sáng nay...";
+  const answer = "Dạ anh ơi, cơn mưa thất tình này nặng hạt quá làm tiến trình render bị trễ nhịp mấy giây rồi ạ!";
+  
+  // 1. Khi có options question là 'sen chúa ảnh đâu'
+  const final1 = finalizeGroundedAnswer(answer, dummyContext, false, {
+    intent: "chat",
+    question: "sen chúa ảnh đâu",
+  });
+  assert.doesNotMatch(final1, /Nguồn:/i);
+  assert.doesNotMatch(final1, /Tuổi Trẻ/i);
+
+  // 2. Khi câu trả lời nói về tiến trình render ảnh
+  const final2 = finalizeGroundedAnswer(answer, dummyContext, false);
+  assert.doesNotMatch(final2, /Nguồn:/i);
+  assert.doesNotMatch(final2, /Tuổi Trẻ/i);
+
+  // 3. Khi intent là 'chat'
+  const chatAnswer = "Chào bạn, mình có thể giúp gì cho bạn?";
+  const final3 = finalizeGroundedAnswer(chatAnswer, dummyContext, false, { intent: "chat" });
+  assert.doesNotMatch(final3, /Nguồn:/i);
+});
+

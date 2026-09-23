@@ -795,7 +795,7 @@ export async function runListener(): Promise<void> {
     if (type === "message" && isDirectUserMessage) {
       let text = extractText(payload) || "";
       const media = extractMediaSummary(payload);
-      const mediaUrl = media ? extractMediaUrl(payload) : null;
+      const mediaUrl = extractMediaUrl(payload);
 
       // VỆ TINH 2: Bóc băng tin nhắn thoại 1:1 qua Whisper
       if (!text && media?.type === "voice" && mediaUrl && isCloudflareConfigured()) {
@@ -845,6 +845,7 @@ export async function runListener(): Promise<void> {
           mediaType: media?.type,
           fileAttachment,
           quote,
+          rawMessage: payload?.data,
         }).catch((e) => console.warn(`[admin-assistant] lỗi: ${String(e)}`));
       }
       return;
@@ -870,7 +871,8 @@ export async function runListener(): Promise<void> {
       let text = extractText(payload);
       const media = extractMediaSummary(payload);
       const displayName = String(payload?.data?.dName ?? "");
-      const mediaUrl = media ? extractMediaUrl(payload) : null;
+      const mediaUrl = extractMediaUrl(payload);
+      const effectiveMedia = media || (mediaUrl && (/\.(?:jpe?g|png|webp|gif|bmp)(?:\?|$)/i.test(mediaUrl) || /zdn\.vn\/gr\/|photo/i.test(mediaUrl)) ? { type: "image" as const, count: 1 } : null);
 
       // VỆ TINH 2: Bóc băng voice note trong nhóm qua Cloudflare Whisper
       if (!text && media?.type === "voice" && mediaUrl && isCloudflareConfigured()) {
@@ -937,7 +939,7 @@ export async function runListener(): Promise<void> {
             text,
             isSelf: false,
             mediaUrl,
-            mediaType: media?.type,
+            mediaType: (media || effectiveMedia)?.type,
             fileAttachment,
             quote,
             mentions,
@@ -947,16 +949,16 @@ export async function runListener(): Promise<void> {
           }).catch((e) => console.warn(`[member-assistant] lỗi: ${String(e)}`));
         }
       }
-      if (media && (media.type === "image" || media.type === "video")) {
-        const mediaMessageId = extractMessageId(payload, sender, ts, `${media.type}:${media.count}`);
+      if (effectiveMedia && (effectiveMedia.type === "image" || effectiveMedia.type === "video")) {
+        const mediaMessageId = extractMessageId(payload, sender, ts, `${effectiveMedia.type}:${effectiveMedia.count}`);
         upsertMember({ zaloUserId: sender, displayName, groupId: threadId, now: Date.now() });
         saveGroupMediaEvent({
           threadId,
           messageId: mediaMessageId,
           zaloUserId: sender,
           displayName,
-          mediaType: media.type,
-          mediaCount: media.count,
+          mediaType: effectiveMedia.type,
+          mediaCount: effectiveMedia.count,
           msgType: String(payload?.data?.msgType ?? ""),
           ts,
           isSelf: Boolean(payload?.isSelf),
@@ -966,7 +968,7 @@ export async function runListener(): Promise<void> {
         // Ảnh phải tải NGAY: link Zalo là link tạm, tới lúc cron tóm tắt/tuyển
         // dụng chạy thì đã chết. Không chờ ở đây — vòng nhận sự kiện phải rảnh
         // tay cho tin tiếp theo; tải xong mới điền đường dẫn vào dòng vừa ghi.
-        if (media.type === "image" && mediaUrl) {
+        if (effectiveMedia.type === "image" && mediaUrl) {
           void saveZaloImage({ url: mediaUrl, threadId, messageId: mediaMessageId })
             .then((file) => {
               if (file) setGroupMediaLocalPath(threadId, mediaMessageId, file);

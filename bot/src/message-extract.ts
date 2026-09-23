@@ -131,7 +131,6 @@ export function collectCandidateUrls(sources: unknown[]): string[] {
 
 /** URL media tạm do Zalo trả về; Telegram có thể dùng URL này để tải ảnh/video. */
 export function extractMediaUrl(payload: any): string | null {
-  if (extractMediaSummary(payload) === null) return null;
   const data = payload?.data ?? {};
   const content = parseObjectMaybe(data?.content);
   const params = parseObjectMaybe(content?.params || data?.params);
@@ -139,7 +138,20 @@ export function extractMediaUrl(payload: any): string | null {
   const propertyExt = parseObjectMaybe(data?.propertyExt || content?.propertyExt);
 
   const urls = collectCandidateUrls([content, params, attach, propertyExt, data, payload]);
-  return urls.length > 0 && urls[0] ? urls[0] : null;
+  if (urls.length === 0) return null;
+
+  // Nếu có media summary (ảnh/video/voice), trả về candidate URL đầu tiên
+  if (extractMediaSummary(payload) !== null) {
+    return urls[0] || null;
+  }
+
+  // Nếu không có media summary rõ ràng nhưng có URL media/ảnh thực thụ (Zalo CDN hoặc đuôi ảnh/video)
+  const mediaCandidate = urls.find((u) =>
+    /\.(?:jpe?g|png|webp|gif|bmp|mp4|mov|m4a|mp3|wav)(?:\?|$)/i.test(u) ||
+    /zdn\.vn|chat-photo|res-zalo|zaloapp/i.test(u)
+  );
+
+  return mediaCandidate || null;
 }
 
 /**

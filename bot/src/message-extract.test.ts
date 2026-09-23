@@ -109,6 +109,17 @@ test("media URL: đọc params JSON và bỏ URL không phải http(s)", () => {
   assert.equal(extractMediaUrl(unsafe), null);
 });
 
+test("media URL: bóc tách ảnh thành công ngay cả khi msgType không có photo/image nhưng có candidate CDN URL", () => {
+  const payload = msg({
+    msgType: "chat.custom",
+    content: {
+      text: "sửa ảnh này giúp tôi",
+      href: "https://photo-stal-35.zdn.vn/gr/jpg/sample.jpg",
+    },
+  });
+  assert.equal(extractMediaUrl(payload), "https://photo-stal-35.zdn.vn/gr/jpg/sample.jpg");
+});
+
 test("ảnh nhiều tấm: đếm childnumber", () => {
   const payload = msg({ msgType: "chat.photo", content: { childnumber: 3, href: "x" } });
   assert.deepEqual(extractMediaSummary(payload), { type: "image", count: 3 });

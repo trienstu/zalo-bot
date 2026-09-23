@@ -173,15 +173,26 @@ function uniqQueries(queries: string[]): string[] {
   return out.slice(0, 4);
 }
 
-function buildContextualFallbackQuery(question: string, quoteText = ""): string {
+function buildContextualFallbackQuery(question: string, quoteText = "", recentContext = ""): string {
   const cleanQuestion = extractCleanUserQuery(question, quoteText);
   const normalized = normalizePlannerText(question.trim());
   const isFollowUp =
     /^(?:còn|con|vậy|vay|thế|the|nó|no|người này|nguoi nay|cái này|cai nay|trường hợp này|truong hop nay|ông này|ong nay|bà này|ba nay|dự án này|du an nay|chỗ này|cho nay|đoạn này|doan nay|thế còn|the con)\b/i.test(normalized) ||
-    /\b(?:này|cái này|dự án này|vụ này|trường hợp này)\b/i.test(normalized);
-  if (isFollowUp && quoteText.trim()) {
-    const cleanQuote = extractCleanUserQuery(quoteText);
-    return `${cleanQuote} ${cleanQuestion}`.replace(/\s+/g, " ").trim().slice(0, 180);
+    /\b(?:này|cái này|dự án này|vụ này|trường hợp này)\b/i.test(normalized) ||
+    /^(?:giá\s+bao\s+nhiêu|bao\s+nhiêu\s+tiền|mua\s+ở\s+đâu|mấy\s+w|bao\s+nhiêu\s+w|có\s+mấy\s+màu|màu\s+gì|dùng\s+thế\s+nào|có\s+tốt\s+không)\b/i.test(normalized);
+  if (isFollowUp) {
+    if (quoteText.trim()) {
+      const cleanQuote = extractCleanUserQuery(quoteText);
+      return `${cleanQuote} ${cleanQuestion}`.replace(/\s+/g, " ").trim().slice(0, 180);
+    }
+    if (recentContext.trim()) {
+      const lines = recentContext.split("\n").map((l) => l.trim()).filter(Boolean);
+      const lastLine = lines.slice(-2).join(" ");
+      const cleanCtx = extractCleanUserQuery(lastLine).slice(0, 80);
+      if (cleanCtx) {
+        return `${cleanCtx} ${cleanQuestion}`.replace(/\s+/g, " ").trim().slice(0, 180);
+      }
+    }
   }
   return cleanQuestion.slice(0, 180);
 }
@@ -287,10 +298,11 @@ export function normalizeQueryPlanIntent(plan: QueryPlanResult, question: string
   // Dữ kiện vốn biến động hoặc có neo thời gian luôn cần kiểm chứng, kể cả khi
   // LLM planner trả needsSearch=false. Đây là chốt an toàn đa lĩnh vực.
   if (signals.explicitlyCurrent || signals.inherentlyVolatile) {
+    const isRealtimeEventOrSchedule = /\b(?:tin|su kien|tran|thoi tiet|bao|lu|dong dat|lich thi dau|lich dau|ket qua|ti so|bong da|the thao|giai dau|bang xep hang)\b/i.test(text);
     return augmentDeveloperProjectQueries({
       ...guardedPlan,
       needsSearch: true,
-      intent: signals.explicitlyCurrent && /\b(?:tin|su kien|tran|thoi tiet|bao|lu|dong dat)\b/i.test(text)
+      intent: signals.explicitlyCurrent && isRealtimeEventOrSchedule
         ? "realtime_news"
         : "fact_check",
       queries: guardedPlan.queries.length > 0 ? guardedPlan.queries : [fallbackQuery].filter(Boolean),
@@ -327,6 +339,30 @@ export function normalizeQueryPlanIntent(plan: QueryPlanResult, question: string
 /**
  * Phân tích câu hỏi và trích dẫn bằng mô hình AI siêu tốc để lập kế hoạch tìm kiếm đa luồng
  */
+/**
+ * Nhận diện câu hỏi thăm trạng thái / tiến trình hoạt động của bot
+ * (ví dụ: giục ảnh, hỏi xong chưa, bot đâu rồi, sao lâu thế...)
+ */
+export function isBotStatusOrMetaQuestion(text: string): boolean {
+  if (!text || !text.trim()) return false;
+  const t = text.toLowerCase().trim();
+  const clean = t
+    .replace(/(?:@\s*)?(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot|admin)(?=[^\p{L}\p{N}]|$)/gui, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const statusPhrases = [
+    "ảnh đâu", "hình đâu", "file đâu", "bài đâu", "kết quả đâu",
+    "sao chưa có ảnh", "sao chưa thấy ảnh", "ảnh của anh đâu", "ảnh của em đâu",
+    "chưa thấy ảnh", "chưa có ảnh", "xong chưa", "chưa xong à", "chưa xong hả",
+    "sao lâu thế", "sao lâu vậy", "sao lâu quá", "chờ lâu quá", "chờ lâu thế",
+    "đang làm gì đấy", "làm đến đâu rồi", "bot đâu rồi", "bot ngủ à", "bot đơ à",
+    "sao không trả lời", "sao im thế", "render xong chưa", "vẽ xong chưa"
+  ];
+
+  return statusPhrases.some((p) => clean.includes(p) || t.includes(p));
+}
+
 export async function planSearchQueries(params: {
   question: string;
   quoteText?: string;
@@ -345,6 +381,17 @@ export async function planSearchQueries(params: {
     }, question, quoteText);
   }
 
+  // Nhận diện câu hỏi thăm trạng thái / tiến trình hoạt động của bot (giục ảnh, hỏi xong chưa, bot đâu rồi)
+  // BẮT BUỘC là hội thoại chat, TUYỆT ĐỐI KHÔNG search báo chí RSS!
+  if (isBotStatusOrMetaQuestion(question)) {
+    return applyExecutionSignals({
+      needsSearch: false,
+      intent: "chat",
+      queries: [],
+      summaryIntent: "Người dùng hỏi thăm tiến trình / trạng thái của bot",
+    }, question, quoteText);
+  }
+
   // Nhận diện câu phản biện / chất vấn / thắc mắc meta về câu trả lời trước đó (Feedback / Critique)
   // Các câu như: "sao em nhầm vậy", "sao lại sai thế", "bot nói sai rồi", "em nhầm rồi", "sao e biết"
   // BẮT BUỘC là hội thoại chat, đối thoại dựa trên ngữ cảnh lịch sử chat, KHÔNG search báo chí RSS!
@@ -356,6 +403,20 @@ export async function planSearchQueries(params: {
       intent: "chat",
       queries: [],
       summaryIntent: "Người dùng chất vấn / phản biện về câu trả lời trước đó",
+    }, question, quoteText);
+  }
+
+  // Nhận diện câu lệnh yêu cầu thực thi / tạo file / soạn tiếp từ phản hồi trước (ví dụ: "soạn luôn đi", "làm luôn đi", "tạo luôn đi e")
+  const isAffirmativeTaskExecution =
+    /^(?:soạn|làm|tạo|xuất|viết|triển\s*khai|chốt|triển|lên)\s*(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|luôn\s*đi|luôn\s*đi\s*e|luôn\s*hộ\s*e|luôn\s*nhé|luôn\s*nha|tiếp\s*đi)\b/i.test(trimmed);
+  if (isAffirmativeTaskExecution) {
+    return applyExecutionSignals({
+      needsSearch: false,
+      intent: "knowledge",
+      queries: [],
+      summaryIntent: "Người dùng đồng ý / giục thực thi tác vụ tạo nội dung đã chốt",
+      responseMode: "action",
+      toolIntent: "create",
     }, question, quoteText);
   }
 
@@ -418,6 +479,9 @@ export async function planSearchQueries(params: {
     `   - BẢO TỒN NGUYÊN VẸN TÊN THỰC THỂ CỐT LÕI (STRICT ENTITY PRESERVATION):\n` +
     `     + TUYỆT ĐỐI KHÔNG TỰ Ý THAY THẾ, SUY DIỄN HOẶC HOÁN ĐỔI tên giải đấu, thương hiệu, tổ chức, công nghệ hoặc sự kiện mà người dùng hỏi sang một cái tên khác (ví dụ: người dùng hỏi "FIFA ASEAN Cup" thì BẮT BUỘC query 1 phải có cụm từ "FIFA ASEAN Cup", TUYỆT ĐỐI CẤM tự ý đổi sang "ASEAN Mitsubishi Electric Cup" hay "AFF Cup"; hỏi "iPhone 16" cấm đổi sang "iPhone 15"; hỏi "Luật Đất đai 2024" cấm đổi sang "Luật 2013").\n` +
     `     + Query đầu tiên (queries[0]) BẮT BUỘC phải giữ nguyên vẹn toàn bộ các danh từ riêng / cụm từ định danh thực thể của người dùng kết hợp với mục tiêu tra cứu.\n` +
+    `   - QUY TẮC KẾ THỪA THỰC THỂ TỪ LỊCH SỬ HỘI THOẠI (ANAPHORA / COREFERENCE RESOLUTION):\n` +
+    `     + Khi câu hỏi của người dùng là câu hỏi ngắn, câu hỏi nối tiếp khuyết chủ ngữ (ví dụ: "giá bao nhiêu", "mua ở đâu", "bao nhiêu W", "có mấy màu", "sạc được mấy lần", "có tốt không", "nó là gì", "dùng thế nào", "bảo hành bao lâu", "khi nào có"): BẮT BUỘC phải đọc kỹ [LỊCH SỬ THẢO LUẬN GẦN ĐÂY] hoặc [NỘI DUNG ĐƯỢC TRÍCH DẪN] để bóc tách ĐÚNG THỰC THỂ / SẢN PHẨM đang được bàn luận (ví dụ: đang bàn luận về sạc dự phòng Nitecore NB series -> Query phải là: "giá sạc dự phòng Nitecore NB" hoặc "giá sạc Nitecore NB 5000mAh").\n` +
+    `     + TUYỆT ĐỐI CẤM tự ý quy chụp câu hỏi giá ngắn ("giá bao nhiêu", "bao nhiêu tiền") sang giá vàng, giá xăng, tỷ giá hay chứng khoán nếu người dùng không nhắc đích danh chữ "vàng", "sjc", "xăng" và ngữ cảnh không bàn về tài chính vĩ mô!\n` +
     `   - Bóc tách đúng THỰC THỂ CHÍNH (Entities) và MỤC TIÊU CẦN TÌM (Target attribute/action).\n` +
     `   - LOẠI BỎ TOÀN BỘ từ rác, xưng hô, mệnh lệnh (check, kiểm tra, xem, giúp, cho anh, sen chúa, mộc miên, kevin, bot ơi, nhé, nha, ạ, có ... chưa, rồi chưa...).\n` +
     `   - BẮT BUỘC giữ nguyên dấu tiếng Việt chuẩn xác (TUYỆT ĐỐI KHÔNG viết không dấu vì tiếng Việt không dấu sẽ làm sai lệch hoàn toàn kết quả tra cứu báo chí và văn bản pháp luật).\n` +
@@ -448,7 +512,7 @@ export async function planSearchQueries(params: {
 
     if (raw && typeof raw === "object") {
       const needsSearch = Boolean(raw.needsSearch);
-      const rawClean = buildContextualFallbackQuery(question, quoteText);
+      const rawClean = buildContextualFallbackQuery(question, quoteText, recentContext);
       const llmQueries = Array.isArray(raw.queries)
         ? raw.queries.map((q: any) => String(q).trim()).filter((q: string) => q.length > 2).slice(0, 3)
         : [];

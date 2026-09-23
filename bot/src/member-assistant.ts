@@ -1252,12 +1252,13 @@ async function handleHistoryQA(
       `   - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * để in đậm vì Zalo không hỗ trợ markdown (sẽ hiện nguyên văn hai dấu sao rất xấu). Hãy viết hoa chữ cái đầu hoặc viết hoa tiêu đề để làm nổi bật (ví dụ: '1. NHÂN VẬT CHÍNH:', '2. KHÁCH HÀNG:').\n` +
       `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Giữ phong cách thanh lịch, gọn gàng. TUYỆT ĐỐI KHÔNG spam icon ở từng dòng hay từng gạch đầu dòng.\n` +
       `8. KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
-      `   - Khi người dùng yêu cầu vẽ biểu đồ, đồ thị, sơ đồ, tạo infographic, poster lịch thi đấu, bảng xếp hạng, timeline, roadmap, HOẶC yêu cầu làm lại/sửa lại ảnh/biểu đồ trước đó:\n` +
+      `   - Khi người dùng yêu cầu vẽ biểu đồ số liệu định lượng, đồ thị, sơ đồ quy trình/thuật toán, tạo infographic poster lịch thi đấu/bảng xếp hạng/timeline/roadmap:\n` +
       `     BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM gõ code Python bằng chữ vào tin nhắn chat Zalo!\n` +
       `   - Phân biệt rõ hai phong cách thiết kế đồ họa:\n` +
       `     + VỚI LỊCH THI ĐẤU, BẢNG XẾP HẠNG, ROADMAP, DANH SÁCH SỰ KIỆN: BẮT BUỘC dùng Pillow (PIL) thiết kế INFOGRAPHIC POSTER DẠNG CARD LAYOUT khổ dọc (W=720, H=1100-1400), nền tối sang trọng (thể thao dùng đỏ rượu/burgundy #42030D, công nghệ/doanh nghiệp dùng Navy #0B132B), các thẻ bo góc (draw.rounded_rectangle), huy hiệu trạng thái ([CHÍNH THỨC], [GIAO HỮU]), tiêu đề vàng kim #FFD700 rực rỡ, hàng dữ liệu sắc nét. TUYỆT ĐỐI KHÔNG vẽ biểu đồ cột cho lịch thi đấu!\n` +
       `     + VỚI BIỂU ĐỒ SỐ LIỆU ĐỊNH LƯỢNG (doanh thu, phần trăm, biến động giá, thống kê): Dùng matplotlib.pyplot với dark theme (plt.style.use('dark_background')), nhãn trục rõ ràng, lưu PNG DPI=150.\n` +
       `   - Hệ thống tự động cung cấp font tiếng Việt chuẩn Unicode qua hàm get_font(size, bold=True/False) và tự động bắt file ảnh PNG gửi trực tiếp lên Zalo cho ${isSuperAdmin ? "Sếp" : "người dùng"}.\n` +
+      `   - TUYỆT ĐỐI KHÔNG dùng python_interpreter để tạo ảnh nghệ thuật/minh họa (phong cảnh, chân dung, đồ vật, bánh trái, anime...). TUYỆT ĐỐI CẤM tự ý hứa hẹn hoặc nói rằng 'em đang tạo ảnh / hệ thống đang gửi ảnh vào nhóm' khi phiên hỏi đáp này không có công cụ sinh ảnh nghệ thuật!\n` +
       `   - TUYỆT ĐỐI CẤM từ chối hoặc bảo người dùng nhờ designer vẽ lại!\n` +
       `9. KỸ NĂNG XUẤT FILE TÀI LIỆU, SLIDE VÀ VOICE (generate_file & create_voice):\n` +
       `   - Khi người dùng yêu cầu tạo bài thuyết trình / slide PowerPoint (.pptx), tài liệu Word (.docx), Excel (.xlsx), hoặc tạo giọng đọc / voice / podcast (.m4a), HOẶC giục 'soạn luôn đi', 'làm luôn đi':\n` +
@@ -2376,6 +2377,7 @@ async function handleHistoryQA(
     `   - KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
     `     + Khi người dùng yêu cầu vẽ biểu đồ, đồ thị, sơ đồ, poster lịch thi đấu, bảng xếp hạng hoặc yêu cầu làm lại/sửa lại ảnh/biểu đồ: BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM in code Python ra chat!\n` +
     `     + Với lịch thi đấu/bảng sự kiện/roadmap: Dùng PIL vẽ Infographic Poster Card Layout nền tối (burgundy/navy), thẻ bo góc, badge nổi bật ([CHÍNH THỨC], [GIAO HỮU]), tiêu đề vàng kim #FFD700. Với số liệu: Dùng matplotlib dark theme.\n` +
+    `     + TUYỆT ĐỐI KHÔNG dùng python_interpreter để sinh ảnh nghệ thuật/minh họa (phong cảnh, chân dung, anime, đồ vật...). TUYỆT ĐỐI CẤM bịa đặt bằng chữ là "đang tạo ảnh / đã gửi ảnh vào nhóm" khi phiên hỏi đáp này không có công cụ sinh ảnh nghệ thuật.\n` +
     `3. DẪN NGUỒN THEO BẰNG CHỨNG ĐƯỢC CUNG CẤP (GROUNDING CITATION CHO MỌI LĨNH VỰC):\n` +
     `   - Khi câu trả lời sử dụng dữ liệu thời gian thực (tin tức, thể thao, văn bản pháp luật, đơn vị hành chính, giá cả thị trường, nghiên cứu khoa học):\n` +
     `     + Chỉ sử dụng các bản ghi [E#], URL và ngày công bố xuất hiện trong phần bằng chứng. Không tự thêm tên cơ quan, ngày hoặc URL.\n` +
@@ -2673,17 +2675,19 @@ export function extractImagePromptFromText(rawText: string, botName = ""): strin
       .replace(/^(?:về|với|cảnh|chủ đề|hình ảnh|bức ảnh|tấm ảnh)\s*[:\s]*/i, "")
       .replace(/^(?:một|vài|những)\s+/i, "")
       .replace(/^(?:con|cái|chiếc|bức|tấm|hình|ảnh)\s+/i, "")
+      .replace(new RegExp(`(?:@\\s*)?(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot${botPart})(?=[^\\p{L}\\p{N}]|$)`, "giu"), " ")
+      .replace(/\s+/g, " ")
       .trim();
   }
 
   // 1. Cú pháp lệnh tạo ảnh: /taoanh, !taoanh, /veanh, /draw, /image, /sinhdan
-  const cmdMatch = clean.match(/^[/!](?:taoanh|veanh|sinhdan|draw|imagine|image)\s*(?:[:\s-]\s*)?(.+)$/i);
+  const cmdMatch = clean.match(/(?:^|\s)[/!](?:taoanh|veanh|sinhdan|draw|imagine|image)\s*(?:[:\s-]\s*)?(.+)$/i);
   if (cmdMatch && cmdMatch[1]?.trim()) {
     return cleanExtractedPrompt(cmdMatch[1]);
   }
 
   // 1.1 Cú pháp lệnh sửa ảnh: /suaanh, !suaanh, /chinhanh, !chinhanh, /chinhsuaanh, !chinhsuaanh, /editanh, !editanh, /editimage, /modifyimage
-  const editCmdMatch = clean.match(/^[/!](?:suaanh|chinhanh|chinhsuaanh|editanh|editimage|modifyimage)\s*(?:[:\s-]\s*)?(.*)$/i);
+  const editCmdMatch = clean.match(/(?:^|\s)[/!](?:suaanh|chinhanh|chinhsuaanh|editanh|editimage|modifyimage)\s*(?:[:\s-]\s*)?(.*)$/i);
   if (editCmdMatch) {
     const p = editCmdMatch[1]?.trim();
     return p ? cleanExtractedPrompt(p) : "nâng cấp chất lượng và tối ưu hóa chi tiết hình ảnh";
@@ -2691,21 +2695,21 @@ export function extractImagePromptFromText(rawText: string, botName = ""): strin
 
   // 2. Ngôn ngữ tự nhiên sửa / chỉnh ảnh:
   // "sửa ảnh này thành tóc ngắn", "chỉnh sửa giúp anh tấm ảnh này", "edit ảnh này theo phong cách anime", "thay nền ảnh này..."
-  const naturalEditPattern = /^(?:hãy\s+|nhờ\s+|cho\s+)?(?:sửa|chỉnh\s*sửa|chỉnh|edit|biến\s*đổi|chuyển\s*đổi|làm\s*lại)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:giúp\s+)?(?:một\s+)?(?:bức\s+|tấm\s+|cái\s+|chiếc\s+)?(?:ảnh|hình|tranh)\s*(?:này|đó)?\s*(?:thành|sang|thêm|thay|bỏ|đổi|cho)?\s*[:\s]*(.+)$/i;
+  const naturalEditPattern = /(?:^|.*?\b)(?:hãy\s+|nhờ\s+|cho\s+)?(?:sửa|chỉnh\s*sửa|chỉnh|edit|biến\s*đổi|chuyển\s*đổi|làm\s*lại)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:giúp\s+)?(?:một\s+)?(?:bức\s+|tấm\s+|cái\s+|chiếc\s+)?(?:ảnh|hình|tranh)\s*(?:này|đó)?\s*(?:thành|sang|thêm|thay|bỏ|đổi|cho)?\s*[:\s]*(.+)$/i;
   const editMatch = clean.match(naturalEditPattern);
   if (editMatch && editMatch[1]?.trim()) {
     return cleanExtractedPrompt(editMatch[1]);
   }
 
   // 2.1 Ngôn ngữ tự nhiên có từ khóa ảnh/hình/tranh/họa:
-  const naturalPhotoPattern = /^(?:hãy\s+|nhờ\s+|cho\s+)?(?:tạo|vẽ|sinh|làm)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:giúp\s+)?(?:một\s+)?(?:bức\s+|tấm\s+|cái\s+|chiếc\s+)?(?:ảnh|hình|tranh|họa)\s*(?:về|với|cảnh|chủ đề|một)?\s*[:\s]*(.+)$/i;
+  const naturalPhotoPattern = /(?:^|.*?\b)(?:hãy\s+|nhờ\s+|cho\s+)?(?:tạo|vẽ|sinh|làm)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:giúp\s+)?(?:một\s+)?(?:bức\s+|tấm\s+|cái\s+|chiếc\s+)?(?:ảnh|hình|tranh|họa)\s*(?:về|với|cảnh|chủ đề|một)?\s*[:\s]*(.+)$/i;
   const photoMatch = clean.match(naturalPhotoPattern);
   if (photoMatch && photoMatch[1]?.trim()) {
     return cleanExtractedPrompt(photoMatch[1]);
   }
 
   // 3. "vẽ giúp anh một...", "vẽ cho em con...", "hãy vẽ..."
-  const directDrawPattern = /^(?:hãy\s+|nhờ\s+|cho\s+)?(?:vẽ)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:giúp\s+)?(?:một\s+|con\s+|cái\s+|chiếc\s+|bức\s+|tấm\s+)?(.+)$/i;
+  const directDrawPattern = /(?:^|.*?\b)(?:hãy\s+|nhờ\s+|cho\s+)?(?:vẽ)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:giúp\s+)?(?:một\s+|con\s+|cái\s+|chiếc\s+|bức\s+|tấm\s+)?(.+)$/i;
   const drawMatch = clean.match(directDrawPattern);
   if (drawMatch && drawMatch[1]?.trim()) {
     return cleanExtractedPrompt(drawMatch[1]);
@@ -2735,15 +2739,17 @@ export function parseImagePromptAndRatio(
 ): ParsedImageRequest | null {
   const extracted = extractImagePromptFromText(rawText, botName);
 
+  const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const botPart = botName ? `|${escapeRegex(botName.toLowerCase())}` : "";
   const cleanForDetect = rawText
-    .replace(new RegExp(`(?:@\\s*)?(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot)(?=[^\\p{L}\\p{N}]|$)`, "giu"), " ")
+    .replace(new RegExp(`(?:@\\s*)?(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot${botPart})(?=[^\\p{L}\\p{N}]|$)`, "giu"), " ")
     .replace(/@[^\s,!?]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
   // Nhận diện lệnh hoặc câu nói sửa ảnh
   const isExplicitEditCmd = /^[/!](?:suaanh|chinhanh|chinhsuaanh|editanh|editimage|modifyimage)\b/i.test(rawText.trim());
-  const isNaturalEdit = /^(?:hãy\s+|nhờ\s+|cho\s+)?(?:sửa|chỉnh\s*sửa|chỉnh|edit|biến\s*đổi|chuyển\s*đổi|làm\s*lại)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:giúp\s+)?(?:một\s+)?(?:bức\s+|tấm\s+|cái\s+|chiếc\s+)?(?:ảnh|hình|tranh)\b/i.test(cleanForDetect);
+  const isNaturalEdit = /(?:^|.*?\b)(?:hãy\s+|nhờ\s+|cho\s+)?(?:sửa|chỉnh\s*sửa|chỉnh|edit|biến\s*đổi|chuyển\s*đổi|làm\s*lại)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:giúp\s+)?(?:một\s+)?(?:bức\s+|tấm\s+|cái\s+|chiếc\s+)?(?:ảnh|hình|tranh)\b/i.test(cleanForDetect);
 
   // Nhận diện trường hợp quote ảnh kèm chỉ dẫn thay đổi (VD: "đổi màu tóc thành vàng", "thêm kính mắt", "thay nền sang ban đêm")
   const hasImageInQuote = Boolean(quote?.mediaUrl && (quote.mediaType === "image" || /\.(?:jpg|jpeg|png|webp|gif)/i.test(quote.mediaUrl)));
@@ -2935,16 +2941,27 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
-  // 1b. Lệnh quản lý trí nhớ cá nhân: !xemtrinho, !xoatrinho, bot nhớ gì về tôi, v.v.
+  // 1b. Lệnh quản lý trí nhớ cá nhân: !xemtrinho, !xoatrinho, hoặc gọi tên bot kèm "nhớ gì về tôi"
+  const isExplicitMemoryCmd = /^[!/](?:xemtrinho|trinho|xem_nho|my_memories|memory|xoatrinho|quenhet|xoa_nho|clear_memories|forget_me)\b/i.test(rawText.trim());
   const memoryAction = isMemoryControlCommand(rawText);
   if (memoryAction) {
-    userCooldowns.set(sender, now);
-    void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.OK);
-    void sendTyping(api, threadId);
-    const reply = handleMemoryControlCommand(memoryAction, sender, displayName);
-    await sendGroupText(api, threadId, reply);
-    console.log(`[member-assistant] 🧠 Đã phản hồi lệnh trí nhớ (${memoryAction}) cho ${displayName}`);
-    return;
+    const lowerBot = botName.toLowerCase().trim();
+    const unaccBot = lowerBot.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
+    const isBotAddressed =
+      isExplicitMemoryCmd ||
+      Boolean(ownId && Array.isArray(event.mentions) && event.mentions.some((m: any) => String(m?.uid || m?.id) === ownId)) ||
+      lower.includes(lowerBot) ||
+      lower.includes(unaccBot);
+
+    if (isBotAddressed) {
+      userCooldowns.set(sender, now);
+      void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.OK);
+      void sendTyping(api, threadId);
+      const reply = handleMemoryControlCommand(memoryAction, sender, displayName);
+      await sendGroupText(api, threadId, reply);
+      console.log(`[member-assistant] 🧠 Đã phản hồi lệnh trí nhớ (${memoryAction}) cho ${displayName}`);
+      return;
+    }
   }
 
   // 2. Lệnh /rank, /diem, /myrank
@@ -3150,32 +3167,18 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
           );
         });
 
-      const mentionsGenericBot =
-        lowerRaw.includes("@bot") ||
-        lowerRaw.startsWith("bot ơi") ||
-        lowerRaw.startsWith("bot oi") ||
-        lowerRaw.startsWith("chào bot") ||
-        lowerRaw.startsWith("chao bot") ||
-        lowerRaw.includes("bot ơi") ||
-        lowerRaw.includes("bot oi") ||
-        lowerRaw.includes("nhờ bot") ||
-        lowerRaw.includes("hỏi bot") ||
-        lowerRaw.includes("cho bot") ||
-        lowerRaw.startsWith("bot ");
-
       // Nếu thành viên tag người khác (UID khác hoặc @Tên khác bot)
       const hasOtherMention =
         isTaggedOtherUid ||
         (/@[^\s,!?]+/g.test(rawText) &&
           !lowerRaw.includes(`@${lowerBot}`) &&
-          !lowerRaw.includes(`@${unaccentedBot}`) &&
-          !lowerRaw.includes("@bot"));
+          !lowerRaw.includes(`@${unaccentedBot}`));
 
-      // Bot được gọi nếu:
+      // Bot chỉ được gọi nếu:
       // 1. Tag trực tiếp bằng UID của bot này (isTaggedByUid)
-      // 2. Hoặc người dùng gọi đích danh tên bot này trong văn bản (mentionsThisBotName)
-      // 3. Hoặc người dùng gọi chung chung "bot ơi", "@bot" (mentionsGenericBot) VÀ không tag đích danh người khác (!hasOtherMention)
-      const isBotCalled = isTaggedByUid || mentionsThisBotName || (mentionsGenericBot && !hasOtherMention);
+      // 2. Hoặc người dùng gọi đích danh tên bot này trong văn bản (mentionsThisBotName) VÀ không tag đích danh người khác (!hasOtherMention)
+      // TUYỆT ĐỐI KHÔNG nhận từ chung chung "bot ơi", "@bot" nữa theo chỉ đạo của người dùng.
+      const isBotCalled = isTaggedByUid || (mentionsThisBotName && !hasOtherMention);
 
       if (!isBotCalled) {
         // Trong nhóm: yêu cầu tạo ảnh nhưng không gọi đích danh bot này -> bỏ qua hoàn toàn, KHÔNG để rơi xuống QA
@@ -3766,23 +3769,17 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     event.mentions.some((m: any) => String(m?.uid || m?.id) === ownId)
   );
 
-  const mentionsGenericBot =
-    lower.includes("@bot") ||
-    lower.startsWith("bot ơi") ||
-    lower.startsWith("bot oi") ||
-    lower.startsWith("chào bot") ||
-    lower.startsWith("chao bot") ||
-    lower.startsWith("alo bot") ||
-    lower.startsWith("hi bot") ||
-    lower.startsWith("hello bot") ||
-    lower.includes("bot ơi") ||
-    lower.includes("bot oi") ||
-    lower.includes("nhờ bot") ||
-    lower.includes("hỏi bot") ||
-    lower.includes("cho bot") ||
-    lower.startsWith("bot ");
+  // Kiểm tra xem người dùng có đang tag người khác qua UID không (tag người khác thì bot tuyệt đối không xen vào)
+  const isTaggedOtherUid = Boolean(
+    ownId &&
+    Array.isArray(event.mentions) &&
+    event.mentions.length > 0 &&
+    !isTaggedByUid
+  );
 
-  const mentionsBot = isTaggedByUid || mentionsThisBot || mentionsGenericBot;
+  // Bot CHỈ kích hoạt khi được tag trực tiếp bằng UID hoặc gọi ĐÚNG TÊN của bot (và KHÔNG tag người khác).
+  // Các từ chung chung như "bot ơi", "bot oi", "@bot", "chào bot", "alo bot" KHÔNG kích hoạt bot.
+  const mentionsBot = isTaggedByUid || (mentionsThisBot && !isTaggedOtherUid);
 
   const isDocCommand =
     lower.startsWith("/doc") ||
@@ -3813,13 +3810,10 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     isCommand ||
     mentionsBot ||
     (hasGoogleDocUrl &&
-      (lower.includes("bot") ||
-        lower.includes("sen") ||
-        lower.includes("check") ||
-        lower.includes("hỏi") ||
-        lower.includes("xem") ||
-        lower.includes("đọc") ||
-        lower.includes("tính")));
+      (lower.includes(lowerBotName) ||
+        lower.includes(unaccentedBotName) ||
+        lower.includes("check doc") ||
+        lower.includes("đọc doc")));
 
   if (isTagBot) {
     userCooldowns.set(sender, now);
@@ -3912,9 +3906,8 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     const qLower = question.toLowerCase().trim();
     const greetingWords = new Set([
       "alo", "hi", "hello", "chào", "chao", "ơi", "oi", "hey", "test",
-      "alo bot", "bot ơi", "chào bot", "chào em", "chào bạn",
       `${lowerBotName} ơi`, `${unaccentedBotName} oi`, `chào ${lowerBotName}`, `chào ${unaccentedBotName}`,
-      "hi bot", "hello bot"
+      `chào ${botName}`, `hi ${lowerBotName}`, `hello ${lowerBotName}`,
     ]);
 
     const isGreeting =

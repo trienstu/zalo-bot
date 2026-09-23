@@ -360,6 +360,11 @@ export const config = {
   vertexServiceAccountJson: process.env.VERTEX_SERVICE_ACCOUNT_JSON?.trim() || "",
   vertexModel: process.env.VERTEX_MODEL?.trim() || "gemini-2.5-flash",
 
+  /** Google Cloud Text-to-Speech (Miễn phí 1 triệu ký tự/tháng với giọng Neural2 & WaveNet chuẩn phòng thu) */
+  googleTtsEnabled: readBool("GOOGLE_TTS_ENABLED", true),
+  googleTtsVoiceFemale: process.env.GOOGLE_TTS_VOICE_FEMALE?.trim() || "vi-VN-Neural2-A",
+  googleTtsVoiceMale: process.env.GOOGLE_TTS_VOICE_MALE?.trim() || "vi-VN-Wavenet-B",
+
   /** API key DeepSeek cho tóm tắt hằng ngày (https://platform.deepseek.com). Rỗng = tắt. */
   deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() || "",
 
@@ -391,7 +396,7 @@ export const config = {
 
   /** Cấu hình sinh ảnh: "codex" (mặc định qua 9Router/Hermes) hoặc "cloudflare" */
   imageProvider: (process.env.IMAGE_PROVIDER?.trim() || "codex").toLowerCase(),
-  codexImageModel: process.env.CODEX_IMAGE_MODEL?.trim() || "cx/gpt-image-1.5",
+  codexImageModel: process.env.CODEX_IMAGE_MODEL?.trim() || "cx/gpt-image-2",
 
   /**
    * Thư mục ảnh bản tin công khai (bản WebP nhẹ) để nginx serve thẳng cho

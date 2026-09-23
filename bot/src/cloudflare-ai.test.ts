@@ -35,6 +35,18 @@ test("extractImagePromptFromText nhận diện ngôn ngữ tự nhiên yêu cầ
     extractImagePromptFromText("vẽ cho em một con rồng vàng uốn lượn phong cách 3D", "Bot"),
     "rồng vàng uốn lượn phong cách 3D"
   );
+  assert.equal(
+    extractImagePromptFromText("Hân mộc miên sen chúa tạo ảnh bánh trung siêu thực", "Sen Chúa"),
+    "bánh trung siêu thực"
+  );
+  assert.equal(
+    extractImagePromptFromText("Hân ơi vẽ giúp anh một chú mèo", "Sen Chúa"),
+    "chú mèo"
+  );
+  assert.equal(
+    extractImagePromptFromText("Chào các bot, vẽ cho tôi bức ảnh hoàng hôn trên biển", "Mộc Miên"),
+    "hoàng hôn trên biển"
+  );
 });
 
 test("extractImagePromptFromText KHÔNG bắt nhầm các yêu cầu tạo văn bản / file docx / vẽ biểu đồ / câu hỏi thường", () => {
@@ -43,11 +55,14 @@ test("extractImagePromptFromText KHÔNG bắt nhầm các yêu cầu tạo văn 
   assert.equal(extractImagePromptFromText("tạo báo cáo doanh thu tuần này giúp tôi"), null);
   assert.equal(extractImagePromptFromText("hôm nay thời tiết Hà Nội thế nào"), null);
   assert.equal(extractImagePromptFromText("tóm tắt tin tức giúp tôi"), null);
-  // Không được bắt nhầm yêu cầu vẽ biểu đồ/đồ thị/sơ đồ (để nhường cho Python Sandbox)
+  // Không được bắt nhầm yêu cầu vẽ biểu đồ/đồ thị/sơ đồ/bảng thi đấu/lịch trình (để nhường cho Python Sandbox hoặc Markdown/Text)
   assert.equal(extractImagePromptFromText("vẽ biểu đồ từ file này đi"), null);
   assert.equal(extractImagePromptFromText("vẽ biểu đồ cột lương"), null);
   assert.equal(extractImagePromptFromText("vẽ đồ thị tăng trưởng doanh số"), null);
   assert.equal(extractImagePromptFromText("vẽ chart so sánh chi phí"), null);
+  assert.equal(extractImagePromptFromText("vẽ bảng thi đấu theo lịch này giúp a"), null);
+  assert.equal(extractImagePromptFromText("vẽ lịch thi đấu cúp C1"), null);
+  assert.equal(extractImagePromptFromText("vẽ bảng xếp hạng ngoại hạng Anh"), null);
 });
 
 test("parseImagePromptAndRatio bóc tách sạch sẽ prompt và tỉ lệ 16:9, 9:16, 4:3, 1:1", async () => {
@@ -99,9 +114,47 @@ test("parseImagePromptAndRatio bóc tách sạch sẽ prompt và tỉ lệ 16:9,
   } as any);
   assert.ok(rQuoteImage);
   assert.equal(rQuoteImage?.referenceImageUrl, "https://example.com/input.png");
+
+  // Kiểm tra lệnh sửa ảnh:
+  const rEditCmd = parseImagePromptAndRatio("/suaanh đổi màu tóc thành bạch kim", "Sen Chúa");
+  assert.ok(rEditCmd);
+  assert.equal(rEditCmd?.prompt, "đổi màu tóc thành bạch kim");
+  assert.equal(rEditCmd?.isEdit, true);
+
+  // Kiểm tra câu nói sửa ảnh tự nhiên:
+  const rNaturalEdit = parseImagePromptAndRatio("sửa ảnh này thành phong cách cyberpunk", "Sen Chúa");
+  assert.ok(rNaturalEdit);
+  assert.equal(rNaturalEdit?.prompt, "phong cách cyberpunk");
+  assert.equal(rNaturalEdit?.isEdit, true);
+
+  // Kiểm tra quote ảnh kèm yêu cầu sửa trực tiếp:
+  const rQuoteAction = parseImagePromptAndRatio("thay nền thành bãi biển hoàng hôn", "Sen Chúa", {
+    mediaUrl: "https://example.com/girl.jpg",
+    mediaType: "image",
+  } as any);
+  assert.ok(rQuoteAction);
+  assert.equal(rQuoteAction?.prompt, "nền thành bãi biển hoàng hôn");
+  assert.equal(rQuoteAction?.referenceImageUrl, "https://example.com/girl.jpg");
+  assert.equal(rQuoteAction?.isEdit, true);
 });
 
 test("isCloudflareConfigured hoạt động không crash", () => {
   const configured = isCloudflareConfigured();
   assert.equal(typeof configured, "boolean");
 });
+
+test("Kiểm tra bóc tách prompt tạo ảnh bánh trung thu khi có nhiều tên đệm / gọi tên bot", () => {
+  assert.equal(
+    extractImagePromptFromText("Sen Chúa tạo ảnh bánh trung thu siêu thực", "Sen Chúa"),
+    "bánh trung thu siêu thực"
+  );
+  assert.equal(
+    extractImagePromptFromText("Hân mộc miên sen chúa tạo ảnh bánh trung siêu thực", "Sen Chúa"),
+    "bánh trung siêu thực"
+  );
+  assert.equal(
+    extractImagePromptFromText("Mộc Miên ơi vẽ cho anh một chiếc bánh trung thu nhân thập cẩm", "Mộc Miên"),
+    "bánh trung thu nhân thập cẩm"
+  );
+});
+

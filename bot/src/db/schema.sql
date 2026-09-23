@@ -565,3 +565,48 @@ CREATE TABLE IF NOT EXISTS permanent_knowledge (
 
 CREATE INDEX IF NOT EXISTS idx_perm_knowledge_topic ON permanent_knowledge(topic);
 CREATE INDEX IF NOT EXISTS idx_perm_knowledge_scope ON permanent_knowledge(scope, updated_at);
+
+-- Bộ nhớ dài hạn cho từng thành viên (User Long-Term Memory)
+CREATE TABLE IF NOT EXISTS user_memories (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id        TEXT NOT NULL,               -- Zalo UID (senderId)
+  thread_id      TEXT NOT NULL DEFAULT '',    -- ID nhóm hoặc inbox gần nhất
+  user_name      TEXT NOT NULL DEFAULT '',    -- Tên hiển thị của người dùng
+  category       TEXT NOT NULL,               -- 'preference' | 'fact' | 'task'
+  memory_key     TEXT NOT NULL,               -- Khóa ngắn gọn (vd: favorite_club, job_title, chart_style)
+  memory_value   TEXT NOT NULL,               -- Nội dung chi tiết (vd: 'Arsenal FC', 'Kỹ sư AI', 'Dark Burgundy')
+  source_snippet TEXT NOT NULL DEFAULT '',    -- Trích đoạn câu nói gốc
+  confidence     REAL NOT NULL DEFAULT 1.0,   -- Độ tin cậy (0.0 - 1.0)
+  created_at     INTEGER NOT NULL,
+  updated_at     INTEGER NOT NULL,
+  UNIQUE(user_id, memory_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_memories_user ON user_memories(user_id, category);
+CREATE INDEX IF NOT EXISTS idx_user_memories_updated ON user_memories(user_id, updated_at);
+
+-- Kho lưu trữ GitHub Repo được chia sẻ trong nhóm (FindARepo Style)
+CREATE TABLE IF NOT EXISTS group_repos (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id         TEXT NOT NULL,
+  repo_url          TEXT NOT NULL,
+  owner             TEXT NOT NULL,
+  repo_name         TEXT NOT NULL,
+  full_name         TEXT NOT NULL,
+  description       TEXT,
+  stars             INTEGER DEFAULT 0,
+  forks             INTEGER DEFAULT 0,
+  language          TEXT,
+  category          TEXT NOT NULL,
+  summary_vi        TEXT NOT NULL,
+  target_audience   TEXT,
+  shared_by_uid     TEXT,
+  shared_by_name    TEXT,
+  created_at        INTEGER NOT NULL,
+  updated_at        INTEGER NOT NULL,
+  UNIQUE(thread_id, full_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_group_repos_thread ON group_repos(thread_id);
+CREATE INDEX IF NOT EXISTS idx_group_repos_category ON group_repos(category);
+CREATE INDEX IF NOT EXISTS idx_group_repos_created ON group_repos(created_at DESC);

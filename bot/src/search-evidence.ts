@@ -1,3 +1,5 @@
+import { isBotStatusOrMetaQuestion } from "./query-planner.js";
+
 export type SearchIntent = "fact_check" | "realtime_news" | "project_qa" | "knowledge" | "chat";
 
 export type EvidenceSourceType = "official" | "primary" | "market" | "news" | "encyclopedia" | "web";
@@ -135,13 +137,16 @@ function inferAuthority(item: SearchEvidence): number {
     /(?:^|\.)(?:gov|gouv|gob|go|gc)\.[a-z.]+$/i.test(value) || /(?:^|\.)gov$/i.test(value)
   );
   const isEducation = authorityHosts.some((value) => /(?:^|\.)edu(?:\.[a-z]{2})?$/i.test(value));
-  const type = isGovernment ? "official" : item.sourceType || "web";
+  const isMajorPress = authorityHosts.some((value) =>
+    /(?:vnexpress\.net|tuoitre\.vn|thanhnien\.vn|vietnamnet\.vn|dantri\.com\.vn|laodong\.vn|tienphong\.vn|nhandan\.vn|vtv\.vn|vov\.vn|chinhphu\.vn|cafef\.vn|znews\.vn|baomoi\.com|24h\.com\.vn|bongda\.com\.vn|bongdaplus\.vn|bongda24h\.vn)/i.test(value)
+  );
+  const type = isGovernment ? "official" : isMajorPress ? "news" : item.sourceType || "web";
 
   switch (type) {
     case "official": return 1;
     case "primary": return 0.9;
     case "market": return 0.88;
-    case "news": return 0.72;
+    case "news": return 0.75;
     case "encyclopedia": return 0.58;
     default: return isEducation ? 0.82 : 0.45;
   }
@@ -519,7 +524,15 @@ function stripTrailingSourceBlock(answer: string): string {
   return lines.slice(0, sourceHeaderIndex).join("\n").trim();
 }
 
-export function finalizeGroundedAnswer(answer: string, evidenceContext: string, evidenceRequired: boolean): string {
+export function finalizeGroundedAnswer(
+  answer: string,
+  evidenceContext: string,
+  evidenceRequired: boolean,
+  options?: {
+    intent?: string;
+    question?: string;
+  },
+): string {
   if (evidenceRequired) {
     const hasSufficientEvidence = /^EVIDENCE_STATUS:\s*SUFFICIENT/im.test(evidenceContext);
     if (!hasSufficientEvidence) {
@@ -537,10 +550,25 @@ export function finalizeGroundedAnswer(answer: string, evidenceContext: string, 
 
   // Nếu câu trả lời có context dữ liệu thời gian thực (liveNews) và câu trả lời chưa có trích dẫn nguồn
   if (evidenceContext && evidenceContext.trim().length > 0) {
-    // Không tự ý gắn nguồn tin tức ngoài lề nếu câu trả lời thuộc dữ liệu nội bộ nhóm hoặc nêu không tìm thấy/chưa có dữ liệu
+    // 1. Nếu intent là "chat" -> TUYỆT ĐỐI KHÔNG gắn nguồn
+    if (options?.intent === "chat") {
+      return answer;
+    }
+
+    // 2. Không tự ý gắn nguồn nếu câu hỏi là trò chuyện, chào hỏi, hoặc hỏi trạng thái bot
+    if (options?.question && isBotStatusOrMetaQuestion(options.question)) {
+      return answer;
+    }
+
+    // 3. Không tự ý gắn nguồn nếu câu trả lời nói về trạng thái bot, tiến trình vẽ ảnh, chào hỏi, đùa vui
+    const isBotSelfStatusOrChat =
+      /(?:tiến trình|render|đang vẽ|đang tạo ảnh|đang xử lý|đẩy lại bức ảnh|bức ảnh|chờ em|đợi em|em đây|sẵn sàng hỗ trợ|chào sếp|chào bác|dạ anh|dạ chị|cơn mưa thất tình|hệ thống đang)/i.test(answer);
+
+    // 4. Không tự ý gắn nguồn tin tức ngoài lề nếu câu trả lời thuộc dữ liệu nội bộ nhóm hoặc nêu không tìm thấy/chưa có dữ liệu
     const isInternalOrNegativeAnswer =
       /(?:trong nhóm|nhóm mình|nội bộ|thành viên.*nhóm|không tìm thấy|chưa tìm thấy|chưa có thông tin|không có dữ liệu|chưa đủ bằng chứng)/i.test(answer);
-    if (!isInternalOrNegativeAnswer) {
+
+    if (!isInternalOrNegativeAnswer && !isBotSelfStatusOrChat) {
       const allowedSources = extractEvidenceSources(evidenceContext);
       const alreadyHasCitation = /(?:nguồn(?:\s+kiểm\s+chứng)?|source)\s*:/i.test(answer) || /\*\(nguồn/i.test(answer);
       if (allowedSources.length > 0 && !alreadyHasCitation) {

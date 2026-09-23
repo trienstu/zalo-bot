@@ -421,17 +421,45 @@ export async function login(): Promise<ZaloApi> {
   const saved = loadCredentials();
 
   if (saved) {
-    try {
-      const api = await zalo.login({
-        cookie: saved.cookie as any,
-        imei: saved.imei,
-        userAgent: saved.userAgent,
-      });
-      console.log("[zalo] Đăng nhập lại bằng session đã lưu.");
-      writeLoginStatus("logged_in");
-      return api;
-    } catch (e) {
-      console.warn(`[zalo] Session không dùng được, cần quét lại QR. (${String(e)})`);
+    let retryCount = 0;
+    const maxRetries = 5;
+    while (retryCount < maxRetries) {
+      try {
+        const api = await zalo.login({
+          cookie: saved.cookie as any,
+          imei: saved.imei,
+          userAgent: saved.userAgent,
+        });
+        console.log("[zalo] Đăng nhập lại bằng session đã lưu.");
+        writeLoginStatus("logged_in");
+        return api;
+      } catch (e: any) {
+        const errMsg = String(e?.message || e);
+        const isNetworkErr =
+          errMsg.includes("fetch failed") ||
+          errMsg.includes("ENOTFOUND") ||
+          errMsg.includes("ECONNREFUSED") ||
+          errMsg.includes("ETIMEDOUT") ||
+          errMsg.includes("EAI_AGAIN") ||
+          errMsg.includes("socket hang up") ||
+          errMsg.includes("network");
+
+        if (isNetworkErr) {
+          retryCount++;
+          console.warn(`[zalo] Mạng chập chờn khi kết nối session (${errMsg}). Thử lại lần ${retryCount}/${maxRetries} sau 5s...`);
+          await sleep(5000);
+          continue;
+        }
+
+        // Nếu thực sự là session hỏng (ví dụ Zalo báo session expired / invalid cookie)
+        console.warn(`[zalo] Session không dùng được, cần quét lại QR. (${errMsg})`);
+        break;
+      }
+    }
+
+    if (retryCount >= maxRetries) {
+      console.error(`[zalo] Không thể kết nối tới Zalo sau ${maxRetries} lần thử do lỗi mạng. Thoát để PM2 khởi động lại.`);
+      process.exit(1);
     }
   }
 
@@ -1173,6 +1201,89 @@ export async function sendDirectFile(
     }
   }
 }
+
+/**
+ * Gửi tin nhắn thoại trực tiếp (Zalo Voice Bubble có sóng âm và nút Play) vào Group Zalo.
+ * Ưu tiên gửi native qua api.uploadAttachment + api.sendVoice; tự động fallback sang file nếu lỗi.
+ */
+export async function sendGroupVoice(
+  api: ZaloApi,
+  groupId: string,
+  filePath: string,
+  caption = "",
+): Promise<void> {
+  const threadIdStr = String(groupId).trim();
+  console.log(`[sendGroupVoice] 🎙️ Đang gửi Voice Bubble [${path.basename(filePath)}] vào nhóm [${threadIdStr}]...`);
+
+  // Nếu có caption riêng biệt không phải câu thông báo mặc định, gửi text trước
+  if (caption && caption.trim() && !caption.includes("gửi voice cho")) {
+    try {
+      await sendGroupText(api, threadIdStr, caption.trim());
+      await sleep(300);
+    } catch (textErr) {
+      console.warn("[sendGroupVoice] Không gửi được caption text:", textErr);
+    }
+  }
+
+  try {
+    if (typeof api.uploadAttachment === "function" && typeof api.sendVoice === "function") {
+      const uploadRes = await api.uploadAttachment([filePath], threadIdStr, ThreadType.Group);
+      const voiceUrl = uploadRes?.[0]?.fileUrl || uploadRes?.[0]?.url;
+      if (voiceUrl) {
+        console.log(`[sendGroupVoice] 🚀 Đã upload audio lên Zalo CDN (${voiceUrl}). Đang phát Voice Bubble...`);
+        await api.sendVoice({ voiceUrl }, threadIdStr, ThreadType.Group);
+        console.log(`[sendGroupVoice] ✅ Đã gửi Voice Bubble thành công vào nhóm [${threadIdStr}]!`);
+        return;
+      }
+    }
+  } catch (voiceErr) {
+    console.warn("[sendGroupVoice] Gửi Voice Bubble qua sendVoice gặp sự cố, tự động fallback sang gửi file:", voiceErr);
+  }
+
+  // Fallback an toàn sang gửi file nếu upload/sendVoice bị lỗi
+  await sendGroupFile(api, threadIdStr, filePath, caption);
+}
+
+/**
+ * Gửi tin nhắn thoại trực tiếp (Zalo Voice Bubble có sóng âm và nút Play) 1:1 cho người dùng / Admin.
+ * Ưu tiên gửi native qua api.uploadAttachment + api.sendVoice; tự động fallback sang file nếu lỗi.
+ */
+export async function sendDirectVoice(
+  api: ZaloApi,
+  userId: string,
+  filePath: string,
+  caption = "",
+): Promise<void> {
+  const targetId = String(userId).trim();
+  console.log(`[sendDirectVoice] 🎙️ Đang gửi Voice Bubble [${path.basename(filePath)}] đến [${targetId}]...`);
+
+  if (caption && caption.trim() && !caption.includes("gửi voice cho")) {
+    try {
+      await sendDirectText(api, targetId, caption.trim());
+      await sleep(300);
+    } catch (textErr) {
+      console.warn("[sendDirectVoice] Không gửi được caption text:", textErr);
+    }
+  }
+
+  try {
+    if (typeof api.uploadAttachment === "function" && typeof api.sendVoice === "function") {
+      const uploadRes = await api.uploadAttachment([filePath], targetId, ThreadType.User);
+      const voiceUrl = uploadRes?.[0]?.fileUrl || uploadRes?.[0]?.url;
+      if (voiceUrl) {
+        console.log(`[sendDirectVoice] 🚀 Đã upload audio lên Zalo CDN (${voiceUrl}). Đang phát Voice Bubble 1:1...`);
+        await api.sendVoice({ voiceUrl }, targetId, ThreadType.User);
+        console.log(`[sendDirectVoice] ✅ Đã gửi Voice Bubble 1:1 thành công đến [${targetId}]!`);
+        return;
+      }
+    }
+  } catch (voiceErr) {
+    console.warn("[sendDirectVoice] Gửi Voice Bubble 1:1 qua sendVoice gặp sự cố, tự động fallback sang gửi file:", voiceErr);
+  }
+
+  await sendDirectFile(api, targetId, filePath, caption);
+}
+
 
 
 /**

@@ -460,7 +460,7 @@ async function fetchGoogleNewsRss(keyword: string, lang: "vi" | "en" = "vi"): Pr
       const url = `https://news.google.com/rss/search?q=${encodeURIComponent(keyword)}&hl=${hl}&gl=${gl}&ceid=${ceid}`;
 
       const res = await fetch(url, {
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(3500),
         headers: {
           "User-Agent":
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko)",
@@ -773,7 +773,7 @@ export async function searchRealtimeNews(query: string | string[], options: Sear
   const timedOut = Symbol("search-timeout");
   let timer: NodeJS.Timeout | undefined;
   const timeoutPromise = new Promise<typeof timedOut>((resolve) => {
-    timer = setTimeout(() => resolve(timedOut), 5000);
+    timer = setTimeout(() => resolve(timedOut), 7500);
   });
   const result = await Promise.race([searchPromise, timeoutPromise]);
   if (timer) clearTimeout(timer);
@@ -958,43 +958,71 @@ async function doSearchRealtimeNews(
       secondaryQ = `${cleanQ} phát ngôn tuyên bố mới nhất`;
     }
 
-    // 6. KIẾN TRÚC PHÂN TẦNG THỜI GIAN (CASCADING 3-TIER SEARCH):
-    let candidates: ParsedNewsItem[] = [];
+    // 6. KIẾN TRÚC PHÂN TẦNG THỜI GIAN (CASCADING 3-TIER SEARCH - CHẠY SONG SONG VỚI WEB SEARCH):
+    const pipelinePromise = (async (): Promise<ParsedNewsItem[]> => {
+      let cand: ParsedNewsItem[] = [];
+      if (is24hStrict) {
+        // TẦNG 1: Ép cứng 24h qua (when:1d)
+        const res24h = await queryNewsPipeline(cleanQ, "when:1d", needEnglishSearch, secondaryQ, enQueryStr, categories);
+        cand = res24h.filter((r) => r.ageHours <= 26);
 
-    if (is24hStrict) {
-      // TẦNG 1: Ép cứng 24h qua (when:1d)
-      const res24h = await queryNewsPipeline(cleanQ, "when:1d", needEnglishSearch, secondaryQ, enQueryStr, categories);
-      candidates = res24h.filter((r) => r.ageHours <= 26);
-
-      // Nếu tầng 24h không có tin nào, tự động thác đổ xuống Tầng 2 (7 ngày)
-      if (candidates.length === 0) {
+        // Nếu tầng 24h không có tin nào, tự động thác đổ xuống Tầng 2 (7 ngày)
+        if (cand.length === 0) {
+          const res7d = await queryNewsPipeline(cleanQ, "when:7d", needEnglishSearch, secondaryQ, enQueryStr, categories);
+          cand = res7d.filter((r) => r.ageHours <= 7 * 24 + 6);
+        }
+      } else if (is7dRecent) {
+        // TẦNG 2: Trong 7 ngày qua (when:7d)
         const res7d = await queryNewsPipeline(cleanQ, "when:7d", needEnglishSearch, secondaryQ, enQueryStr, categories);
-        candidates = res7d.filter((r) => r.ageHours <= 7 * 24 + 6);
-      }
-    } else if (is7dRecent) {
-      // TẦNG 2: Trong 7 ngày qua (when:7d)
-      const res7d = await queryNewsPipeline(cleanQ, "when:7d", needEnglishSearch, secondaryQ, enQueryStr, categories);
-      candidates = res7d.filter((r) => r.ageHours <= 7 * 24 + 6);
+        cand = res7d.filter((r) => r.ageHours <= 7 * 24 + 6);
 
-      // Nếu tầng 7 ngày không có tin nào, thác đổ xuống Tầng 3 (Không giới hạn)
-      if (candidates.length === 0) {
-        candidates = await queryNewsPipeline(cleanQ, "", needEnglishSearch, secondaryQ, enQueryStr, categories);
+        // Nếu tầng 7 ngày không có tin nào, thác đổ xuống Tầng 3 (Không giới hạn)
+        if (cand.length === 0) {
+          cand = await queryNewsPipeline(cleanQ, "", needEnglishSearch, secondaryQ, enQueryStr, categories);
+        }
+      } else {
+        // TẦNG 3: KHÔNG GIỚI HẠN THỜI GIAN (Mặc định cho các câu hỏi tra cứu thông tin/hồ sơ/sự việc)
+        cand = await queryNewsPipeline(cleanQ, "", needEnglishSearch, secondaryQ, enQueryStr, categories);
       }
-    } else {
-      // TẦNG 3: KHÔNG GIỚI HẠN THỜI GIAN (Mặc định cho các câu hỏi tra cứu thông tin/hồ sơ/sự việc)
-      candidates = await queryNewsPipeline(cleanQ, "", needEnglishSearch, secondaryQ, enQueryStr, categories);
-    }
+      return cand;
+    })();
 
     // 7. Tra cứu song song Bách khoa toàn thư Wikipedia nếu là câu hỏi khái niệm / danh nhân / lịch sử / địa danh / hành chính
-    let wikiText = "";
-    try {
-      const isEncyclopedia = /(?:ai là|là ai|tiểu sử|nguồn gốc|lịch sử|năm nào|định nghĩa|khái niệm|nguyên lý|hiện tượng|tại sao lại|ý nghĩa của|chiến dịch|nhà văn|tác giả|diễn viên|tỉnh thành|thành phố|trung ương|đơn vị hành chính)/i.test(
-        rawQuery
-      );
-      if (isEncyclopedia) {
-        wikiText = await fetchWikipediaSummary(cleanQ);
-      }
-    } catch {}
+    const wikiPromise = (async (): Promise<string> => {
+      try {
+        const isEncyclopedia = /(?:ai là|là ai|tiểu sử|nguồn gốc|lịch sử|năm nào|định nghĩa|khái niệm|nguyên lý|hiện tượng|tại sao lại|ý nghĩa của|chiến dịch|nhà văn|tác giả|diễn viên|tỉnh thành|thành phố|trung ương|đơn vị hành chính)/i.test(
+          rawQuery
+        );
+        if (isEncyclopedia) {
+          return await fetchWikipediaSummary(cleanQ);
+        }
+      } catch {}
+      return "";
+    })();
+
+    // 8. Quét Web Search mở rộng (DuckDuckGo Snippets) song song
+    const snippetQueries: string[] = [cleanQ];
+    const shouldBuildRealEstateProfile = isRealEstateProjectProfileQuery(rawQuery);
+    if (shouldBuildRealEstateProfile) {
+      snippetQueries.push(...buildRealEstateProjectSearchQueries(cleanQ).slice(0, 2));
+    }
+    if (isWorldPolitics) {
+      snippetQueries.push(`${cleanQ} phát ngôn tuyên bố mới nhất ${new Date().getFullYear()}`);
+    }
+    if (needEnglishSearch && enQueryStr) {
+      snippetQueries.push(enQueryStr);
+    }
+    const webSnippetsPromise = Promise.allSettled(
+      snippetQueries.map((q) => webSearch(q, intent === "fact_check" ? 8 : 4))
+    );
+
+    const [pipelineCandidates, wikiText, snippetResults] = await Promise.all([
+      pipelinePromise,
+      wikiPromise,
+      webSnippetsPromise,
+    ]);
+
+    let candidates: ParsedNewsItem[] = pipelineCandidates;
 
     // 7.5. Lọc bỏ các tin lạc đề hoàn toàn không liên quan đến chủ đề đang hỏi (nếu có chuyên mục cụ thể)
     if (categories.includes("bat-dong-san")) {
@@ -1080,40 +1108,10 @@ async function doSearchRealtimeNews(
     }
     const mergedItems = Array.from(titleMap.values());
 
-    // 10. Luôn luôn trích xuất dữ liệu web chuyên sâu & bách khoa qua DuckDuckGo Web Search Snippets
+    // 10. Trích xuất kết quả richSnippetsText từ web search đã chạy song song
     let richSnippetsText = "";
     const collectedSnippets: SearchResultItem[] = [];
     try {
-      const snippetQueries: string[] = [cleanQ];
-      const shouldBuildRealEstateProfile = isRealEstateProjectProfileQuery(rawQuery);
-      if (shouldBuildRealEstateProfile) {
-        snippetQueries.push(...buildRealEstateProjectSearchQueries(cleanQ).slice(0, 2));
-      }
-
-      if (isWorldPolitics) {
-        snippetQueries.push(`${cleanQ} phát ngôn tuyên bố mới nhất ${new Date().getFullYear()}`);
-      }
-
-      // Query tiếng Anh nếu cần thiết cho mảng thế giới / AI công nghệ
-      if (needEnglishSearch && enQueryStr) {
-        snippetQueries.push(enQueryStr);
-      }
-
-      // Chỉ lấy thêm tiêu đề từ mergedItems nếu là câu hỏi tin tức thế giới/chính trị
-      if (isWorldPolitics) {
-        for (const item of mergedItems.slice(0, 3)) {
-          const rawTitle = item.title.split(/\s*-\s*[^-]+$/)[0]?.trim();
-          if (rawTitle && rawTitle.length > 10 && !snippetQueries.some((q) => q.includes(rawTitle.slice(0, 20)))) {
-            snippetQueries.push(rawTitle);
-            if (snippetQueries.length >= 4) break;
-          }
-        }
-      }
-
-      const snippetResults = await Promise.allSettled(
-        snippetQueries.map((q) => webSearch(q, intent === "fact_check" ? 8 : 4))
-      );
-
       const seenSnippets = new Set<string>();
 
       for (const res of snippetResults) {
@@ -1225,7 +1223,7 @@ async function doSearchRealtimeNews(
 
       let scheduleTable = "";
       for (const cand of scheduleCandidates) {
-        if (cand.url) {
+        if (cand.url && !cand.url.includes("news.google.com")) {
           scheduleTable = await fetchArticleScheduleTable(cand.url);
           if (!scheduleTable && /đội tuyển|quốc gia|asean|world cup|asian cup|u23|lịch thi đấu/i.test(cand.title)) {
             // Nếu bài viết về đội tuyển/giải đấu không có thẻ <table>, trích xuất đoạn bài viết chi tiết
@@ -1251,7 +1249,7 @@ async function doSearchRealtimeNews(
             lang: "vi",
           });
           const vnNetSchedule = vnNetFeed.find((it) => /lịch thi đấu/i.test(it.title));
-          if (vnNetSchedule?.url) {
+          if (vnNetSchedule?.url && !vnNetSchedule.url.includes("news.google.com")) {
             scheduleTable = await fetchArticleScheduleTable(vnNetSchedule.url);
             if (scheduleTable) {
               sections.unshift(`⚽ LỊCH THI ĐẤU & CÁC CẶP ĐẤU BÓNG ĐÁ CHI TIẾT (Trích xuất từ Báo Thể Thao):\n${scheduleTable}`);
@@ -1265,6 +1263,7 @@ async function doSearchRealtimeNews(
 
     if (intent === "fact_check" || options.requireEvidence) {
       sections.push(`🔎 BẰNG CHỨNG ĐÃ XẾP HẠNG VÀ KIỂM TRA:\n${evidenceContext}`);
+      if (richSnippetsText) sections.push(richSnippetsText);
     } else {
       if (wikiText) sections.push(wikiText);
       if (richSnippetsText) sections.push(richSnippetsText);
