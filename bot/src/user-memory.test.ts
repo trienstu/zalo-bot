@@ -13,6 +13,7 @@ import {
   deleteUserMemory,
   type UserMemoryItem,
 } from "./db/index.js";
+import { deriveConversationPronouns } from "./admin-assistant.js";
 
 test("isMemoryControlCommand nhận diện đúng lệnh xem trí nhớ", () => {
   assert.equal(isMemoryControlCommand("!xemtrinho"), "view");
@@ -134,3 +135,62 @@ test("CRUD user_memories hoạt động an toàn và chính xác", () => {
   const clearText = handleMemoryControlCommand("clear", testUserId, "Test User");
   assert.ok(clearText.includes("chưa lưu thông tin") || clearText.includes("xóa sạch"));
 });
+
+test("deriveConversationPronouns xác định đúng cặp xưng hô đối xứng thuần Việt", () => {
+  // 1. Admin -> Sếp / em
+  const adminRes = deriveConversationPronouns({
+    isAdmin: true,
+    displayName: "Admin Triển",
+    rawText: "kiểm tra hệ thống giúp tôi",
+  });
+  assert.equal(adminRes.userTitle, "Sếp");
+  assert.equal(adminRes.botPronoun, "em");
+
+  // 2. Người dùng lớn tuổi (Chú) lưu trong trí nhớ dài hạn -> Chú / cháu (CẤM xưng em với Chú)
+  const elderResMem = deriveConversationPronouns({
+    isAdmin: false,
+    displayName: "Nguyễn Văn A",
+    rawText: "hôm nay có gì mới",
+    memories: [{ memory_key: "addressing_preference", memory_value: "Người dùng muốn được gọi là Chú" }],
+  });
+  assert.equal(elderResMem.userTitle, "Chú");
+  assert.equal(elderResMem.botPronoun, "cháu");
+  assert.match(elderResMem.instruction, /TUYỆT ĐỐI CẤM xưng cọc cạch như 'em' với 'Chú'/i);
+
+  // 3. Người dùng lớn tuổi (Chú) từ tin nhắn tự nhiên
+  const elderResText = deriveConversationPronouns({
+    isAdmin: false,
+    displayName: "Nguyễn Văn A",
+    rawText: "Cháu đọc cho chú nghe bài này với, chú đang bận",
+  });
+  assert.equal(elderResText.userTitle, "Chú");
+  assert.equal(elderResText.botPronoun, "cháu");
+
+  // 4. Người dùng là Bác / Cô / Dì
+  const bacRes = deriveConversationPronouns({
+    isAdmin: false,
+    displayName: "Trần B",
+    rawText: "bác hỏi cháu câu này",
+  });
+  assert.equal(bacRes.userTitle, "Bác");
+  assert.equal(bacRes.botPronoun, "cháu");
+
+  // 5. Người dùng là Anh / Chị
+  const siblingRes = deriveConversationPronouns({
+    isAdmin: false,
+    displayName: "Lê C",
+    rawText: "em ơi đọc giúp anh bài này với",
+  });
+  assert.equal(siblingRes.userTitle, "Anh");
+  assert.equal(siblingRes.botPronoun, "em");
+
+  // 6. Mặc định
+  const defaultRes = deriveConversationPronouns({
+    isAdmin: false,
+    displayName: "Hoàng",
+    rawText: "xin chào bot",
+  });
+  assert.equal(defaultRes.userTitle, "Hoàng");
+  assert.equal(defaultRes.botPronoun, "em");
+});
+

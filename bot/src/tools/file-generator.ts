@@ -65,6 +65,13 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
   if (hasStructuralDirection) return true;
   if (hasFileTarget && (hasAction || isAffirmativeFollowUp)) return true;
 
+  const isSpeechOrVoiceRequest =
+    /(?:đọc|nói|phát|kể)\s+(?:cho\s+)?(?:[\p{L}\s]+)?\s*nghe/iu.test(qLower) ||
+    /(?:bận|đang\s+lái\s+xe|không\s+tiện\s+đọc)\s*[,.]*\s*(?:đọc|phát|nói|voice|audio)/iu.test(qLower) ||
+    /(?:chuyển|phát|đọc)\s+(?:thành|ra|sang)?\s*(?:giọng|tiếng|âm\s*thanh|lời\s*nói)/iu.test(qLower);
+
+  if (isSpeechOrVoiceRequest) return true;
+
   const isCodeOrChart =
     /(?:vẽ|tạo|xuất|lập|thiết\s*kế|làm|soạn)(?:\s+lại)?\s*(?:cho\s*.*?\s*)?(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|poster|ảnh|hình|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/i.test(qLower) ||
     /(?:biểu\s*đồ|đồ\s*họa|poster|infographic|hình\s*ảnh).*?(?:làm\s*lại|sửa\s*lại|vẽ\s*lại|cẩn\s*thận|đẹp\s*hơn|chuyên\s*nghiệp)/i.test(qLower) ||

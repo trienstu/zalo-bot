@@ -32,7 +32,7 @@ import { handleSetReminder, handleListReminders, handleCancelReminder } from "./
 import { getDailyAiNewsBriefing } from "./ai-news.js";
 import { searchRealtimeNews } from "./realtime-search.js";
 import { planSearchQueries } from "./query-planner.js";
-import { finalizeGroundedAnswer } from "./search-evidence.js";
+import { finalizeGroundedAnswer, isStrictVerificationQuestion } from "./search-evidence.js";
 import { isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
 import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from "./grounding-quota.js";
 import {
@@ -52,6 +52,88 @@ import {
   extractAndSaveUserMemories,
   formatUserMemoriesForPrompt,
 } from "./user-memory.js";
+
+export interface ConversationPronouns {
+  botPronoun: string;
+  userTitle: string;
+  instruction: string;
+}
+
+function matchesPronoun(text: string, words: string[]): boolean {
+  const norm = String(text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase();
+  const pattern = new RegExp(`\\b(?:${words.join("|")})\\b`, "i");
+  return pattern.test(norm);
+}
+
+export function deriveConversationPronouns(params: {
+  isAdmin: boolean;
+  displayName: string;
+  rawText: string;
+  quoteText?: string;
+  memories?: { memory_key?: string; memory_value?: string }[];
+}): ConversationPronouns {
+  const { isAdmin, displayName, rawText, quoteText = "", memories = [] } = params;
+
+  if (isAdmin) {
+    return {
+      botPronoun: "em",
+      userTitle: "Sếp",
+      instruction: `Xưng 'em' (hoặc '${defaultBotName}'), gọi Admin là 'Sếp' (hoặc '${displayName}') một cách lịch thiệp, tôn trọng và chu đáo.`,
+    };
+  }
+
+  // Quét thông tin từ trí nhớ dài hạn (user_memories) và hội thoại hiện tại
+  const memTexts = memories.map((m) => `${m.memory_key || ""} ${m.memory_value || ""}`).join(" ");
+  const currentTexts = `${rawText} ${quoteText}`;
+
+  // 1. Nhận diện vai vế lớn hơn (Chú, Bác, Cô, Dì, Thím, Cậu)
+  let foundElder: string | null = null;
+  if (matchesPronoun(memTexts, ["chu"]) || matchesPronoun(currentTexts, ["chu"])) {
+    foundElder = "Chú";
+  } else if (matchesPronoun(memTexts, ["bac"]) || matchesPronoun(currentTexts, ["bac"])) {
+    foundElder = "Bác";
+  } else if (matchesPronoun(memTexts, ["co"]) || matchesPronoun(currentTexts, ["co"])) {
+    foundElder = "Cô";
+  } else if (matchesPronoun(memTexts, ["di", "thim"]) || matchesPronoun(currentTexts, ["di", "thim"])) {
+    foundElder = "Dì";
+  }
+
+  if (foundElder) {
+    return {
+      botPronoun: "cháu",
+      userTitle: foundElder,
+      instruction: `QUY TẮC XƯNG HÔ ĐỐI XỨNG & KÍNH TRỌNG: Người dùng là bề trên (${foundElder}). BẮT BUỘC xưng 'cháu', gọi người dùng là '${foundElder}'. TUYỆT ĐỐI CẤM xưng cọc cạch như 'em' với '${foundElder}'! Lễ phép, tự nhiên, chuẩn mực thuần phong mỹ tục Việt Nam.`,
+    };
+  }
+
+  // 2. Nhận diện anh/chị
+  let foundSibling: string | null = null;
+  if (matchesPronoun(memTexts, ["chi"]) || matchesPronoun(currentTexts, ["chi"])) {
+    foundSibling = "Chị";
+  } else if (matchesPronoun(memTexts, ["anh"]) || matchesPronoun(currentTexts, ["anh"])) {
+    foundSibling = "Anh";
+  }
+
+  if (foundSibling) {
+    return {
+      botPronoun: "em",
+      userTitle: foundSibling,
+      instruction: `QUY TẮC XƯNG HÔ: Xưng 'em', gọi người dùng là '${foundSibling}'. Thân thiện, chu đáo, tôn trọng.`,
+    };
+  }
+
+  // 3. Mặc định
+  const defaultTitle = displayName ? displayName : "bạn";
+  return {
+    botPronoun: "em",
+    userTitle: defaultTitle,
+    instruction: `Xưng 'em' hoặc 'mình', gọi người dùng là '${defaultTitle}' hoặc 'bạn'. Giữ văn phong thanh lịch, gần gũi và nhiệt tình.`,
+  };
+}
 
 // Lưu lịch sử trò chuyện nhiều lượt (Multi-turn Chat) giữa Admin và Bot (Lưu tối đa 12 lượt gần nhất)
 const adminChatSessions = new Map<string, { role: "user" | "model"; text: string }[]>();
@@ -1417,6 +1499,25 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       .join("\n")
     : "";
 
+  let userMemories: any[] = [];
+  let userMemorySection = "";
+  try {
+    userMemories = getUserMemories(sender, 8);
+    if (userMemories.length > 0) {
+      userMemorySection = `\n\n` + formatUserMemoriesForPrompt(userMemories, displayName);
+    }
+  } catch (e) {
+    console.warn("[admin-assistant] Lỗi getUserMemories:", e);
+  }
+
+  const pronouns = deriveConversationPronouns({
+    isAdmin,
+    displayName,
+    rawText,
+    quoteText: event.quote?.text,
+    memories: userMemories,
+  });
+
   const temporalPrompt = getSystemTemporalPrompt();
   const systemPrompt = `${temporalPrompt}\n\n` + (isAdmin
     ? `Bạn là '${defaultBotName}' - Trợ lý AI cá nhân cao cấp, thông minh, tận tâm và hóm hỉnh phục vụ riêng cho Admin/Chủ bot (${displayName}).\n` +
@@ -1441,7 +1542,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `   - BẮT BUỘC ĐI THẲNG VÀO ĐÁP ÁN, SỐ LIỆU HOẶC THÔNG TIN CỐT LÕI ngay từ dòng đầu tiên.\n` +
     `   - TUYỆT ĐỐI CẤM mở bài bằng các câu chào hỏi rườm rà, cảm thán đùa cợt, phân trần giải thích lý do, hứa hẹn tương lai, tự kiểm điểm hoặc các câu chào báo cáo dài dòng làm loãng tin (CẤM các câu kiểu "em xin lỗi Sếp vì...", "thông tin trước đó chưa tập trung...", "em đang theo dõi sát sao...").\n` +
     `   - Dù ở lượt trước Sếp có nhắc nhở hay phàn nàn, lượt này PHẢI CUNG CẤP NGAY ĐÁP ÁN CHÍNH XÁC VÀ GỌN GÀNG, tuyệt đối không nhắc lại chuyện cũ hay phân trần.\n` +
-    `   - Xưng 'em' hoặc '${defaultBotName}', gọi Admin là 'Sếp' hoặc '${displayName}' một cách lịch thiệp, tôn trọng và chu đáo.\n` +
+    `   - ${pronouns.instruction}\n` +
     `8. ĐỘ DÀI & TỐC ĐỘ: Trả lời gãy gọn, đúng trọng tâm, súc tích (khoảng 300-800 ký tự). Tránh viết dài dòng lan man trừ khi được yêu cầu phân tích sâu.\n` +
     `9. NGUYÊN TẮC TRUNG THỰC & CHỐNG BỊA ĐẶT (ANTI-HALLUCINATION):\n` +
     `   - Nếu trong tài liệu, hình ảnh, trích dẫn hoặc dữ liệu không có thông tin chi tiết về điều Sếp hỏi, hãy thành thật trả lời là không có thông tin đó. Tuyệt đối cấm tự suy diễn hoặc bịa ra sự kiện, sản phẩm không có căn cứ.\n` +
@@ -1455,15 +1556,17 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `       • 💰 4. Giá bán & Chính sách tham khảo (Giá rumor/dự kiến đợt 1 từng loại hình, chính sách bán hàng hoặc vay vốn nếu có).\n` +
     `     + In đậm các số liệu quan trọng, trình bày gạch đầu dòng rõ ràng, mạch lạc, tối ưu hiển thị trên giao diện chat Zalo.\n` +
     `   - [CHỐNG BẺ LÁI SANG BẤT ĐỘNG SẢN]: Khi người dùng hỏi về địa lý, xã hội, khoa học, chính trị, thể thao, công nghệ, lịch sử: PHẢI TRẢ LỜI ĐÚNG TRỌNG TÂM, CẤM tự ý suy diễn người hỏi đi du lịch hay lôi chuyện bất động sản/mua bán đất vào câu trả lời nếu người dùng không hỏi về BĐS!`
-    : `Bạn là '${defaultBotName}' - Trợ lý AI thông minh, thân thiện, duyên dáng và hóm hỉnh của Zalo đang trò chuyện 1:1 với bạn ${displayName}.\n` +
+    : `Bạn là '${defaultBotName}' - Trợ lý AI thông minh, thân thiện, duyên dáng và hóm hỉnh của Zalo đang trò chuyện 1:1 với ${pronouns.userTitle} (${displayName}).\n` +
     `NHIỆM VỤ CỦA BẠN:\n` +
     `1. Trò chuyện tự nhiên, vui vẻ, giải đáp mọi câu hỏi, tư vấn học tập, công việc, tâm sự, dịch thuật, phân tích hình ảnh/tài liệu khi được gửi tới.\n` +
     `2. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
     `   - Hệ thống đã tích hợp bộ chuyển đổi Rich Text native cho Zalo. THOẢI MÁI dùng cú pháp Markdown: **in đậm** từ khóa chính, số liệu; dùng gạch đầu dòng '- ' hoặc '• '.\n` +
     `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Giữ văn phong thanh lịch, không chèn icon vào từng gạch đầu dòng, chỉ dùng 1-2 icon ở tiêu đề nếu cần.\n` +
-    `3. Thái độ: Lễ phép, thân thiện, gần gũi, xưng 'em' hoặc 'mình', gọi người dùng là '${displayName}' hoặc 'bạn'. Bắt buộc đi thẳng vào đáp án, cấm mở bài xin lỗi hoặc vòng vo.\n` +
+    `3. THÁI ĐỘ & QUY TẮC XƯNG HÔ:\n` +
+    `   - ${pronouns.instruction}\n` +
+    `   - Lễ phép, chu đáo, tôn trọng. Bắt buộc đi thẳng vào đáp án, cấm mở bài xin lỗi hoặc vòng vo.\n` +
     `4. Bạn là trợ lý trò chuyện cá nhân, không có quyền can thiệp vào các nhóm Zalo khác.\n` +
-    `5. ĐỘ DÀI & TỐC ĐỘ: Trả lời gãy gọn, súc tích (khoảng 300-800 ký tự), dễ đọc trên điện thoại.\n` +
+    `5. ĐỘ DÀI & TỐC ĐỘ: Trả lời gãy gọn, súc tích (khoảng 300-600 ký tự), dễ đọc trên điện thoại Zalo. Tránh viết dông dài trừ khi người dùng yêu cầu giải thích chi tiết hoặc phân tích sâu.\n` +
     `6. NGUYÊN TẮC TRUNG THỰC: Nếu không có dữ liệu chi tiết, hãy nói rõ là không có thông tin, tuyệt đối không tự bịa đặt câu chuyện hay chi tiết không có thật.\n` +
     `7. KHI CÂU HỎI LÀ TỔNG QUAN DỰ ÁN BẤT ĐỘNG SẢN / CÔNG TRÌNH:\n` +
     `   - BẮT BUỘC cấu trúc câu trả lời chuyên nghiệp theo 4 phân mục: 🏢 TỔNG QUAN DỰ ÁN, 📍 1. Vị trí đắc địa, 📐 2. Quy mô & Cơ cấu sản phẩm, 🌿 3. Tiện ích, 💰 4. Giá bán & Chính sách tham khảo.\n` +
@@ -1502,7 +1605,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     const isFileOrVoiceReq = checkIsFileOrVoiceGeneration(rawText, event.quote?.text);
     if (!isFileOrVoiceReq && plan.needsSearch && plan.queries.length > 0) {
       planNeedsSearch = true;
-      evidenceRequired = plan.intent === "fact_check" || plan.intent === "realtime_news";
+      evidenceRequired = (plan.intent === "fact_check" || plan.intent === "realtime_news") && isStrictVerificationQuestion(rawText);
       const searchQueries = plan.queries.slice(0, 2);
       console.log(`[admin-assistant] 🧠 Semantic Planner: intent=${plan.intent}, queries=${JSON.stringify(searchQueries)}`);
       const tStartSearch = Date.now();
@@ -1670,8 +1773,8 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   const userPrompt =
     (historyText ? `LỊCH SỬ TRÒ CHUYỆN TRƯỚC ĐÓ:\n${historyText}\n\n` : "") +
     `${quoteSection}${fileSection}${liveNewsSection}${groupActivitiesSection}${permanentKnowledgeSection}\n` +
-    `YÊU CẦU MỚI TỪ ${isAdmin ? `ADMIN (${displayName})` : `BẠN (${displayName})`}: ${rawText || "Hãy phân tích tài liệu/hình ảnh này giúp tôi."}\n\n` +
-    (isAdmin ? `HÃY TRẢ LỜI SẾP THẬT CHUẨN XÁC, THÔNG MINH VÀ HỮU ÍCH:` : `HÃY TRẢ LỜI THẬT THÂN THIỆN, CHUẨN XÁC VÀ HỮU ÍCH:`);
+    `YÊU CẦU MỚI TỪ ${isAdmin ? `ADMIN (${displayName})` : `${pronouns.userTitle.toUpperCase()} (${displayName})`}: ${rawText || "Hãy phân tích tài liệu/hình ảnh này giúp tôi."}\n\n` +
+    (isAdmin ? `HÃY TRẢ LỜI SẾP THẬT CHUẨN XÁC, THÔNG MINH VÀ HỮU ÍCH:` : `HÃY TRẢ LỜI ${pronouns.userTitle.toUpperCase()} THẬT THÂN THIỆN, CHUẨN XÁC VÀ HỮU ÍCH:`);
 
   try {
     const isSearchDisabled = process.env.DISABLE_SEARCH === "true";
@@ -1699,16 +1802,6 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
     const targetModel = (needsSearch && canUseGrounding()) ? "gemini-3-flash-preview" : defaultFastModel;
 
-    let userMemorySection = "";
-    try {
-      const userMemories = getUserMemories(sender, 6);
-      if (userMemories.length > 0) {
-        userMemorySection = `\n\n` + formatUserMemoriesForPrompt(userMemories, displayName);
-      }
-    } catch (e) {
-      console.warn("[admin-assistant] Lỗi getUserMemories:", e);
-    }
-
     const fullSystemPrompt =
       systemPrompt +
       userMemorySection +
@@ -1732,14 +1825,15 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
             const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
             const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
             const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+            const userGreeting = isAdmin ? "Sếp" : pronouns.userTitle;
             const caption = file.caption || (
               isSlide
-                ? `📊 ${defaultBotName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho Sếp!`
+                ? `📊 ${defaultBotName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${userGreeting}!`
                 : isImg
-                  ? `🎨 ${defaultBotName} đã tạo ảnh [${file.fileName}] thành công cho Sếp!`
+                  ? `🎨 ${defaultBotName} đã tạo ảnh [${file.fileName}] thành công cho ${userGreeting}!`
                   : isVoice
-                    ? `🎙️ ${defaultBotName} gửi voice cho Sếp nghe đây ạ!`
-                    : `📄 ${defaultBotName} đã tạo file [${file.fileName}] thành công cho Sếp!`
+                    ? `🎙️ ${defaultBotName} gửi voice cho ${userGreeting} nghe đây ạ!`
+                    : `📄 ${defaultBotName} đã tạo file [${file.fileName}] thành công cho ${userGreeting}!`
             );
             if (isVoice) {
               await sendDirectVoice(api, sender, file.filePath, caption);
@@ -1788,11 +1882,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
     answer = await interceptAndExecuteSimulatedTool(answer, async (file) => {
       try {
+        const userGreeting = isAdmin ? "Sếp" : pronouns.userTitle;
         const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
         if (isVoice) {
-          await sendDirectVoice(api, sender, file.filePath, file.caption || `🎙️ ${defaultBotName} gửi voice cho Sếp nghe nhé!`);
+          await sendDirectVoice(api, sender, file.filePath, file.caption || `🎙️ ${defaultBotName} gửi voice cho ${userGreeting} nghe nhé!`);
         } else {
-          await sendDirectFile(api, sender, file.filePath, file.caption || `📄 ${defaultBotName} gửi file [${file.fileName}] cho Sếp!`);
+          await sendDirectFile(api, sender, file.filePath, file.caption || `📄 ${defaultBotName} gửi file [${file.fileName}] cho ${userGreeting}!`);
         }
       } catch (fileErr) {
         console.warn("[admin-assistant] Interceptor sendDirectFile error:", fileErr);

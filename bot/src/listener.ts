@@ -1495,10 +1495,17 @@ export async function runListener(): Promise<void> {
         const userId = String(uid || (item as any)?.userId || "").trim();
         if (!userId) continue;
 
-        // Bỏ qua các UID đã thử chấp nhận thất bại (ví dụ lỗi 170 do chặn tin nhắn/vi phạm Zalo) trong 1 giờ
+        // Bỏ qua các UID đã thử chấp nhận thất bại (ví dụ lỗi 170 do chặn tin nhắn/vi phạm Zalo) theo cơ chế exponential backoff
         const failedInfo = failedFriendAttempts.get(userId);
-        if (failedInfo && failedInfo.attempts >= 2 && Date.now() - failedInfo.lastTried < 3600_000) {
-          continue;
+        if (failedInfo) {
+          const backoffMs = failedInfo.attempts >= 4
+            ? 7 * 86400_000 // 7 ngày
+            : failedInfo.attempts >= 2
+            ? 86400_000     // 24 giờ
+            : 3600_000;     // 1 giờ
+          if (Date.now() - failedInfo.lastTried < backoffMs) {
+            continue;
+          }
         }
 
         console.log(`[auto-friend] 🔔 Phát hiện lời mời kết bạn chờ duyệt từ UID: ${userId}`);
@@ -1533,9 +1540,12 @@ export async function runListener(): Promise<void> {
             }
           }
         } catch (acceptErr: any) {
+          const errMsg = String(acceptErr?.message || acceptErr);
+          const isBlockedOrPrivacy = /không thể nhận tin nhắn|chặn|privacy|170/i.test(errMsg);
           const prev = failedFriendAttempts.get(userId) || { attempts: 0, lastTried: 0 };
-          failedFriendAttempts.set(userId, { attempts: prev.attempts + 1, lastTried: Date.now() });
-          console.warn(`[auto-friend] Lỗi khi chấp nhận kết bạn với ${userId} (lần ${prev.attempts + 1}): ${String(acceptErr?.message || acceptErr)}`);
+          const attempts = isBlockedOrPrivacy ? Math.max(prev.attempts + 1, 2) : prev.attempts + 1;
+          failedFriendAttempts.set(userId, { attempts, lastTried: Date.now() });
+          console.warn(`[auto-friend] Lỗi khi chấp nhận kết bạn với ${userId} (lần ${attempts}, tạm hoãn thử lại): ${errMsg}`);
         }
       }
     } catch (e) {

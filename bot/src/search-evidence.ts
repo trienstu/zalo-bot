@@ -524,6 +524,15 @@ function stripTrailingSourceBlock(answer: string): string {
   return lines.slice(0, sourceHeaderIndex).join("\n").trim();
 }
 
+export function isStrictVerificationQuestion(text: string): boolean {
+  const norm = String(text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase();
+  return /\b(?:dung khong|dung k\b|co phai|co that khong|co that ko|co dung|xac minh|tin don|thuc hu|chinh xac khong|kiem chung|phai khong|phai ko|dung hay sai)\b/i.test(norm);
+}
+
 export function finalizeGroundedAnswer(
   answer: string,
   evidenceContext: string,
@@ -536,11 +545,20 @@ export function finalizeGroundedAnswer(
   if (evidenceRequired) {
     const hasSufficientEvidence = /^EVIDENCE_STATUS:\s*SUFFICIENT/im.test(evidenceContext);
     if (!hasSufficientEvidence) {
+      // Chỉ chặn cứng khi câu hỏi thực sự là câu hỏi xác minh tin đồn / đúng sai nghiêm ngặt
+      const isStrict = options?.question ? isStrictVerificationQuestion(options.question) : true;
+      if (!isStrict) {
+        return answer;
+      }
       return "Em chưa đủ bằng chứng đáng tin cậy và cập nhật để khẳng định câu trả lời này. Anh/chị vui lòng cho em kiểm tra lại khi có thêm nguồn chính thức hoặc nguồn độc lập xác nhận.";
     }
 
     const allowedSources = extractEvidenceSources(evidenceContext);
     if (allowedSources.length === 0) {
+      const isStrict = options?.question ? isStrictVerificationQuestion(options.question) : true;
+      if (!isStrict) {
+        return answer;
+      }
       return "Em chưa đủ bằng chứng có thể dẫn nguồn để khẳng định câu trả lời này.";
     }
 

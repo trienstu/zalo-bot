@@ -100,14 +100,8 @@ export interface MemberMessageEvent {
 const userCooldowns = new Map<string, number>();
 const COOLDOWN_MS = 500; // 0.5s cooldown to allow smooth conversation
 
-export function isStrictVerificationQuestion(text: string): boolean {
-  const norm = String(text || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/gi, "d")
-    .toLowerCase();
-  return /\b(?:dung khong|dung k\b|co phai|co that khong|co that ko|co dung|xac minh|tin don|thuc hu|chinh xac khong|kiem chung|phai khong|phai ko|dung hay sai)\b/i.test(norm);
-}
+import { isStrictVerificationQuestion } from "./search-evidence.js";
+export { isStrictVerificationQuestion };
 
 /**
  * Xây dựng object Quote tương thích chuẩn Zalo zca-js để hiển thị khung trích dẫn tin nhắn gốc.

@@ -6,6 +6,7 @@ import {
   extractEvidenceSources,
   finalizeGroundedAnswer,
   formatEvidenceContext,
+  isStrictVerificationQuestion,
   rankEvidence,
   scoreEvidence,
   type SearchEvidence,
@@ -465,4 +466,33 @@ test("finalizeGroundedAnswer TUYỆT ĐỐI KHÔNG gắn nguồn khi câu hỏi 
   const final3 = finalizeGroundedAnswer(chatAnswer, dummyContext, false, { intent: "chat" });
   assert.doesNotMatch(final3, /Nguồn:/i);
 });
+
+test("isStrictVerificationQuestion phân biệt chính xác câu hỏi xác minh tin đồn và câu hỏi tra cứu thông thường", () => {
+  assert.equal(isStrictVerificationQuestion("thông tin này có đúng không?"), true);
+  assert.equal(isStrictVerificationQuestion("vụ tai nạn ở đèo Bảo Lộc có thật không?"), true);
+  assert.equal(isStrictVerificationQuestion("tin đồn ông X bị bắt thực hư ra sao"), true);
+  assert.equal(isStrictVerificationQuestion("kiểm chứng giúp tôi bài báo này đúng hay sai"), true);
+
+  assert.equal(isStrictVerificationQuestion("Cháu tìm cho chú người tên Khánh sống ở Bình Liêu"), false);
+  assert.equal(isStrictVerificationQuestion("giới thiệu cho mình địa điểm du lịch đẹp ở Mù Cang Chải"), false);
+  assert.equal(isStrictVerificationQuestion("cách làm món phở bò Nam Định"), false);
+});
+
+test("finalizeGroundedAnswer soft-fallback cho câu hỏi tra cứu thông thường khi thiếu bằng chứng báo chí", () => {
+  const insufficientContext = "EVIDENCE_STATUS: INSUFFICIENT\nREASON: No strong official sources found";
+  const naturalAnswer = "Dạ, về bạn Khánh ở Bình Liêu thì đây là một cá nhân sinh sống tại địa phương...";
+
+  // 1. Với câu hỏi tra cứu thông thường (non-strict): KHÔNG bị ghi đè bằng câu từ chối robot
+  const resultNonStrict = finalizeGroundedAnswer(naturalAnswer, insufficientContext, true, {
+    question: "Cháu tìm cho chú người tên Khánh sống ở Bình Liêu",
+  });
+  assert.equal(resultNonStrict, naturalAnswer);
+
+  // 2. Với câu hỏi xác minh nghiêm ngặt (strict): BẮT BUỘC trả về lời từ chối an toàn
+  const resultStrict = finalizeGroundedAnswer(naturalAnswer, insufficientContext, true, {
+    question: "Thông tin này có đúng không cháu?",
+  });
+  assert.match(resultStrict, /Em chưa đủ bằng chứng đáng tin cậy/i);
+});
+
 

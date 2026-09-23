@@ -314,6 +314,9 @@ test("checkIsFileOrVoiceGeneration nhận diện chính xác các ý định t�
 
   // Test case 4: Tạo voice / podcast
   assert.equal(checkIsFileOrVoiceGeneration("gửi voice đọc giúp anh đoạn văn này"), true);
+  assert.equal(checkIsFileOrVoiceGeneration("Cháu đọc cho chú nghe bài này với, chú đang bận"), true);
+  assert.equal(checkIsFileOrVoiceGeneration("đọc cho anh nghe với"), true);
+  assert.equal(checkIsFileOrVoiceGeneration("chú đang lái xe, đọc bài này hộ chú"), true);
 
   // Test case 5: Tiếp nối tin nhắn trích dẫn (quote) với lệnh giục
   const quoteText = "Trang 1: Tổng quan dự án Serena Riverside... Anh Triển muốn em soạn full nội dung chi tiết từng trang để anh copy qua PowerPoint không?";
