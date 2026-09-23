@@ -116,6 +116,13 @@ function AppShellInner({
     if (typeof window !== "undefined") {
       const urlBotId = searchParams?.get("botId");
       if (urlBotId) return urlBotId;
+      const hostname = window.location.hostname;
+      if (hostname.includes("b2.") || window.location.port === "3001" || window.location.port === "3002") {
+        return "bot-2";
+      }
+      if (hostname.includes("b1.") || window.location.port === "3000") {
+        return "bot-1";
+      }
     }
     if (typeof document === "undefined") return "bot-1";
     const match = document.cookie.match(new RegExp("(^| )active_bot_id=([^;]+)"));

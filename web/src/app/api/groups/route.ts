@@ -13,8 +13,8 @@ function getBotDbPath(reqUrl?: string, hostHeader?: string): string {
   const isPort3002 =
     port === "3002" ||
     port === "3001" ||
-    (reqUrl && (reqUrl.includes(":3002") || reqUrl.includes(":3001"))) ||
-    (hostHeader && (hostHeader.includes(":3001") || hostHeader.includes(":3002")));
+    (reqUrl && (reqUrl.includes(":3002") || reqUrl.includes(":3001") || reqUrl.includes("b2."))) ||
+    (hostHeader && (hostHeader.includes(":3001") || hostHeader.includes(":3002") || hostHeader.includes("b2.")));
   const isBot2 = isPort3002 || process.env.BOT_ID === "bot-2" || process.env.WEB_DB_PATH?.includes("bot-2");
 
   if (isBot2) {
@@ -52,8 +52,8 @@ async function getActiveBotDbPath(overrideBotId?: string, reqUrl?: string, hostH
   const isPort3002 =
     port === "3002" ||
     port === "3001" ||
-    (reqUrl && (reqUrl.includes(":3002") || reqUrl.includes(":3001"))) ||
-    (hostHeader && (hostHeader.includes(":3001") || hostHeader.includes(":3002")));
+    (reqUrl && (reqUrl.includes(":3002") || reqUrl.includes(":3001") || reqUrl.includes("b2."))) ||
+    (hostHeader && (hostHeader.includes(":3001") || hostHeader.includes(":3002") || hostHeader.includes("b2.")));
   const isBot2 =
     isPort3002 ||
     process.env.BOT_ID === "bot-2" ||
@@ -115,8 +115,10 @@ export async function GET(request: Request) {
       const url = new URL(request.url);
       botId = url.searchParams.get("botId") || "";
       if (!botId) {
-        if (url.port === "3002" || url.port === "3001" || hostHeader.includes(":3001") || hostHeader.includes(":3002")) {
+        if (hostHeader.includes("b2.") || url.port === "3002" || url.port === "3001" || hostHeader.includes(":3001") || hostHeader.includes(":3002")) {
           botId = "bot-2";
+        } else if (hostHeader.includes("b1.") || url.port === "3000" || hostHeader.includes(":3000")) {
+          botId = "bot-1";
         } else {
           const cookieStore = await cookies();
           botId = cookieStore.get("active_bot_id")?.value || "bot-1";
@@ -304,8 +306,10 @@ export async function POST(request: Request) {
     if (!botId) {
       try {
         const url = new URL(request.url);
-        if (url.port === "3002" || url.port === "3001" || hostHeader.includes(":3001") || hostHeader.includes(":3002")) {
+        if (hostHeader.includes("b2.") || url.port === "3002" || url.port === "3001" || hostHeader.includes(":3001") || hostHeader.includes(":3002")) {
           botId = "bot-2";
+        } else if (hostHeader.includes("b1.") || url.port === "3000" || hostHeader.includes(":3000")) {
+          botId = "bot-1";
         } else {
           const cookieStore = await cookies();
           botId = cookieStore.get("active_bot_id")?.value || "bot-1";

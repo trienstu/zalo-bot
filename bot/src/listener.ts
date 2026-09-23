@@ -499,6 +499,18 @@ export async function runListener(): Promise<void> {
           });
       }
       console.log(`[listener] Đã đồng bộ ${groups.length} group vào bảng bot_groups thành công!`);
+
+      // Tự động dọn dẹp các nhóm bot không còn tham gia (rời nhóm, bị kick hoặc nhóm của bot khác còn sót lại)
+      const currentGroupIds = groups.map((g) => String(g.groupId)).filter(Boolean);
+      if (currentGroupIds.length > 0) {
+        const placeholders = currentGroupIds.map(() => "?").join(",");
+        const deleted = getDb()
+          .prepare(`DELETE FROM bot_groups WHERE group_id NOT IN (${placeholders})`)
+          .run(...currentGroupIds);
+        if (deleted.changes > 0) {
+          console.log(`[listener] 🧹 Đã dọn dẹp ${deleted.changes} group không còn tham gia khỏi bảng bot_groups.`);
+        }
+      }
     } catch (e) {
       console.warn(`[listener] Quét group lỗi: ${String(e)}`);
     }
