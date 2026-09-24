@@ -348,10 +348,8 @@ export const config = {
   /** API key Google Gemini chuyên dùng cho Google Search Grounding (key có gắn thẻ billing để hưởng 1500 lượt search/ngày). Rỗng = dùng key đầu tiên của GEMINI_API_KEY. */
   geminiGroundingApiKey: process.env.GEMINI_GROUNDING_API_KEY?.trim() || "",
 
-  /** Model Gemini dùng để tóm tắt và xử lý thông tin (mặc định gemini-3.1-flash-lite-preview siêu tốc ~800ms). */
-  geminiModel: (process.env.GEMINI_MODEL?.trim() && process.env.GEMINI_MODEL.includes("lite"))
-    ? process.env.GEMINI_MODEL.trim()
-    : "gemini-3.1-flash-lite-preview",
+  /** Model Gemini dùng để tóm tắt và xử lý thông tin (mặc định gemini-3-flash-preview hoạt động ổn định và nhanh). */
+  geminiModel: process.env.GEMINI_MODEL?.trim() || "gemini-3-flash-preview",
 
   /** Google Cloud Vertex AI (Chuyên dụng cho Google Search Grounding: hưởng 1500 lượt search/ngày & trừ vào $300 credit) */
   vertexProjectId: process.env.VERTEX_PROJECT_ID?.trim() || "gen-lang-client-0283698215",

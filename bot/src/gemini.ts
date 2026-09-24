@@ -464,18 +464,19 @@ export async function callGemini(
     throw new Error("Thiếu GEMINI_API_KEY trong .env");
   }
 
-  let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-3.1-flash-lite-preview";
+  let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-3-flash-preview";
   if (isSearchEnabled) {
     primaryModel = "gemini-3-flash-preview";
-  } else if (!primaryModel || !primaryModel.includes("lite")) {
-    primaryModel = "gemini-3.1-flash-lite-preview";
+  } else if (!primaryModel || primaryModel.includes("3.1-flash-lite")) {
+    primaryModel = "gemini-3-flash-preview";
   }
 
-  // Danh sách model cascading dự phòng siêu tốc (~800ms) khi model chính nghẽn mạng / 503 / 429 / Timeout:
+  // Danh sách model cascading dự phòng khi model chính nghẽn mạng / 503 / 429 / Timeout:
   const candidateFallbacks = [
-    "gemini-3.1-flash-lite-preview",
-    "gemini-3.1-flash-lite",
     "gemini-3-flash-preview",
+    "gemini-3.6-flash",
+    "gemini-3.7-flash",
+    "gemini-3.1-flash-lite-preview",
     "gemini-flash-lite-latest",
   ].filter((m) => m !== primaryModel);
 
@@ -1158,9 +1159,9 @@ export async function callGeminiAgentLoop(
     throw new Error("Thiếu GEMINI_API_KEY trong .env");
   }
 
-  let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-3.1-flash-lite-preview";
-  if (!primaryModel || !primaryModel.includes("lite")) {
-    primaryModel = "gemini-3.1-flash-lite-preview";
+  let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-3-flash-preview";
+  if (!primaryModel || primaryModel.includes("3.1-flash-lite")) {
+    primaryModel = "gemini-3-flash-preview";
   }
   const maxTurns = options?.maxTurns || 2;
   const temperature = options?.temperature ?? 0.2;

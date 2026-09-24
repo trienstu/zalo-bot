@@ -296,6 +296,7 @@ export async function summarizeWithAI(input: {
     "Trong mỗi mục: mỗi chủ đề một cụm gạch đầu dòng, nêu ai khởi xướng và các ý kiến/kết luận " +
     "chính CÓ NỘI DUNG CỤ THỂ. Thảo luận khớp nhiều mục thì xếp vào mục cao nhất phù hợp. " +
     "Trình bày bằng gạch đầu dòng '- ', mỗi ý một dòng, KHÔNG dùng markdown đậm/nghiêng vì Zalo không render. " +
+    "BẮT BUỘC: PHẢI dùng các dòng tiêu đề mục lớn trên làm đề mục (in hoa kèm emoji, ví dụ: '📢 THÔNG BÁO & QUYẾT ĐỊNH', '💼 CHỦ ĐỀ CHUYÊN MÔN & THẢO LUẬN', '🤖 AI & CÔNG NGHỆ', '🔗 LINK ĐÃ CHIA SẺ'). TUYỆT ĐỐI KHÔNG xuất ra một danh sách gạch đầu dòng phẳng mà thiếu các tiêu đề phân mục này.\n" +
     `Toàn bộ dưới ${summaryTargetChars(maxParts)} ký tự. ` +
     "Khi log quá dài không thể kể hết trong giới hạn: ƯU TIÊN ĐỘ SÂU HƠN ĐỘ PHỦ — chọn những thảo luận " +
     "quan trọng/sôi nổi nhất để tóm tắt chi tiết. Không bịa thông tin không có trong log. " +
