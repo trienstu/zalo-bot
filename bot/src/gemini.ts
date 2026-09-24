@@ -130,8 +130,9 @@ export async function downloadImageBase64(url: string): Promise<GeminiImagePart 
 export interface DownloadFileResult {
   textContent?: string;
   mediaPart?: GeminiMediaPart;
-  error?: "FILE_TOO_LARGE" | "DOWNLOAD_TIMEOUT" | "DOWNLOAD_FAILED";
+  error?: "FILE_TOO_LARGE" | "DOWNLOAD_TIMEOUT" | "DOWNLOAD_FAILED" | "UNSUPPORTED_IMAGE_FORMAT";
   fileSizeBytes?: number;
+  unsupportedMime?: string;
 }
 
 /**
@@ -237,12 +238,42 @@ export async function downloadFileContent(
 
     // 2. File Hình ảnh (Gemini đọc Multimodal native)
     if (detectedMime.startsWith("image/")) {
-      return {
-        mediaPart: {
-          data: buffer.toString("base64"),
-          mimeType: detectedMime,
-        },
-      };
+      const geminiSupportedImageMimes = new Set([
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/heic",
+        "image/heif",
+      ]);
+
+      if (geminiSupportedImageMimes.has(detectedMime)) {
+        return {
+          mediaPart: {
+            data: buffer.toString("base64"),
+            mimeType: detectedMime,
+          },
+        };
+      }
+
+      // Thử dùng sharp convert các định dạng ảnh khác (bmp, gif, tiff, svg) sang standard JPEG
+      try {
+        const sharp = (await import("sharp")).default;
+        const converted = await sharp(buffer).jpeg({ quality: 90 }).toBuffer();
+        console.log(`[gemini] 🔄 Đã chuyển đổi định dạng ảnh ${detectedMime} sang image/jpeg (${Math.round(converted.length / 1024)} KB)`);
+        return {
+          mediaPart: {
+            data: converted.toString("base64"),
+            mimeType: "image/jpeg",
+          },
+        };
+      } catch (convErr) {
+        console.warn(`[gemini] Định dạng ảnh ${detectedMime} không hỗ trợ và không thể convert sang JPEG:`, convErr);
+        return {
+          error: "UNSUPPORTED_IMAGE_FORMAT",
+          unsupportedMime: detectedMime,
+          textContent: `[Ảnh đính kèm có định dạng "${detectedMime}" hiện chưa được AI hỗ trợ giải mã. Vui lòng chụp lại màn hình hoặc lưu ảnh dạng JPG/PNG để bot phân tích nhé!]`,
+        };
+      }
     }
 
     // 2. File Âm thanh / Voice

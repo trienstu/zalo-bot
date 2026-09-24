@@ -1450,6 +1450,15 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       saveRecentDirectDocument(sender, fileName || "Tài liệu", fileTextContent);
     } else {
       // Báo rõ cho Admin thay vì để Gemini tự đoán mò từ tên file
+      if (fileRes?.error === "UNSUPPORTED_IMAGE_FORMAT") {
+        await sendDirectText(
+          api,
+          sender,
+          `⚠️ Dạ Sếp ơi, hình ảnh đính kèm có định dạng "${fileRes.unsupportedMime || "tệp"}" hiện AI chưa hỗ trợ giải mã trực tiếp ạ!\n\n` +
+          `👉 Kính nhờ Sếp chụp lại màn hình hoặc lưu ảnh dạng JPG/PNG gửi lại giúp em nhé! ☘️`,
+        );
+        return;
+      }
       if (fileRes?.error === "FILE_TOO_LARGE") {
         const mb = fileRes.fileSizeBytes ? (fileRes.fileSizeBytes / 1024 / 1024).toFixed(1) : "hơn 50";
         await sendDirectText(
@@ -1773,7 +1782,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   const userPrompt =
     (historyText ? `LỊCH SỬ TRÒ CHUYỆN TRƯỚC ĐÓ:\n${historyText}\n\n` : "") +
     `${quoteSection}${fileSection}${liveNewsSection}${groupActivitiesSection}${permanentKnowledgeSection}\n` +
-    `YÊU CẦU MỚI TỪ ${isAdmin ? `ADMIN (${displayName})` : `${pronouns.userTitle.toUpperCase()} (${displayName})`}: ${rawText || "Hãy phân tích tài liệu/hình ảnh này giúp tôi."}\n\n` +
+    `YÊU CẦU MỚI TỪ ${isAdmin ? `ADMIN (${displayName})` : `${pronouns.userTitle.toUpperCase()} (${displayName})`}: ${rawText || (mediaPart ? "Hãy phân tích hình ảnh này giúp tôi." : fileTextContent ? "Hãy đọc tài liệu này giúp tôi." : "Dạ em chào Sếp ạ! Em có thể hỗ trợ gì?")}\n\n` +
     (isAdmin ? `HÃY TRẢ LỜI SẾP THẬT CHUẨN XÁC, THÔNG MINH VÀ HỮU ÍCH:` : `HÃY TRẢ LỜI ${pronouns.userTitle.toUpperCase()} THẬT THÂN THIỆN, CHUẨN XÁC VÀ HỮU ÍCH:`);
 
   try {

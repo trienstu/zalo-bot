@@ -1179,6 +1179,12 @@ async function handleHistoryQA(
   if (targetUrl) {
     console.log(`[member-assistant] 📥 Đang nạp tài liệu/file từ: ${targetUrl.slice(0, 80)} (${fileName})...`);
     const fileRes = await downloadFileContent(targetUrl, fileName);
+    if (fileRes?.error === "UNSUPPORTED_IMAGE_FORMAT") {
+      const mime = fileRes.unsupportedMime || "này";
+      return isSuperAdmin
+        ? `Dạ Sếp ơi, hình ảnh đính kèm có định dạng "${mime}" hiện AI chưa hỗ trợ giải mã trực tiếp ạ. Kính nhờ Sếp chụp lại màn hình hoặc lưu ảnh dạng JPG/PNG gửi lại giúp em nhé! 🙏`
+        : `Dạ ${displayName ? `bác ${displayName}` : "bác"} ơi, hình ảnh đính kèm có định dạng "${mime}" hiện AI chưa hỗ trợ đọc trực tiếp ạ. Bác vui lòng chụp lại màn hình hoặc lưu ảnh dạng JPG/PNG gửi lại giúp em nhé! 🙏`;
+    }
     if (fileRes?.mediaPart) {
       mediaPart = fileRes.mediaPart;
       console.log(`[member-assistant] ✅ Đã nạp file đa phương tiện thành công (${mediaPart.mimeType}, size: ${Math.round(mediaPart.data.length / 1024)} KB)`);
@@ -1266,7 +1272,7 @@ async function handleHistoryQA(
 
     const fastUserPrompt =
       `${quoteTextSection}${fileContentSnippet}\n` +
-      `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${question || "Hãy phân tích chi tiết hình ảnh/tài liệu này giúp tôi."}\n\n` +
+      `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${question || (fileTextContent ? "Hãy phân tích chi tiết nội dung tài liệu này giúp tôi." : "Hãy phân tích chi tiết hình ảnh này giúp tôi.")}\n\n` +
       `HÃY TRẢ LỜI NGAY:`;
 
     const needsAgentLoop = checkIsFileOrVoiceGeneration(question, options?.quote?.text);
@@ -2466,7 +2472,7 @@ async function handleHistoryQA(
     `DƯỚI ĐÂY LÀ DỮ LIỆU LỊCH SỬ CHAT NỘI BỘ CỦA CHÍNH NHÓM "${currentGroupName}" (ID: ${threadId}) ĐỂ THAM KHẢO:\n` +
     `<chat_history>\n${contextData}\n</chat_history>\n\n` +
     `${quotePromptSection ? `${quotePromptSection}\n` : ""}` +
-    `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${question || "Hãy phân tích tài liệu/hình ảnh/nội dung trên giúp tôi."}\n\n` +
+    `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${question || (mediaPart ? "Hãy phân tích chi tiết hình ảnh này giúp tôi." : fileTextContent ? "Hãy đọc và phân tích tài liệu này giúp tôi." : "Dạ em chào Sếp/bác ạ! Em có thể hỗ trợ gì?")}\n\n` +
     `HÃY TRẢ LỜI THẬT ${isSuperAdmin ? "CHU ĐÁO, CHUẨN XÁC VÀ TÔN TRỌNG SẾP" : "DUYÊN DÁNG, CHUẨN XÁC VÀ HÓM HỈNH"}:`;
 
   try {
@@ -3913,12 +3919,16 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     if (isGreeting) {
       const isSuperAdmin = isUserAdmin(sender);
       const greetingMsg = isSuperAdmin
-        ? `🤖 Dạ em chào Sếp ạ! Em sẵn sàng nhận lệnh từ Sếp: tra cứu thông tin, tổng hợp báo cáo các nhóm, kiểm tra tình hình, đọc tài liệu/ảnh... Sếp cần em hỗ trợ gì cứ chỉ đạo em nhé!`
-        : `🤖 Dạ ${botName} chào ${displayName || "bác"} ạ! Em sẵn sàng hỗ trợ tra cứu thông tin thảo luận trong nhóm, điểm tương tác, đọc hình ảnh, tài liệu (PDF, Word, Excel, Code), dịch thuật và ghi nhớ kiến thức. Bác cần hỏi gì cứ gõ: /hoi [câu hỏi], gửi file/ảnh kèm câu lệnh hoặc tag @${botName} nhé!`;
-      await sendGroupText(
+        ? `Dạ em chào Sếp ạ! Em luôn sẵn sàng nhận lệnh từ Sếp. Sếp cần em hỗ trợ gì cứ chỉ đạo em nhé! ☘️`
+        : `Dạ em ${botName} nghe đây ạ! Bác cần em hỗ trợ tra cứu hay giải đáp gì cứ nhắn em nhé! ✨`;
+      await sendGroupReplyWithMention(
         api,
         threadId,
+        botName,
+        displayName,
+        sender,
         greetingMsg,
+        { quote: buildQuoteObject(event) },
       );
       console.log(`[member-assistant] ✅ Đã gửi lời chào cho ${displayName} (isSuperAdmin=${isSuperAdmin})`);
       return;
@@ -3929,14 +3939,15 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     try {
       let targetImageUrl = event.mediaUrl || event.quote?.mediaUrl || undefined;
 
-      // 1. Nếu có quote mà chưa có targetImageUrl: thử tra cứu theo msgId / cliMsgId của quote
-      if (!targetImageUrl && event.quote) {
+      // 1. Nếu có quote: Ưu tiên tra cứu ảnh gốc từ DB theo msgId / cliMsgId của quote
+      // (đặc biệt khi URL quote là ảnh jxl hoặc thumbnail rút gọn)
+      if (event.quote) {
         const quoteId = event.quote.msgId || event.quote.cliMsgId || event.quote.globalMsgId;
         if (quoteId) {
           const media = getMediaByMessageId(threadId, quoteId);
-          if (media) {
-            targetImageUrl = media.local_path || media.media_url || undefined;
-            console.log(`[member-assistant] 📸 Đã tìm thấy ảnh từ tin nhắn được trích dẫn (${quoteId})`);
+          if (media?.local_path || media?.media_url) {
+            targetImageUrl = media.local_path || media.media_url;
+            console.log(`[member-assistant] 📸 Đã tìm thấy ảnh gốc từ tin nhắn được trích dẫn (${quoteId})`);
           }
         }
       }
