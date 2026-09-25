@@ -246,3 +246,24 @@ export async function interceptAndExecuteSimulatedTool(
     return text;
   }
 }
+
+/**
+ * Trích xuất phần nội dung văn bản (bài thơ, kịch bản đối thoại, truyện, đoạn văn)
+ * từ câu trả lời của AI để tạo voice tự động dự phòng nếu AI quên gọi tool create_voice
+ */
+export function extractSpeechFallbackText(answer: string): string {
+  if (!answer) return "";
+  let text = answer.trim();
+
+  // 1. Loại bỏ dòng @mention chào hỏi ban đầu
+  text = text.replace(/^@(?:[^\n]+)\n+/i, "");
+  text = text.replace(/^(?:dạ\s+)?(?:sếp|anh|chị|bác|bạn)?\s*[^,\n]*[,!:]\s*(?:em\s+xin\s+(?:phép\s+)?(?:gửi|tặng|đọc|triển\s*khai)[^\n]*\n+)?/i, "");
+  text = text.replace(/^(?:em\s+xin\s+(?:phép\s+)?(?:gửi|tặng|đọc|triển\s*khai)[^\n]*\n+)/i, "");
+
+  // 2. Loại bỏ các đoạn thông báo kỹ thuật về việc tạo voice ở cuối bài
+  text = text.replace(/\n+hệ\s*thống\s*(?:đang\s+tiến\s*hành|đã\s+tự\s*động\s*kích\s*hoạt)[^\n]*[\s\S]*$/i, "");
+  text = text.replace(/\n+file\s*âm\s*thanh\s*sẽ\s*tự\s*động\s*xuất\s*hiện[\s\S]*$/i, "");
+  text = text.replace(/\n+(?:sếp|bác|anh|chị|bạn)\s*(?:có\s+muốn|nhấp\s*vào\s*nghe|thưởng\s*thức)[\s\S]*$/i, "");
+
+  return text.trim();
+}

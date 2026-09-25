@@ -25,6 +25,7 @@ import {
   callGemini,
   callGeminiAgentLoop,
   downloadFileContent,
+  executeAgentTool,
   type GeminiMediaPart,
 } from "./gemini.js";
 import { getWeatherReport } from "./weather.js";
@@ -45,8 +46,8 @@ import { collectCandidateUrls } from "./message-extract.js";
 import { isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
 import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from "./grounding-quota.js";
 import { githubSearch } from "./tools/vertical-tools.js";
-import { checkIsFileOrVoiceGeneration } from "./tools/file-generator.js";
-import { interceptAndExecuteSimulatedTool } from "./tools/simulated-tool-interceptor.js";
+import { checkIsFileOrVoiceGeneration, checkIsVoiceRequest } from "./tools/file-generator.js";
+import { interceptAndExecuteSimulatedTool, extractSpeechFallbackText } from "./tools/simulated-tool-interceptor.js";
 import {
   isMemoryControlCommand,
   handleMemoryControlCommand,
@@ -1294,6 +1295,7 @@ async function handleHistoryQA(
 
     try {
       let answer = "";
+      let voiceGenerated = false;
       if (needsAgentLoop) {
         answer = await callGeminiAgentLoop(fastSystemPrompt, fastUserPrompt, {
           model: "gemini-3.1-flash-lite-preview",
@@ -1305,6 +1307,7 @@ async function handleHistoryQA(
                 const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
                 const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
                 const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+                if (isVoice) voiceGenerated = true;
                 const caption = file.caption || (
                   isSlide
                     ? `📊 ${botName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
@@ -1346,6 +1349,7 @@ async function handleHistoryQA(
         if (options?.api) {
           const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
           if (isVoice) {
+            voiceGenerated = true;
             await sendGroupVoice(
               options.api,
               threadId,
@@ -1362,6 +1366,31 @@ async function handleHistoryQA(
           }
         }
       });
+
+      // 🛡️ PHÒNG THỦ CHIỀU SÂU: Nếu người dùng yêu cầu Voice/Đọc thơ mà chưa có file voice nào được gửi
+      if (checkIsVoiceRequest(question, options?.quote?.text) && !voiceGenerated && options?.api) {
+        try {
+          const speechText = extractSpeechFallbackText(answer);
+          if (speechText && speechText.length >= 15) {
+            console.log(`[member-assistant] 🛡️ [Fast QA] Kích hoạt voice fallback tự động (${speechText.length} ký tự)...`);
+            const vRes = await executeAgentTool("create_voice", {
+              text: speechText,
+              caption: `🎙️ ${botName} gửi bản đọc diễn cảm cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
+            });
+            if (vRes?.success && vRes?.filePath) {
+              voiceGenerated = true;
+              await sendGroupVoice(
+                options.api,
+                threadId,
+                vRes.filePath,
+                vRes.caption || `🎙️ ${botName} gửi bản đọc diễn cảm cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
+              );
+            }
+          }
+        } catch (fbVoiceErr) {
+          console.warn("[member-assistant] Fast-path QA lỗi sinh voice fallback:", fbVoiceErr);
+        }
+      }
 
       // Ghi nhớ vào tri thức nếu cần
       if (targetUrl) {
@@ -1647,6 +1676,7 @@ async function handleHistoryQA(
       `HÃY TRẢ LỜI NGAY DỰA TRÊN DỮ LIỆU MỚI NHẤT ĐƯỢC CUNG CẤP:`;
 
     let answer = "";
+    let voiceGenerated = false;
     const isGreetingQuote =
       /^(?:chào|hi|hello|alo|ê|cảm ơn|thanks|ok)\b/i.test(question.trim()) && question.trim().length < 25;
     try {
@@ -1662,6 +1692,7 @@ async function handleHistoryQA(
                 const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
                 const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
                 const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+                if (isVoice) voiceGenerated = true;
                 const caption = file.caption || (
                   isSlide
                     ? `📊 ${botName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
@@ -1728,6 +1759,7 @@ async function handleHistoryQA(
         if (options?.api) {
           const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
           if (isVoice) {
+            voiceGenerated = true;
             await sendGroupVoice(
               options.api,
               threadId,
@@ -1744,6 +1776,31 @@ async function handleHistoryQA(
           }
         }
       });
+
+      // 🛡️ PHÒNG THỦ CHIỀU SÂU: Nếu người dùng yêu cầu Voice/Đọc thơ mà chưa có file voice nào được gửi
+      if (checkIsVoiceRequest(question, options?.quote?.text) && !voiceGenerated && options?.api) {
+        try {
+          const speechText = extractSpeechFallbackText(answer);
+          if (speechText && speechText.length >= 15) {
+            console.log(`[member-assistant] 🛡️ [Quote QA] Kích hoạt voice fallback tự động (${speechText.length} ký tự)...`);
+            const vRes = await executeAgentTool("create_voice", {
+              text: speechText,
+              caption: `🎙️ ${botName} gửi bản đọc diễn cảm cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
+            });
+            if (vRes?.success && vRes?.filePath) {
+              voiceGenerated = true;
+              await sendGroupVoice(
+                options.api,
+                threadId,
+                vRes.filePath,
+                vRes.caption || `🎙️ ${botName} gửi bản đọc diễn cảm cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
+              );
+            }
+          }
+        } catch (fbVoiceErr) {
+          console.warn("[member-assistant] Quote QA lỗi sinh voice fallback:", fbVoiceErr);
+        }
+      }
       return finalizeGroundedAnswer(answer, quoteLiveNews, quoteEvidenceRequired, {
         intent: quotePlan?.intent,
         question,
@@ -2520,6 +2577,7 @@ async function handleHistoryQA(
     const needsAgentLoop = isFileOrVoiceReq || (!isSearchDisabled && /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(question));
 
     let answer = "";
+    let voiceGenerated = false;
     if (needsAgentLoop) {
       // 🚀 Chỉ khi người dùng thực sự yêu cầu gọi tool xuất file, voice hoặc đọc link cụ thể mới chạy Agent Loop
       answer = await callGeminiAgentLoop(systemPrompt, userPrompt, {
@@ -2532,6 +2590,7 @@ async function handleHistoryQA(
               const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
               const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
               const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+              if (isVoice) voiceGenerated = true;
               const caption = file.caption || (
                 isSlide
                   ? `📊 ${botName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
@@ -2612,6 +2671,7 @@ async function handleHistoryQA(
       if (options?.api) {
         const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
         if (isVoice) {
+          voiceGenerated = true;
           await sendGroupVoice(
             options.api,
             threadId,
@@ -2628,6 +2688,31 @@ async function handleHistoryQA(
         }
       }
     });
+
+    // 🛡️ PHÒNG THỦ CHIỀU SÂU: Nếu người dùng yêu cầu Voice/Đọc thơ/Podcast mà chưa có file voice nào được gửi
+    if (checkIsVoiceRequest(question, options?.quote?.text) && !voiceGenerated && options?.api) {
+      try {
+        const speechText = extractSpeechFallbackText(answer);
+        if (speechText && speechText.length >= 15) {
+          console.log(`[member-assistant] 🛡️ [Main QA] Kích hoạt voice fallback tự động (${speechText.length} ký tự)...`);
+          const vRes = await executeAgentTool("create_voice", {
+            text: speechText,
+            caption: `🎙️ ${botName} gửi bản đọc diễn cảm cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
+          });
+          if (vRes?.success && vRes?.filePath) {
+            voiceGenerated = true;
+            await sendGroupVoice(
+              options.api,
+              threadId,
+              vRes.filePath,
+              vRes.caption || `🎙️ ${botName} gửi bản đọc diễn cảm cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
+            );
+          }
+        }
+      } catch (fbVoiceErr) {
+        console.warn("[member-assistant] Main QA lỗi sinh voice fallback:", fbVoiceErr);
+      }
+    }
 
     answer = finalizeGroundedAnswer(answer, liveNews, evidenceRequired, {
       intent: queryPlan?.intent,
@@ -3811,13 +3896,16 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     );
   });
 
-  const mentionsThisBot =
+  const explicitlyMentionsBotFullName =
     lower.includes(`@${lowerBotName}`) ||
     lower.includes(`@${unaccentedBotName}`) ||
     lower.includes(lowerBotName) ||
     lower.includes(unaccentedBotName) ||
     lower.startsWith(lowerBotName + " ") ||
-    lower.startsWith(unaccentedBotName + " ") ||
+    lower.startsWith(unaccentedBotName + " ");
+
+  const mentionsThisBot =
+    explicitlyMentionsBotFullName ||
     lower.includes(`${lowerBotName} ơi`) ||
     lower.includes(`${unaccentedBotName} oi`) ||
     lower.includes(`nhờ ${lowerBotName}`) ||
@@ -3842,9 +3930,11 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     !isTaggedByUid
   );
 
-  // Bot CHỈ kích hoạt khi được tag trực tiếp bằng UID hoặc gọi ĐÚNG TÊN của bot (và KHÔNG tag người khác).
-  // Các từ chung chung như "bot ơi", "bot oi", "@bot", "chào bot", "alo bot" KHÔNG kích hoạt bot.
-  const mentionsBot = isTaggedByUid || (mentionsThisBot && !isTaggedOtherUid);
+  // Bot kích hoạt khi:
+  // 1. Được tag trực tiếp bằng UID của bot (isTaggedByUid)
+  // 2. Được gọi ĐÍCH DANH tên đầy đủ trong nội dung tin nhắn (explicitlyMentionsBotFullName), kể cả khi có tag UID người khác (VD: "@Mộc Miên sen chúa đọc...")
+  // 3. Hoặc gọi tên ngắn/thông thường khi KHÔNG tag UID người khác (!isTaggedOtherUid)
+  const mentionsBot = isTaggedByUid || explicitlyMentionsBotFullName || (mentionsThisBot && !isTaggedOtherUid);
 
   const isDocCommand =
     lower.startsWith("/doc") ||

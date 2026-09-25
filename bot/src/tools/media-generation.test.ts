@@ -8,12 +8,13 @@ import {
   generateCsvFile,
   generateHtmlFile,
   checkIsFileOrVoiceGeneration,
+  checkIsVoiceRequest,
   parseMarkdownToSlides,
   parseMarkdownRuns,
 } from "./file-generator.js";
 import { synthesizeSpeech, synthesizeDialogue, normalizeDialogueTurns, isDialogueText } from "./voice-generator.js";
 import { validatePythonCodeSafety } from "./python-runner.js";
-import { extractSimulatedGenerateFile, extractSimulatedCreateVoice } from "./simulated-tool-interceptor.js";
+import { extractSimulatedGenerateFile, extractSimulatedCreateVoice, extractSpeechFallbackText } from "./simulated-tool-interceptor.js";
 
 test("generatePowerPointFile tạo file .pptx thành công với các slide bố cục chuẩn và hiện đại", async () => {
   const res = await generatePowerPointFile(
@@ -506,4 +507,45 @@ test("normalizeDialogueTurns và isDialogueText chuẩn hóa chính xác hội t
   assert.ok(turns[2].startsWith("Nam:"));
   assert.ok(turns[3].startsWith("Nữ:"));
 });
+
+test("checkIsVoiceRequest nhận diện chuẩn xác các yêu cầu đọc diễn cảm và thu âm thơ", () => {
+  assert.equal(checkIsVoiceRequest('đọc diễn cảm cho a bài thơ gì mà có câu "ao thu lạnh lẽo nước trong veo" ak'), true);
+  assert.equal(checkIsFileOrVoiceGeneration('đọc diễn cảm cho a bài thơ gì mà có câu "ao thu lạnh lẽo nước trong veo" ak'), true);
+  assert.equal(checkIsVoiceRequest("sen chúa thu âm bài thơ thu điếu đi"), true);
+  assert.equal(checkIsFileOrVoiceGeneration("sen chúa thu âm bài thơ thu điếu đi"), true);
+  assert.equal(checkIsVoiceRequest("đọc thơ Hàn Mặc Tử"), true);
+  assert.equal(checkIsVoiceRequest("ngâm thơ bài Tây Tiến"), true);
+  assert.equal(checkIsVoiceRequest("thuyết minh video này"), true);
+});
+
+test("extractSpeechFallbackText bóc tách trọn vẹn bài thơ và loại bỏ lời chào / thông báo kỹ thuật", () => {
+  const botAnswerFromScreenshot = `@Trien Nguyen Dạ Sếp Trien Nguyen, bài thơ có câu mở đầu "Ao thu lạnh lẽo nước trong veo" chính là kiệt tác Thu Điếu (Câu cá mùa thu) của nhà thơ vĩ đại Nguyễn Khuyến ạ!
+
+Em xin gửi tặng Sếp trọn vẹn bài thơ:
+
+THU ĐIẾU
+Tác giả: Nguyễn Khuyến
+
+Ao thu lạnh lẽo nước trong veo,
+Một chiếc thuyền câu bé tẻo teo.
+Sóng biếc theo làn hơi gợn tí,
+Lá vàng trước gió khẽ đưa vèo.
+
+Tầng mây lơ lửng trời xanh ngắt,
+Ngõ trúc quanh co khách vắng teo.
+Tựa gối ôm cần lâu chẳng được,
+Cá đâu đớp động dưới chân bèo.
+
+Hệ thống đang tiến hành xử lý thu âm giọng đọc diễn cảm bài thơ này theo chuẩn Google AI Studio và gửi file voice trực tiếp vào nhóm ngay đây để Sếp thưởng thức ạ! 🎙️🍃
+
+Sếp có muốn em đọc diễn cảm thêm bài thơ nào khác nữa không ạ?`;
+
+  const fallbackText = extractSpeechFallbackText(botAnswerFromScreenshot);
+  assert.ok(fallbackText.includes("Ao thu lạnh lẽo nước trong veo"));
+  assert.ok(fallbackText.includes("Cá đâu đớp động dưới chân bèo"));
+  assert.ok(!fallbackText.includes("Trien Nguyen"));
+  assert.ok(!fallbackText.includes("Hệ thống đang tiến hành"));
+  assert.ok(!fallbackText.includes("Sếp có muốn em đọc diễn cảm"));
+});
+
 

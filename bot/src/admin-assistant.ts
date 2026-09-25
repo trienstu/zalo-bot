@@ -19,7 +19,7 @@ import {
   getUserMemories,
 } from "./db/index.js";
 import { sendDirectText, sendDirectFile, sendDirectVoice, sendGroupText } from "./zalo/client.js";
-import { callGemini, callGeminiAgentLoop, downloadFileContent, type GeminiMediaPart } from "./gemini.js";
+import { callGemini, callGeminiAgentLoop, downloadFileContent, executeAgentTool, type GeminiMediaPart } from "./gemini.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
 import { defaultBotName } from "./config.js";
 import fs from "node:fs";
@@ -44,8 +44,8 @@ import { config } from "./config.js";
 import type { QueryPlanResult } from "./query-planner.js";
 import { answerWithHybridRouting } from "./hybrid-agent.js";
 import { normalizeExecutionSignals, selectResponseMode } from "./hybrid-routing.js";
-import { checkIsFileOrVoiceGeneration } from "./tools/file-generator.js";
-import { interceptAndExecuteSimulatedTool } from "./tools/simulated-tool-interceptor.js";
+import { checkIsFileOrVoiceGeneration, checkIsVoiceRequest } from "./tools/file-generator.js";
+import { interceptAndExecuteSimulatedTool, extractSpeechFallbackText } from "./tools/simulated-tool-interceptor.js";
 import {
   isMemoryControlCommand,
   handleMemoryControlCommand,
@@ -1826,6 +1826,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     const needsAgentLoop = checkIsFileOrVoiceGeneration(rawText, event.quote?.text) || /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(rawText);
 
     let answer = "";
+    let voiceGenerated = false;
     if (needsAgentLoop && !isSearchDisabled) {
       // 🚀 AGENT LOOP (Chỉ dùng khi cần tạo/xuất file, vẽ ảnh/biểu đồ, voice hoặc tải link)
       answer = await callGeminiAgentLoop(fullSystemPrompt, effectiveUserPrompt, {
@@ -1836,6 +1837,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
             const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
             const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
             const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+            if (isVoice) voiceGenerated = true;
             const userGreeting = isAdmin ? "Sếp" : pronouns.userTitle;
             const caption = file.caption || (
               isSlide
@@ -1896,6 +1898,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         const userGreeting = isAdmin ? "Sếp" : pronouns.userTitle;
         const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
         if (isVoice) {
+          voiceGenerated = true;
           await sendDirectVoice(api, sender, file.filePath, file.caption || `🎙️ ${defaultBotName} gửi voice cho ${userGreeting} nghe nhé!`);
         } else {
           await sendDirectFile(api, sender, file.filePath, file.caption || `📄 ${defaultBotName} gửi file [${file.fileName}] cho ${userGreeting}!`);
@@ -1904,6 +1907,27 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         console.warn("[admin-assistant] Interceptor sendDirectFile error:", fileErr);
       }
     });
+
+    // 🛡️ PHÒNG THỦ CHIỀU SÂU: Nếu người dùng yêu cầu Voice/Đọc thơ mà chưa có file voice nào được gửi
+    if (checkIsVoiceRequest(rawText, event.quote?.text) && !voiceGenerated) {
+      try {
+        const speechText = extractSpeechFallbackText(answer);
+        if (speechText && speechText.length >= 15) {
+          console.log(`[admin-assistant] 🛡️ Kích hoạt voice fallback tự động (${speechText.length} ký tự)...`);
+          const userGreeting = isAdmin ? "Sếp" : pronouns.userTitle;
+          const vRes = await executeAgentTool("create_voice", {
+            text: speechText,
+            caption: `🎙️ ${defaultBotName} gửi bản đọc diễn cảm cho ${userGreeting} nghe nhé!`,
+          });
+          if (vRes?.success && vRes?.filePath) {
+            voiceGenerated = true;
+            await sendDirectVoice(api, sender, vRes.filePath, vRes.caption || `🎙️ ${defaultBotName} gửi bản đọc diễn cảm cho ${userGreeting} nghe nhé!`);
+          }
+        }
+      } catch (fbVoiceErr) {
+        console.warn("[admin-assistant] Lỗi sinh voice fallback:", fbVoiceErr);
+      }
+    }
 
     answer = finalizeGroundedAnswer(answer, liveNews, evidenceRequired, {
       intent: queryPlan?.intent,

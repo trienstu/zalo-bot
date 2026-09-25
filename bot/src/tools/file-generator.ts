@@ -30,7 +30,41 @@ export function ensureOutputDir(): string {
  * Nhận diện toàn diện ý định tạo/xuất file, bài thuyết trình/slide, voice, podcast hoặc vẽ biểu đồ/ảnh.
  * Hỗ trợ cả câu lệnh trực tiếp lẫn câu trả lời tiếp nối tin nhắn trích dẫn (quote) hoặc giục thực thi ("soạn luôn đi e").
  */
+/**
+ * Kiểm tra xem người dùng có yêu cầu xuất giọng đọc / voice / podcast / ngâm thơ / đọc diễn cảm không
+ */
+export function checkIsVoiceRequest(question: string, quoteText = ""): boolean {
+  const qLower = `${question || ""} ${quoteText || ""}`.toLowerCase();
+
+  // Bỏ qua nếu chỉ là câu hỏi thăm dò năng lực thuần túy
+  if (/^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|thu)?\s*(?:được|đc|duoc)?(?:\s+(?:thu|làm|tạo))?\s+(?:voice|âm\s*thanh|giọng\s*đọc)\s*(?:không|ko)?\s*(?:hả|nhỉ|hở|ạ|không|ko)\s*[?]?$/i.test(qLower.trim())) {
+    return false;
+  }
+
+  const isSpeechOrVoiceRequest =
+    /(?:đọc|ngâm)\s+diễn\s*cảm/iu.test(qLower) ||
+    /(?:đọc|ngâm)\s+(?:giúp|hộ|cho\s+[^\s,!?]+\s+)?(?:bài\s+)?thơ/iu.test(qLower) ||
+    /(?:thuyết\s*minh|lồng\s*tiếng)\b/iu.test(qLower) ||
+    /(?:đọc|nói|phát|kể|ngâm)\s+(?:cho\s+)?(?:[\p{L}\s]+)?\s*nghe/iu.test(qLower) ||
+    /(?:bận|đang\s+lái\s+xe|không\s+tiện\s+đọc)\s*[,.]*\s*(?:đọc|phát|nói|voice|audio)/iu.test(qLower) ||
+    /(?:chuyển|phát|đọc|đổi|bật)\s+(?:thành|ra|sang|qua)?\s*(?:giọng|tiếng|âm\s*thanh|lời\s*nói|voice|audio|podcast)/iu.test(qLower) ||
+    /(?:thu\s*âm|ghi\s*âm|ngâm\s*thơ)\s+(?:bài|thơ|văn|đoạn|kịch|nội\s*dung|cho)/iu.test(qLower) ||
+    /\b(?:thu\s*âm|ghi\s*âm)\b/iu.test(qLower) ||
+    /\b(?:voice\s*bubble|bong\s*bóng\s*thoại)\b/i.test(qLower);
+
+  if (isSpeechOrVoiceRequest) return true;
+
+  const isDialogueOrPodcastRequest =
+    /(?:kịch\s*bản|đối\s*thoại|hội\s*thoại|trò\s*chuyện|cuộc\s*nói\s*chuyện|thảo\s*luận|podcast)\s+(?:giữa\s+)?2\s*(?:người|bạn|nhân\s*vật|mc)/iu.test(qLower) ||
+    /2\s*(?:người|bạn|nhân\s*vật|mc)\s+(?:nói\s*chuyện|đối\s*thoại|trò\s*chuyện|thảo\s*luận|đối\s*đáp|tâm\s*sự)/iu.test(qLower) ||
+    /(?:làm|tạo|soạn|phát|chuyển)\s+(?:thành\s+)?(?:podcast|đối\s*thoại|hội\s*thoại|talkshow)/iu.test(qLower);
+
+  return isDialogueOrPodcastRequest;
+}
+
 export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): boolean {
+  if (checkIsVoiceRequest(question, quoteText)) return true;
+
   const combined = `${question || ""} ${quoteText || ""}`.toLowerCase();
   const qLower = (question || "").toLowerCase();
 
@@ -66,22 +100,6 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
 
   if (hasStructuralDirection) return true;
   if (hasFileTarget && (hasAction || isAffirmativeFollowUp)) return true;
-
-  const isSpeechOrVoiceRequest =
-    /(?:đọc|nói|phát|kể|ngâm)\s+(?:cho\s+)?(?:[\p{L}\s]+)?\s*nghe/iu.test(qLower) ||
-    /(?:bận|đang\s+lái\s+xe|không\s+tiện\s+đọc)\s*[,.]*\s*(?:đọc|phát|nói|voice|audio)/iu.test(qLower) ||
-    /(?:chuyển|phát|đọc|đổi|bật)\s+(?:thành|ra|sang|qua)?\s*(?:giọng|tiếng|âm\s*thanh|lời\s*nói|voice|audio|podcast)/iu.test(qLower) ||
-    /(?:thu\s*âm|ghi\s*âm|ngâm\s*thơ)\s+(?:bài|thơ|văn|đoạn|nội\s*dung)/iu.test(qLower) ||
-    /\b(?:voice\s*bubble|bong\s*bóng\s*thoại)\b/i.test(qLower);
-
-  if (isSpeechOrVoiceRequest) return true;
-
-  const isDialogueOrPodcastRequest =
-    /(?:kịch\s*bản|đối\s*thoại|hội\s*thoại|trò\s*chuyện|cuộc\s*nói\s*chuyện|thảo\s*luận|podcast)\s+(?:giữa\s+)?2\s*(?:người|bạn|nhân\s*vật|mc)/iu.test(qLower) ||
-    /2\s*(?:người|bạn|nhân\s*vật|mc)\s+(?:nói\s*chuyện|đối\s*thoại|trò\s*chuyện|thảo\s*luận|đối\s*đáp|tâm\s*sự)/iu.test(qLower) ||
-    /(?:làm|tạo|soạn|phát|chuyển)\s+(?:thành\s+)?(?:podcast|đối\s*thoại|hội\s*thoại|talkshow)/iu.test(qLower);
-
-  if (isDialogueOrPodcastRequest) return true;
 
   const isCodeOrChart =
     /(?:vẽ|tạo|xuất|lập|thiết\s*kế|làm|soạn)(?:\s+lại)?\s*(?:cho\s*.*?\s*)?(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|poster|ảnh|hình|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/i.test(qLower) ||

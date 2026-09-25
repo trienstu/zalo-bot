@@ -1277,8 +1277,8 @@ export async function callGeminiAgentLoop(
       let resp: Response | null = null;
       let lastErrText = "";
 
-      // Thử gọi model với cơ chế retry nhanh (đổi key hoặc fallback model nếu gặp 503/429)
-      for (let retry = 0; retry < 2; retry++) {
+      // Thử gọi model với cơ chế retry nhanh (đổi key hoặc fallback model nếu gặp 503/429/timeout)
+      for (let retry = 0; retry < 3; retry++) {
         const apiKey = apiKeys[apiKeyIdx];
         const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKey}`;
 
@@ -1298,7 +1298,7 @@ export async function callGeminiAgentLoop(
         try {
           resp = await fetch(endpoint, {
             method: "POST",
-            signal: AbortSignal.timeout(10_000),
+            signal: AbortSignal.timeout(25_000),
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(requestBody),
           });
@@ -1314,19 +1314,25 @@ export async function callGeminiAgentLoop(
             apiKeyIdx = (apiKeyIdx + 1) % apiKeys.length;
           }
 
-          if (resp.status === 503) {
-            if (currentModel !== "gemini-flash-latest") {
-              console.log(`[gemini-agent] ⚡ Chuyển sang model dự phòng gemini-flash-latest do ${currentModel} quá tải 503...`);
+          if (resp.status === 503 || resp.status === 429) {
+            if (currentModel.includes("3-flash")) {
+              console.log(`[gemini-agent] ⚡ Chuyển sang model dự phòng gemini-2.5-flash do ${currentModel} quá tải ${resp.status}...`);
+              currentModel = "gemini-2.5-flash";
+            } else if (currentModel !== "gemini-flash-latest") {
+              console.log(`[gemini-agent] ⚡ Chuyển sang model dự phòng gemini-flash-latest do ${currentModel} quá tải ${resp.status}...`);
               currentModel = "gemini-flash-latest";
             }
             await new Promise((r) => setTimeout(r, 1000));
-          } else if (resp.status === 429) {
-            await new Promise((r) => setTimeout(r, 1500));
           }
         } catch (fetchErr) {
-          console.warn(`[gemini-agent] Turn ${turn + 1} fetch error:`, fetchErr);
+          console.warn(`[gemini-agent] Turn ${turn + 1} (${currentModel}) fetch error:`, fetchErr);
           if (apiKeys.length > 1) {
             apiKeyIdx = (apiKeyIdx + 1) % apiKeys.length;
+          }
+          if (currentModel.includes("3-flash")) {
+            currentModel = "gemini-2.5-flash";
+          } else if (currentModel !== "gemini-flash-latest") {
+            currentModel = "gemini-flash-latest";
           }
           await new Promise((r) => setTimeout(r, 1000));
         }
