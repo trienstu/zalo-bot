@@ -345,6 +345,200 @@ async function synthesizeWithEdgeTTS(
 }
 
 /**
+ * Lọc sạch lời chào hỏi, thông báo hệ thống, lời dẫn chuyện bên ngoài và câu hỏi kết thúc của AI,
+ * CHỈ GIỮ LẠI NỘI DUNG CỐT LÕI CẦN PHÁT ÂM (Tiêu đề, Tác giả/Nguồn nếu có, và toàn bộ nội dung tác phẩm/bài viết/bản tin/kịch bản thoại).
+ * Áp dụng chuẩn mực cho TẤT CẢ các lĩnh vực (thơ ca, văn học, tin tức, pháp luật, tài chính, podcast đối thoại, thông báo, thuyết minh).
+ */
+export function cleanCoreSpeechText(rawText: string): string {
+  if (!rawText) return "";
+  const text = rawText.trim();
+
+  // 1. Phân tách thành các đoạn (paragraphs)
+  const paragraphs = text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  if (paragraphs.length === 0) return "";
+
+  const isIntroParagraphOrLine = (line: string): boolean => {
+    const l = line.replace(/[*_#>`"“”«»]/g, "").trim();
+    if (!l) return false;
+    // Bắt đầu bằng @mention
+    if (/^@\S+/i.test(l)) return true;
+    // Lời chào / xưng hô ban đầu: "Dạ Sếp...", "Chào anh...", "Kính thưa...", "Vâng, em..."
+    if (
+      /^(?:dạ|vâng|chào|thưa|kính\s*thưa|hello|hi)(?:\s+|$|[.,:!?;])/iu.test(l) &&
+      /(?:sếp|anh|chị|bác|bạn|thầy|cô|admin|mọi\s*người|cả\s*nhà|quý\s*vị)/iu.test(l)
+    ) {
+      return true;
+    }
+    if (/^(?:dạ|vâng|thưa\s+sếp|kính\s*thưa)[,!]?\s*$/iu.test(l)) return true;
+    // Bot tự xưng nhận việc: "Em đã tiếp nhận yêu cầu...", "Em xin gửi...", "Tôi xin đọc..."
+    if (
+      /^(?:em|tôi|mình|bot|sen\s*chúa|mộc\s*miên)\s+(?:đã\s+tiếp\s*nhận|xin\s+(?:phép\s+)?(?:gửi|tặng|đọc|trình\s*bày|chia\s*sẻ|thể\s*hiện|thu\s*âm)|rất\s+vui|vừa\s+nhận)/iu.test(
+        l,
+      )
+    ) {
+      return true;
+    }
+    if (/^(?:em|tôi|mình)\s+đã\s+(?:tiếp\s*nhận|ghi\s*nhận|nhận\s*lệnh)/iu.test(l)) return true;
+    // Dẫn nhập chuyển tiếp: "Dưới đây là...", "Sau đây là...", "Em xin gửi trọn vẹn bài thơ:"
+    if (
+      /^(?:dưới\s*đây|sau\s*đây|đây)\s*là\s*(?:nội\s*dung|bài\s*thơ|kịch\s*bản|bản\s*tin|thông\s*tin|đoạn|văn\s*bản|lời\s*thoại|tổng\s*hợp|báo\s*cáo|chi\s*tiết)/iu.test(
+        l,
+      )
+    ) {
+      return true;
+    }
+    if (/^(?:em\s+)?xin\s+(?:phép\s+)?(?:gửi|tặng|đọc|trình\s*bày|chia\s*sẻ)[^:\n]*:?$/iu.test(l)) return true;
+    if (/^(?:dưới\s*đây|sau\s*đây)\s*là\s*[^:\n]*:?$/iu.test(l)) return true;
+    // Thông báo kỹ thuật / tiến trình xử lý
+    if (
+      /(?:hệ\s*thống|worker|tiến\s*trình|nền)\s*(?:đang|đã|sẽ)\s*(?:tiến\s*hành|xử\s*lý|thu\s*âm|tạo|tổng\s*hợp|chuyển\s*đổi|chạy|gửi)/iu.test(
+        l,
+      )
+    ) {
+      return true;
+    }
+    if (
+      /(?:file|bản)\s*(?:âm\s*thanh|voice|audio|ghi\s*âm|thu\s*âm|podcast)\s*(?:sẽ|đang|được)\s*(?:tự\s*động|gửi|xuất|hoàn\s*tất)/iu.test(
+        l,
+      )
+    ) {
+      return true;
+    }
+    if (
+      /(?:google\s*ai\s*studio|gemini\s*tts|google\s*cloud|edge-tts|voice\s*bubble|bong\s*bóng\s*thoại)/iu.test(
+        l,
+      )
+    ) {
+      return true;
+    }
+    return false;
+  };
+
+  const isOutroParagraphOrLine = (line: string): boolean => {
+    const l = line.replace(/[*_#>`"“”«»]/g, "").trim();
+    if (!l) return false;
+    // Câu chờ đợi / hứa hẹn file xuất hiện
+    if (/(?:sếp|bác|anh|chị|bạn|admin)?(?:\s+[\p{L}\s\d]+)?\s*(?:chờ|đợi)\s*(?:em|tôi)\s*(?:một\s+chút|chút|giây\s*lát)/iu.test(l)) return true;
+    if (
+      /(?:file|bản\s*thu|voice|audio|podcast).*?(?:sẽ\s*có\s*mặt|sẽ\s*được\s*gửi|ngay\s*sau\s*đây|ngay\s*ạ|sớm\s*nhất)/iu.test(
+        l,
+      )
+    ) {
+      return true;
+    }
+    if (/(?:hệ\s*thống|worker)\s*(?:đang|sẽ)\s*(?:tiến\s*hành|xử\s*lý|gửi|tổng\s*hợp)/iu.test(l)) return true;
+    // Câu hỏi gợi mở / tương tác xã giao ở cuối
+    if (/(?:sếp|bác|anh|chị|bạn|admin)?(?:\s+[\p{L}\s\d]+)?\s*(?:có\s*muốn|cần|thấy|nghĩ|thích).*(?:\?|ạ!|ạ\?|nhé!|nhé\?)$/iu.test(l)) return true;
+    if (
+      /(?:có\s*muốn|cần)\s*(?:em|tôi|bot)?\s*(?:chuẩn\s*bị|đọc|ngâm|hát|làm|soạn|tìm|hỗ\s*trợ|thử\s*sức).*(?:\?|ạ!|ạ\?|nhé!|nhé\?)$/iu.test(
+        l,
+      )
+    ) {
+      return true;
+    }
+    if (/^(?:sếp|bác|anh|chị|bạn)\s*thấy\s*(?:thế\s*nào|sao|bản\s*đọc)/iu.test(l)) return true;
+    if (/(?:để\s*em|cho\s*em)\s*["']?thử\s*sức["']?\s*tiếp\s*không\s*ạ/iu.test(l)) return true;
+    // Lời chúc / hy vọng
+    if (/^chúc\s*(?:sếp|bác|anh|chị|bạn|mọi\s*người|cả\s*nhà)/iu.test(l)) return true;
+    if (/^hy\s*vọng\s*(?:bản\s*đọc|bài\s*thơ|nội\s*dung|kịch\s*bản|bản\s*tin|thông\s*tin)/iu.test(l)) return true;
+    // Lời mời gọi hỗ trợ tiếp
+    if (/^(?:nếu\s*(?:sếp|bác|anh|chị|bạn)?\s*cần|cần\s+thêm)\s*.*?(?:cứ\s*bảo|cứ\s*nhắn|hãy\s*bảo)\s*(?:em|tôi)/iu.test(l)) {
+      return true;
+    }
+    return false;
+  };
+
+  // 2. Lọc bỏ các đoạn intro từ trên xuống
+  let startIndex = 0;
+  while (startIndex < paragraphs.length) {
+    const p = paragraphs[startIndex];
+    if (!p) {
+      startIndex++;
+      continue;
+    }
+    const lines = p.split("\n").map((s) => s.trim()).filter(Boolean);
+    if (lines.length > 0 && lines.every((l) => isIntroParagraphOrLine(l))) {
+      startIndex++;
+    } else {
+      break;
+    }
+  }
+
+  // 3. Lọc bỏ các đoạn outro từ dưới lên
+  let endIndex = paragraphs.length - 1;
+  while (endIndex >= startIndex) {
+    const p = paragraphs[endIndex];
+    if (!p) {
+      endIndex--;
+      continue;
+    }
+    const lines = p.split("\n").map((s) => s.trim()).filter(Boolean);
+    if (lines.length > 0 && lines.every((l) => isOutroParagraphOrLine(l))) {
+      endIndex--;
+    } else {
+      break;
+    }
+  }
+
+  if (startIndex > endIndex) {
+    return rawText.trim();
+  }
+
+  const remainingParagraphs = paragraphs.slice(startIndex, endIndex + 1);
+
+  // 4. Kiểm tra dòng đầu của đoạn đầu tiên: nếu có dòng dẫn dắt bị gộp chung đoạn, loại bỏ dòng đó
+  if (remainingParagraphs.length > 0 && remainingParagraphs[0]) {
+    const firstP = remainingParagraphs[0];
+    const lines = firstP.split("\n");
+    let lineStart = 0;
+    while (lineStart < lines.length && isIntroParagraphOrLine(lines[lineStart] || "")) {
+      lineStart++;
+    }
+    if (lineStart > 0 && lineStart < lines.length) {
+      remainingParagraphs[0] = lines.slice(lineStart).join("\n").trim();
+    }
+  }
+
+  // 5. Kiểm tra dòng cuối của đoạn cuối cùng: nếu có dòng outro bị gộp chung đoạn, loại bỏ dòng đó
+  if (remainingParagraphs.length > 0) {
+    const lastIdx = remainingParagraphs.length - 1;
+    const lastP = remainingParagraphs[lastIdx];
+    if (lastP) {
+      const lines = lastP.split("\n");
+      let lineEnd = lines.length - 1;
+      while (lineEnd >= 0 && isOutroParagraphOrLine(lines[lineEnd] || "")) {
+        lineEnd--;
+      }
+      if (lineEnd >= 0 && lineEnd < lines.length - 1) {
+        remainingParagraphs[lastIdx] = lines.slice(0, lineEnd + 1).join("\n").trim();
+      }
+    }
+  }
+
+  const result = remainingParagraphs.join("\n\n").trim();
+
+  // Phòng thủ an toàn: Nếu sau khi lọc mà độ dài còn lại quá ngắn (< 15 ký tự), giữ nguyên text gốc
+  if (!result || result.length < 15) {
+    return rawText.trim();
+  }
+
+  return result;
+}
+
+/**
+ * Làm sạch các câu hứa hẹn tiến trình / worker nền lỗi thời trong câu trả lời bằng chữ
+ * sau khi file voice đã được thực sự tạo và gửi lên Zalo.
+ */
+export function cleanOutdatedVoicePromisesFromAnswer(answer: string): string {
+  if (!answer) return "";
+  let text = answer;
+  text = text.replace(/\n*hệ\s*thống\s*(?:đang|sẽ)\s*(?:tiến\s*hành|xử\s*lý|tổng\s*hợp)[^\n]*/giu, "");
+  text = text.replace(/\n*file\s*âm\s*thanh\s*sẽ\s*(?:được\s*gửi|tự\s*động\s*xuất\s*hiện|có\s*mặt)[^\n]*/giu, "");
+  text = text.replace(/\n*(?:sếp|bác|anh|chị|bạn|admin)?(?:\s+[\p{L}\s\d]+)?\s*(?:chờ|đợi)\s*(?:em|tôi)\s*(?:một\s+chút|chút|giây\s*lát)[^\n]*/giu, "");
+  return text.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/**
  * Làm sạch văn bản trước khi đưa vào Text-to-Speech:
  * - Loại bỏ định dạng markdown (tiêu đề #, in đậm **, in nghiêng *, trích dẫn >, gạch đầu dòng -)
  * - Loại bỏ các chỉ dẫn sân khấu / cảm xúc trong ngoặc đơn hoặc ngoặc vuông (VD: (cười), (hào hứng), [thì thầm])
@@ -523,7 +717,8 @@ export async function synthesizeSpeech(options: SynthesizeOptions): Promise<Voic
   ensureVoiceDir();
   cleanOldVoiceFiles(60);
 
-  const cleanText = cleanTextForTTS(options.text);
+  const coreText = cleanCoreSpeechText(options.text);
+  const cleanText = cleanTextForTTS(coreText);
   if (!cleanText) {
     return {
       success: false,
@@ -617,7 +812,8 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
   ensureVoiceDir();
   cleanOldVoiceFiles(60);
 
-  const content = normalizeDialogueTurns(options.text || "");
+  const coreText = cleanCoreSpeechText(options.text || "");
+  const content = normalizeDialogueTurns(coreText);
   if (!content) {
     return {
       success: false,

@@ -12,7 +12,14 @@ import {
   parseMarkdownToSlides,
   parseMarkdownRuns,
 } from "./file-generator.js";
-import { synthesizeSpeech, synthesizeDialogue, normalizeDialogueTurns, isDialogueText } from "./voice-generator.js";
+import {
+  synthesizeSpeech,
+  synthesizeDialogue,
+  normalizeDialogueTurns,
+  isDialogueText,
+  cleanCoreSpeechText,
+  cleanOutdatedVoicePromisesFromAnswer,
+} from "./voice-generator.js";
 import { validatePythonCodeSafety } from "./python-runner.js";
 import { extractSimulatedGenerateFile, extractSimulatedCreateVoice, extractSpeechFallbackText } from "./simulated-tool-interceptor.js";
 
@@ -540,12 +547,107 @@ Hệ thống đang tiến hành xử lý thu âm giọng đọc diễn cảm bà
 
 Sếp có muốn em đọc diễn cảm thêm bài thơ nào khác nữa không ạ?`;
 
-  const fallbackText = extractSpeechFallbackText(botAnswerFromScreenshot);
-  assert.ok(fallbackText.includes("Ao thu lạnh lẽo nước trong veo"));
-  assert.ok(fallbackText.includes("Cá đâu đớp động dưới chân bèo"));
-  assert.ok(!fallbackText.includes("Trien Nguyen"));
-  assert.ok(!fallbackText.includes("Hệ thống đang tiến hành"));
-  assert.ok(!fallbackText.includes("Sếp có muốn em đọc diễn cảm"));
+  const fallback = extractSpeechFallbackText(botAnswerFromScreenshot);
+  assert.ok(fallback.startsWith("THU ĐIẾU"));
+  assert.ok(!fallback.includes("Trien Nguyen"));
+});
+
+test("cleanCoreSpeechText bóc tách chính xác tên bài thơ, tác giả và nội dung thơ từ tin nhắn thực tế của Sếp", () => {
+  const screenshotMsg = `@Trien Nguyen Dạ Sếp Trien Nguyen, em đã tiếp nhận yêu cầu và đang tiến hành thu âm bài thơ Thu Điếu của cụ Nguyễn Khuyến bằng giọng nữ truyền cảm, ngân nga đúng chất ngâm thơ theo chuẩn Gemini TTS (Google AI Studio) mà em đã báo cáo với Sếp ạ.
+
+Hệ thống đang xử lý qua worker nền để đảm bảo chất lượng âm thanh tốt nhất, file âm thanh sẽ được gửi trực tiếp vào nhóm ngay sau khi hoàn tất.
+
+Dưới đây là nội dung bài thơ em đang thực hiện:
+
+THU ĐIẾU (Câu cá mùa thu)
+Tác giả: Nguyễn Khuyến
+
+Ao thu lạnh lẽo nước trong veo,
+Một chiếc thuyền câu bé tẻo teo.
+Sóng biếc theo làn hơi gợn tí,
+Lá vàng trước gió khẽ đưa vèo.
+
+Tầng mây lơ lửng trời xanh ngắt,
+Ngõ trúc quanh co khách vắng teo.
+Tựa gối ôm cần lâu chẳng được,
+Cá đâu đớp động dưới chân bèo.
+
+Sếp Trien Nguyen chờ em một chút, file "đã" nhất sẽ có mặt ngay ạ! Sếp có muốn em chuẩn bị thêm kịch bản hay bài thơ nào khác để em "thử sức" tiếp không ạ?`;
+
+  const cleaned = cleanCoreSpeechText(screenshotMsg);
+  assert.ok(cleaned.startsWith("THU ĐIẾU (Câu cá mùa thu)"), "Phải bắt đầu bằng tên bài thơ");
+  assert.ok(cleaned.includes("Tác giả: Nguyễn Khuyến"), "Phải giữ tên tác giả");
+  assert.ok(cleaned.includes("Ao thu lạnh lẽo nước trong veo"), "Phải chứa câu thơ đầu");
+  assert.ok(cleaned.endsWith("Cá đâu đớp động dưới chân bèo."), "Phải kết thúc ở câu thơ cuối");
+
+  assert.ok(!cleaned.includes("Dạ Sếp Trien Nguyen"), "Không được đọc lời chào ban đầu");
+  assert.ok(!cleaned.includes("worker"), "Không được đọc thông báo worker kỹ thuật");
+  assert.ok(!cleaned.includes("Dưới đây là"), "Không được đọc câu dẫn nhập phiếm đàm");
+  assert.ok(!cleaned.includes("chờ em một chút"), "Không được đọc câu chờ đợi");
+  assert.ok(!cleaned.includes("thử sức"), "Không được đọc câu hỏi gợi mở ở cuối");
+});
+
+test("cleanCoreSpeechText hoạt động đồng bộ trên các lĩnh vực khác: bản tin thể thao, pháp luật, podcast 2 người", () => {
+  // 1. Lĩnh vực Thể thao / Tin tức
+  const sportsNews = `@Anh Dạ em cập nhật bản tin thể thao hôm nay:
+
+TỔNG HỢP VÒNG 5 NGOẠI HẠNG ANH
+Man City hòa Arsenal với tỷ số 2-2 trong trận cầu kịch tính tại sân Etihad. Stones ghi bàn gỡ hòa ở phút bù giờ cuối cùng.
+
+File âm thanh sẽ được gửi ngay ạ! Bác có muốn nghe thêm bảng xếp hạng không?`;
+
+  const cleanSports = cleanCoreSpeechText(sportsNews);
+  assert.ok(cleanSports.startsWith("TỔNG HỢP VÒNG 5 NGOẠI HẠNG ANH"));
+  assert.ok(cleanSports.endsWith("Stones ghi bàn gỡ hòa ở phút bù giờ cuối cùng."));
+  assert.ok(!cleanSports.includes("Dạ em cập nhật"));
+  assert.ok(!cleanSports.includes("Bác có muốn nghe thêm"));
+
+  // 2. Lĩnh vực Pháp luật
+  const lawText = `Dạ thưa Sếp, em xin gửi trích dẫn điều khoản:
+
+ĐIỀU 132 BỘ LUẬT LAO ĐỘNG 2019: NGHỈ HẰNG NĂM
+Người lao động làm việc đủ 12 tháng cho một người sử dụng lao động thì được nghỉ hằng năm, hưởng nguyên lương theo hợp đồng lao động.
+
+Hệ thống đang tiến hành tổng hợp voice... Sếp cần tra cứu thêm điều khoản nào không ạ?`;
+
+  const cleanLaw = cleanCoreSpeechText(lawText);
+  assert.ok(cleanLaw.startsWith("ĐIỀU 132 BỘ LUẬT LAO ĐỘNG 2019: NGHỈ HẰNG NĂM"));
+  assert.ok(cleanLaw.endsWith("hưởng nguyên lương theo hợp đồng lao động."));
+  assert.ok(!cleanLaw.includes("Dạ thưa Sếp"));
+  assert.ok(!cleanLaw.includes("Hệ thống đang tiến hành"));
+
+  // 3. Lĩnh vực Kịch bản Podcast 2 người
+  const podcastText = `Dưới đây là kịch bản đối thoại:
+
+KỊCH BẢN: ĐỐI THOẠI VỀ KHOA HỌC DỮ LIỆU
+Nam: Chào Mai, theo bạn kỹ năng nào quan trọng nhất với một Data Scientist?
+Nữ: Mình nghĩ đó là tư duy giải quyết vấn đề và sự am hiểu nghiệp vụ kinh doanh.
+
+Sếp chờ em một chút, file podcast 2 giọng sẽ có mặt ngay ạ!`;
+
+  const cleanPodcast = cleanCoreSpeechText(podcastText);
+  assert.ok(cleanPodcast.startsWith("KỊCH BẢN: ĐỐI THOẠI VỀ KHOA HỌC DỮ LIỆU"));
+  assert.ok(cleanPodcast.includes("Nam: Chào Mai"));
+  assert.ok(cleanPodcast.endsWith("Nữ: Mình nghĩ đó là tư duy giải quyết vấn đề và sự am hiểu nghiệp vụ kinh doanh."));
+  assert.ok(!cleanPodcast.includes("Dưới đây là kịch bản"));
+  assert.ok(!cleanPodcast.includes("Sếp chờ em một chút"));
+});
+
+test("cleanOutdatedVoicePromisesFromAnswer loại bỏ sạch các câu hứa hẹn kỹ thuật khi voice đã gửi", () => {
+  const originalAnswer = `@Trien Nguyen Dạ Sếp Trien Nguyen, em xin gửi tặng Sếp trọn vẹn bài thơ:
+
+Hệ thống đang xử lý qua worker nền để đảm bảo chất lượng âm thanh tốt nhất, file âm thanh sẽ được gửi trực tiếp vào nhóm ngay sau khi hoàn tất.
+
+THU ĐIẾU
+Ao thu lạnh lẽo nước trong veo...
+
+Sếp Trien Nguyen chờ em một chút, file "đã" nhất sẽ có mặt ngay ạ!`;
+
+  const cleaned = cleanOutdatedVoicePromisesFromAnswer(originalAnswer);
+  assert.ok(!cleaned.includes("worker nền"));
+  assert.ok(!cleaned.includes("chờ em một chút"));
+  assert.ok(cleaned.includes("@Trien Nguyen Dạ Sếp Trien Nguyen"));
+  assert.ok(cleaned.includes("THU ĐIẾU"));
 });
 
 

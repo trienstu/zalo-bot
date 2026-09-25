@@ -997,7 +997,7 @@ const AGENT_TOOLS_DECLARATION = {
         properties: {
           text: {
             type: "STRING",
-            description: "Nội dung cần đọc. Nếu là Podcast/đối thoại thì viết theo cấu trúc: 'Tên: Lời thoại' cho mỗi lượt nói.",
+            description: "Nội dung cốt lõi cần đọc thành tiếng (CHỈ gồm Tiêu đề, Tác giả/Nguồn nếu có, và nội dung tác phẩm/bài thơ/bản tin/kịch bản thoại). TUYỆT ĐỐI KHÔNG đưa lời chào hỏi của bot (@mention, 'Dạ Sếp...', 'Em xin gửi...'), lời dẫn chuyện ('Dưới đây là...'), thông báo kỹ thuật ('Hệ thống đang xử lý...'), hay câu hỏi kết thúc ('Sếp có muốn...', 'Chúc bạn...') vào tham số này!",
           },
           voice: {
             type: "STRING",
