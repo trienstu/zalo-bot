@@ -242,5 +242,33 @@ test("quote dạng object content có title/description: rút text đầy đủ"
   assert.equal(quote.text, "Bản tin AI hôm nay — Claude 3.7 và GPT-4o ra mắt nhiều tính năng mới");
 });
 
+test("parseImagePromptAndRatio: nhận diện yêu cầu vẽ ảnh mới", async () => {
+  const { parseImagePromptAndRatio } = await import("./member-assistant.js");
+  const parsed = parseImagePromptAndRatio("vẽ ảnh một chú mèo phi hành gia trên sao hỏa tỉ lệ 16:9");
+  assert.ok(parsed);
+  assert.match(parsed.prompt, /mèo phi hành gia/);
+  assert.equal(parsed.aspectRatio, "16:9");
+  assert.equal(parsed.isEdit, false);
+});
+
+test("parseImagePromptAndRatio: nhận diện yêu cầu chỉnh sửa/xoá chi tiết ảnh", async () => {
+  const { parseImagePromptAndRatio } = await import("./member-assistant.js");
+  const parsed1 = parseImagePromptAndRatio("Sen chúa xoá người mặc áo đen bên phải, thay người mặc đầm nâu thành đầm đen, sửa ngày 19 tháng 8 thành 25 tháng 9, sửa thứ tư thành thứ Sáu");
+  assert.ok(parsed1);
+  assert.equal(parsed1.isEdit, true);
+  assert.match(parsed1.prompt, /xoá người mặc áo đen/);
+
+  const parsed2 = parseImagePromptAndRatio("Sen Chúa xoá phông nền giúp em thành bãi biển");
+  assert.ok(parsed2);
+  assert.equal(parsed2.isEdit, true);
+});
+
+test("parseImagePromptAndRatio: KHÔNG nhầm lẫn câu hỏi văn bản thông thường", async () => {
+  const { parseImagePromptAndRatio } = await import("./member-assistant.js");
+  assert.equal(parseImagePromptAndRatio("xóa người đại diện theo pháp luật cần thủ tục gì hả bot"), null);
+  assert.equal(parseImagePromptAndRatio("thay đổi đăng ký kinh doanh mất bao lâu"), null);
+  assert.equal(parseImagePromptAndRatio("sửa đổi điều lệ công ty cổ phần có cần họp đại hội đồng cổ đông"), null);
+});
+
 
 

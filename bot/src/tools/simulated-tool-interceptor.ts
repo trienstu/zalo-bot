@@ -109,10 +109,16 @@ export function extractSimulatedCreateVoice(text: string): ExtractedVoiceCall | 
     }
   }
 
-  // Trích xuất voice hoặc voice_style
-  const voiceMatch = inner.match(/(?:voice|voice_style)\s*=\s*(['"])(.*?)\1/i);
+  // Trích xuất voice
+  const voiceMatch = inner.match(/\bvoice\s*=\s*(['"])(.*?)\1/i);
   if (voiceMatch && voiceMatch[2]) {
     args.voice = voiceMatch[2].trim();
+  }
+
+  // Trích xuất voice_style hoặc style
+  const styleMatch = inner.match(/\b(?:voice_style|style)\s*=\s*(['"])(.*?)\1/i);
+  if (styleMatch && styleMatch[2]) {
+    args.voice_style = styleMatch[2].trim();
   }
 
   // Trích xuất caption
@@ -144,12 +150,13 @@ export async function interceptAndExecuteSimulatedTool(
     try {
       console.log(
         `[simulated-tool-interceptor] 🛡️ Phát hiện [create_voice] thô trong output text! ` +
-        `Kích hoạt tạo voice ngầm: text=${voiceExtracted.args.text.length} chars, voice=${voiceExtracted.args.voice || "auto"}`,
+        `Kích hoạt tạo voice ngầm: text=${voiceExtracted.args.text.length} chars, voice=${voiceExtracted.args.voice || "auto"}, style=${voiceExtracted.args.voice_style || "natural"}`,
       );
 
       const result = await executeAgentTool("create_voice", {
         text: voiceExtracted.args.text,
         voice: voiceExtracted.args.voice,
+        voice_style: voiceExtracted.args.voice_style,
         caption: voiceExtracted.args.caption,
       });
 

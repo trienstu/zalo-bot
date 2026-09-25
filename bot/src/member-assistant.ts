@@ -2509,10 +2509,11 @@ async function handleHistoryQA(
     `HÃY TRẢ LỜI THẬT ${isSuperAdmin ? "CHU ĐÁO, CHUẨN XÁC VÀ TÔN TRỌNG SẾP" : "DUYÊN DÁNG, CHUẨN XÁC VÀ HÓM HỈNH"}:`;
 
   try {
-    const needsAgentLoop = checkIsFileOrVoiceGeneration(question, options?.quote?.text) || /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(question);
+    const isFileOrVoiceReq = checkIsFileOrVoiceGeneration(question, options?.quote?.text);
+    const needsAgentLoop = isFileOrVoiceReq || (!isSearchDisabled && /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(question));
 
     let answer = "";
-    if (needsAgentLoop && !isSearchDisabled) {
+    if (needsAgentLoop) {
       // 🚀 Chỉ khi người dùng thực sự yêu cầu gọi tool xuất file, voice hoặc đọc link cụ thể mới chạy Agent Loop
       answer = await callGeminiAgentLoop(systemPrompt, userPrompt, {
         model: "gemini-3.1-flash-lite-preview",
@@ -2578,7 +2579,7 @@ async function handleHistoryQA(
       const responseMode = selectResponseMode({
         signals: routingSignals,
         needsSearch,
-        explicitToolRequest: false,
+        explicitToolRequest: isFileOrVoiceReq,
         hasMedia: Boolean(mediaPart),
       });
       console.log(`[member-assistant] 🤖 Đang gọi AI sinh câu trả lời (route: ${responseMode}, fallbackModel: ${chosenModel}, search: ${needsSearch})...`);
@@ -2589,7 +2590,7 @@ async function handleHistoryQA(
         userPrompt: effectiveUserPrompt,
         sessionKey: `${config.botId}:group:${threadId}:user:${options?.sender || displayName}`,
         isOwner: isSuperAdmin,
-        explicitToolRequest: false,
+        explicitToolRequest: isFileOrVoiceReq,
         hasMedia: Boolean(mediaPart),
         fallback: async () => await callGemini(systemPrompt, effectiveUserPrompt, {
           model: chosenModel,
@@ -2744,7 +2745,18 @@ export function extractImagePromptFromText(rawText: string, botName = ""): strin
     return cleanExtractedPrompt(editMatch[1]);
   }
 
-  // 2.1 Ngôn ngữ tự nhiên có từ khóa ảnh/hình/tranh/họa:
+  // 2.1 Ngôn ngữ tự nhiên thao tác chỉnh sửa chi tiết ảnh (in-painting / xóa người, thay phục trang, đổi nền...):
+  // VD: "xoá người mặc áo đen bên phải, thay người mặc đầm nâu...", "xoá phông nền giúp em...", "thay người bên phải thành đầm tím"
+  const isQuestion = /(?:như\s*thế\s*nào|làm\s*sao|thủ\s*tục\s*(?:gì|như\s*thế\s*nào)|quy\s*định\s*(?:gì|như\s*thế\s*nào)|có\s*được\s*không|được\s*k\b|phải\s*làm\s*gì|là\s*gì|tại\s*sao|\?\s*$)/i.test(clean);
+  if (!isQuestion) {
+    const directPhotoEditActionPattern = /(?:^|.*?\b)(?:hãy\s+|nhờ\s+|cho\s+)?((?:xoá|xóa|bỏ|thay|đổi|chỉnh|sửa|làm\s*nét|làm\s*rõ|phục\s*chế)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:người|nhân\s*vật|áo|quần|váy|đầm|tóc|kính|mũ|mặt|khuôn\s*mặt|nền|phông|background|chữ|ngày|tháng|chi\s*tiết)\b.+)$/i;
+    const directActionMatch = clean.match(directPhotoEditActionPattern);
+    if (directActionMatch && directActionMatch[1]?.trim()) {
+      return cleanExtractedPrompt(directActionMatch[1]);
+    }
+  }
+
+  // 2.2 Ngôn ngữ tự nhiên có từ khóa ảnh/hình/tranh/họa:
   const naturalPhotoPattern = /(?:^|.*?\b)(?:hãy\s+|nhờ\s+|cho\s+)?(?:tạo|vẽ|sinh|làm)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:giúp\s+)?(?:một\s+)?(?:bức\s+|tấm\s+|cái\s+|chiếc\s+)?(?:ảnh|hình|tranh|họa)\s*(?:về|với|cảnh|chủ đề|một)?\s*[:\s]*(.+)$/i;
   const photoMatch = clean.match(naturalPhotoPattern);
   if (photoMatch && photoMatch[1]?.trim()) {
@@ -2792,7 +2804,10 @@ export function parseImagePromptAndRatio(
 
   // Nhận diện lệnh hoặc câu nói sửa ảnh
   const isExplicitEditCmd = /^[/!](?:suaanh|chinhanh|chinhsuaanh|editanh|editimage|modifyimage)\b/i.test(rawText.trim());
-  const isNaturalEdit = /(?:^|.*?\b)(?:hãy\s+|nhờ\s+|cho\s+)?(?:sửa|chỉnh\s*sửa|chỉnh|edit|biến\s*đổi|chuyển\s*đổi|làm\s*lại)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:giúp\s+)?(?:một\s+)?(?:bức\s+|tấm\s+|cái\s+|chiếc\s+)?(?:ảnh|hình|tranh)\b/i.test(cleanForDetect);
+  const isNaturalEdit =
+    /(?:^|.*?\b)(?:hãy\s+|nhờ\s+|cho\s+)?(?:sửa|chỉnh\s*sửa|chỉnh|edit|biến\s*đổi|chuyển\s*đổi|làm\s*lại)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:giúp\s+)?(?:một\s+)?(?:bức\s+|tấm\s+|cái\s+|chiếc\s+)?(?:ảnh|hình|tranh)\b/i.test(cleanForDetect) ||
+    (!/(?:như\s*thế\s*nào|làm\s*sao|thủ\s*tục\s*(?:gì|như\s*thế\s*nào)|quy\s*định\s*(?:gì|như\s*thế\s*nào)|có\s*được\s*không|được\s*k\b|phải\s*làm\s*gì|là\s*gì|tại\s*sao|\?\s*$)/i.test(cleanForDetect) &&
+      /(?:^|.*?\b)(?:hãy\s+|nhờ\s+|cho\s+)?(?:xoá|xóa|bỏ|thay|đổi|chỉnh|sửa|làm\s*nét|làm\s*rõ|phục\s*chế)\s+(?:giúp\s+)?(?:cho\s+)?(?:tôi|mình|em|anh|chị|bác|nhóm)?\s*(?:người|nhân\s*vật|áo|quần|váy|đầm|tóc|kính|mũ|mặt|khuôn\s*mặt|nền|phông|background|chữ|ngày|tháng|chi\s*tiết)\b/i.test(cleanForDetect));
 
   // Nhận diện trường hợp quote ảnh kèm chỉ dẫn thay đổi (VD: "đổi màu tóc thành vàng", "thêm kính mắt", "thay nền sang ban đêm")
   const hasImageInQuote = Boolean(quote?.mediaUrl && (quote.mediaType === "image" || /\.(?:jpg|jpeg|png|webp|gif)/i.test(quote.mediaUrl)));

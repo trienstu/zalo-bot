@@ -266,7 +266,7 @@ test("synthesizeSpeech tạo file voice .m4a AAC 44.1kHz chất lượng cao qua
   });
 
   assert.equal(res.success, true);
-  assert.equal(res.provider, "google");
+  assert.ok(res.provider === "aistudio" || res.provider === "google");
   assert.ok(res.filePath.endsWith(".m4a"));
   assert.ok(fs.existsSync(res.filePath));
   assert.ok(res.fileSize > 2000);
@@ -288,7 +288,7 @@ test("synthesizeDialogue tạo podcast đối thoại 2 người qua Google Clou
   });
 
   assert.equal(res.success, true);
-  assert.equal(res.provider, "google");
+  assert.ok(res.provider === "aistudio" || res.provider === "google");
   assert.ok(res.filePath.endsWith(".m4a"));
   assert.ok(fs.existsSync(res.filePath));
   assert.ok(res.fileSize > 4000);

@@ -1017,6 +1017,10 @@ const AGENT_TOOLS_DECLARATION = {
             type: "STRING",
             description: "Lời nhắn chữ ngắn gọn gửi kèm voice message.",
           },
+          voice_style: {
+            type: "STRING",
+            description: "Phong cách, cảm xúc, hoặc chất giọng vùng miền (ví dụ: 'ngâm thơ Huế', 'giọng nữ người Huế truyền cảm', 'kể chuyện trầm ấm', 'nam miền Nam', 'hào hùng'). Tự động được ưu tiên xử lý qua Google AI Studio.",
+          },
         },
         required: ["text"],
       },
@@ -1191,15 +1195,16 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
       const text = String(args?.text || "").trim();
       const voice = args?.voice ? String(args.voice) : undefined;
       const caption = args?.caption ? String(args.caption) : undefined;
+      const voice_style = args?.voice_style ? String(args.voice_style) : (args?.style ? String(args.style) : undefined);
       const speakers = Array.isArray(args?.speakers) ? (args.speakers as any) : undefined;
 
       const isDialogue = (speakers && speakers.length > 0) || text.includes("\n") && /^[^:：\n]+[:：]/.test(text);
 
       if (isDialogue) {
-        const result = await synthesizeDialogue({ text, speakers, caption });
+        const result = await synthesizeDialogue({ text, speakers, caption, stylePrompt: voice_style });
         return result;
       } else {
-        const result = await synthesizeSpeech({ text, voice, caption });
+        const result = await synthesizeSpeech({ text, voice, caption, stylePrompt: voice_style });
         return result;
       }
     }

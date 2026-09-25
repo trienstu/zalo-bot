@@ -15,7 +15,7 @@ export interface VoiceResult {
   filePath: string;
   fileName: string;
   fileSize: number;
-  provider?: "google" | "edge";
+  provider?: "aistudio" | "google" | "edge";
   durationSec?: number;
   caption?: string;
   message?: string;
@@ -33,6 +33,8 @@ export interface SynthesizeOptions {
   caption?: string;
   rate?: string;
   pitch?: string;
+  stylePrompt?: string;
+  style?: string;
 }
 
 function ensureVoiceDir(): string {
@@ -320,27 +322,134 @@ async function synthesizeWithEdgeTTS(
 }
 
 /**
- * Sinh âm thanh cho một câu văn với cơ chế ưu tiên Google Cloud TTS, tự động fallback EdgeTTS
+ * Định danh giọng Google AI Studio (Gemini Native Audio):
+ * Nữ: Aoede, Kore
+ * Nam: Puck, Fenrir, Charon
+ */
+export function resolveAIStudioVoice(voiceHint?: string): string {
+  if (!voiceHint) return "Aoede";
+  const hint = voiceHint.toLowerCase().trim();
+
+  if (hint.includes("nam") || hint.includes("male") || hint.includes("dan") || hint.includes("puck")) {
+    return "Puck";
+  }
+  if (hint.includes("trầm") || hint.includes("charon") || hint.includes("fenrir")) {
+    return "Fenrir";
+  }
+  if (hint.includes("kore")) {
+    return "Kore";
+  }
+  return "Aoede";
+}
+
+/**
+ * Sinh âm thanh qua Google AI Studio (Gemini Flash TTS)
+ * Hỗ trợ diễn cảm, ngâm thơ, phong cách vùng miền (Huế, Nam, Bắc) và ngữ điệu tự nhiên.
+ */
+async function synthesizeWithGoogleAIStudio(
+  text: string,
+  outputPath: string,
+  voiceHint?: string,
+  options?: { rate?: string; pitch?: string; stylePrompt?: string },
+): Promise<boolean> {
+  const rawKey = (process.env.GEMINI_API_KEY || config.geminiApiKey || "").trim();
+  const apiKeys = rawKey.split(",").map((k) => k.trim()).filter(Boolean);
+  if (apiKeys.length === 0) return false;
+
+  const voiceName = resolveAIStudioVoice(voiceHint);
+  const models = ["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts", "gemini-2.5-flash"];
+
+  const styleDesc = (options?.stylePrompt || "").trim();
+  let promptText = "";
+  if (styleDesc) {
+    promptText = `Hãy thể hiện và đọc diễn cảm văn bản sau bằng tiếng Việt với phong cách/giọng điệu: ${styleDesc}.\n\nVăn bản:\n${text}`;
+  } else {
+    promptText = `Hãy đọc diễn cảm văn bản sau bằng tiếng Việt với ngữ điệu tự nhiên, truyền cảm:\n\n${text}`;
+  }
+
+  const payload = {
+    contents: [
+      {
+        parts: [{ text: promptText }],
+      },
+    ],
+    generationConfig: {
+      responseModalities: ["AUDIO"],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: {
+            voiceName,
+          },
+        },
+      },
+    },
+  };
+
+  for (const apiKey of apiKeys) {
+    for (const model of models) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(30_000),
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          console.warn(`[voice-generator] Google AI Studio TTS (${model}) HTTP ${res.status}:`, errText.slice(0, 150));
+          continue;
+        }
+
+        const data = (await res.json()) as any;
+        const part = data?.candidates?.[0]?.content?.parts?.[0];
+        if (part?.inlineData?.data) {
+          const buffer = Buffer.from(part.inlineData.data, "base64");
+          if (buffer.length > 0) {
+            fs.writeFileSync(outputPath, buffer);
+            console.log(`[voice-generator] ✅ Sinh âm thanh thành công qua Google AI Studio (${model}, ${voiceName}, ${buffer.length} bytes)`);
+            return true;
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[voice-generator] Lỗi gọi Google AI Studio TTS (${model}):`, err?.message || err);
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Sinh âm thanh theo cấu trúc Hybrid 3 Tầng:
+ * Tier 1: Google AI Studio (Gemini Flash TTS) - Diễn cảm, thơ ca, phong cách vùng miền
+ * Tier 2: Google Cloud Text-to-Speech (Neural2/Wavenet) - Chuẩn phát thanh viên
+ * Tier 3: Microsoft Edge-TTS (Hoài My / Nam Minh) - Lưới an toàn miễn phí 100%
  */
 async function synthesizeSingleAudio(
   text: string,
   outputPath: string,
   voiceHint?: string,
-  options?: { rate?: string; pitch?: string },
-): Promise<"google" | "edge"> {
-  // 1. Ưu tiên Google Cloud TTS
+  options?: { rate?: string; pitch?: string; stylePrompt?: string },
+): Promise<"aistudio" | "google" | "edge"> {
+  // Tier 1: Ưu tiên Google AI Studio (Gemini Flash TTS)
+  const aiStudioOk = await synthesizeWithGoogleAIStudio(text, outputPath, voiceHint, options);
+  if (aiStudioOk) return "aistudio";
+  console.warn("[voice-generator] Google AI Studio TTS không khả dụng, đang kích hoạt Tier 2: Google Cloud TTS...");
+
+  // Tier 2: Fallback sang Google Cloud TTS
   if (config.googleTtsEnabled) {
     const googleVoice = resolveGoogleVoice(voiceHint);
     const ok = await synthesizeWithGoogleTTS(text, googleVoice, outputPath, options);
     if (ok) return "google";
-    console.warn("[voice-generator] Google Cloud TTS không khả dụng, đang kích hoạt EdgeTTS dự phòng...");
+    console.warn("[voice-generator] Google Cloud TTS không khả dụng, đang kích hoạt Tier 3: EdgeTTS...");
   }
 
-  // 2. Fallback sang EdgeTTS ở chất lượng cao 160kbps
+  // Tier 3: Fallback cuối cùng sang EdgeTTS ở chất lượng cao 160kbps
   const edgeVoice = resolveEdgeVoice(voiceHint);
   const edgeOk = await synthesizeWithEdgeTTS(text, edgeVoice, outputPath, options);
   if (!edgeOk) {
-    throw new Error("Không thể tạo giọng nói từ cả Google Cloud TTS lẫn Edge-TTS.");
+    throw new Error("Không thể tạo giọng nói từ cả Google AI Studio, Google Cloud TTS lẫn Edge-TTS.");
   }
   return "edge";
 }
@@ -364,20 +473,22 @@ export async function synthesizeSpeech(options: SynthesizeOptions): Promise<Voic
   }
 
   const timestamp = Date.now();
-  const rawMp3Path = path.join(VOICE_CACHE_DIR, `raw_${timestamp}.mp3`);
+  const rawAudioPath = path.join(VOICE_CACHE_DIR, `raw_${timestamp}.audio`);
   const finalM4aPath = path.join(VOICE_CACHE_DIR, `voice_${timestamp}.m4a`);
 
   try {
-    const provider = await synthesizeSingleAudio(cleanText, rawMp3Path, options.voice, {
+    const stylePrompt = options.stylePrompt || options.style;
+    const provider = await synthesizeSingleAudio(cleanText, rawAudioPath, options.voice, {
       rate: options.rate,
       pitch: options.pitch,
+      stylePrompt,
     });
 
     // Convert sang định dạng Zalo Voice Bubble (.m4a AAC 44.1kHz 128kbps)
-    await convertToZaloVoiceBubble(rawMp3Path, finalM4aPath);
+    await convertToZaloVoiceBubble(rawAudioPath, finalM4aPath);
 
     try {
-      fs.unlinkSync(rawMp3Path);
+      fs.unlinkSync(rawAudioPath);
     } catch { }
 
     const finalStats = fs.statSync(finalM4aPath);
@@ -393,7 +504,7 @@ export async function synthesizeSpeech(options: SynthesizeOptions): Promise<Voic
   } catch (err: any) {
     console.error("[voice-generator] Lỗi tạo voice đơn lẻ:", err);
     try {
-      if (fs.existsSync(rawMp3Path)) fs.unlinkSync(rawMp3Path);
+      if (fs.existsSync(rawAudioPath)) fs.unlinkSync(rawAudioPath);
     } catch { }
     return {
       success: false,
@@ -442,7 +553,7 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
   // Cặp giọng mặc định: Nam phát thanh viên (Wavenet-B) & Nữ MC (Neural2-A)
   const defaultVoices = ["vi-VN-Wavenet-B", "vi-VN-Neural2-A"];
   let autoSpeakerIndex = 0;
-  let activeProvider: "google" | "edge" = "google";
+  let activeProvider: "aistudio" | "google" | "edge" = "aistudio";
 
   try {
     for (let i = 0; i < lines.length; i++) {
