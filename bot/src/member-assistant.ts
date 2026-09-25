@@ -48,7 +48,7 @@ import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from
 import { githubSearch } from "./tools/vertical-tools.js";
 import { checkIsFileOrVoiceGeneration, checkIsVoiceRequest } from "./tools/file-generator.js";
 import { interceptAndExecuteSimulatedTool, extractSpeechFallbackText } from "./tools/simulated-tool-interceptor.js";
-import { cleanOutdatedVoicePromisesFromAnswer } from "./tools/voice-generator.js";
+import { cleanOutdatedVoicePromisesFromAnswer, cleanCoreSpeechText } from "./tools/voice-generator.js";
 import {
   isMemoryControlCommand,
   handleMemoryControlCommand,
@@ -1285,7 +1285,11 @@ async function handleHistoryQA(
       `     * [QUY TẮC NỘI DUNG VOICE / TTS CHO MỌI LĨNH VỰC (Thơ ca, Tin tức, Pháp luật, Tài chính, Kịch bản, Kể chuyện)]: Khi gọi 'create_voice', tham số 'text' CHỈ ĐƯỢC CHỨA NỘI DUNG CỐT LÕI CẦN ĐỌC THÀNH TIẾNG (Tên tác phẩm/bản tin/điều luật, Tác giả/Nguồn nếu có, và toàn bộ nội dung chi tiết bài thơ / tin tức / đối thoại / câu chuyện). TUYỆT ĐỐI KHÔNG ĐƯỢC đưa lời chào xưng hô (@mention, 'Dạ Sếp...', 'Em xin gửi...'), lời dẫn phiếm đàm ('Dưới đây là...'), thông báo tiến độ ('Hệ thống đang xử lý qua worker...'), hay câu hỏi kết thúc ('Sếp có muốn...', 'Chúc bạn nghe vui...') vào tham số 'text' của giọng đọc!\n` +
       `     * [KỊCH BẢN ĐỐI THOẠI / PODCAST 2 NGƯỜI]: Khi người dùng yêu cầu kịch bản 2 người nói chuyện, cuộc đối thoại, hoặc podcast 2 người: BẮT BUỘC tự động soạn kịch bản đối đáp sinh động, phân vai rõ ràng theo từng lượt nói (ví dụ: 'Nam: ...\nNữ: ...' hoặc 'MC Nam: ...\nKhách mời: ...', có thể thêm cảm xúc trong ngoặc như 'Nam (hào hứng): ...') và BẮT BUỘC GỌI 'create_voice' truyền toàn bộ kịch bản vào tham số 'text' để hệ thống tự động tổng hợp thành file Podcast .m4a 2 giọng gửi lên Zalo!\n` +
       `     * TUYỆT ĐỐI CẤM in cú pháp giả lập dạng '[create_voice text="..."]' hoặc '[generate_file(...)]' ra tin nhắn văn bản! BẮT BUỘC PHẢI THỰC SỰ GỌI FUNCTION CALLING CỦA TOOL!\n` +
-      `     * Sau khi gọi công cụ thành công, câu trả lời bằng chữ của bạn chỉ cần NGẮN GỌN 1-3 DÒNG tóm tắt chính và thông báo file đã gửi. TUYỆT ĐỐI KHÔNG lặp lại toàn bộ nội dung dài dòng trong tin nhắn chat Zalo!\n` +
+      `     * [QUY ĐỊNH CÂU TRẢ LỜI BẰNG CHỮ KÈM THEO]:\n` +
+      `       + Với Slide PowerPoint (.pptx), File Word (.docx), Excel (.xlsx): Câu trả lời bằng chữ chỉ cần ngắn gọn 1-3 dòng tóm tắt và thông báo file đã gửi, không xả hàng chục trang vào chat Zalo.\n` +
+      `       + Với Yêu cầu Voice / Đọc bài thơ / Ngâm thơ / Đọc tin tức / Kịch bản / Kể chuyện: BẮT BUỘC PHẢI IN TOÀN BỘ NỘI DUNG BÀI THƠ / BÀI VIẾT / KỊCH BẢN ĐẦY ĐỦ RA TIN NHẮN CHAT (ghi rõ Tên bài thơ/tác phẩm, Tác giả nếu có, và toàn văn từng dòng từng khổ). TUYỆT ĐỐI KHÔNG được chỉ gửi mỗi câu thông báo 1 dòng nhận việc mà quên in nội dung!\n` +
+      `     * [TUYỆT ĐỐI CẤM BỊA ĐẶT / ẢO GIÁC VỀ GIỚI HẠN KỸ THUẬT]:\n` +
+      `       + TUYỆT ĐỐI CẤM bịa đặt các câu như 'hạn mức 2 tác vụ/giờ', 'đạt ngưỡng hệ thống', 'chỉ chủ nhân mới có quyền', 'lát nữa em mới thu âm', 'uống trà đợi em'. Khi người dùng yêu cầu, PHẢI THỰC HIỆN NGAY LẬP TỨC!\n` +
       `     * Tuyệt đối cấm bịa đặt tin nhắn đã xuất file khi chưa gọi tool!`;
 
     const fastUserPrompt =
@@ -1372,7 +1376,26 @@ async function handleHistoryQA(
       // 🛡️ PHÒNG THỦ CHIỀU SÂU: Nếu người dùng yêu cầu Voice/Đọc thơ mà chưa có file voice nào được gửi
       if (checkIsVoiceRequest(question, options?.quote?.text) && !voiceGenerated && options?.api) {
         try {
-          const speechText = extractSpeechFallbackText(answer);
+          let speechText = extractSpeechFallbackText(answer);
+          if (!speechText || speechText.length < 15) {
+            console.log(`[member-assistant] 🔍 [Fast QA] Answer thiếu nội dung cốt lõi để đọc voice, đang gọi nhanh AI trích xuất nội dung từ yêu cầu: "${question}"...`);
+            const directContent = await callGemini(
+              `Bạn là trợ lý trích xuất văn bản đọc giọng. Hãy cung cấp ĐẦY ĐỦ, CHÍNH XÁC toàn bộ nội dung bài thơ, bài viết, kịch bản hoặc lời thoại được yêu cầu trong câu hỏi của người dùng.
+QUY TẮC BẮT BUỘC:
+1. Chỉ in: Tên tác phẩm/bài thơ, Tác giả (nếu có), và TOÀN BỘ NỘI DUNG TỪNG DÒNG của bài thơ / văn bản / kịch bản.
+2. TUYỆT ĐỐI KHÔNG có lời chào (@mention, Dạ Sếp, Xin chào), KHÔNG có lời giải thích, KHÔNG có câu kết, KHÔNG bịa đặt giới hạn kỹ thuật.`,
+              `Yêu cầu: "${question}". Trích dẫn nếu có: "${options?.quote?.text || ""}".`,
+              { model: "gemini-flash-latest" },
+            ).catch(() => "");
+            if (directContent && directContent.length >= 15) {
+              const cleanedDirect = cleanCoreSpeechText(directContent);
+              speechText = (cleanedDirect && cleanedDirect.length >= 15) ? cleanedDirect : directContent.trim();
+              if (speechText && !answer.toLowerCase().includes(speechText.slice(0, 30).toLowerCase())) {
+                answer = `${answer}\n\n${speechText}`.trim();
+              }
+            }
+          }
+
           if (speechText && speechText.length >= 15) {
             console.log(`[member-assistant] 🛡️ [Fast QA] Kích hoạt voice fallback tự động (${speechText.length} ký tự)...`);
             const vRes = await executeAgentTool("create_voice", {
@@ -1579,7 +1602,11 @@ async function handleHistoryQA(
       `       * [QUY TẮC NỘI DUNG VOICE / TTS CHO MỌI LĨNH VỰC (Thơ ca, Tin tức, Pháp luật, Tài chính, Kịch bản, Kể chuyện)]: Khi gọi 'create_voice', tham số 'text' CHỈ ĐƯỢC CHỨA NỘI DUNG CỐT LÕI CẦN ĐỌC THÀNH TIẾNG (Tên tác phẩm/bản tin/điều luật, Tác giả/Nguồn nếu có, và toàn bộ nội dung chi tiết bài thơ / tin tức / đối thoại / câu chuyện). TUYỆT ĐỐI KHÔNG ĐƯỢC đưa lời chào xưng hô (@mention, 'Dạ Sếp...', 'Em xin gửi...'), lời dẫn phiếm đàm ('Dưới đây là...'), thông báo tiến độ ('Hệ thống đang xử lý qua worker...'), hay câu hỏi kết thúc ('Sếp có muốn...', 'Chúc bạn nghe vui...') vào tham số 'text' của giọng đọc!\n` +
        `       * [KỊCH BẢN ĐỐI THOẠI / PODCAST 2 NGƯỜI]: Khi người dùng yêu cầu kịch bản 2 người nói chuyện, cuộc đối thoại, hoặc podcast 2 người: BẮT BUỘC tự động soạn kịch bản đối đáp sinh động, phân vai rõ ràng theo từng lượt nói (ví dụ: 'Nam: ...\nNữ: ...' hoặc 'MC Nam: ...\nKhách mời: ...', có thể thêm cảm xúc trong ngoặc như 'Nam (hào hứng): ...') và BẮT BUỘC GỌI 'create_voice' truyền toàn bộ kịch bản vào tham số 'text' để hệ thống tự động tổng hợp thành file Podcast .m4a 2 giọng gửi lên Zalo!\n` +
       `       * TUYỆT ĐỐI CẤM in cú pháp giả lập dạng '[create_voice text="..."]' hoặc '[generate_file(...)]' ra tin nhắn văn bản! BẮT BUỘC PHẢI THỰC SỰ GỌI FUNCTION CALLING CỦA TOOL!\n` +
-      `       * Sau khi gọi công cụ thành công, câu trả lời bằng chữ của bạn chỉ cần NGẮN GỌN 1-3 DÒNG tóm tắt chính và thông báo file đã gửi. TUYỆT ĐỐI KHÔNG lặp lại toàn bộ nội dung dài dòng trong tin nhắn chat Zalo!\n` +
+      `     * [QUY ĐỊNH CÂU TRẢ LỜI BẰNG CHỮ KÈM THEO]:\n` +
+      `       + Với Slide PowerPoint (.pptx), File Word (.docx), Excel (.xlsx): Câu trả lời bằng chữ chỉ cần ngắn gọn 1-3 dòng tóm tắt và thông báo file đã gửi, không xả hàng chục trang vào chat Zalo.\n` +
+      `       + Với Yêu cầu Voice / Đọc bài thơ / Ngâm thơ / Đọc tin tức / Kịch bản / Kể chuyện: BẮT BUỘC PHẢI IN TOÀN BỘ NỘI DUNG BÀI THƠ / BÀI VIẾT / KỊCH BẢN ĐẦY ĐỦ RA TIN NHẮN CHAT (ghi rõ Tên bài thơ/tác phẩm, Tác giả nếu có, và toàn văn từng dòng từng khổ). TUYỆT ĐỐI KHÔNG được chỉ gửi mỗi câu thông báo 1 dòng nhận việc mà quên in nội dung!\n` +
+      `     * [TUYỆT ĐỐI CẤM BỊA ĐẶT / ẢO GIÁC VỀ GIỚI HẠN KỸ THUẬT]:\n` +
+      `       + TUYỆT ĐỐI CẤM bịa đặt các câu như 'hạn mức 2 tác vụ/giờ', 'đạt ngưỡng hệ thống', 'chỉ chủ nhân mới có quyền', 'lát nữa em mới thu âm', 'uống trà đợi em'. Khi người dùng yêu cầu, PHẢI THỰC HIỆN NGAY LẬP TỨC!\n` +
       `       * TUYỆT ĐỐI CẤM TỰ Ý BỊA ĐẶT TIN NHẮN GIẢ MẠO rằng "em đã xuất xong file", "đã gửi file" khi CHƯA THỰC SỰ GỌI TOOL!\n` +
       `   - [KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ, POSTER & ĐỒ HỌA BẰNG PYTHON (python_interpreter)]:\n` +
       `     + Khi người dùng yêu cầu vẽ biểu đồ, sơ đồ quy trình, mindmap hoặc thiết kế đồ họa / poster / bảng lịch thi đấu / bảng xếp hạng, HOẶC khi người dùng chê ảnh xấu/lỗi font và yêu cầu làm lại cẩn thận:\n` +
@@ -1784,7 +1811,26 @@ async function handleHistoryQA(
       // 🛡️ PHÒNG THỦ CHIỀU SÂU: Nếu người dùng yêu cầu Voice/Đọc thơ mà chưa có file voice nào được gửi
       if (checkIsVoiceRequest(question, options?.quote?.text) && !voiceGenerated && options?.api) {
         try {
-          const speechText = extractSpeechFallbackText(answer);
+          let speechText = extractSpeechFallbackText(answer);
+          if (!speechText || speechText.length < 15) {
+            console.log(`[member-assistant] 🔍 [Quote QA] Answer thiếu nội dung cốt lõi để đọc voice, đang gọi nhanh AI trích xuất nội dung từ yêu cầu: "${question}"...`);
+            const directContent = await callGemini(
+              `Bạn là trợ lý trích xuất văn bản đọc giọng. Hãy cung cấp ĐẦY ĐỦ, CHÍNH XÁC toàn bộ nội dung bài thơ, bài viết, kịch bản hoặc lời thoại được yêu cầu trong câu hỏi của người dùng.
+QUY TẮC BẮT BUỘC:
+1. Chỉ in: Tên tác phẩm/bài thơ, Tác giả (nếu có), và TOÀN BỘ NỘI DUNG TỪNG DÒNG của bài thơ / văn bản / kịch bản.
+2. TUYỆT ĐỐI KHÔNG có lời chào (@mention, Dạ Sếp, Xin chào), KHÔNG có lời giải thích, KHÔNG có câu kết, KHÔNG bịa đặt giới hạn kỹ thuật.`,
+              `Yêu cầu: "${question}". Trích dẫn nếu có: "${options?.quote?.text || ""}".`,
+              { model: "gemini-flash-latest" },
+            ).catch(() => "");
+            if (directContent && directContent.length >= 15) {
+              const cleanedDirect = cleanCoreSpeechText(directContent);
+              speechText = (cleanedDirect && cleanedDirect.length >= 15) ? cleanedDirect : directContent.trim();
+              if (speechText && !answer.toLowerCase().includes(speechText.slice(0, 30).toLowerCase())) {
+                answer = `${answer}\n\n${speechText}`.trim();
+              }
+            }
+          }
+
           if (speechText && speechText.length >= 15) {
             console.log(`[member-assistant] 🛡️ [Quote QA] Kích hoạt voice fallback tự động (${speechText.length} ký tự)...`);
             const vRes = await executeAgentTool("create_voice", {
@@ -2554,7 +2600,11 @@ async function handleHistoryQA(
     `    * [KỊCH BẢN ĐỐI THOẠI / PODCAST 2 NGƯỜI]: Khi người dùng yêu cầu kịch bản 2 người nói chuyện, cuộc đối thoại, hoặc podcast 2 người: BẮT BUỘC tự động soạn kịch bản đối đáp sinh động, phân vai rõ ràng theo từng lượt nói (ví dụ: 'Nam: ...\nNữ: ...' hoặc 'MC Nam: ...\nKhách mời: ...', có thể thêm cảm xúc trong ngoặc như 'Nam (hào hứng): ...') và BẮT BUỘC GỌI 'create_voice' truyền toàn bộ kịch bản vào tham số 'text' để hệ thống tự động tổng hợp thành file Podcast .m4a 2 giọng gửi lên Zalo!\n` +
     `    * TUYỆT ĐỐI CẤM in cú pháp giả lập dạng '[create_voice text="..."]' hoặc '[generate_file(...)]' ra tin nhắn văn bản! BẮT BUỘC PHẢI THỰC SỰ GỌI FUNCTION CALLING CỦA TOOL!\n` +
     `    * CHỈ từ chối tạo file khi người dùng chỉ hỏi thăm năng lực (ví dụ: 'em biết tạo slide không?'). Khi đó chỉ giải thích năng lực và mời người dùng yêu cầu cụ thể.\n` +
-    `    * Sau khi gọi công cụ thành công, câu trả lời bằng chữ của bạn chỉ cần NGẮN GỌN 1-3 DÒNG tóm tắt chính và thông báo file đã gửi. TUYỆT ĐỐI KHÔNG lặp lại toàn bộ nội dung dài dòng trong tin nhắn chat Zalo!\n` +
+    `    * [QUY ĐỊNH CÂU TRẢ LỜI BẰNG CHỮ KÈM THEO]:\n` +
+    `      + Với Slide PowerPoint (.pptx), File Word (.docx), Excel (.xlsx): Câu trả lời bằng chữ chỉ cần ngắn gọn 1-3 dòng tóm tắt và thông báo file đã gửi, không xả hàng chục trang vào chat Zalo.\n` +
+    `      + Với Yêu cầu Voice / Đọc bài thơ / Ngâm thơ / Đọc tin tức / Kịch bản / Kể chuyện: BẮT BUỘC PHẢI IN TOÀN BỘ NỘI DUNG BÀI THƠ / BÀI VIẾT / KỊCH BẢN ĐẦY ĐỦ RA TIN NHẮN CHAT (ghi rõ Tên bài thơ/tác phẩm, Tác giả nếu có, và toàn văn từng dòng từng khổ). TUYỆT ĐỐI KHÔNG được chỉ gửi mỗi câu thông báo 1 dòng nhận việc mà quên in nội dung!\n` +
+    `    * [TUYỆT ĐỐI CẤM BỊA ĐẶT / ẢO GIÁC VỀ GIỚI HẠN KỸ THUẬT]:\n` +
+    `      + TUYỆT ĐỐI CẤM bịa đặt các câu như 'hạn mức 2 tác vụ/giờ', 'đạt ngưỡng hệ thống', 'chỉ chủ nhân mới có quyền', 'lát nữa em mới thu âm', 'uống trà đợi em'. Khi người dùng yêu cầu, PHẢI THỰC HIỆN NGAY LẬP TỨC!\n` +
     `- KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
     `  + Khi người dùng yêu cầu vẽ biểu đồ, đồ thị, sơ đồ, poster lịch thi đấu, bảng xếp hạng hoặc yêu cầu làm lại/sửa lại ảnh/biểu đồ: BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM in code Python ra chat!\n` +
     `  + Với lịch thi đấu/bảng sự kiện/roadmap: Dùng PIL vẽ Infographic Poster Card Layout nền tối (burgundy/navy), thẻ bo góc, badge nổi bật ([CHÍNH THỨC], [GIAO HỮU]), tiêu đề vàng kim #FFD700. Với số liệu: Dùng matplotlib dark theme.\n` +
@@ -2698,7 +2748,26 @@ async function handleHistoryQA(
     // 🛡️ PHÒNG THỦ CHIỀU SÂU: Nếu người dùng yêu cầu Voice/Đọc thơ/Podcast mà chưa có file voice nào được gửi
     if (checkIsVoiceRequest(question, options?.quote?.text) && !voiceGenerated && options?.api) {
       try {
-        const speechText = extractSpeechFallbackText(answer);
+        let speechText = extractSpeechFallbackText(answer);
+        if (!speechText || speechText.length < 15) {
+          console.log(`[member-assistant] 🔍 [Main QA] Answer thiếu nội dung cốt lõi để đọc voice, đang gọi nhanh AI trích xuất nội dung từ yêu cầu: "${question}"...`);
+          const directContent = await callGemini(
+            `Bạn là trợ lý trích xuất văn bản đọc giọng. Hãy cung cấp ĐẦY ĐỦ, CHÍNH XÁC toàn bộ nội dung bài thơ, bài viết, kịch bản hoặc lời thoại được yêu cầu trong câu hỏi của người dùng.
+QUY TẮC BẮT BUỘC:
+1. Chỉ in: Tên tác phẩm/bài thơ, Tác giả (nếu có), và TOÀN BỘ NỘI DUNG TỪNG DÒNG của bài thơ / văn bản / kịch bản.
+2. TUYỆT ĐỐI KHÔNG có lời chào (@mention, Dạ Sếp, Xin chào), KHÔNG có lời giải thích, KHÔNG có câu kết, KHÔNG bịa đặt giới hạn kỹ thuật.`,
+            `Yêu cầu: "${question}". Trích dẫn nếu có: "${options?.quote?.text || ""}".`,
+            { model: "gemini-flash-latest" },
+          ).catch(() => "");
+          if (directContent && directContent.length >= 15) {
+            const cleanedDirect = cleanCoreSpeechText(directContent);
+            speechText = (cleanedDirect && cleanedDirect.length >= 15) ? cleanedDirect : directContent.trim();
+            if (speechText && !answer.toLowerCase().includes(speechText.slice(0, 30).toLowerCase())) {
+              answer = `${answer}\n\n${speechText}`.trim();
+            }
+          }
+        }
+
         if (speechText && speechText.length >= 15) {
           console.log(`[member-assistant] 🛡️ [Main QA] Kích hoạt voice fallback tự động (${speechText.length} ký tự)...`);
           const vRes = await executeAgentTool("create_voice", {

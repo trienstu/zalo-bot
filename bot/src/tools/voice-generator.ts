@@ -358,10 +358,12 @@ export function cleanCoreSpeechText(rawText: string): string {
   if (paragraphs.length === 0) return "";
 
   const isIntroParagraphOrLine = (line: string): boolean => {
-    const l = line.replace(/[*_#>`"“”«»]/g, "").trim();
+    const l = line.replace(/^[*\s\-•–—>#]+/, "").replace(/[*_#>`"“”«»]/g, "").trim();
     if (!l) return false;
     // Bắt đầu bằng @mention
     if (/^@\S+/i.test(l)) return true;
+    // Tiêu đề / dẫn dắt thông báo kỹ thuật: "Về việc thu âm giọng đọc:", "Tiến độ xử lý:"
+    if (/^(?:về\s*việc|thông\s*báo\s*(?:về)?|tiến\s*độ|trạng\s*thái)\s*.*?:?$/iu.test(l)) return true;
     // Lời chào / xưng hô ban đầu: "Dạ Sếp...", "Chào anh...", "Kính thưa...", "Vâng, em..."
     if (
       /^(?:dạ|vâng|chào|thưa|kính\s*thưa|hello|hi)(?:\s+|$|[.,:!?;])/iu.test(l) &&
@@ -379,7 +381,7 @@ export function cleanCoreSpeechText(rawText: string): string {
       return true;
     }
     if (/^(?:em|tôi|mình)\s+đã\s+(?:tiếp\s*nhận|ghi\s*nhận|nhận\s*lệnh)/iu.test(l)) return true;
-    // Dẫn nhập chuyển tiếp: "Dưới đây là...", "Sau đây là...", "Em xin gửi trọn vẹn bài thơ:"
+    // Dẫn nhập chuyển tiếp: "Dưới đây là...", "Sau đây là...", "Trong lúc chờ đợi, em xin gửi...", "Em xin gửi trọn vẹn bài thơ:"
     if (
       /^(?:dưới\s*đây|sau\s*đây|đây)\s*là\s*(?:nội\s*dung|bài\s*thơ|kịch\s*bản|bản\s*tin|thông\s*tin|đoạn|văn\s*bản|lời\s*thoại|tổng\s*hợp|báo\s*cáo|chi\s*tiết)/iu.test(
         l,
@@ -387,7 +389,7 @@ export function cleanCoreSpeechText(rawText: string): string {
     ) {
       return true;
     }
-    if (/^(?:em\s+)?xin\s+(?:phép\s+)?(?:gửi|tặng|đọc|trình\s*bày|chia\s*sẻ)[^:\n]*:?$/iu.test(l)) return true;
+    if (/^(?:.*?,\s*)?(?:em\s+)?(?:xin\s+)?(?:phép\s+)?(?:gửi|tặng|đọc|trình\s*bày|chia\s*sẻ)[^:\n]*:?$/iu.test(l)) return true;
     if (/^(?:dưới\s*đây|sau\s*đây)\s*là\s*[^:\n]*:?$/iu.test(l)) return true;
     // Thông báo kỹ thuật / tiến trình xử lý
     if (
@@ -408,6 +410,14 @@ export function cleanCoreSpeechText(rawText: string): string {
       /(?:google\s*ai\s*studio|gemini\s*tts|google\s*cloud|edge-tts|voice\s*bubble|bong\s*bóng\s*thoại)/iu.test(
         l,
       )
+    ) {
+      return true;
+    }
+    // Thông báo giới hạn kỹ thuật / hạn mức / quá tải / quyền hạn giả lập
+    if (
+      /(?:hạn\s*mức|ngưỡng\s*giới\s*hạn|giới\s*hạn\s*(?:tác\s*vụ|tạo|file|hệ\s*thống)|tác\s*vụ\s*\/\s*giờ|đạt\s*ngưỡng|làm\s*mới|hồi\s*lại\s*hạn\s*mức)/iu.test(l) ||
+      /(?:tạm\s*đạt|đang\s*tạm|chờ\s*(?:hồi|làm\s*mới)|vượt\s*quá\s*hạn\s*mức|chỉ\s*hỗ\s*trợ\s*khi\s*có\s*lệnh|quyền\s*hệ\s*thống|tài\s*khoản\s*quản\s*trị|chủ\s*nhân)/iu.test(l) ||
+      /(?:ngay\s*khi|lát\s*nữa|sau\s*đó|khi\s*nào).*?(?:em|tôi|bot)\s*(?:sẽ|tiến\s*hành)?\s*(?:thực\s*hiện|thu\s*âm|đọc|ngâm|tạo|gửi)/iu.test(l)
     ) {
       return true;
     }
@@ -438,6 +448,13 @@ export function cleanCoreSpeechText(rawText: string): string {
     }
     if (/^(?:sếp|bác|anh|chị|bạn)\s*thấy\s*(?:thế\s*nào|sao|bản\s*đọc)/iu.test(l)) return true;
     if (/(?:để\s*em|cho\s*em)\s*["']?thử\s*sức["']?\s*tiếp\s*không\s*ạ/iu.test(l)) return true;
+    // Trà nước, chờ đợi, phục vụ xã giao
+    if (
+      /(?:thong\s*thả|nhâm\s*nhi|uống)\s*(?:chén|tách|ly|dùng)?\s*trà/iu.test(l) ||
+      /(?:luôn\s*túc\s*trực|sẵn\s*sàng\s*phục\s*vụ|hỗ\s*trợ\s*thêm\s*thông\s*tin\s*nào\s*khác\s*trong\s*lúc\s*chờ)/iu.test(l)
+    ) {
+      return true;
+    }
     // Lời chúc / hy vọng
     if (/^chúc\s*(?:sếp|bác|anh|chị|bạn|mọi\s*người|cả\s*nhà)/iu.test(l)) return true;
     if (/^hy\s*vọng\s*(?:bản\s*đọc|bài\s*thơ|nội\s*dung|kịch\s*bản|bản\s*tin|thông\s*tin)/iu.test(l)) return true;
@@ -480,8 +497,9 @@ export function cleanCoreSpeechText(rawText: string): string {
     }
   }
 
+  // Nếu toàn bộ văn bản đều là câu chào, hứa hẹn, hoặc giới hạn kỹ thuật -> Không có nội dung cốt lõi để đọc!
   if (startIndex > endIndex) {
-    return rawText.trim();
+    return "";
   }
 
   const remainingParagraphs = paragraphs.slice(startIndex, endIndex + 1);
@@ -517,9 +535,9 @@ export function cleanCoreSpeechText(rawText: string): string {
 
   const result = remainingParagraphs.join("\n\n").trim();
 
-  // Phòng thủ an toàn: Nếu sau khi lọc mà độ dài còn lại quá ngắn (< 15 ký tự), giữ nguyên text gốc
+  // Phòng thủ an toàn: Nếu sau khi lọc mà độ dài còn lại quá ngắn (< 15 ký tự), coi như không có nội dung hợp lệ
   if (!result || result.length < 15) {
-    return rawText.trim();
+    return "";
   }
 
   return result;
@@ -535,6 +553,8 @@ export function cleanOutdatedVoicePromisesFromAnswer(answer: string): string {
   text = text.replace(/\n*hệ\s*thống\s*(?:đang|sẽ)\s*(?:tiến\s*hành|xử\s*lý|tổng\s*hợp)[^\n]*/giu, "");
   text = text.replace(/\n*file\s*âm\s*thanh\s*sẽ\s*(?:được\s*gửi|tự\s*động\s*xuất\s*hiện|có\s*mặt)[^\n]*/giu, "");
   text = text.replace(/\n*(?:sếp|bác|anh|chị|bạn|admin)?(?:\s+[\p{L}\s\d]+)?\s*(?:chờ|đợi)\s*(?:em|tôi)\s*(?:một\s+chút|chút|giây\s*lát)[^\n]*/giu, "");
+  text = text.replace(/\n*.*?(?:hạn\s*mức|ngưỡng\s*giới\s*hạn|tác\s*vụ\s*\/\s*giờ|đang\s*tạm\s*đạt|hồi\s*lại\s*hạn\s*mức)[^\n]*/giu, "");
+  text = text.replace(/\n*.*?(?:thong\s*thả\s*dùng\s*trà|uống\s*(?:chén|tách)?\s*trà|lát\s*nữa\s*em\s*thu\s*âm)[^\n]*/giu, "");
   return text.replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -718,7 +738,7 @@ export async function synthesizeSpeech(options: SynthesizeOptions): Promise<Voic
   cleanOldVoiceFiles(60);
 
   const coreText = cleanCoreSpeechText(options.text);
-  const cleanText = cleanTextForTTS(coreText);
+  const cleanText = cleanTextForTTS(coreText || options.text);
   if (!cleanText) {
     return {
       success: false,

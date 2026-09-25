@@ -1237,9 +1237,9 @@ export async function callGeminiAgentLoop(
     throw new Error("Thiếu GEMINI_API_KEY trong .env");
   }
 
-  let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-3-flash-preview";
-  if (!primaryModel || primaryModel.includes("3.1-flash-lite")) {
-    primaryModel = "gemini-3-flash-preview";
+  let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-2.5-flash";
+  if (!primaryModel || primaryModel.includes("3.1-flash-lite") || primaryModel.includes("3-flash")) {
+    primaryModel = "gemini-2.5-flash";
   }
   const maxTurns = options?.maxTurns || 2;
   const temperature = options?.temperature ?? 0.2;
@@ -1298,7 +1298,7 @@ export async function callGeminiAgentLoop(
         try {
           resp = await fetch(endpoint, {
             method: "POST",
-            signal: AbortSignal.timeout(25_000),
+            signal: AbortSignal.timeout(15_000),
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(requestBody),
           });

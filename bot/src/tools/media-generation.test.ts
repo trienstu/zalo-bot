@@ -650,4 +650,54 @@ Sếp Trien Nguyen chờ em một chút, file "đã" nhất sẽ có mặt ngay 
   assert.ok(cleaned.includes("THU ĐIẾU"));
 });
 
+test("cleanCoreSpeechText trả về rỗng khi tin nhắn chỉ chứa câu tiếp nhận/hứa hẹn (Screenshot 1)", () => {
+  const screenshot1 = `@Trien Nguyen Dạ Sếp Trien Nguyen, em đã tiếp nhận yêu cầu và đang tiến hành xử lý bản đọc thu âm bài thơ "Đi học" (thơ Hoàng Minh Chính) bằng giọng Nam miền Nam trầm ấm, truyền cảm theo đúng ý Sếp ạ!`;
+  const cleaned = cleanCoreSpeechText(screenshot1);
+  assert.strictEqual(cleaned, "", "Phải trả về chuỗi rỗng để không đọc câu tiếp nhận thành tiếng!");
+});
+
+test("cleanCoreSpeechText trả về rỗng khi tin nhắn chỉ chứa lý do hạn mức giả lập và mời uống trà (Screenshot 2)", () => {
+  const screenshot2 = `@Trien Nguyen Dạ Sếp Trien Nguyen, em đã ghi nhận yêu cầu của Sếp.
+
+Hiện tại, hệ thống đang tạm đạt ngưỡng giới hạn tác vụ tạo file âm thanh (2 tác vụ/giờ). Ngay khi hạn mức được làm mới, em sẽ thực hiện thu âm bài thơ "Đi học" của tác giả Hoàng Minh Chính với chất giọng Nam miền Nam trầm ấm, truyền cảm nhất để gửi đến Sếp ngay lập tức ạ.
+
+Sếp thong thả dùng trà, em luôn túc trực để phục vụ Sếp ạ! Sếp có cần em hỗ trợ thêm thông tin nào khác trong lúc chờ đợi không ạ?`;
+  const cleaned = cleanCoreSpeechText(screenshot2);
+  assert.strictEqual(cleaned, "", "Phải trả về chuỗi rỗng để không đọc lý do hạn mức hay lời mời dùng trà thành tiếng!");
+});
+
+test("cleanCoreSpeechText bóc tách chính xác toàn văn bài thơ khi nằm giữa lời tiếp nhận, giới hạn và chào kết", () => {
+  const mixedMsg = `Về việc thu âm giọng đọc:
+- Hiện tại hạn mức tạo file âm thanh/nhạc của hệ thống trong nhóm đang tạm đạt mức giới hạn (2 tác vụ/giờ).
+- Đồng thời, tính năng gửi voice trực tiếp qua lệnh thoại (zalo_say) trong nhóm chỉ hỗ trợ khi có lệnh từ tài khoản quản trị/chủ nhân.
+
+Vì thế, lát nữa khi hệ thống hồi lại hạn mức âm thanh mới, em sẽ tạo ngay bản ngâm thơ/đọc thơ diễn cảm theo đúng chất giọng truyền cảm nhất cho anh nhé!
+
+Trong lúc chờ đợi, em xin gửi tặng anh trọn vẹn lời bài thơ "Đi Học":
+
+🎒 ĐI HỌC
+Tác giả: Hoàng Minh Chính
+
+Hôm qua em tới trường
+Mẹ dắt tay từng bước
+Hôm nay mẹ lên nương
+Một mình em tới lớp.
+
+Chim đùa theo trong lá
+Cá dưới khe thì thào
+Hương rừng chen hương cốm
+Đường nhấp nhô quanh đèo.
+
+Anh Triển thong thả uống chén trà, lát nữa em thu âm gửi anh nghe sau nha! ☕🌸✨`;
+
+  const cleaned = cleanCoreSpeechText(mixedMsg);
+  assert.ok(cleaned.startsWith("🎒 ĐI HỌC"), "Phải bắt đầu từ tên bài thơ");
+  assert.ok(cleaned.includes("Tác giả: Hoàng Minh Chính"), "Phải giữ tên tác giả");
+  assert.ok(cleaned.includes("Hôm qua em tới trường"), "Phải có khổ thơ 1");
+  assert.ok(cleaned.endsWith("Đường nhấp nhô quanh đèo."), "Phải kết thúc ở khổ thơ cuối cùng");
+  assert.ok(!cleaned.includes("hạn mức"), "Không được chứa câu hạn mức");
+  assert.ok(!cleaned.includes("chén trà"), "Không được chứa lời mời uống trà");
+  assert.ok(!cleaned.includes("lát nữa em thu âm"), "Không được chứa lời hứa hẹn tương lai");
+});
+
 
