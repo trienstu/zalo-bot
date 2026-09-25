@@ -99,6 +99,7 @@ export async function downloadImageBase64(url: string): Promise<GeminiImagePart 
   try {
     if (fs.existsSync(url)) {
       const buffer = fs.readFileSync(url);
+      if (!buffer || buffer.length === 0) return null;
       const mime = detectMimeType(buffer, url, "");
       return {
         data: buffer.toString("base64"),
@@ -106,16 +107,50 @@ export async function downloadImageBase64(url: string): Promise<GeminiImagePart 
       };
     }
 
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(20_000),
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
-      },
-    });
-    if (!res.ok) return null;
-    const arrayBuffer = await res.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const contentType = res.headers.get("content-type") || "";
+    const maxRetries = 3;
+    let buffer: Buffer = Buffer.alloc(0);
+    let contentType = "";
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const res = await fetch(url, {
+          signal: AbortSignal.timeout(20_000),
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            "Referer": "https://chat.zalo.me/",
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+          },
+        });
+
+        if (!res.ok) {
+          if ((res.status === 409 || res.status === 404 || res.status >= 500) && attempt < maxRetries) {
+            await new Promise((r) => setTimeout(r, attempt * 800));
+            continue;
+          }
+          return null;
+        }
+
+        const arrayBuffer = await res.arrayBuffer();
+        buffer = Buffer.from(arrayBuffer);
+        contentType = res.headers.get("content-type") || "";
+
+        if (buffer.length === 0 && attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, attempt * 800));
+          continue;
+        }
+
+        if (buffer.length > 0) break;
+      } catch (err) {
+        if (attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, attempt * 800));
+          continue;
+        }
+        return null;
+      }
+    }
+
+    if (!buffer || buffer.length === 0) return null;
+
     const mime = detectMimeType(buffer, url, contentType);
     return {
       data: buffer.toString("base64"),
@@ -145,7 +180,7 @@ export async function downloadFileContent(
   fileName = "",
 ): Promise<DownloadFileResult | null> {
   try {
-    let buffer: Buffer;
+    let buffer: Buffer = Buffer.alloc(0);
     let contentType = "";
 
     if (fs.existsSync(url)) {
@@ -155,50 +190,86 @@ export async function downloadFileContent(
       }
       buffer = fs.readFileSync(url);
     } else {
-      const res = await fetch(url, {
-        signal: AbortSignal.timeout(60_000), // 60s timeout cho file tài liệu nặng (20MB-50MB)
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
-        },
-      });
-      if (!res.ok) return { error: "DOWNLOAD_FAILED" };
+      const maxRetries = 3;
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          const res = await fetch(url, {
+            signal: AbortSignal.timeout(60_000), // 60s timeout cho file tài liệu nặng (20MB-50MB)
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+              "Referer": "https://chat.zalo.me/",
+              "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            },
+          });
 
-      const contentLengthStr = res.headers.get("content-length");
-      const contentLength = contentLengthStr ? parseInt(contentLengthStr, 10) : 0;
-      if (contentLength > 50 * 1024 * 1024) {
-        console.warn(`[gemini] File quá lớn: ${(contentLength / 1024 / 1024).toFixed(1)}MB > 50MB`);
-        return {
-          error: "FILE_TOO_LARGE",
-          fileSizeBytes: contentLength,
-        };
-      }
-
-      if (res.body) {
-        const chunks: Uint8Array[] = [];
-        let totalBytes = 0;
-        const reader = res.body.getReader();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value) {
-            totalBytes += value.length;
-            if (totalBytes > 50 * 1024 * 1024) {
-              await reader.cancel();
-              console.warn(`[gemini] File stream vượt quá 50MB (${(totalBytes / 1024 / 1024).toFixed(1)}MB)`);
-              return {
-                error: "FILE_TOO_LARGE",
-                fileSizeBytes: totalBytes,
-              };
+          if (!res.ok) {
+            if ((res.status === 409 || res.status === 404 || res.status >= 500) && attempt < maxRetries) {
+              await new Promise((r) => setTimeout(r, attempt * 800));
+              continue;
             }
-            chunks.push(value);
+            return { error: "DOWNLOAD_FAILED" };
           }
+
+          const contentLengthStr = res.headers.get("content-length");
+          const contentLength = contentLengthStr ? parseInt(contentLengthStr, 10) : 0;
+          if (contentLength > 50 * 1024 * 1024) {
+            console.warn(`[gemini] File quá lớn: ${(contentLength / 1024 / 1024).toFixed(1)}MB > 50MB`);
+            return {
+              error: "FILE_TOO_LARGE",
+              fileSizeBytes: contentLength,
+            };
+          }
+
+          if (res.body) {
+            const chunks: Uint8Array[] = [];
+            let totalBytes = 0;
+            const reader = res.body.getReader();
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              if (value) {
+                totalBytes += value.length;
+                if (totalBytes > 50 * 1024 * 1024) {
+                  await reader.cancel();
+                  console.warn(`[gemini] File stream vượt quá 50MB (${(totalBytes / 1024 / 1024).toFixed(1)}MB)`);
+                  return {
+                    error: "FILE_TOO_LARGE",
+                    fileSizeBytes: totalBytes,
+                  };
+                }
+                chunks.push(value);
+              }
+            }
+            buffer = Buffer.concat(chunks);
+          } else {
+            const arrayBuffer = await res.arrayBuffer();
+            buffer = Buffer.from(arrayBuffer);
+          }
+          contentType = (res.headers.get("content-type") || "").toLowerCase();
+
+          // Nếu file vừa upload lên Zalo CDN trả về 0 bytes (chưa kịp đồng bộ storage):
+          if (buffer.length === 0 && attempt < maxRetries) {
+            await new Promise((r) => setTimeout(r, attempt * 800));
+            continue;
+          }
+
+          if (buffer.length > 0) {
+            break;
+          }
+        } catch (fetchErr) {
+          if (attempt < maxRetries) {
+            await new Promise((r) => setTimeout(r, attempt * 800));
+            continue;
+          }
+          console.warn(`[gemini] Lỗi tải file sau ${maxRetries} lần thử từ ${url.slice(0, 80)}:`, fetchErr);
+          return { error: "DOWNLOAD_FAILED" };
         }
-        buffer = Buffer.concat(chunks);
-      } else {
-        const arrayBuffer = await res.arrayBuffer();
-        buffer = Buffer.from(arrayBuffer);
       }
-      contentType = (res.headers.get("content-type") || "").toLowerCase();
+
+      if (!buffer || buffer.length === 0) {
+        console.warn(`[gemini] File tải về rỗng (0 bytes) sau ${maxRetries} lần thử từ ${url.slice(0, 80)}`);
+        return { error: "DOWNLOAD_FAILED" };
+      }
     }
 
     const detectedMime = detectMimeType(buffer, fileName || url, contentType);

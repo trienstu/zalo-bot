@@ -152,22 +152,47 @@ export async function downloadImage(
   url: string,
   headers: Record<string, string> = {},
 ): Promise<Buffer | null> {
-  try {
-    const res = await fetch(url, {
-      headers,
-      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+          "Referer": "https://chat.zalo.me/",
+          "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+          ...headers,
+        },
+        signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+      });
 
-    const type = res.headers.get("content-type") ?? "";
-    if (type && !/^image\//i.test(type)) throw new Error(`content-type ${type}`);
+      if (!res.ok) {
+        if ((res.status === 409 || res.status === 404 || res.status >= 500) && attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, attempt * 800));
+          continue;
+        }
+        throw new Error(`HTTP ${res.status}`);
+      }
 
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.length === 0) throw new Error("ảnh rỗng");
-    if (buffer.length > MAX_IMAGE_BYTES) throw new Error(`ảnh ${buffer.length} byte, quá nặng`);
-    return buffer;
-  } catch (e) {
-    console.warn(`[ocr] không tải được ảnh ${url}: ${String(e)}`);
-    return null;
+      const type = res.headers.get("content-type") ?? "";
+      if (type && !/^image\//i.test(type)) throw new Error(`content-type ${type}`);
+
+      const buffer = Buffer.from(await res.arrayBuffer());
+      if (buffer.length === 0) {
+        if (attempt < maxRetries) {
+          await new Promise((r) => setTimeout(r, attempt * 800));
+          continue;
+        }
+        throw new Error("ảnh rỗng");
+      }
+      if (buffer.length > MAX_IMAGE_BYTES) throw new Error(`ảnh ${buffer.length} byte, quá nặng`);
+      return buffer;
+    } catch (e) {
+      if (attempt >= maxRetries) {
+        console.warn(`[ocr] không tải được ảnh ${url}: ${String(e)}`);
+        return null;
+      }
+      await new Promise((r) => setTimeout(r, attempt * 800));
+    }
   }
+  return null;
 }

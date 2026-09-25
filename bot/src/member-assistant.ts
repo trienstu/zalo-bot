@@ -1185,12 +1185,25 @@ async function handleHistoryQA(
         ? `Dạ Sếp ơi, hình ảnh đính kèm có định dạng "${mime}" hiện AI chưa hỗ trợ giải mã trực tiếp ạ. Kính nhờ Sếp chụp lại màn hình hoặc lưu ảnh dạng JPG/PNG gửi lại giúp em nhé! 🙏`
         : `Dạ ${displayName ? `bác ${displayName}` : "bác"} ơi, hình ảnh đính kèm có định dạng "${mime}" hiện AI chưa hỗ trợ đọc trực tiếp ạ. Bác vui lòng chụp lại màn hình hoặc lưu ảnh dạng JPG/PNG gửi lại giúp em nhé! 🙏`;
     }
-    if (fileRes?.mediaPart) {
+    if (fileRes?.mediaPart && fileRes.mediaPart.data && fileRes.mediaPart.data.length > 50) {
       mediaPart = fileRes.mediaPart;
       console.log(`[member-assistant] ✅ Đã nạp file đa phương tiện thành công (${mediaPart.mimeType}, size: ${Math.round(mediaPart.data.length / 1024)} KB)`);
     } else if (fileRes?.textContent) {
       fileTextContent = fileRes.textContent;
       console.log(`[member-assistant] ✅ Đã đọc file văn bản thành công (${fileTextContent.length} ký tự)`);
+    }
+  }
+
+  // Nếu người dùng gửi kèm ảnh/file rõ ràng nhưng hệ thống không nạp được do mạng/CDN rỗng
+  if (targetUrl && !mediaPart && !fileTextContent) {
+    console.warn(`[member-assistant] Không nạp được media từ targetUrl: ${targetUrl.slice(0, 80)}`);
+    const isImageAnalysisReq =
+      /(?:ocr|chữ trong ảnh|văn bản trong ảnh|đọc ảnh|xem ảnh|ảnh này|hình này|soi ảnh|giải bài|đáp án)/i.test(question) ||
+      Boolean(options?.imageUrl);
+    if (isImageAnalysisReq) {
+      return isSuperAdmin
+        ? `Dạ Sếp ơi, em đã nhận được yêu cầu nhưng máy chủ Zalo CDN chưa kịp đồng bộ ảnh sang cho em đọc ạ. Kính nhờ Sếp reply (quote) lại ảnh hoặc gửi lại giúp em nhé! 🙏`
+        : `Dạ ${displayName ? `bác ${displayName}` : "bác"} ơi, máy chủ Zalo chưa kịp đồng bộ ảnh sang cho em đọc ạ. Bác vui lòng reply (quote) lại ảnh hoặc gửi lại giúp em nhé! 🙏`;
     }
   }
 
@@ -3939,15 +3952,27 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     try {
       let targetImageUrl = event.mediaUrl || event.quote?.mediaUrl || undefined;
 
-      // 1. Nếu có quote: Ưu tiên tra cứu ảnh gốc từ DB theo msgId / cliMsgId của quote
+      // 1. Ưu tiên tra cứu file ảnh cục bộ nếu listener đã lưu kịp
+      if (event.msgId || event.cliMsgId) {
+        const directMedia = getMediaByMessageId(threadId, event.msgId || event.cliMsgId || "");
+        if (directMedia?.local_path && fs.existsSync(directMedia.local_path)) {
+          targetImageUrl = directMedia.local_path;
+          console.log(`[member-assistant] 📸 Đã tìm thấy file ảnh cục bộ trên ổ cứng (${directMedia.local_path})`);
+        }
+      }
+
+      // 2. Nếu có quote: Ưu tiên tra cứu ảnh gốc từ DB theo msgId / cliMsgId của quote
       // (đặc biệt khi URL quote là ảnh jxl hoặc thumbnail rút gọn)
       if (event.quote) {
         const quoteId = event.quote.msgId || event.quote.cliMsgId || event.quote.globalMsgId;
         if (quoteId) {
           const media = getMediaByMessageId(threadId, quoteId);
-          if (media?.local_path || media?.media_url) {
-            targetImageUrl = media.local_path || media.media_url;
-            console.log(`[member-assistant] 📸 Đã tìm thấy ảnh gốc từ tin nhắn được trích dẫn (${quoteId})`);
+          if (media?.local_path && fs.existsSync(media.local_path)) {
+            targetImageUrl = media.local_path;
+            console.log(`[member-assistant] 📸 Đã tìm thấy file ảnh gốc cục bộ từ quote (${quoteId})`);
+          } else if (media?.media_url) {
+            targetImageUrl = media.media_url;
+            console.log(`[member-assistant] 📸 Đã tìm thấy URL ảnh gốc từ tin nhắn được trích dẫn (${quoteId})`);
           }
         }
       }

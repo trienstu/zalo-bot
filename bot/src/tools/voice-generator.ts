@@ -231,8 +231,13 @@ export function cleanOldVoiceFiles(maxAgeMinutes = 60): void {
  * Chất lượng âm thanh cao cấp, sáng rõ và không bị vỡ/nghẹt tiếng
  */
 async function convertToZaloVoiceBubble(inputPath: string, outputPath: string): Promise<void> {
-  const ffmpegCmd = `ffmpeg -y -v error -i "${inputPath}" -vn -map_metadata -1 -c:a aac -b:a 128k -ar 44100 -ac 1 -movflags +faststart "${outputPath}"`;
-  await execPromise(ffmpegCmd);
+  try {
+    const ffmpegCmd = `ffmpeg -y -v error -i "${inputPath}" -vn -map_metadata -1 -c:a aac -b:a 128k -ar 44100 -ac 1 -movflags +faststart "${outputPath}"`;
+    await execPromise(ffmpegCmd);
+  } catch (ffmpegErr) {
+    console.warn("[voice-generator] FFmpeg convert không thành công, fallback sao chép file gốc:", ffmpegErr);
+    fs.copyFileSync(inputPath, outputPath);
+  }
 }
 
 /**
@@ -488,8 +493,13 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
       .join("\n");
     fs.writeFileSync(listFilePath, concatContent, "utf8");
 
-    const concatCmd = `ffmpeg -y -v error -f concat -safe 0 -i "${listFilePath}" -vn -map_metadata -1 -c:a aac -b:a 128k -ar 44100 -ac 1 -movflags +faststart "${finalM4aPath}"`;
-    await execPromise(concatCmd);
+    try {
+      const concatCmd = `ffmpeg -y -v error -f concat -safe 0 -i "${listFilePath}" -vn -map_metadata -1 -c:a aac -b:a 128k -ar 44100 -ac 1 -movflags +faststart "${finalM4aPath}"`;
+      await execPromise(concatCmd);
+    } catch (ffmpegErr) {
+      console.warn("[voice-generator] FFmpeg concat dialogue không thành công, fallback sang file part đầu tiên:", ffmpegErr);
+      if (partFiles[0]) fs.copyFileSync(partFiles[0], finalM4aPath);
+    }
 
     const finalStats = fs.statSync(finalM4aPath);
 
