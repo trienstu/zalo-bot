@@ -23,6 +23,8 @@ import {
 import {
   synthesizeSpeech,
   synthesizeDialogue,
+  isDialogueText,
+  normalizeDialogueTurns,
 } from "./tools/voice-generator.js";
 import { runPythonCode } from "./tools/python-runner.js";
 import {
@@ -1198,10 +1200,10 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
       const voice_style = args?.voice_style ? String(args.voice_style) : (args?.style ? String(args.style) : undefined);
       const speakers = Array.isArray(args?.speakers) ? (args.speakers as any) : undefined;
 
-      const isDialogue = (speakers && speakers.length > 0) || text.includes("\n") && /^[^:：\n]+[:：]/.test(text);
+      const isDialogue = (speakers && speakers.length > 0) || isDialogueText(text);
 
       if (isDialogue) {
-        const result = await synthesizeDialogue({ text, speakers, caption, stylePrompt: voice_style });
+        const result = await synthesizeDialogue({ text: normalizeDialogueTurns(text), speakers, caption, stylePrompt: voice_style });
         return result;
       } else {
         const result = await synthesizeSpeech({ text, voice, caption, stylePrompt: voice_style });

@@ -579,13 +579,45 @@ export async function synthesizeSpeech(options: SynthesizeOptions): Promise<Voic
 }
 
 /**
+ * Chuẩn hóa các lượt đối thoại:
+ * Tách từng lượt thoại ra từng dòng riêng biệt nếu LLM vô tình viết trên cùng 1 dòng
+ * (VD: "... tình yêu. Nữ: Anh lại văn vở rồi! Nam: Lần này...")
+ */
+export function normalizeDialogueTurns(text: string): string {
+  if (!text) return "";
+  let clean = text.trim();
+  // 1. Tách dòng khi có một lượt nói mới (VD: "Nam:", "Nữ:", "MC:", v.v.) sau dấu kết thúc câu hoặc khoảng trắng
+  clean = clean.replace(/([.!?…"]\s+)(?=(?:[-*•]\s*)?(?:Nam|Nữ|MC|Host|[A-ZÀ-Ỹa-zà-ỹ0-9_ -]+)[:：]\s*)/g, "$1\n");
+  // 2. Tách dòng nếu giữa 2 câu có dấu gạch đầu dòng '- Nam:'
+  clean = clean.replace(/(\s+)(?=[-•*]\s*(?:Nam|Nữ|MC|Host|[A-ZÀ-Ỹa-zà-ỹ0-9_ -]+)[:：]\s*)/g, "\n");
+  return clean;
+}
+
+/**
+ * Kiểm tra xem đoạn văn bản có phải kịch bản đối thoại đa nhân vật không
+ */
+export function isDialogueText(text: string): boolean {
+  if (!text) return false;
+  const normalized = normalizeDialogueTurns(text);
+  const lines = normalized.split("\n").filter((l) => l.trim().length > 0);
+  if (lines.length <= 1) return false;
+  let speakerTurnCount = 0;
+  for (const line of lines) {
+    if (/^(?:[-*•]\s*)?[^:：\n]{1,30}[:：]/.test(line.trim())) {
+      speakerTurnCount++;
+    }
+  }
+  return speakerTurnCount >= 2;
+}
+
+/**
  * Sinh hội thoại Podcast đối đáp 2 người (Dialogue / Dual-Speaker)
  */
 export async function synthesizeDialogue(options: SynthesizeOptions): Promise<VoiceResult> {
   ensureVoiceDir();
   cleanOldVoiceFiles(60);
 
-  const content = options.text?.trim();
+  const content = normalizeDialogueTurns(options.text || "");
   if (!content) {
     return {
       success: false,
@@ -646,8 +678,8 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
       let sentence = line;
 
       if (match && match[1] && match[2]) {
-        speakerRaw = match[1].trim();
-        sentence = match[2].trim();
+        speakerRaw = match[1].replace(/^[\s\-*•]+/, "").trim();
+        sentence = match[2].trim().replace(/^["'“”«»]+|["'“”«»]+$/g, "").trim();
       }
 
       if (!sentence) continue;

@@ -11,7 +11,7 @@ import {
   parseMarkdownToSlides,
   parseMarkdownRuns,
 } from "./file-generator.js";
-import { synthesizeSpeech, synthesizeDialogue } from "./voice-generator.js";
+import { synthesizeSpeech, synthesizeDialogue, normalizeDialogueTurns, isDialogueText } from "./voice-generator.js";
 import { validatePythonCodeSafety } from "./python-runner.js";
 import { extractSimulatedGenerateFile, extractSimulatedCreateVoice } from "./simulated-tool-interceptor.js";
 
@@ -476,3 +476,34 @@ test("resolveAIStudioVoice nhận diện chính xác qua styleHint vùng miền 
   assert.equal(resolveAIStudioVoice(undefined, "nam MC trầm ấm"), "Fenrir");
   assert.equal(resolveAIStudioVoice(undefined, "nữ dịu dàng kore"), "Kore");
 });
+
+test("extractSimulatedCreateVoice bóc tách chính xác cú pháp tag [create_voice text='...' /] từ phản hồi của model", () => {
+  const rawFromUserScreenshot = `PODCAST: BẢN TÌNH CA MÙA THU 🎙️💕
+- Nam: "Người ta bảo mùa thu là mùa của nỗi nhớ..."
+- Nữ: "Anh lại văn vở rồi!..."
+
+[create_voice text="Nam: Người ta bảo mùa thu là mùa của nỗi nhớ, nhưng với anh, mùa thu là mùa để bắt đầu một tình yêu. Nữ: Anh lại văn vở rồi! Mùa nào anh chẳng nói thế, tin được không đây? Nam: Lần này là thật đấy. Nhìn lá vàng rơi, anh chỉ ước có thể nắm tay em đi hết cả con đường này. Nữ: Nghe cũng xuôi tai đấy nhỉ. Thế anh định nắm tay em đến bao giờ? Nam: Đến khi nào em đồng ý để anh được làm người chăm sóc em mỗi ngày. Mình thử bắt đầu từ hôm nay nhé? Nữ: Để xem thái độ của anh thế nào đã. Nếu đủ chân thành, em sẽ cân nhắc. Nam: Thái độ của anh thì rõ mười mươi rồi, chỉ cần em gật đầu, cả thế giới này anh đều có thể mang đến cho em." /]`;
+
+  const extracted = extractSimulatedCreateVoice(rawFromUserScreenshot);
+  assert.ok(extracted, "Phải trích xuất được tool call create_voice");
+  assert.equal(extracted?.toolName, "create_voice");
+  assert.ok(extracted?.args.text?.startsWith("Nam: Người ta bảo mùa thu"));
+  assert.ok(extracted?.args.text?.endsWith("cho em."));
+  assert.ok(extracted?.rawMatch.startsWith("[create_voice"));
+  assert.ok(extracted?.rawMatch.endsWith("/]"));
+});
+
+test("normalizeDialogueTurns và isDialogueText chuẩn hóa chính xác hội thoại bị dồn trên 1 dòng", () => {
+  const singleLineDialogue = 'Nam: Người ta bảo mùa thu là mùa của nỗi nhớ. Nữ: Anh lại văn vở rồi! Nam: Lần này là thật đấy. Nữ: Nghe cũng xuôi tai đấy.';
+
+  assert.equal(isDialogueText(singleLineDialogue), true);
+
+  const normalized = normalizeDialogueTurns(singleLineDialogue);
+  const turns = normalized.split("\n").filter((l) => l.trim().length > 0);
+  assert.equal(turns.length, 4);
+  assert.ok(turns[0].startsWith("Nam:"));
+  assert.ok(turns[1].startsWith("Nữ:"));
+  assert.ok(turns[2].startsWith("Nam:"));
+  assert.ok(turns[3].startsWith("Nữ:"));
+});
+

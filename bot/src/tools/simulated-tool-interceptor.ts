@@ -25,8 +25,14 @@ export interface ExtractedToolCall {
 export function extractSimulatedGenerateFile(text: string): ExtractedToolCall | null {
   if (!text) return null;
 
-  // Khớp cú pháp: [generate_file(...)] hoặc generate_file(...)
-  const match = text.match(/\[?\bgenerate_file\s*\(([\s\S]*?)\)\]?/i);
+  // Khớp cả cú pháp tag: [generate_file ... /] hoặc <generate_file ... /> lẫn cú pháp hàm: generate_file(...)
+  const tagMatch = text.match(/\[\s*generate_file\b([\s\S]*?)\/\s*\]/i) ||
+                   text.match(/<\s*generate_file\b([\s\S]*?)\/\s*>/i) ||
+                   text.match(/\[\s*generate_file\b([\s\S]*?)\]/i) ||
+                   text.match(/<\s*generate_file\b([\s\S]*?)>/i);
+  const funcMatch = text.match(/\[?\bgenerate_file\s*\(([\s\S]*?)\)\]?/i);
+
+  const match = tagMatch || funcMatch;
   if (!match) return null;
 
   const inner = match[1] || "";
@@ -43,10 +49,11 @@ export function extractSimulatedGenerateFile(text: string): ExtractedToolCall | 
   if (contentTripleMatch && contentTripleMatch[1]) {
     args.content = contentTripleMatch[1].trim();
   } else {
-    // Fallback nếu không dùng triple quotes
-    const contentSingleMatch = inner.match(/content\s*=\s*(['"])([\s\S]*?)\1(?=[,\s\)]|$)/i);
-    if (contentSingleMatch && contentSingleMatch[2]) {
-      args.content = contentSingleMatch[2].trim();
+    // Fallback nếu không dùng triple quotes, ưu tiên quote trước attribute khác hoặc cuối tag
+    const contentQuoteMatch = inner.match(/content\s*=\s*(['"])([\s\S]*?)\1(?=\s*(?:[a-zA-Z_]+\s*=|(?:\/\]|\]|>|$)))/i) ||
+                              inner.match(/content\s*=\s*(['"])([\s\S]*?)\1/i);
+    if (contentQuoteMatch && contentQuoteMatch[2]) {
+      args.content = contentQuoteMatch[2].trim();
     }
   }
 
@@ -91,8 +98,14 @@ export interface ExtractedVoiceCall {
 export function extractSimulatedCreateVoice(text: string): ExtractedVoiceCall | null {
   if (!text) return null;
 
-  // Khớp cú pháp: [create_voice(...)] hoặc create_voice(...)
-  const match = text.match(/\[?\bcreate_voice\s*\(([\s\S]*?)\)\]?/i);
+  // Khớp cả cú pháp tag: [create_voice ... /] hoặc <create_voice ... /> lẫn cú pháp hàm: create_voice(...)
+  const tagMatch = text.match(/\[\s*create_voice\b([\s\S]*?)\/\s*\]/i) ||
+                   text.match(/<\s*create_voice\b([\s\S]*?)\/\s*>/i) ||
+                   text.match(/\[\s*create_voice\b([\s\S]*?)\]/i) ||
+                   text.match(/<\s*create_voice\b([\s\S]*?)>/i);
+  const funcMatch = text.match(/\[?\bcreate_voice\s*\(([\s\S]*?)\)\]?/i);
+
+  const match = tagMatch || funcMatch;
   if (!match) return null;
 
   const inner = match[1] || "";
@@ -103,9 +116,11 @@ export function extractSimulatedCreateVoice(text: string): ExtractedVoiceCall | 
   if (textTripleMatch && textTripleMatch[1]) {
     args.text = textTripleMatch[1].trim();
   } else {
-    const textSingleMatch = inner.match(/text\s*=\s*(['"])([\s\S]*?)\1(?=[,\s\)]|$)/i);
-    if (textSingleMatch && textSingleMatch[2]) {
-      args.text = textSingleMatch[2].trim();
+    // Ưu tiên quote trước attribute khác hoặc cuối tag
+    const textQuoteMatch = inner.match(/text\s*=\s*(['"])([\s\S]*?)\1(?=\s*(?:[a-zA-Z_]+\s*=|(?:\/\]|\]|>|$)))/i) ||
+                           inner.match(/text\s*=\s*(['"])([\s\S]*?)\1/i);
+    if (textQuoteMatch && textQuoteMatch[2]) {
+      args.text = textQuoteMatch[2].trim();
     }
   }
 

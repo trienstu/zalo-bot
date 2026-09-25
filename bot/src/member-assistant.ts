@@ -1281,6 +1281,7 @@ async function handleHistoryQA(
       `       + Khi người dùng yêu cầu 'đóng gói', 'xuất file', 'lưu vào file', 'chuyển thành file' (Word/docx, Excel/xlsx, PowerPoint/pptx, PDF, CSV, TXT...) từ nội dung tin nhắn được trích dẫn (quote) hoặc nội dung đã bàn luận trước đó:\n` +
       `       + BẮT BUỘC PHẢI BẢO LƯU NGUYÊN VẸN 100% TOÀN BỘ NỘI DUNG CHI TIẾT GỐC VÀO THAM SỐ 'content' CỦA TOOL 'generate_file' (bao gồm đầy đủ căn cứ/điều khoản pháp luật, bảng biểu/số liệu tài chính - BĐS, toàn bộ lời thoại/phân cảnh kịch bản media, mã nguồn/kiến trúc kỹ thuật, quy chế doanh nghiệp...). TUYỆT ĐỐI CẤM tự ý tóm tắt thành dàn ý gạch đầu dòng sơ sài làm mất mát dữ liệu và tri thức chuyên sâu của người dùng!\n` +
       `     * [KỊCH BẢN ĐỐI THOẠI / PODCAST 2 NGƯỜI]: Khi người dùng yêu cầu kịch bản 2 người nói chuyện, cuộc đối thoại, hoặc podcast 2 người: BẮT BUỘC tự động soạn kịch bản đối đáp sinh động, phân vai rõ ràng theo từng lượt nói (ví dụ: 'Nam: ...\nNữ: ...' hoặc 'MC Nam: ...\nKhách mời: ...', có thể thêm cảm xúc trong ngoặc như 'Nam (hào hứng): ...') và BẮT BUỘC GỌI 'create_voice' truyền toàn bộ kịch bản vào tham số 'text' để hệ thống tự động tổng hợp thành file Podcast .m4a 2 giọng gửi lên Zalo!\n` +
+      `     * TUYỆT ĐỐI CẤM in cú pháp giả lập dạng '[create_voice text="..."]' hoặc '[generate_file(...)]' ra tin nhắn văn bản! BẮT BUỘC PHẢI THỰC SỰ GỌI FUNCTION CALLING CỦA TOOL!\n` +
       `     * Sau khi gọi công cụ thành công, câu trả lời bằng chữ của bạn chỉ cần NGẮN GỌN 1-3 DÒNG tóm tắt chính và thông báo file đã gửi. TUYỆT ĐỐI KHÔNG lặp lại toàn bộ nội dung dài dòng trong tin nhắn chat Zalo!\n` +
       `     * Tuyệt đối cấm bịa đặt tin nhắn đã xuất file khi chưa gọi tool!`;
 
@@ -1339,27 +1340,28 @@ async function handleHistoryQA(
           mediaParts: mediaPart ? [mediaPart] : undefined,
           enableSearch: false,
         });
-        answer = await interceptAndExecuteSimulatedTool(answer, async (file) => {
-          if (options?.api) {
-            const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
-            if (isVoice) {
-              await sendGroupVoice(
-                options.api,
-                threadId,
-                file.filePath,
-                file.caption || `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
-              );
-            } else {
-              await sendGroupFile(
-                options.api,
-                threadId,
-                file.filePath,
-                file.caption || `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`,
-              );
-            }
-          }
-        });
       }
+
+      answer = await interceptAndExecuteSimulatedTool(answer, async (file) => {
+        if (options?.api) {
+          const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+          if (isVoice) {
+            await sendGroupVoice(
+              options.api,
+              threadId,
+              file.filePath,
+              file.caption || `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
+            );
+          } else {
+            await sendGroupFile(
+              options.api,
+              threadId,
+              file.filePath,
+              file.caption || `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`,
+            );
+          }
+        }
+      });
 
       // Ghi nhớ vào tri thức nếu cần
       if (targetUrl) {
@@ -1543,6 +1545,7 @@ async function handleHistoryQA(
       `         - Khi người dùng yêu cầu 'đóng gói', 'xuất file', 'lưu vào file', 'chuyển thành file' (Word/docx, Excel/xlsx, PowerPoint/pptx, PDF, CSV, TXT...) từ nội dung tin nhắn được trích dẫn (quote) hoặc nội dung đã bàn luận trước đó:\n` +
       `         - BẮT BUỘC PHẢI BẢO LƯU NGUYÊN VẸN 100% TOÀN BỘ NỘI DUNG CHI TIẾT GỐC VÀO THAM SỐ 'content' CỦA TOOL 'generate_file' (bao gồm đầy đủ căn cứ/điều khoản pháp luật, bảng biểu/số liệu tài chính - BĐS, toàn bộ lời thoại/phân cảnh kịch bản media, mã nguồn/kiến trúc kỹ thuật, quy chế doanh nghiệp...). TUYỆT ĐỐI CẤM tự ý tóm tắt thành dàn ý gạch đầu dòng sơ sài làm mất mát dữ liệu và tri thức chuyên sâu của người dùng!\n` +
       `       * [KỊCH BẢN ĐỐI THOẠI / PODCAST 2 NGƯỜI]: Khi người dùng yêu cầu kịch bản 2 người nói chuyện, cuộc đối thoại, hoặc podcast 2 người: BẮT BUỘC tự động soạn kịch bản đối đáp sinh động, phân vai rõ ràng theo từng lượt nói (ví dụ: 'Nam: ...\nNữ: ...' hoặc 'MC Nam: ...\nKhách mời: ...', có thể thêm cảm xúc trong ngoặc như 'Nam (hào hứng): ...') và BẮT BUỘC GỌI 'create_voice' truyền toàn bộ kịch bản vào tham số 'text' để hệ thống tự động tổng hợp thành file Podcast .m4a 2 giọng gửi lên Zalo!\n` +
+      `       * TUYỆT ĐỐI CẤM in cú pháp giả lập dạng '[create_voice text="..."]' hoặc '[generate_file(...)]' ra tin nhắn văn bản! BẮT BUỘC PHẢI THỰC SỰ GỌI FUNCTION CALLING CỦA TOOL!\n` +
       `       * Sau khi gọi công cụ thành công, câu trả lời bằng chữ của bạn chỉ cần NGẮN GỌN 1-3 DÒNG tóm tắt chính và thông báo file đã gửi. TUYỆT ĐỐI KHÔNG lặp lại toàn bộ nội dung dài dòng trong tin nhắn chat Zalo!\n` +
       `       * TUYỆT ĐỐI CẤM TỰ Ý BỊA ĐẶT TIN NHẮN GIẢ MẠO rằng "em đã xuất xong file", "đã gửi file" khi CHƯA THỰC SỰ GỌI TOOL!\n` +
       `   - [KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ, POSTER & ĐỒ HỌA BẰNG PYTHON (python_interpreter)]:\n` +
@@ -2486,6 +2489,7 @@ async function handleHistoryQA(
     `    * TUYỆT ĐỐI CẤM CHỈ GÕ DÀN Ý BẰNG CHỮ RỒI HỎI NGƯỢC LẠI NGƯỜI DÙNG có muốn soạn không. Hãy hành động và xuất file ngay lập tức!\n` +
     `    * [QUY TẮC BẢO LƯU NGUYÊN VẸN TRI THỨC KHI ĐÓNG GÓI / XUẤT FILE ĐA LĨNH VỰC]: Khi người dùng yêu cầu 'đóng gói', 'xuất file', 'lưu vào file', 'chuyển thành file' (Word/docx, Excel/xlsx, PowerPoint/pptx, PDF, CSV, TXT...) từ nội dung tin nhắn được trích dẫn (quote) hoặc nội dung đã bàn luận trước đó: BẮT BUỘC PHẢI BẢO LƯU NGUYÊN VẸN 100% TOÀN BỘ NỘI DUNG CHI TIẾT GỐC VÀO THAM SỐ 'content' CỦA TOOL 'generate_file' (đầy đủ căn cứ/điều khoản pháp luật, bảng biểu/số liệu tài chính - BĐS, toàn bộ lời thoại/phân cảnh kịch bản media, mã nguồn/kiến trúc kỹ thuật...). TUYỆT ĐỐI CẤM tự ý tóm tắt thành dàn ý gạch đầu dòng sơ sài làm mất mát dữ liệu và tri thức chuyên sâu của người dùng!\n` +
     `    * [KỊCH BẢN ĐỐI THOẠI / PODCAST 2 NGƯỜI]: Khi người dùng yêu cầu kịch bản 2 người nói chuyện, cuộc đối thoại, hoặc podcast 2 người: BẮT BUỘC tự động soạn kịch bản đối đáp sinh động, phân vai rõ ràng theo từng lượt nói (ví dụ: 'Nam: ...\nNữ: ...' hoặc 'MC Nam: ...\nKhách mời: ...', có thể thêm cảm xúc trong ngoặc như 'Nam (hào hứng): ...') và BẮT BUỘC GỌI 'create_voice' truyền toàn bộ kịch bản vào tham số 'text' để hệ thống tự động tổng hợp thành file Podcast .m4a 2 giọng gửi lên Zalo!\n` +
+    `    * TUYỆT ĐỐI CẤM in cú pháp giả lập dạng '[create_voice text="..."]' hoặc '[generate_file(...)]' ra tin nhắn văn bản! BẮT BUỘC PHẢI THỰC SỰ GỌI FUNCTION CALLING CỦA TOOL!\n` +
     `    * CHỈ từ chối tạo file khi người dùng chỉ hỏi thăm năng lực (ví dụ: 'em biết tạo slide không?'). Khi đó chỉ giải thích năng lực và mời người dùng yêu cầu cụ thể.\n` +
     `    * Sau khi gọi công cụ thành công, câu trả lời bằng chữ của bạn chỉ cần NGẮN GỌN 1-3 DÒNG tóm tắt chính và thông báo file đã gửi. TUYỆT ĐỐI KHÔNG lặp lại toàn bộ nội dung dài dòng trong tin nhắn chat Zalo!\n` +
     `- KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
