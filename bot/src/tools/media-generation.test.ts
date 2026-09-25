@@ -451,3 +451,28 @@ test("Bộ 3 hàm phân giải giọng đọc (AI Studio, Google Cloud, Edge) á
   assert.equal(resolveGoogleVoice("Aoede"), "vi-VN-Neural2-A");
   assert.equal(resolveEdgeVoice("Aoede"), "vi-VN-HoaiMyNeural");
 });
+
+test("cleanTextForTTS làm sạch triệt để markdown và chỉ dẫn cảm xúc trong ngoặc", async () => {
+  const { cleanTextForTTS } = await import("./voice-generator.js");
+
+  const raw = "### Tiêu đề\n**Nam (hào hứng):** Xin chào các bạn! [cười lớn]\nĐây là một bài thơ hay: *Đây Thôn Vỹ Dạ*\nXem thêm tại https://example.com/tho";
+  const cleaned = cleanTextForTTS(raw);
+
+  assert.ok(!cleaned.includes("###"));
+  assert.ok(!cleaned.includes("**"));
+  assert.ok(!cleaned.includes("*"));
+  assert.ok(!cleaned.includes("(hào hứng)"));
+  assert.ok(!cleaned.includes("[cười lớn]"));
+  assert.ok(!cleaned.includes("https://"));
+  assert.ok(cleaned.includes("Nam: Xin chào các bạn!"));
+  assert.ok(cleaned.includes("Đây Thôn Vỹ Dạ"));
+});
+
+test("resolveAIStudioVoice nhận diện chính xác qua styleHint vùng miền và giới tính", async () => {
+  const { resolveAIStudioVoice } = await import("./voice-generator.js");
+
+  assert.equal(resolveAIStudioVoice(undefined, "giọng nữ người Huế"), "Aoede");
+  assert.equal(resolveAIStudioVoice(undefined, "giọng nam miền Bắc"), "Puck");
+  assert.equal(resolveAIStudioVoice(undefined, "nam MC trầm ấm"), "Fenrir");
+  assert.equal(resolveAIStudioVoice(undefined, "nữ dịu dàng kore"), "Kore");
+});

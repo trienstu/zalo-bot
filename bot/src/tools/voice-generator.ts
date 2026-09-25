@@ -345,30 +345,66 @@ async function synthesizeWithEdgeTTS(
 }
 
 /**
+ * Làm sạch văn bản trước khi đưa vào Text-to-Speech:
+ * - Loại bỏ định dạng markdown (tiêu đề #, in đậm **, in nghiêng *, trích dẫn >, gạch đầu dòng -)
+ * - Loại bỏ các chỉ dẫn sân khấu / cảm xúc trong ngoặc đơn hoặc ngoặc vuông (VD: (cười), (hào hứng), [thì thầm])
+ * - Giữ nguyên lời thoại và nội dung thuần túy để giọng đọc AI phát âm chuẩn xác, không đọc chữ rác
+ */
+export function cleanTextForTTS(rawText: string): string {
+  if (!rawText) return "";
+  return rawText
+    // Loại bỏ code blocks ``` ... ```
+    .replace(/```[\s\S]*?```/g, "")
+    // Loại bỏ URLs https://... hoặc http://...
+    .replace(/https?:\/\/\S+/gi, "")
+    // Loại bỏ bullet points, headers, blockquotes ở đầu dòng
+    .replace(/^(\s*[*#>-]+\s*)+/gm, "")
+    // Loại bỏ in đậm / in nghiêng markdown: **text** hoặc *text* hoặc __text__ hoặc _text_
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/(\*|_)(.*?)\1/g, "$2")
+    // Loại bỏ chỉ dẫn cảm xúc / hành động sân khấu trong ngoặc đơn: (cười), (hào hứng), (thở dài), v.v.
+    .replace(
+      /\((?:cười|cười lớn|hào hứng|ngạc nhiên|vui vẻ|trầm ấm|trầm ngâm|thì thầm|hồi hộp|thở dài|vỗ tay|khóc|lo lắng|xúc động|tự tin|ngập ngừng|tức giận|hài hước|nghẹn ngào|ngơ ngác|tươi vui|nhí nhảnh|dõng dạc|nghiêm túc|cảm xúc)[^)]*\)/gi,
+      "",
+    )
+    // Loại bỏ chỉ dẫn cảm xúc trong ngoặc vuông: [cười], [hào hứng], v.v.
+    .replace(
+      /\[(?:cười|cười lớn|hào hứng|ngạc nhiên|vui vẻ|trầm ấm|trầm ngâm|thì thầm|hồi hộp|thở dài|vỗ tay|khóc|lo lắng|xúc động|tự tin|ngập ngừng|tức giận|hài hước|nghẹn ngào|ngơ ngác|tươi vui|nhí nhảnh|dõng dạc|nghiêm túc|cảm xúc)[^\]]*\]/gi,
+      "",
+    )
+    // Chuẩn hóa khoảng trắng trước dấu câu (ví dụ: "Nam :" -> "Nam:")
+    .replace(/[ \t]+([,:?.!])/g, "$1")
+    // Thu gọn khoảng trắng thừa
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s*\n/g, "\n")
+    .trim();
+}
+
+/**
  * Định danh giọng Google AI Studio (Gemini Native Audio):
  * Nữ: Aoede, Kore
  * Nam: Puck, Fenrir, Charon
  */
-export function resolveAIStudioVoice(voiceHint?: string): string {
-  if (!voiceHint) return "Aoede";
-  const hint = voiceHint.toLowerCase().trim();
+export function resolveAIStudioVoice(voiceHint?: string, styleHint?: string): string {
+  const combined = `${voiceHint || ""} ${styleHint || ""}`.toLowerCase().trim();
+  if (!combined) return "Aoede";
 
-  if (
-    hint.includes("nam") ||
-    hint.includes("male") ||
-    hint.includes("dan") ||
-    hint.includes("puck") ||
-    hint.includes("wavenet-b") ||
-    hint.includes("wavenet-d") ||
-    hint.includes("namminh")
-  ) {
-    return "Puck";
-  }
-  if (hint.includes("trầm") || hint.includes("charon") || hint.includes("fenrir")) {
+  if (combined.includes("trầm") || combined.includes("charon") || combined.includes("fenrir")) {
     return "Fenrir";
   }
-  if (hint.includes("kore")) {
+  if (combined.includes("kore")) {
     return "Kore";
+  }
+  if (
+    combined.includes("nam") ||
+    combined.includes("male") ||
+    combined.includes("dan") ||
+    combined.includes("puck") ||
+    combined.includes("wavenet-b") ||
+    combined.includes("wavenet-d") ||
+    combined.includes("namminh")
+  ) {
+    return "Puck";
   }
   return "Aoede";
 }
@@ -387,21 +423,16 @@ async function synthesizeWithGoogleAIStudio(
   const apiKeys = rawKey.split(",").map((k) => k.trim()).filter(Boolean);
   if (apiKeys.length === 0) return false;
 
-  const voiceName = resolveAIStudioVoice(voiceHint);
-  const models = ["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"];
+  const cleanInput = cleanTextForTTS(text);
+  if (!cleanInput) return false;
 
-  const styleDesc = (options?.stylePrompt || "").trim();
-  let promptText = "";
-  if (styleDesc) {
-    promptText = `Hãy thể hiện và đọc diễn cảm văn bản sau bằng tiếng Việt với phong cách/giọng điệu: ${styleDesc}.\n\nVăn bản:\n${text}`;
-  } else {
-    promptText = `Hãy đọc diễn cảm văn bản sau bằng tiếng Việt với ngữ điệu tự nhiên, truyền cảm:\n\n${text}`;
-  }
+  const voiceName = resolveAIStudioVoice(voiceHint, options?.stylePrompt);
+  const models = ["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"];
 
   const payload = {
     contents: [
       {
-        parts: [{ text: promptText }],
+        parts: [{ text: cleanInput }],
       },
     ],
     generationConfig: {
@@ -492,7 +523,7 @@ export async function synthesizeSpeech(options: SynthesizeOptions): Promise<Voic
   ensureVoiceDir();
   cleanOldVoiceFiles(60);
 
-  const cleanText = options.text?.trim();
+  const cleanText = cleanTextForTTS(options.text);
   if (!cleanText) {
     return {
       success: false,
@@ -658,8 +689,10 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
 
       // Ghép phong cách chung và cảm xúc riêng của từng lượt thoại (nếu có)
       const turnStyle = [options.stylePrompt || options.style, turnEmotion].filter(Boolean).join(", ");
+      const cleanSentence = cleanTextForTTS(sentence);
+      if (!cleanSentence) continue;
 
-      const p = await synthesizeSingleAudio(sentence, partPath, assignedVoice, {
+      const p = await synthesizeSingleAudio(cleanSentence, partPath, assignedVoice, {
         rate: options.rate,
         pitch: options.pitch,
         stylePrompt: turnStyle,
