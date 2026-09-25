@@ -3277,6 +3277,24 @@ export function upsertBotFriend(params: {
 }
 
 /**
+ * Dọn dẹp những bạn bè không còn nằm trong danh sách bạn bè Zalo hiện tại của bot.
+ */
+export function pruneStaleBotFriends(currentUids: string[]): number {
+  if (!currentUids || currentUids.length === 0) return 0;
+  try {
+    const db = getDb();
+    const placeholders = currentUids.map(() => "?").join(",");
+    const res = db
+      .prepare(`DELETE FROM bot_friends WHERE user_id NOT IN (${placeholders})`)
+      .run(...currentUids);
+    return res.changes;
+  } catch (e) {
+    console.error("[db] pruneStaleBotFriends error:", e);
+    return 0;
+  }
+}
+
+/**
  * Lấy thông tin 1 bạn bè theo userId từ bot_friends.
  */
 export function getBotFriend(userId: string): BotFriend | null {

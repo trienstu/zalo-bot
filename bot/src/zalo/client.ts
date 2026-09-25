@@ -4,7 +4,7 @@ import { Zalo, LoginQRCallbackEventType, ThreadType, Reactions } from "zca-js";
 export { Reactions };
 import qrcodeTerminal from "qrcode-terminal";
 import { config } from "../config.js";
-import { setBotState, upsertBotFriend } from "../db/index.js";
+import { setBotState, upsertBotFriend, pruneStaleBotFriends } from "../db/index.js";
 import { LOGIN_STATE_KEY } from "../health-state.js";
 
 /**
@@ -708,9 +708,11 @@ export async function syncFriends(
   const now = Date.now();
   let upserted = 0;
 
+  const validUids: string[] = [];
   for (const item of friendList) {
     const userId = String(item.userId || item.uid || item.id || "").trim();
     if (!userId) continue;
+    validUids.push(userId);
     const displayName = String(item.displayName || item.zaloName || item.dName || item.name || `User ${userId.slice(-4)}`).trim();
     const avatar = String(item.avatar || item.avatarUrl || "").trim();
 
@@ -721,6 +723,14 @@ export async function syncFriends(
       now,
     });
     upserted++;
+  }
+
+  // Dọn dẹp bạn bè rác / đã hủy kết bạn / tàn dư từ bot khác
+  if (validUids.length > 0) {
+    const pruned = pruneStaleBotFriends(validUids);
+    if (pruned > 0) {
+      console.log(`[syncFriends] 🧹 Đã dọn dẹp ${pruned} bạn bè cũ không còn trong danh bạ Zalo hiện tại.`);
+    }
   }
 
   try {

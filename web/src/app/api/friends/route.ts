@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import fs from "node:fs";
 import {
   DbNotReadyError,
@@ -23,7 +24,9 @@ function handleDbError(e: unknown): NextResponse | never {
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
-    const botId = url.searchParams.get("botId") || "bot-1";
+    const cookieStore = await cookies();
+    const activeBotCookie = cookieStore.get("active_bot_id")?.value;
+    const botId = url.searchParams.get("botId") || activeBotCookie || "bot-1";
 
     const friends = listBotFriends(botId);
     const syncStatus = getFriendSyncStatus(botId);

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { cookies } from "next/headers";
 import { PageHeader, EmptyState } from "@/components/ui";
 import { dbExists, listBotFriends, getFriendSyncStatus, getAutoFriendSettings } from "@/lib/db";
 import { friendSyncRequestPath } from "@/lib/login-status";
@@ -21,7 +22,9 @@ export default async function FriendsPage({
   }
 
   const params = await searchParams;
-  const botId = params?.botId || "bot-1";
+  const cookieStore = await cookies();
+  const activeBotCookie = cookieStore.get("active_bot_id")?.value;
+  const botId = params?.botId || activeBotCookie || "bot-1";
   const initialFriends = listBotFriends(botId);
   const syncStatus = getFriendSyncStatus(botId);
   const initialSettings = getAutoFriendSettings(botId);
