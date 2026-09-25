@@ -74,13 +74,107 @@ export function extractSimulatedGenerateFile(text: string): ExtractedToolCall | 
   };
 }
 
+export interface ExtractedVoiceCall {
+  toolName: "create_voice";
+  args: {
+    text: string;
+    voice?: string;
+    caption?: string;
+    [key: string]: any;
+  };
+  rawMatch: string;
+}
+
 /**
- * Chặn và thực thi tool giả lập ngầm, gửi file và làm sạch văn bản chat
+ * Bóc tách lệnh create_voice từ text thô
+ */
+export function extractSimulatedCreateVoice(text: string): ExtractedVoiceCall | null {
+  if (!text) return null;
+
+  // Khớp cú pháp: [create_voice(...)] hoặc create_voice(...)
+  const match = text.match(/\[?\bcreate_voice\s*\(([\s\S]*?)\)\]?/i);
+  if (!match) return null;
+
+  const inner = match[1] || "";
+  const args: Record<string, string> = {};
+
+  // Trích xuất text (hỗ trợ cả triple quotes ''' hoặc """ và single/double quotes)
+  const textTripleMatch = inner.match(/text\s*=\s*(?:'''|""")([\s\S]*?)(?:'''|""")/i);
+  if (textTripleMatch && textTripleMatch[1]) {
+    args.text = textTripleMatch[1].trim();
+  } else {
+    const textSingleMatch = inner.match(/text\s*=\s*(['"])([\s\S]*?)\1(?=[,\s\)]|$)/i);
+    if (textSingleMatch && textSingleMatch[2]) {
+      args.text = textSingleMatch[2].trim();
+    }
+  }
+
+  // Trích xuất voice hoặc voice_style
+  const voiceMatch = inner.match(/(?:voice|voice_style)\s*=\s*(['"])(.*?)\1/i);
+  if (voiceMatch && voiceMatch[2]) {
+    args.voice = voiceMatch[2].trim();
+  }
+
+  // Trích xuất caption
+  const captionMatch = inner.match(/caption\s*=\s*(?:'''|""")(.*?)(?:'''|""")|caption\s*=\s*(['"])(.*?)\2/i);
+  if (captionMatch) {
+    const captionVal = captionMatch[1] || captionMatch[3] || "";
+    if (captionVal.trim()) args.caption = captionVal.trim();
+  }
+
+  if (!args.text) return null;
+
+  return {
+    toolName: "create_voice",
+    args: args as any,
+    rawMatch: match[0],
+  };
+}
+
+/**
+ * Chặn và thực thi tool giả lập ngầm, gửi file/voice và làm sạch văn bản chat
  */
 export async function interceptAndExecuteSimulatedTool(
   text: string,
-  onFileGenerated?: (file: GeneratedFileResult) => Promise<void>,
+  onFileGenerated?: (file: GeneratedFileResult | any) => Promise<void>,
 ): Promise<string> {
+  // 1. Kiểm tra create_voice giả lập trước
+  const voiceExtracted = extractSimulatedCreateVoice(text);
+  if (voiceExtracted && voiceExtracted.args.text) {
+    try {
+      console.log(
+        `[simulated-tool-interceptor] 🛡️ Phát hiện [create_voice] thô trong output text! ` +
+        `Kích hoạt tạo voice ngầm: text=${voiceExtracted.args.text.length} chars, voice=${voiceExtracted.args.voice || "auto"}`,
+      );
+
+      const result = await executeAgentTool("create_voice", {
+        text: voiceExtracted.args.text,
+        voice: voiceExtracted.args.voice,
+        caption: voiceExtracted.args.caption,
+      });
+
+      if (result?.success && onFileGenerated) {
+        try {
+          await onFileGenerated(result);
+        } catch (sendErr) {
+          console.warn("[simulated-tool-interceptor] Lỗi gửi voice qua onFileGenerated:", sendErr);
+        }
+      }
+
+      let cleanedText = text.replace(voiceExtracted.rawMatch, "").trim();
+      if (
+        !cleanedText ||
+        /^(?:anh|chị|bác|sếp|bạn)?\s*(?:đã\s+)?(?:nghe|nhận|thấy)\s*(?:được\s+)?(?:voice|bản\s*thu)\s*(?:chưa|chưa\s*ạ)?\s*[?]?$/i.test(cleanedText)
+      ) {
+        cleanedText = "🎙️ Em đã thu âm và gửi bản đọc truyền cảm vào nhóm rồi nhé!";
+      }
+      return cleanedText;
+    } catch (err) {
+      console.warn("[simulated-tool-interceptor] Lỗi thực thi simulated create_voice:", err);
+    }
+  }
+
+  // 2. Kiểm tra generate_file giả lập
   const extracted = extractSimulatedGenerateFile(text);
   if (!extracted || !extracted.args.content) {
     return text;

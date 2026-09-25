@@ -1340,12 +1340,22 @@ async function handleHistoryQA(
         });
         answer = await interceptAndExecuteSimulatedTool(answer, async (file) => {
           if (options?.api) {
-            await sendGroupFile(
-              options.api,
-              threadId,
-              file.filePath,
-              file.caption || `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`,
-            );
+            const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+            if (isVoice) {
+              await sendGroupVoice(
+                options.api,
+                threadId,
+                file.filePath,
+                file.caption || `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
+              );
+            } else {
+              await sendGroupFile(
+                options.api,
+                threadId,
+                file.filePath,
+                file.caption || `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`,
+              );
+            }
           }
         });
       }
@@ -1711,12 +1721,22 @@ async function handleHistoryQA(
       }
       answer = await interceptAndExecuteSimulatedTool(answer, async (file) => {
         if (options?.api) {
-          await sendGroupFile(
-            options.api,
-            threadId,
-            file.filePath,
-            file.caption || `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`,
-          );
+          const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+          if (isVoice) {
+            await sendGroupVoice(
+              options.api,
+              threadId,
+              file.filePath,
+              file.caption || `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
+            );
+          } else {
+            await sendGroupFile(
+              options.api,
+              threadId,
+              file.filePath,
+              file.caption || `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`,
+            );
+          }
         }
       });
       return finalizeGroundedAnswer(answer, quoteLiveNews, quoteEvidenceRequired, {
@@ -2582,12 +2602,22 @@ async function handleHistoryQA(
 
     answer = await interceptAndExecuteSimulatedTool(answer, async (file) => {
       if (options?.api) {
-        await sendGroupFile(
-          options.api,
-          threadId,
-          file.filePath,
-          file.caption || `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`,
-        );
+        const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+        if (isVoice) {
+          await sendGroupVoice(
+            options.api,
+            threadId,
+            file.filePath,
+            file.caption || `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
+          );
+        } else {
+          await sendGroupFile(
+            options.api,
+            threadId,
+            file.filePath,
+            file.caption || `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`,
+          );
+        }
       }
     });
 

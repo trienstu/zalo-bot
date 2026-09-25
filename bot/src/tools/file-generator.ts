@@ -34,10 +34,12 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
   const combined = `${question || ""} ${quoteText || ""}`.toLowerCase();
   const qLower = (question || "").toLowerCase();
 
-  // Bỏ qua nếu chỉ là câu hỏi thăm dò năng lực thông thường (capability inquiry)
-  const isCapabilityInquiry =
-    /^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm\s*được|tạo\s*được|xuất\s*được|soạn\s*được)\s+.*?(?:không|ko|hả|nhỉ|hở)\s*[?]?$/i.test(qLower.trim());
-  if (isCapabilityInquiry) return false;
+  // Bỏ qua nếu chỉ là câu hỏi thăm dò năng lực thuần túy không có chủ đề cụ thể (VD: "em có biết tạo file không?", "bot có tạo được slide không hả?")
+  const isGenericCapabilityInquiry =
+    /^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|xuất|soạn)?\s*(?:được|đc|duoc)?(?:\s+(?:tạo|làm|soạn|xuất))?\s+(?:file|slide|voice|ảnh|nhạc|tài\s*liệu)\s*(?:không|ko)?\s*(?:hả|nhỉ|hở|ạ|không|ko)\s*[?]?$/i.test(
+      qLower.trim(),
+    );
+  if (isGenericCapabilityInquiry) return false;
 
   const hasFileTarget =
     /(?:powerpoint|slide|pptx|trình\s*chiếu|thuyết\s*trình|word|docx|văn\s*bản\s*hành\s*chính|hợp\s*đồng|excel|xlsx|bảng\s*tính|báo\s*giá|csv|html|báo\s*cáo\s*web|pdf|file|tệp|voice|podcast|thu\s*âm|ghi\s*âm|audio|giọng\s*đọc|poster|biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|hình\s*ảnh|ảnh|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/i.test(combined);
@@ -52,12 +54,12 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
 
   if (isQuotingGeneratedArtifact && isReworkOrCritique) return true;
 
-  // Nhận diện cấu trúc ngữ pháp tự nhiên đưa nội dung vào/ra file
+  // Nhận diện cấu trúc ngữ pháp tự nhiên đưa nội dung vào/ra file hoặc voice
   const hasStructuralDirection =
-    /(?:vào|ra|thành|sang|lên|bằng)\s+(?:thành\s+)?(?:file\s+)?(?:docx|word|excel|xlsx|bảng\s*tính|pptx|powerpoint|slide|pdf|csv|txt)/i.test(qLower);
+    /(?:vào|ra|thành|sang|qua|lên|bằng)\s+(?:thành\s+)?(?:file\s+)?(?:docx|word|excel|xlsx|bảng\s*tính|pptx|powerpoint|slide|pdf|csv|txt|voice|audio)/i.test(qLower);
 
   const hasAction =
-    /(?:tạo|xuất|soạn|làm|viết|gửi|lưu|thiết\s*kế|chuyển\s*thành|convert|generate|export|triển\s*khai|đọc\s*(?:giúp|hộ|cho|bằng)?|vẽ(?:\s+lại)?|làm(?:\s+lại)?|thiết\s*kế(?:\s+lại)?|sửa(?:\s+lại)?|chỉnh(?:\s+lại)?|đóng\s*gói|gom|cho\s*vào|bỏ\s*vào|lưu\s*vào|nhét\s*vào|in\s*ra)/i.test(qLower);
+    /(?:tạo|xuất|soạn|làm|viết|gửi|lưu|thiết\s*kế|chuyển\s*(?:thành|sang|qua|lên|ra)?|đổi\s*(?:thành|sang|qua)?|bật|convert|generate|export|triển\s*khai|đọc\s*(?:giúp|hộ|cho|bằng)?|ngâm(?:\s+thơ)?|thu\s*âm|ghi\s*âm|vẽ(?:\s+lại)?|làm(?:\s+lại)?|thiết\s*kế(?:\s+lại)?|sửa(?:\s+lại)?|chỉnh(?:\s+lại)?|đóng\s*gói|gom|cho\s*vào|bỏ\s*vào|lưu\s*vào|nhét\s*vào|in\s*ra)/i.test(qLower);
 
   const isAffirmativeFollowUp =
     /^(?:soạn|làm|tạo|xuất|viết|triển\s*khai|chốt|triển|lên|đóng\s*gói|gom)\s*(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|luôn\s*đi|luôn\s*đi\s*e|luôn\s*hộ\s*e|luôn\s*nhé|luôn\s*nha|tiếp\s*đi)\b/i.test(qLower.trim());
@@ -66,9 +68,11 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
   if (hasFileTarget && (hasAction || isAffirmativeFollowUp)) return true;
 
   const isSpeechOrVoiceRequest =
-    /(?:đọc|nói|phát|kể)\s+(?:cho\s+)?(?:[\p{L}\s]+)?\s*nghe/iu.test(qLower) ||
+    /(?:đọc|nói|phát|kể|ngâm)\s+(?:cho\s+)?(?:[\p{L}\s]+)?\s*nghe/iu.test(qLower) ||
     /(?:bận|đang\s+lái\s+xe|không\s+tiện\s+đọc)\s*[,.]*\s*(?:đọc|phát|nói|voice|audio)/iu.test(qLower) ||
-    /(?:chuyển|phát|đọc)\s+(?:thành|ra|sang)?\s*(?:giọng|tiếng|âm\s*thanh|lời\s*nói)/iu.test(qLower);
+    /(?:chuyển|phát|đọc|đổi|bật)\s+(?:thành|ra|sang|qua)?\s*(?:giọng|tiếng|âm\s*thanh|lời\s*nói|voice|audio|podcast)/iu.test(qLower) ||
+    /(?:thu\s*âm|ghi\s*âm|ngâm\s*thơ)\s+(?:bài|thơ|văn|đoạn|nội\s*dung)/iu.test(qLower) ||
+    /\b(?:voice\s*bubble|bong\s*bóng\s*thoại)\b/i.test(qLower);
 
   if (isSpeechOrVoiceRequest) return true;
 

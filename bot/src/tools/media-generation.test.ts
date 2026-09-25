@@ -13,7 +13,7 @@ import {
 } from "./file-generator.js";
 import { synthesizeSpeech, synthesizeDialogue } from "./voice-generator.js";
 import { validatePythonCodeSafety } from "./python-runner.js";
-import { extractSimulatedGenerateFile } from "./simulated-tool-interceptor.js";
+import { extractSimulatedGenerateFile, extractSimulatedCreateVoice } from "./simulated-tool-interceptor.js";
 
 test("generatePowerPointFile tạo file .pptx thành công với các slide bố cục chuẩn và hiện đại", async () => {
   const res = await generatePowerPointFile(
@@ -402,3 +402,28 @@ draw.text((50, 50), "Lịch Thi Đấu", fill="#FFD700")
   assert.equal(validatePythonCodeSafety('open(".env").read()').safe, false);
   assert.equal(validatePythonCodeSafety('open("data/bot.db").read()').safe, false);
 });
+
+test("checkIsFileOrVoiceGeneration nhận diện chính xác yêu cầu voice/âm thanh và phân biệt câu hỏi năng lực", () => {
+  // Yêu cầu voice hợp lệ
+  assert.equal(checkIsFileOrVoiceGeneration("chuyển sang voice đi em"), true);
+  assert.equal(checkIsFileOrVoiceGeneration("thu âm bài thơ Đây Thôn Vỹ Dạ được ko em?"), true);
+  assert.equal(checkIsFileOrVoiceGeneration("phát voice bubble cho anh nghe"), true);
+  assert.equal(checkIsFileOrVoiceGeneration("đọc đoạn văn này cho cả nhóm nghe nhé"), true);
+  assert.equal(checkIsFileOrVoiceGeneration("ngâm thơ bài Tây Tiến được không?"), true);
+
+  // Câu hỏi thăm dò năng lực thông thường (generic capability inquiry) -> false
+  assert.equal(checkIsFileOrVoiceGeneration("em có biết tạo file không?"), false);
+  assert.equal(checkIsFileOrVoiceGeneration("bot có tạo được slide không hả?"), false);
+  assert.equal(checkIsFileOrVoiceGeneration("em có biết làm voice ko?"), false);
+});
+
+test("extractSimulatedCreateVoice bóc tách chuẩn xác lệnh giả lập [create_voice]", () => {
+  const rawText = "Dưới đây là bản thu âm:\\n[create_voice(text='''Sao anh không về chơi thôn Vỹ\\nNhìn nắng hàng cau nắng mới lên''', voice='hn-quynhanh', caption='Bài thơ Đây Thôn Vỹ Dạ')]\\nBạn đã nghe được chưa?";
+  const extracted = extractSimulatedCreateVoice(rawText);
+  assert.ok(extracted);
+  assert.equal(extracted?.toolName, "create_voice");
+  assert.ok(extracted?.args.text?.includes("Sao anh không về"));
+  assert.equal(extracted?.args.voice, "hn-quynhanh");
+  assert.equal(extracted?.args.caption, "Bài thơ Đây Thôn Vỹ Dạ");
+});
+
