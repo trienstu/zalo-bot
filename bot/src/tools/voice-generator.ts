@@ -253,16 +253,33 @@ export function cleanOldVoiceFiles(maxAgeMinutes = 60): void {
 
 /**
  * Chuyển đổi file audio sang chuẩn Zalo Voice Bubble (.m4a AAC 44.1kHz Mono 128kbps)
- * Chất lượng âm thanh cao cấp, sáng rõ và không bị vỡ/nghẹt tiếng
+ * Chất lượng âm thanh cao cấp, sáng rõ, tương thích 100% với trình phát Zalo (chuẩn moov atom faststart).
+ * Xử lý được cả file audio chuẩn (MP3, WAV, AAC) lẫn raw PCM 24kHz/48kHz từ Gemini TTS.
  */
 async function convertToZaloVoiceBubble(inputPath: string, outputPath: string): Promise<void> {
+  // 1. Thử convert tự động nhận diện container/codec
   try {
     const ffmpegCmd = `ffmpeg -y -v error -i "${inputPath}" -vn -map_metadata -1 -c:a aac -b:a 128k -ar 44100 -ac 1 -movflags +faststart "${outputPath}"`;
     await execPromise(ffmpegCmd);
-  } catch (ffmpegErr) {
-    console.warn("[voice-generator] FFmpeg convert không thành công, fallback sao chép file gốc:", ffmpegErr);
-    fs.copyFileSync(inputPath, outputPath);
-  }
+    if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) return;
+  } catch {}
+
+  // 2. Thử convert raw PCM 24kHz mono (chuẩn định dạng Gemini Flash TTS audio/L16)
+  try {
+    const pcm24Cmd = `ffmpeg -y -v error -f s16le -ar 24000 -ac 1 -i "${inputPath}" -vn -map_metadata -1 -c:a aac -b:a 128k -ar 44100 -ac 1 -movflags +faststart "${outputPath}"`;
+    await execPromise(pcm24Cmd);
+    if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) return;
+  } catch {}
+
+  // 3. Thử convert raw PCM 48kHz mono
+  try {
+    const pcm48Cmd = `ffmpeg -y -v error -f s16le -ar 48000 -ac 1 -i "${inputPath}" -vn -map_metadata -1 -c:a aac -b:a 128k -ar 44100 -ac 1 -movflags +faststart "${outputPath}"`;
+    await execPromise(pcm48Cmd);
+    if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) return;
+  } catch {}
+
+  // 4. Nếu thất bại, cảnh báo và TUYỆT ĐỐI KHÔNG copy file raw vào .m4a để tránh sinh file rỗng 00:00 trên Zalo
+  console.warn(`[voice-generator] Không thể encode file audio sang .m4a AAC chuẩn từ: ${inputPath}`);
 }
 
 /**
@@ -502,7 +519,7 @@ export function cleanCoreSpeechText(rawText: string): string {
     return "";
   }
 
-  const remainingParagraphs = paragraphs.slice(startIndex, endIndex + 1);
+  let remainingParagraphs = paragraphs.slice(startIndex, endIndex + 1);
 
   // 4. Kiểm tra dòng đầu của đoạn đầu tiên: nếu có dòng dẫn dắt bị gộp chung đoạn, loại bỏ dòng đó
   if (remainingParagraphs.length > 0 && remainingParagraphs[0]) {
@@ -517,14 +534,40 @@ export function cleanCoreSpeechText(rawText: string): string {
     }
   }
 
-  // 5. Kiểm tra dòng cuối của đoạn cuối cùng: nếu có dòng outro bị gộp chung đoạn, loại bỏ dòng đó
+  // 5. Loại bỏ triệt để các phần phân tích, bình luận, giải thích, chú thích, ý nghĩa hoặc đường kẻ phân cách ở phía dưới tác phẩm
+  const isCommentaryOrDividerParagraph = (p: string): boolean => {
+    const l = p.replace(/^[*\s\-•–—>#]+/, "").replace(/[*_#>`"“”«»]/g, "").trim();
+    if (!l) return false;
+    // Đường kẻ phân cách (ví dụ: ---, ***, ===)
+    if (/^[-*_—=]{3,}$/.test(l)) return true;
+    const firstLine = l.split("\n")[0]?.trim() || "";
+    return (
+      /^(?:phân\s*tích|bình\s*luận|cảm\s*nhận|đánh\s*giá|ý\s*nghĩa\s*(?:của|bài\s*thơ|tác\s*phẩm)?|hoàn\s*cảnh\s*sáng\s*tác|bối\s*cảnh\s*(?:lịch\s*sử|sáng\s*tác)?|đôi\s*nét\s*(?:về)?|về\s*(?:bài\s*thơ|tác\s*phẩm|tác\s*giả|tác\s*giả\s*và\s*tác\s*phẩm)|nghệ\s*thuật\s*(?:đặc\s*sắc)?|giá\s*trị\s*(?:nội\s*dung|nghệ\s*thuật)|nội\s*dung\s*chính|tìm\s*hiểu\s*thêm|giới\s*thiệu\s*(?:thêm|về)?|lưu\s*ý|ghi\s*chú|chú\s*thích|chú\s*giải|giải\s*nghĩa|từ\s*ngữ\s*khó|nguồn\s*tham\s*khảo|tham\s*khảo|tài\s*liệu\s*tham\s*khảo|analysis|commentary|meaning\s*of|background|historical\s*context|about\s*the\s*author|notes?|footnotes?|references?)\s*[:：\-–]?/iu.test(
+        firstLine,
+      ) ||
+      /^(?:về\s*bài\s*thơ\s*này|về\s*tác\s*phẩm\s*này|đôi\s*nét\s*về\s*tác\s*giả|đôi\s*nét\s*về\s*bài\s*thơ)\s*[:：\-–]?/iu.test(firstLine)
+    );
+  };
+
+  let commentaryCutoffIdx = -1;
+  for (let i = 1; i < remainingParagraphs.length; i++) {
+    if (isCommentaryOrDividerParagraph(remainingParagraphs[i] || "")) {
+      commentaryCutoffIdx = i;
+      break;
+    }
+  }
+  if (commentaryCutoffIdx !== -1) {
+    remainingParagraphs = remainingParagraphs.slice(0, commentaryCutoffIdx);
+  }
+
+  // 6. Kiểm tra dòng cuối của đoạn cuối cùng: nếu có dòng outro bị gộp chung đoạn, loại bỏ dòng đó
   if (remainingParagraphs.length > 0) {
     const lastIdx = remainingParagraphs.length - 1;
     const lastP = remainingParagraphs[lastIdx];
     if (lastP) {
       const lines = lastP.split("\n");
       let lineEnd = lines.length - 1;
-      while (lineEnd >= 0 && isOutroParagraphOrLine(lines[lineEnd] || "")) {
+      while (lineEnd >= 0 && (isOutroParagraphOrLine(lines[lineEnd] || "") || isCommentaryOrDividerParagraph(lines[lineEnd] || ""))) {
         lineEnd--;
       }
       if (lineEnd >= 0 && lineEnd < lines.length - 1) {
@@ -533,7 +576,7 @@ export function cleanCoreSpeechText(rawText: string): string {
     }
   }
 
-  const result = remainingParagraphs.join("\n\n").trim();
+  const result = remainingParagraphs.filter(Boolean).join("\n\n").trim();
 
   // Phòng thủ an toàn: Nếu sau khi lọc mà độ dài còn lại quá ngắn (< 15 ký tự), coi như không có nội dung hợp lệ
   if (!result || result.length < 15) {
@@ -643,10 +686,14 @@ async function synthesizeWithGoogleAIStudio(
   const voiceName = resolveAIStudioVoice(voiceHint, options?.stylePrompt);
   const models = ["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"];
 
+  const promptPrefix = options?.stylePrompt
+    ? `Read the following text aloud with style (${options.stylePrompt}):\n`
+    : `Read the following text aloud:\n`;
+
   const payload = {
     contents: [
       {
-        parts: [{ text: cleanInput }],
+        parts: [{ text: `${promptPrefix}${cleanInput}` }],
       },
     ],
     generationConfig: {
@@ -693,6 +740,100 @@ async function synthesizeWithGoogleAIStudio(
       }
     }
   }
+  return false;
+}
+
+/**
+ * Sinh âm thanh đối thoại đa nhân vật (Podcast / Dialogue) qua Google AI Studio Native Multi-Speaker TTS.
+ * Sử dụng cấu hình multiSpeakerVoiceConfig trong 1 request duy nhất, đảm bảo tính liền mạch cảm xúc,
+ * nhịp điệu tương tác tự nhiên và tạo trực tiếp file Zalo Voice Bubble (.m4a) chuẩn không cần ghép nối.
+ */
+async function synthesizeWithGoogleAIStudioMultiSpeaker(
+  dialogueText: string,
+  outputPath: string,
+  speakers: { speaker: string; voiceName: string }[],
+  options?: { stylePrompt?: string },
+): Promise<boolean> {
+  const rawKey = (process.env.GEMINI_API_KEY || config.geminiApiKey || "").trim();
+  const apiKeys = rawKey.split(",").map((k) => k.trim()).filter(Boolean);
+  if (apiKeys.length === 0) return false;
+
+  const models = ["gemini-2.5-flash-preview-tts", "gemini-3.8-flash-tts"];
+
+  const speakerVoiceConfigs = speakers.map((s) => ({
+    speaker: s.speaker,
+    voiceConfig: {
+      prebuiltVoiceConfig: {
+        voiceName: s.voiceName,
+      },
+    },
+  }));
+
+  const promptPrefix = options?.stylePrompt
+    ? `Read the following dialogue aloud with style (${options.stylePrompt}):\n`
+    : `Read the following dialogue aloud:\n`;
+
+  const payload = {
+    contents: [
+      {
+        parts: [{ text: `${promptPrefix}${dialogueText}` }],
+      },
+    ],
+    generationConfig: {
+      responseModalities: ["AUDIO"],
+      speechConfig: {
+        multiSpeakerVoiceConfig: {
+          speakerVoiceConfigs,
+        },
+      },
+    },
+  };
+
+  const tempPcmPath = path.join(VOICE_CACHE_DIR, `multispeaker_${Date.now()}.pcm`);
+
+  for (const apiKey of apiKeys) {
+    for (const model of models) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(45_000),
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          console.warn(`[voice-generator] Google AI Studio Multi-Speaker (${model}) HTTP ${res.status}:`, errText.slice(0, 150));
+          continue;
+        }
+
+        const data = (await res.json()) as any;
+        const part = data?.candidates?.[0]?.content?.parts?.[0];
+        if (part?.inlineData?.data) {
+          const buffer = Buffer.from(part.inlineData.data, "base64");
+          if (buffer.length > 0) {
+            fs.writeFileSync(tempPcmPath, buffer);
+            const cmd = `ffmpeg -y -v error -f s16le -ar 24000 -ac 1 -i "${tempPcmPath}" -vn -map_metadata -1 -c:a aac -b:a 128k -ar 44100 -ac 1 -movflags +faststart "${outputPath}"`;
+            await execPromise(cmd);
+            if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
+              console.log(
+                `[voice-generator] ✅ Sinh Podcast đa nhân vật thành công qua Google AI Studio (${model}, ${speakers.length} speakers, ${buffer.length} bytes PCM)`,
+              );
+              return true;
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[voice-generator] Lỗi gọi Google AI Studio Multi-Speaker (${model}):`, err?.message || err);
+      } finally {
+        try {
+          if (fs.existsSync(tempPcmPath)) fs.unlinkSync(tempPcmPath);
+        } catch {}
+      }
+    }
+  }
+
   return false;
 }
 
@@ -809,24 +950,46 @@ export function normalizeDialogueTurns(text: string): string {
 }
 
 /**
- * Kiểm tra xem đoạn văn bản có phải kịch bản đối thoại đa nhân vật không
+ * Danh sách tiền tố metadata / đề mục thường gặp trong các bài viết, bài thơ, điều luật, tin tức.
+ * Tuyệt đối không coi các đề mục này là tên nhân vật trong kịch bản đối thoại!
+ */
+export const METADATA_PREFIX_REGEX = /^(?:tác\s*giả|tác\s*phẩm|bài\s*thơ|thơ|tiêu\s*đề|tựa\s*đề|nguồn|ngày|thời\s*gian|địa\s*điểm|thể\s*loại|thể\s*thơ|khổ|đoạn|điều|khoản|điểm|chương|mục|phần|trích|ghi\s*chú|lưu\s*ý|nội\s*dung|ý\s*nghĩa|xuất\s*xứ|hoàn\s*cảnh|hoàn\s*cảnh\s*sáng\s*tác|tóm\s*tắt|bối\s*cảnh|phân\s*tích|bình\s*luận|cảm\s*nhận|đánh\s*giá|nghệ\s*thuật|chú\s*thích|chú\s*giải|giải\s*nghĩa|từ\s*ngữ|author|poem|title|source|date|time|genre|stanza|section|article|chapter|note|summary|context|analysis|example|ví\s*dụ|cụ\s*thể)(?:\s|$|[:：\d])/iu;
+
+/**
+ * Kiểm tra xem đoạn văn bản có phải kịch bản đối thoại đa nhân vật không.
+ * Đảm bảo phân biệt chính xác giữa hội thoại thực sự và văn bản đơn lẻ có metadata (bài thơ, tác giả, điều luật).
  */
 export function isDialogueText(text: string): boolean {
   if (!text) return false;
   const normalized = normalizeDialogueTurns(text);
-  const lines = normalized.split("\n").filter((l) => l.trim().length > 0);
+  const lines = normalized.split("\n").map((l) => l.trim()).filter(Boolean);
   if (lines.length <= 1) return false;
+
+  const speakerSet = new Set<string>();
   let speakerTurnCount = 0;
+
   for (const line of lines) {
-    if (/^(?:[-*•]\s*)?[^:：\n]{1,30}[:：]/.test(line.trim())) {
-      speakerTurnCount++;
-    }
+    const match = line.match(/^(?:[-*•]\s*)?([^:：\n]{1,30})[:：]\s*(.+)$/);
+    if (!match || !match[1] || !match[2]) continue;
+
+    const rawLabel = match[1].trim();
+    if (METADATA_PREFIX_REGEX.test(rawLabel)) continue;
+    if (/^\d+$/.test(rawLabel)) continue;
+
+    const cleanSpeaker = rawLabel.replace(/\([^)]+\)/g, "").trim().toLowerCase();
+    if (!cleanSpeaker) continue;
+
+    speakerSet.add(cleanSpeaker);
+    speakerTurnCount++;
   }
-  return speakerTurnCount >= 2;
+
+  return speakerSet.size >= 2 && speakerTurnCount >= 2;
 }
 
 /**
  * Sinh hội thoại Podcast đối đáp 2 người (Dialogue / Dual-Speaker)
+ * Tier 1: Google AI Studio Native Multi-Speaker TTS (1-shot synthesis, âm điệu tự nhiên thống nhất)
+ * Tier 2: Turn-by-turn fallback qua Google Cloud TTS / Edge-TTS (có chuẩn hóa codec AAC .m4a chống lỗi 00:00)
  */
 export async function synthesizeDialogue(options: SynthesizeOptions): Promise<VoiceResult> {
   ensureVoiceDir();
@@ -845,26 +1008,8 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
   }
 
   const lines = content.split("\n").filter((l) => l.trim().length > 0);
-  const partFiles: string[] = [];
   const timestamp = Date.now();
-  const listFilePath = path.join(VOICE_CACHE_DIR, `list_${timestamp}.txt`);
   const finalM4aPath = path.join(VOICE_CACHE_DIR, `podcast_${timestamp}.m4a`);
-
-  // Xây dựng map speaker -> voice
-  const speakerToVoice: Record<string, string> = {};
-  if (Array.isArray(options.speakers) && options.speakers.length > 0) {
-    for (const s of options.speakers) {
-      if (s.speaker && s.voice) {
-        speakerToVoice[s.speaker.trim().toLowerCase()] = s.voice.trim();
-      }
-    }
-  }
-
-  // Cặp giọng mặc định: Nam phát thanh viên (Wavenet-B / Puck) & Nữ MC (Neural2-A / Aoede)
-  const defaultVoices = ["vi-VN-Wavenet-B", "vi-VN-Neural2-A"];
-  let autoSpeakerIndex = 0;
-  let activeProvider: "aistudio" | "google" | "edge" = "aistudio";
-  const silencePath = path.join(VOICE_CACHE_DIR, `silence_${timestamp}.m4a`);
 
   const detectGenderFromName = (name: string): "male" | "female" | null => {
     const n = name.toLowerCase().trim();
@@ -881,6 +1026,101 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
     return null;
   };
 
+  // 1. Trích xuất danh sách nhân vật đối thoại theo thứ tự xuất hiện
+  const extractedSpeakers: { speaker: string; voiceName: string }[] = [];
+  const speakerMap: Record<string, string> = {};
+
+  if (Array.isArray(options.speakers) && options.speakers.length > 0) {
+    for (const s of options.speakers) {
+      if (s.speaker) {
+        const cleanName = s.speaker.trim();
+        const vName = resolveAIStudioVoice(s.voice || cleanName, options.stylePrompt || options.style);
+        extractedSpeakers.push({ speaker: cleanName, voiceName: vName });
+        speakerMap[cleanName.toLowerCase()] = vName;
+      }
+    }
+  } else {
+    const defaultAIStudioVoices = ["Puck", "Aoede", "Fenrir", "Kore", "Charon"];
+    let aiIndex = 0;
+    const seen = new Set<string>();
+
+    for (const line of lines) {
+      const match = line.match(/^(?:[-*•]\s*)?([^:：\n]{1,30})[:：]\s*(.+)$/);
+      if (match && match[1]) {
+        const rawLabel = match[1].replace(/\([^)]+\)/g, "").trim();
+        if (!METADATA_PREFIX_REGEX.test(rawLabel)) {
+          const lower = rawLabel.toLowerCase();
+          if (!seen.has(lower)) {
+            seen.add(lower);
+            const gender = detectGenderFromName(rawLabel);
+            let assignedVoice = "";
+            if (gender === "male") {
+              assignedVoice = "Puck";
+            } else if (gender === "female") {
+              assignedVoice = "Aoede";
+            } else {
+              assignedVoice = defaultAIStudioVoices[aiIndex % defaultAIStudioVoices.length] || "Puck";
+              aiIndex++;
+            }
+            extractedSpeakers.push({ speaker: rawLabel, voiceName: assignedVoice });
+            speakerMap[lower] = assignedVoice;
+          }
+        }
+      }
+    }
+  }
+
+  // Chuẩn hóa nội dung kịch bản cho Multi-Speaker: loại bỏ markdown thừa
+  const cleanScriptLines: string[] = [];
+  for (const line of lines) {
+    const match = line.match(/^(?:[-*•]\s*)?([^:：\n]+)[:：]\s*(.*)$/);
+    if (match && match[1] && match[2]) {
+      const rawLabel = match[1].replace(/\([^)]+\)/g, "").trim();
+      const sentence = match[2].trim().replace(/^["'“”«»]+|["'“”«»]+$/g, "").trim();
+      if (sentence) {
+        cleanScriptLines.push(`${rawLabel}: ${sentence}`);
+      }
+    } else {
+      const trimmed = line.trim();
+      if (trimmed) cleanScriptLines.push(trimmed);
+    }
+  }
+  const cleanScript = cleanScriptLines.join("\n");
+
+  // 2. TIER 1: Thử nghiệm Google AI Studio Native Multi-Speaker TTS (1-shot synthesis)
+  if (extractedSpeakers.length >= 2) {
+    const nativeOk = await synthesizeWithGoogleAIStudioMultiSpeaker(
+      cleanScript,
+      finalM4aPath,
+      extractedSpeakers,
+      { stylePrompt: options.stylePrompt || options.style },
+    );
+
+    if (nativeOk && fs.existsSync(finalM4aPath) && fs.statSync(finalM4aPath).size > 0) {
+      const finalStats = fs.statSync(finalM4aPath);
+      return {
+        success: true,
+        filePath: finalM4aPath,
+        fileName: path.basename(finalM4aPath),
+        fileSize: finalStats.size,
+        provider: "aistudio",
+        caption: options.caption,
+      };
+    }
+    console.warn("[voice-generator] Google AI Studio Multi-Speaker không khả dụng, đang kích hoạt Tier 2/3 turn-by-turn fallback...");
+  }
+
+  // 3. TIER 2 & 3: Turn-by-turn fallback (Google Cloud TTS / Edge-TTS)
+  const partFiles: string[] = [];
+  const listFilePath = path.join(VOICE_CACHE_DIR, `list_${timestamp}.txt`);
+  const silencePath = path.join(VOICE_CACHE_DIR, `silence_${timestamp}.m4a`);
+
+  const speakerToVoiceFallback: Record<string, string> = {};
+  const defaultVoices = ["vi-VN-Wavenet-B", "vi-VN-Neural2-A"];
+  let autoSpeakerIndex = 0;
+  let activeProvider: "aistudio" | "google" | "edge" = "google";
+  let lastAssignedVoice = defaultVoices[0] || "vi-VN-Wavenet-B";
+
   try {
     for (let i = 0; i < lines.length; i++) {
       const rawLine = lines[i];
@@ -889,7 +1129,6 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
       if (!line) continue;
 
       const match = line.match(/^([^:：]+)[:：]\s*(.*)$/);
-
       let speakerRaw = "";
       let sentence = line;
 
@@ -900,8 +1139,6 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
 
       if (!sentence) continue;
 
-      // Bóc tách cảm xúc/sắc thái thoại nếu có trong ngoặc đơn ở tên nhân vật hoặc đầu câu:
-      // Ví dụ: "Nam (hào hứng): ..." hoặc "Nam: (cười lớn) Chào bạn!"
       let turnEmotion = "";
       const speakerEmotionMatch = speakerRaw.match(/\(([^)]+)\)/);
       if (speakerEmotionMatch && speakerEmotionMatch[1]) {
@@ -913,42 +1150,49 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
         sentence = sentence.replace(/^\([^)]+\)\s*/, "").trim();
       }
 
-      // Tên nhân vật sạch
       const speakerName = speakerRaw.replace(/\([^)]+\)/g, "").trim().toLowerCase();
 
-      if (speakerName && !speakerToVoice[speakerName]) {
+      if (speakerName && !speakerToVoiceFallback[speakerName]) {
         const detectedGender = detectGenderFromName(speakerName);
         if (detectedGender === "male") {
-          speakerToVoice[speakerName] = "vi-VN-Wavenet-B";
+          speakerToVoiceFallback[speakerName] = "vi-VN-Wavenet-B";
         } else if (detectedGender === "female") {
-          speakerToVoice[speakerName] = "vi-VN-Neural2-A";
+          speakerToVoiceFallback[speakerName] = "vi-VN-Neural2-A";
         } else {
-          speakerToVoice[speakerName] = defaultVoices[autoSpeakerIndex % defaultVoices.length] || "vi-VN-Wavenet-B";
+          speakerToVoiceFallback[speakerName] = defaultVoices[autoSpeakerIndex % defaultVoices.length] || "vi-VN-Wavenet-B";
           autoSpeakerIndex++;
         }
       }
 
-      const assignedVoice = (speakerName ? speakerToVoice[speakerName] : defaultVoices[i % 2]) || "vi-VN-Neural2-A";
-      const partPath = path.join(VOICE_CACHE_DIR, `part_${timestamp}_${i}.mp3`);
+      // Giữ nguyên giọng của người nói trước nếu câu này không có nhãn nhân vật mới (tránh đổi giọng ngẫu nhiên giữa chừng)
+      const assignedVoice = speakerName ? speakerToVoiceFallback[speakerName] || defaultVoices[0]! : lastAssignedVoice;
+      lastAssignedVoice = assignedVoice;
+
+      const partRaw = path.join(VOICE_CACHE_DIR, `part_raw_${timestamp}_${i}.mp3`);
+      const partM4a = path.join(VOICE_CACHE_DIR, `part_${timestamp}_${i}.m4a`);
 
       if (i > 0) {
         await new Promise((r) => setTimeout(r, 150));
       }
 
-      // Ghép phong cách chung và cảm xúc riêng của từng lượt thoại (nếu có)
       const turnStyle = [options.stylePrompt || options.style, turnEmotion].filter(Boolean).join(", ");
       const cleanSentence = cleanTextForTTS(sentence);
       if (!cleanSentence) continue;
 
-      const p = await synthesizeSingleAudio(cleanSentence, partPath, assignedVoice, {
+      const p = await synthesizeSingleAudio(cleanSentence, partRaw, assignedVoice, {
         rate: options.rate,
         pitch: options.pitch,
         stylePrompt: turnStyle,
       });
       activeProvider = p;
 
-      if (fs.existsSync(partPath) && fs.statSync(partPath).size > 0) {
-        partFiles.push(partPath);
+      if (fs.existsSync(partRaw) && fs.statSync(partRaw).size > 0) {
+        // Chuẩn hóa ngay lập tức từng part sang .m4a AAC chuẩn để concat đồng bộ định dạng
+        await convertToZaloVoiceBubble(partRaw, partM4a);
+        try { fs.unlinkSync(partRaw); } catch {}
+        if (fs.existsSync(partM4a) && fs.statSync(partM4a).size > 0) {
+          partFiles.push(partM4a);
+        }
       }
     }
 
@@ -956,7 +1200,7 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
       throw new Error("Không tạo được đoạn âm thanh nào cho podcast");
     }
 
-    // Tạo 1 file silence 250ms để tạo nhịp thở tự nhiên giữa các lượt đối thoại
+    // Tạo khoảng lặng 250ms giữa các câu thoại
     let hasSilence = false;
     try {
       await execPromise(`ffmpeg -y -v error -f lavfi -i anullsrc=r=44100:cl=mono -t 0.25 -c:a aac "${silencePath}"`);
@@ -965,7 +1209,6 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
       hasSilence = false;
     }
 
-    // Ghép các part xen kẽ khoảng lặng tự nhiên qua FFmpeg Concat Demuxer và encode sang Zalo Voice Bubble (.m4a 44.1kHz 128kbps)
     const concatLines: string[] = [];
     for (let idx = 0; idx < partFiles.length; idx++) {
       const partFile = partFiles[idx];
@@ -981,8 +1224,10 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
       const concatCmd = `ffmpeg -y -v error -f concat -safe 0 -i "${listFilePath}" -vn -map_metadata -1 -c:a aac -b:a 128k -ar 44100 -ac 1 -movflags +faststart "${finalM4aPath}"`;
       await execPromise(concatCmd);
     } catch (ffmpegErr) {
-      console.warn("[voice-generator] FFmpeg concat dialogue không thành công, fallback sang file part đầu tiên:", ffmpegErr);
-      if (partFiles[0]) fs.copyFileSync(partFiles[0], finalM4aPath);
+      console.warn("[voice-generator] FFmpeg concat dialogue không thành công, re-encode từ file part đầu tiên:", ffmpegErr);
+      if (partFiles[0]) {
+        await execPromise(`ffmpeg -y -v error -i "${partFiles[0]}" -vn -map_metadata -1 -c:a aac -b:a 128k -ar 44100 -ac 1 -movflags +faststart "${finalM4aPath}"`);
+      }
     }
 
     const finalStats = fs.statSync(finalM4aPath);
@@ -1011,6 +1256,6 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
       for (const p of partFiles) {
         if (fs.existsSync(p)) fs.unlinkSync(p);
       }
-    } catch { }
+    } catch {}
   }
 }

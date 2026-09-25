@@ -31,5 +31,5 @@ test("searchPermanentKnowledge không bị rò rỉ Palm City khi hỏi dự án
 test("searchPermanentKnowledge match chính xác khi hỏi đúng Palm River", () => {
   const res = searchPermanentKnowledge("thông tin dự án Palm River thế nào bot", "all", 2);
   assert.ok(res.length > 0, "Phải match Palm River khi hỏi đúng tên");
-  assert.equal(res[0].topic, "Palm River");
+  assert.equal(res[0]?.topic, "Palm River");
 });

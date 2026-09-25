@@ -509,10 +509,10 @@ test("normalizeDialogueTurns và isDialogueText chuẩn hóa chính xác hội t
   const normalized = normalizeDialogueTurns(singleLineDialogue);
   const turns = normalized.split("\n").filter((l) => l.trim().length > 0);
   assert.equal(turns.length, 4);
-  assert.ok(turns[0].startsWith("Nam:"));
-  assert.ok(turns[1].startsWith("Nữ:"));
-  assert.ok(turns[2].startsWith("Nam:"));
-  assert.ok(turns[3].startsWith("Nữ:"));
+  assert.ok(turns[0]?.startsWith("Nam:"));
+  assert.ok(turns[1]?.startsWith("Nữ:"));
+  assert.ok(turns[2]?.startsWith("Nam:"));
+  assert.ok(turns[3]?.startsWith("Nữ:"));
 });
 
 test("checkIsVoiceRequest nhận diện chuẩn xác các yêu cầu đọc diễn cảm và thu âm thơ", () => {
@@ -699,5 +699,72 @@ Anh Triển thong thả uống chén trà, lát nữa em thu âm gửi anh nghe 
   assert.ok(!cleaned.includes("chén trà"), "Không được chứa lời mời uống trà");
   assert.ok(!cleaned.includes("lát nữa em thu âm"), "Không được chứa lời hứa hẹn tương lai");
 });
+
+test("isDialogueText không nhầm lẫn bài thơ / văn bản có metadata (Tác giả, Bài thơ, Thể loại) thành hội thoại đối đáp", () => {
+  const poemWithMetadata = `THU ĐIẾU (Câu cá mùa thu)
+Bài thơ: Thu Điếu
+Tác giả: Nguyễn Khuyến
+Thể thơ: Thất ngôn bát cú Đường luật
+
+Ao thu lạnh lẽo nước trong veo,
+Một chiếc thuyền câu bé tẻo teo.
+Sóng biếc theo làn hơi gợn tí,
+Lá vàng trước gió khẽ đưa vèo.`;
+
+  assert.equal(isDialogueText(poemWithMetadata), false, "Bài thơ có các đề mục Tác giả:, Bài thơ:, Thể thơ: không được coi là hội thoại đối đáp!");
+
+  const lawWithMetadata = `Điều 132: Nghỉ hằng năm
+Khoản 1: Người lao động làm việc đủ 12 tháng cho một người sử dụng lao động thì được nghỉ hằng năm.
+Khoản 2: Ngày nghỉ hằng năm tăng thêm theo thâm niên.`;
+
+  assert.equal(isDialogueText(lawWithMetadata), false, "Văn bản luật có Điều:, Khoản: không được coi là hội thoại đối đáp!");
+
+  const singleSpeakerNarrative = `Thuyết minh: Xin chào các bạn đến với chương trình.
+Thuyết minh: Hôm nay chúng ta cùng khám phá vẻ đẹp vịnh Hạ Long.`;
+
+  assert.equal(isDialogueText(singleSpeakerNarrative), false, "Chỉ có 1 nhân vật thuyết minh nói nhiều lần không phải là hội thoại đa nhân vật!");
+});
+
+test("isDialogueText nhận diện chuẩn xác kịch bản đối thoại / podcast 2 người trở lên", () => {
+  const podcastScript = `Kịch bản Podcast: Chuyện Khởi Nghiệp
+Nam (hào hứng): Chào Mai, bạn thấy thị trường công nghệ năm nay thế nào?
+Nữ: Chào anh Nam, em thấy các mô hình AI đang phát triển bùng nổ!
+Nam: Đúng vậy, chúng ta cùng đào sâu chủ đề này nhé.`;
+
+  assert.equal(isDialogueText(podcastScript), true, "Kịch bản có Nam và Nữ đối đáp phải được nhận diện là hội thoại!");
+});
+
+test("cleanCoreSpeechText loại bỏ triệt để phần phân tích, bình luận, ý nghĩa và đường kẻ bên dưới bài thơ", () => {
+  const poemWithAnalysis = `Dạ Sếp Trien Nguyen, em xin gửi bài thơ:
+
+THU ĐIẾU (Câu cá mùa thu)
+Tác giả: Nguyễn Khuyến
+
+Ao thu lạnh lẽo nước trong veo,
+Một chiếc thuyền câu bé tẻo teo.
+Sóng biếc theo làn hơi gợn tí,
+Lá vàng trước gió khẽ đưa vèo.
+
+Tầng mây lơ lửng trời xanh ngắt,
+Ngõ trúc quanh co khách vắng teo.
+Tựa gối ôm cần lâu chẳng được,
+Cá đâu đớp động dưới chân bèo.
+
+---
+**Ý nghĩa và nghệ thuật bài thơ:**
+Thu Điếu là một bức tranh mùa thu tuyệt mỹ ở đồng bằng Bắc Bộ. Bằng nghệ thuật lấy động tả tĩnh...
+
+Sếp nghe xong thấy thế nào ạ? Chúc Sếp có những giây phút thư giãn!`;
+
+  const cleaned = cleanCoreSpeechText(poemWithAnalysis);
+  assert.ok(cleaned.startsWith("THU ĐIẾU (Câu cá mùa thu)"), "Phải bắt đầu từ tên bài thơ");
+  assert.ok(cleaned.includes("Tác giả: Nguyễn Khuyến"), "Phải giữ tên tác giả");
+  assert.ok(cleaned.includes("Cá đâu đớp động dưới chân bèo."), "Phải có khổ thơ cuối");
+  assert.ok(!cleaned.includes("Ý nghĩa và nghệ thuật bài thơ"), "TUYỆT ĐỐI KHÔNG đọc phần phân tích ý nghĩa bên dưới!");
+  assert.ok(!cleaned.includes("bức tranh mùa thu tuyệt mỹ"), "TUYỆT ĐỐI KHÔNG đọc nội dung bình luận!");
+  assert.ok(!cleaned.includes("Sếp nghe xong thấy thế nào"), "Không đọc câu hỏi ở cuối!");
+  assert.ok(!cleaned.includes("---"), "Không chứa đường kẻ markdown!");
+});
+
 
 
