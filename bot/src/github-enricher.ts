@@ -1,4 +1,5 @@
 import { callGemini } from "./gemini.js";
+import { config } from "./config.js";
 import { saveGroupRepo, isRepoRecentlyShared, type GroupRepoItem } from "./db/index.js";
 
 const RESERVED_GITHUB_NAMES = new Set([
@@ -304,12 +305,25 @@ HÃY XUẤT ĐÁNH GIÁ BẰNG TIẾNG VIỆT (JSON):`;
 
   try {
     const rawJson = await callGemini(system, user, {
-      model: "gemini-3.1-flash-lite-preview",
-      maxTokens: 300,
+      model: config.geminiModel || "gemini-3-flash-preview",
+      maxTokens: 800,
       json: true,
     });
 
-    const parsed = JSON.parse(rawJson);
+    let parsed: any;
+    try {
+      parsed = JSON.parse(rawJson);
+    } catch {
+      const cleanJson = rawJson.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+      const firstBrace = cleanJson.indexOf("{");
+      const lastBrace = cleanJson.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        parsed = JSON.parse(cleanJson.slice(firstBrace, lastBrace + 1));
+      } else {
+        throw new Error(`Không thể bóc tách JSON từ phản hồi: ${rawJson.slice(0, 120)}`);
+      }
+    }
+
     const validCategories = [
       "🤖 AI & Agents",
       "🔌 MCP & Skills",
@@ -320,7 +334,12 @@ HÃY XUẤT ĐÁNH GIÁ BẰNG TIẾNG VIỆT (JSON):`;
       "📦 Libraries & Core",
     ];
 
-    const category = validCategories.find((c) => c.includes(parsed.category)) || parsed.category || "🛠️ Dev Tools & CLI";
+    const category =
+      validCategories.find(
+        (c) => c.includes(parsed.category) || (parsed.category && String(parsed.category).toLowerCase().includes(c.slice(2).trim().toLowerCase()))
+      ) ||
+      (String(parsed.category || "").toLowerCase().includes("ai") ? "🤖 AI & Agents" : "🛠️ Dev Tools & CLI");
+
     let summary_vi = String(parsed.summary_vi || "").trim();
     if (!summary_vi || !hasVietnameseDiacritics(summary_vi)) {
       summary_vi = `Công cụ mã nguồn mở ${metadata.fullName} hỗ trợ phát triển phần mềm và tự động hóa.`;
