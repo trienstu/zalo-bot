@@ -76,6 +76,13 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
 
   if (isSpeechOrVoiceRequest) return true;
 
+  const isDialogueOrPodcastRequest =
+    /(?:kịch\s*bản|đối\s*thoại|hội\s*thoại|trò\s*chuyện|cuộc\s*nói\s*chuyện|thảo\s*luận|podcast)\s+(?:giữa\s+)?2\s*(?:người|bạn|nhân\s*vật|mc)/iu.test(qLower) ||
+    /2\s*(?:người|bạn|nhân\s*vật|mc)\s+(?:nói\s*chuyện|đối\s*thoại|trò\s*chuyện|thảo\s*luận|đối\s*đáp|tâm\s*sự)/iu.test(qLower) ||
+    /(?:làm|tạo|soạn|phát|chuyển)\s+(?:thành\s+)?(?:podcast|đối\s*thoại|hội\s*thoại|talkshow)/iu.test(qLower);
+
+  if (isDialogueOrPodcastRequest) return true;
+
   const isCodeOrChart =
     /(?:vẽ|tạo|xuất|lập|thiết\s*kế|làm|soạn)(?:\s+lại)?\s*(?:cho\s*.*?\s*)?(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|poster|ảnh|hình|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/i.test(qLower) ||
     /(?:biểu\s*đồ|đồ\s*họa|poster|infographic|hình\s*ảnh).*?(?:làm\s*lại|sửa\s*lại|vẽ\s*lại|cẩn\s*thận|đẹp\s*hơn|chuyên\s*nghiệp)/i.test(qLower) ||

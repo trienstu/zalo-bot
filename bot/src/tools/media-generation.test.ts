@@ -426,4 +426,28 @@ test("extractSimulatedCreateVoice bóc tách chuẩn xác lệnh giả lập [cr
   assert.equal(extracted?.args.voice, "hn-quynhanh");
   assert.equal(extracted?.args.caption, "Bài thơ Đây Thôn Vỹ Dạ");
 });
+test("checkIsFileOrVoiceGeneration nhận diện chuẩn xác ý định kịch bản/podcast/đối thoại 2 người", () => {
+  assert.equal(checkIsFileOrVoiceGeneration("làm một kịch bản 2 người nói chuyện về công nghệ AI"), true);
+  assert.equal(checkIsFileOrVoiceGeneration("tạo cuộc trò chuyện 2 người"), true);
+  assert.equal(checkIsFileOrVoiceGeneration("soạn đối thoại 2 người về chủ đề du lịch"), true);
+  assert.equal(checkIsFileOrVoiceGeneration("tạo podcast 2 người bàn luận về thị trường bất động sản"), true);
+  assert.equal(checkIsFileOrVoiceGeneration("cho 2 người nói chuyện đối đáp với nhau"), true);
+});
 
+test("Bộ 3 hàm phân giải giọng đọc (AI Studio, Google Cloud, Edge) ánh xạ đồng nhất và chính xác Nam/Nữ", async () => {
+  const { resolveAIStudioVoice, resolveGoogleVoice, resolveEdgeVoice } = await import("./voice-generator.js");
+
+  // Giọng Nam
+  assert.equal(resolveAIStudioVoice("vi-VN-Wavenet-B"), "Puck");
+  assert.equal(resolveAIStudioVoice("nam"), "Puck");
+  assert.equal(resolveAIStudioVoice("NamMinh"), "Puck");
+  assert.equal(resolveGoogleVoice("Puck"), "vi-VN-Wavenet-B");
+  assert.equal(resolveEdgeVoice("Puck"), "vi-VN-NamMinhNeural");
+
+  // Giọng Nữ
+  assert.equal(resolveAIStudioVoice("vi-VN-Neural2-A"), "Aoede");
+  assert.equal(resolveAIStudioVoice("nữ"), "Aoede");
+  assert.equal(resolveAIStudioVoice("HoaiMy"), "Aoede");
+  assert.equal(resolveGoogleVoice("Aoede"), "vi-VN-Neural2-A");
+  assert.equal(resolveEdgeVoice("Aoede"), "vi-VN-HoaiMyNeural");
+});

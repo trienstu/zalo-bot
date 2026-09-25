@@ -136,7 +136,17 @@ export function resolveGoogleVoice(voiceHint?: string): string {
   if (!voiceHint) return config.googleTtsVoiceFemale || "vi-VN-Neural2-A";
   const hint = voiceHint.toLowerCase().trim();
 
-  if (hint.includes("nam") || hint.includes("male") || hint.includes("dan")) {
+  if (
+    hint.includes("nam") ||
+    hint.includes("male") ||
+    hint.includes("dan") ||
+    hint.includes("puck") ||
+    hint.includes("fenrir") ||
+    hint.includes("charon") ||
+    hint.includes("wavenet-b") ||
+    hint.includes("wavenet-d") ||
+    hint.includes("namminh")
+  ) {
     return config.googleTtsVoiceMale || "vi-VN-Wavenet-B";
   }
   if (
@@ -145,7 +155,13 @@ export function resolveGoogleVoice(voiceHint?: string): string {
     hint.includes("female") ||
     hint.includes("hoa") ||
     hint.includes("hoài") ||
-    hint.includes("anh")
+    hint.includes("anh") ||
+    hint.includes("aoede") ||
+    hint.includes("kore") ||
+    hint.includes("neural2-a") ||
+    hint.includes("wavenet-a") ||
+    hint.includes("wavenet-c") ||
+    hint.includes("hoaimy")
   ) {
     return config.googleTtsVoiceFemale || "vi-VN-Neural2-A";
   }
@@ -172,8 +188,12 @@ export function resolveEdgeVoice(voiceHint?: string): string {
     hint.includes("nam") ||
     hint.includes("male") ||
     hint.includes("dan") ||
+    hint.includes("puck") ||
+    hint.includes("fenrir") ||
+    hint.includes("charon") ||
     hint.includes("wavenet-b") ||
-    hint.includes("wavenet-d")
+    hint.includes("wavenet-d") ||
+    hint.includes("namminh")
   ) {
     return "vi-VN-NamMinhNeural";
   }
@@ -183,7 +203,10 @@ export function resolveEdgeVoice(voiceHint?: string): string {
     hint.includes("female") ||
     hint.includes("neural2-a") ||
     hint.includes("wavenet-a") ||
-    hint.includes("wavenet-c")
+    hint.includes("wavenet-c") ||
+    hint.includes("aoede") ||
+    hint.includes("kore") ||
+    hint.includes("hoaimy")
   ) {
     return "vi-VN-HoaiMyNeural";
   }
@@ -330,7 +353,15 @@ export function resolveAIStudioVoice(voiceHint?: string): string {
   if (!voiceHint) return "Aoede";
   const hint = voiceHint.toLowerCase().trim();
 
-  if (hint.includes("nam") || hint.includes("male") || hint.includes("dan") || hint.includes("puck")) {
+  if (
+    hint.includes("nam") ||
+    hint.includes("male") ||
+    hint.includes("dan") ||
+    hint.includes("puck") ||
+    hint.includes("wavenet-b") ||
+    hint.includes("wavenet-d") ||
+    hint.includes("namminh")
+  ) {
     return "Puck";
   }
   if (hint.includes("trầm") || hint.includes("charon") || hint.includes("fenrir")) {
@@ -357,7 +388,7 @@ async function synthesizeWithGoogleAIStudio(
   if (apiKeys.length === 0) return false;
 
   const voiceName = resolveAIStudioVoice(voiceHint);
-  const models = ["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts", "gemini-2.5-flash"];
+  const models = ["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"];
 
   const styleDesc = (options?.stylePrompt || "").trim();
   let promptText = "";
@@ -473,7 +504,7 @@ export async function synthesizeSpeech(options: SynthesizeOptions): Promise<Voic
   }
 
   const timestamp = Date.now();
-  const rawAudioPath = path.join(VOICE_CACHE_DIR, `raw_${timestamp}.audio`);
+  const rawAudioPath = path.join(VOICE_CACHE_DIR, `raw_${timestamp}.mp3`);
   const finalM4aPath = path.join(VOICE_CACHE_DIR, `voice_${timestamp}.m4a`);
 
   try {
@@ -550,10 +581,26 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
     }
   }
 
-  // Cặp giọng mặc định: Nam phát thanh viên (Wavenet-B) & Nữ MC (Neural2-A)
+  // Cặp giọng mặc định: Nam phát thanh viên (Wavenet-B / Puck) & Nữ MC (Neural2-A / Aoede)
   const defaultVoices = ["vi-VN-Wavenet-B", "vi-VN-Neural2-A"];
   let autoSpeakerIndex = 0;
   let activeProvider: "aistudio" | "google" | "edge" = "aistudio";
+  const silencePath = path.join(VOICE_CACHE_DIR, `silence_${timestamp}.m4a`);
+
+  const detectGenderFromName = (name: string): "male" | "female" | null => {
+    const n = name.toLowerCase().trim();
+    if (
+      /(?:^|\b)(?:nam|anh|ông|chú|bác|bố|cha|trai|boy|man|male|mc\s*nam|host\s*nam|puck|fenrir|charon|tiến|hùng|dũng|tuấn|minh|long|hoàng|khoa|thành|đức|hải|quân)(?:\b|$)/i.test(n)
+    ) {
+      return "male";
+    }
+    if (
+      /(?:^|\b)(?:nữ|nu|chị|cô|bà|mẹ|gái|girl|woman|female|mc\s*nữ|host\s*nữ|aoede|kore|mai|lan|hoa|linh|hương|nga|thảo|hà|trang|vy|quỳnh|ngọc|yến)(?:\b|$)/i.test(n)
+    ) {
+      return "female";
+    }
+    return null;
+  };
 
   try {
     for (let i = 0; i < lines.length; i++) {
@@ -564,19 +611,42 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
 
       const match = line.match(/^([^:：]+)[:：]\s*(.*)$/);
 
-      let speakerName = "";
+      let speakerRaw = "";
       let sentence = line;
 
       if (match && match[1] && match[2]) {
-        speakerName = match[1].trim().toLowerCase();
+        speakerRaw = match[1].trim();
         sentence = match[2].trim();
       }
 
       if (!sentence) continue;
 
+      // Bóc tách cảm xúc/sắc thái thoại nếu có trong ngoặc đơn ở tên nhân vật hoặc đầu câu:
+      // Ví dụ: "Nam (hào hứng): ..." hoặc "Nam: (cười lớn) Chào bạn!"
+      let turnEmotion = "";
+      const speakerEmotionMatch = speakerRaw.match(/\(([^)]+)\)/);
+      if (speakerEmotionMatch && speakerEmotionMatch[1]) {
+        turnEmotion = speakerEmotionMatch[1].trim();
+      }
+      const sentenceEmotionMatch = sentence.match(/^\(([^)]+)\)\s*/);
+      if (sentenceEmotionMatch && sentenceEmotionMatch[1]) {
+        if (!turnEmotion) turnEmotion = sentenceEmotionMatch[1].trim();
+        sentence = sentence.replace(/^\([^)]+\)\s*/, "").trim();
+      }
+
+      // Tên nhân vật sạch
+      const speakerName = speakerRaw.replace(/\([^)]+\)/g, "").trim().toLowerCase();
+
       if (speakerName && !speakerToVoice[speakerName]) {
-        speakerToVoice[speakerName] = defaultVoices[autoSpeakerIndex % defaultVoices.length] || "vi-VN-Wavenet-B";
-        autoSpeakerIndex++;
+        const detectedGender = detectGenderFromName(speakerName);
+        if (detectedGender === "male") {
+          speakerToVoice[speakerName] = "vi-VN-Wavenet-B";
+        } else if (detectedGender === "female") {
+          speakerToVoice[speakerName] = "vi-VN-Neural2-A";
+        } else {
+          speakerToVoice[speakerName] = defaultVoices[autoSpeakerIndex % defaultVoices.length] || "vi-VN-Wavenet-B";
+          autoSpeakerIndex++;
+        }
       }
 
       const assignedVoice = (speakerName ? speakerToVoice[speakerName] : defaultVoices[i % 2]) || "vi-VN-Neural2-A";
@@ -586,7 +656,14 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
         await new Promise((r) => setTimeout(r, 150));
       }
 
-      const p = await synthesizeSingleAudio(sentence, partPath, assignedVoice);
+      // Ghép phong cách chung và cảm xúc riêng của từng lượt thoại (nếu có)
+      const turnStyle = [options.stylePrompt || options.style, turnEmotion].filter(Boolean).join(", ");
+
+      const p = await synthesizeSingleAudio(sentence, partPath, assignedVoice, {
+        rate: options.rate,
+        pitch: options.pitch,
+        stylePrompt: turnStyle,
+      });
       activeProvider = p;
 
       if (fs.existsSync(partPath) && fs.statSync(partPath).size > 0) {
@@ -598,11 +675,26 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
       throw new Error("Không tạo được đoạn âm thanh nào cho podcast");
     }
 
-    // Ghép các part qua FFmpeg Concat Demuxer và encode sang Zalo Voice Bubble (.m4a 44.1kHz 128kbps)
-    const concatContent = partFiles
-      .map((p) => `file '${path.resolve(p).replace(/'/g, "'\\''")}'`)
-      .join("\n");
-    fs.writeFileSync(listFilePath, concatContent, "utf8");
+    // Tạo 1 file silence 250ms để tạo nhịp thở tự nhiên giữa các lượt đối thoại
+    let hasSilence = false;
+    try {
+      await execPromise(`ffmpeg -y -v error -f lavfi -i anullsrc=r=44100:cl=mono -t 0.25 -c:a aac "${silencePath}"`);
+      hasSilence = fs.existsSync(silencePath) && fs.statSync(silencePath).size > 0;
+    } catch {
+      hasSilence = false;
+    }
+
+    // Ghép các part xen kẽ khoảng lặng tự nhiên qua FFmpeg Concat Demuxer và encode sang Zalo Voice Bubble (.m4a 44.1kHz 128kbps)
+    const concatLines: string[] = [];
+    for (let idx = 0; idx < partFiles.length; idx++) {
+      const partFile = partFiles[idx];
+      if (!partFile) continue;
+      concatLines.push(`file '${path.resolve(partFile).replace(/'/g, "'\\''")}'`);
+      if (hasSilence && idx < partFiles.length - 1) {
+        concatLines.push(`file '${path.resolve(silencePath).replace(/'/g, "'\\''")}'`);
+      }
+    }
+    fs.writeFileSync(listFilePath, concatLines.join("\n"), "utf8");
 
     try {
       const concatCmd = `ffmpeg -y -v error -f concat -safe 0 -i "${listFilePath}" -vn -map_metadata -1 -c:a aac -b:a 128k -ar 44100 -ac 1 -movflags +faststart "${finalM4aPath}"`;
@@ -634,6 +726,7 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
   } finally {
     try {
       if (fs.existsSync(listFilePath)) fs.unlinkSync(listFilePath);
+      if (fs.existsSync(silencePath)) fs.unlinkSync(silencePath);
       for (const p of partFiles) {
         if (fs.existsSync(p)) fs.unlinkSync(p);
       }
