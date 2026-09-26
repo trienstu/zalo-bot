@@ -356,7 +356,7 @@ export const config = {
   vertexLocation: process.env.VERTEX_LOCATION?.trim() || "us-central1",
   vertexCredentialsPath: process.env.VERTEX_CREDENTIALS_PATH?.trim() || process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim() || "google-credentials.json",
   vertexServiceAccountJson: process.env.VERTEX_SERVICE_ACCOUNT_JSON?.trim() || "",
-  vertexModel: process.env.VERTEX_MODEL?.trim() || "gemini-2.5-flash",
+  vertexModel: process.env.VERTEX_MODEL?.trim() || "gemini-2.0-flash",
 
   /** Google Cloud Text-to-Speech (Miễn phí 1 triệu ký tự/tháng với giọng Neural2 & WaveNet chuẩn phòng thu) */
   googleTtsEnabled: readBool("GOOGLE_TTS_ENABLED", true),

@@ -591,7 +591,7 @@ export async function callGemini(
   if (isSearchEnabled && isVertexConfigured()) {
     try {
       const vertexRes = await callVertexGemini(user, {
-        model: "gemini-2.5-flash",
+        model: config.vertexModel || "gemini-2.0-flash",
         systemInstruction: effectiveSystem,
         temperature,
         maxTokens,

@@ -145,7 +145,7 @@ export async function callVertexGemini(
 
   const projectId = creds.project_id || config.vertexProjectId;
   const location = config.vertexLocation || "us-central1";
-  const model = options?.model || config.vertexModel || "gemini-2.5-flash";
+  const model = options?.model || config.vertexModel || "gemini-2.0-flash";
   const timeoutMs = options?.timeoutMs || 25000;
   const isSearchEnabled = options?.search ?? true;
 

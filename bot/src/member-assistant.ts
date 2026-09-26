@@ -2669,7 +2669,7 @@ QUY TẮC BẮT BUỘC:
       });
     } else {
       // ⚡ FAST-PATH DIRECT RESPONSE:
-      // Tự động kích hoạt Google Search Grounding với model gemini-2.5-flash khi câu hỏi cần dữ liệu thời gian thực
+      // Tự động kích hoạt Google Search Grounding khi câu hỏi cần dữ liệu thời gian thực
       const needsSearch = !isSearchDisabled && !isInternalGroupLookup && (
         planNeedsSearch ||
         (isResourceQuery && relevantLinks.length === 0) ||
