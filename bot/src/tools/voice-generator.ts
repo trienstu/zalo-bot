@@ -252,33 +252,44 @@ export function cleanOldVoiceFiles(maxAgeMinutes = 60): void {
 }
 
 /**
- * Chuyển đổi file audio sang chuẩn Zalo Voice Bubble (.m4a AAC 44.1kHz Mono 128kbps)
- * Chất lượng âm thanh cao cấp, sáng rõ, tương thích 100% với trình phát Zalo (chuẩn moov atom faststart).
+ * Chuyển đổi file audio sang chuẩn Zalo Voice Bubble (.m4a AAC-LC 24kHz Mono 64kbps)
+ * Chuẩn âm thanh thoại tối ưu phổ quát nhất, tương thích 100% trên toàn bộ thiết bị (iOS, Android, Zalo PC, Web).
+ * - Sử dụng profile aac_low (AAC-LC) để mọi thiết bị giải mã được không phụ thuộc codec mở rộng
+ * - Tần số 24000Hz (chuẩn thoại speech) giúp chip âm thanh Android không bị lỗi driver khi định tuyến qua loa trong/loa ngoài
+ * - Bitrate 64kbps gọn nhẹ, streaming nhanh qua Zalo CDN mà vẫn giữ chất lượng giọng đọc trong trẻo
+ * - Cờ +faststart đưa atom moov lên đầu để trình phát Zalo đọc được ngay lập tức
  * Xử lý được cả file audio chuẩn (MP3, WAV, AAC) lẫn raw PCM 24kHz/48kHz từ Gemini TTS.
  */
 async function convertToZaloVoiceBubble(inputPath: string, outputPath: string): Promise<void> {
-  // 1. Thử convert tự động nhận diện container/codec
+  // 1. Thử convert chuẩn tối ưu nhất: AAC-LC 24kHz 64kbps mono + faststart
   try {
-    const ffmpegCmd = `ffmpeg -y -v error -i "${inputPath}" -vn -map_metadata -1 -c:a aac -b:a 128k -ar 44100 -ac 1 -movflags +faststart "${outputPath}"`;
+    const ffmpegCmd = `ffmpeg -y -v error -i "${inputPath}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 24000 -ac 1 -movflags +faststart "${outputPath}"`;
     await execPromise(ffmpegCmd);
     if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) return;
   } catch {}
 
   // 2. Thử convert raw PCM 24kHz mono (chuẩn định dạng Gemini Flash TTS audio/L16)
   try {
-    const pcm24Cmd = `ffmpeg -y -v error -f s16le -ar 24000 -ac 1 -i "${inputPath}" -vn -map_metadata -1 -c:a aac -b:a 128k -ar 44100 -ac 1 -movflags +faststart "${outputPath}"`;
+    const pcm24Cmd = `ffmpeg -y -v error -f s16le -ar 24000 -ac 1 -i "${inputPath}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 24000 -ac 1 -movflags +faststart "${outputPath}"`;
     await execPromise(pcm24Cmd);
     if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) return;
   } catch {}
 
   // 3. Thử convert raw PCM 48kHz mono
   try {
-    const pcm48Cmd = `ffmpeg -y -v error -f s16le -ar 48000 -ac 1 -i "${inputPath}" -vn -map_metadata -1 -c:a aac -b:a 128k -ar 44100 -ac 1 -movflags +faststart "${outputPath}"`;
+    const pcm48Cmd = `ffmpeg -y -v error -f s16le -ar 48000 -ac 1 -i "${inputPath}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 24000 -ac 1 -movflags +faststart "${outputPath}"`;
     await execPromise(pcm48Cmd);
     if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) return;
   } catch {}
 
-  // 4. Nếu thất bại, cảnh báo và TUYỆT ĐỐI KHÔNG copy file raw vào .m4a để tránh sinh file rỗng 00:00 trên Zalo
+  // 4. Dự phòng: convert 44.1kHz nếu nguồn đặc thù
+  try {
+    const fallbackCmd = `ffmpeg -y -v error -i "${inputPath}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 44100 -ac 1 -movflags +faststart "${outputPath}"`;
+    await execPromise(fallbackCmd);
+    if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) return;
+  } catch {}
+
+  // 5. Nếu thất bại, cảnh báo và TUYỆT ĐỐI KHÔNG copy file raw vào .m4a để tránh sinh file rỗng 00:00 trên Zalo
   console.warn(`[voice-generator] Không thể encode file audio sang .m4a AAC chuẩn từ: ${inputPath}`);
 }
 
@@ -687,7 +698,12 @@ async function synthesizeWithGoogleAIStudio(
   if (!cleanInput) return false;
 
   const voiceName = resolveAIStudioVoice(voiceHint, options?.stylePrompt);
-  const models = ["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"];
+  const models = [
+    "gemini-3.8-flash-lite-tts",
+    "gemini-3.1-flash-tts-preview",
+    "gemini-3.8-flash-tts",
+    "gemini-2.5-flash-preview-tts",
+  ];
 
   const numKeys = apiKeys.length;
   for (let attempt = 0; attempt < numKeys; attempt++) {
@@ -701,6 +717,7 @@ async function synthesizeWithGoogleAIStudio(
       continue;
     }
 
+    let all429OnKey = true;
     for (const model of models) {
       try {
         const isGemini38 = model.includes("3.8");
@@ -739,13 +756,13 @@ async function synthesizeWithGoogleAIStudio(
         if (!res.ok) {
           const errText = await res.text().catch(() => "");
           console.warn(`[voice-generator] Google AI Studio TTS (${model}, Key #${keyIdx + 1}) HTTP ${res.status}:`, errText.slice(0, 150));
-          if (res.status === 429) {
-            voiceKeyCooldownMap.set(apiKey, Date.now() + 60_000);
-            break; // Cạn quota trên key này, chuyển ngay sang Key tiếp theo, không thử model thứ hai
+          if (res.status !== 429) {
+            all429OnKey = false;
           }
           continue;
         }
 
+        all429OnKey = false;
         const data = (await res.json()) as any;
         const part = data?.candidates?.[0]?.content?.parts?.[0];
         if (part?.inlineData?.data) {
@@ -758,8 +775,12 @@ async function synthesizeWithGoogleAIStudio(
           }
         }
       } catch (err: any) {
+        all429OnKey = false;
         console.warn(`[voice-generator] Lỗi gọi Google AI Studio TTS (${model}, Key #${keyIdx + 1}):`, err?.message || err);
       }
+    }
+    if (all429OnKey) {
+      voiceKeyCooldownMap.set(apiKey, Date.now() + 60_000);
     }
   }
   return false;
@@ -829,8 +850,8 @@ async function synthesizeWithGoogleAIStudioMultiSpeaker(
     },
   }));
 
-  // Ưu tiên Gemini 3.8 Flash TTS vì hỗ trợ cấu trúc speech_metadata đa nhân vật chuẩn xác
-  const models = ["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"];
+  // Ưu tiên Gemini 3.8 Flash Lite TTS vì hỗ trợ cấu trúc speech_metadata đa nhân vật chuẩn xác và quota dồi dào
+  const models = ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"];
   const tempAudioPath = path.join(VOICE_CACHE_DIR, `multispeaker_${Date.now()}.audio`);
 
   const numKeys = apiKeys.length;
@@ -845,6 +866,7 @@ async function synthesizeWithGoogleAIStudioMultiSpeaker(
       continue;
     }
 
+    let all429OnKey = true;
     for (const model of models) {
       try {
         let payload: any;
@@ -904,20 +926,20 @@ async function synthesizeWithGoogleAIStudioMultiSpeaker(
         if (!res.ok) {
           const errText = await res.text().catch(() => "");
           console.warn(`[voice-generator] Google AI Studio Multi-Speaker (${model}, Key #${keyIdx + 1}) HTTP ${res.status}:`, errText.slice(0, 150));
-          if (res.status === 429) {
-            voiceKeyCooldownMap.set(apiKey, Date.now() + 60_000);
-            break; // Cạn quota trên key này, chuyển ngay sang Key tiếp theo, không thử model thứ hai
+          if (res.status !== 429) {
+            all429OnKey = false;
           }
           continue;
         }
 
+        all429OnKey = false;
         const data = (await res.json()) as any;
         const part = data?.candidates?.[0]?.content?.parts?.[0];
         if (part?.inlineData?.data) {
           const buffer = Buffer.from(part.inlineData.data, "base64");
           if (buffer.length > 0) {
             fs.writeFileSync(tempAudioPath, buffer);
-            // Convert sang chuẩn Zalo Voice Bubble (.m4a AAC 44.1kHz 128kbps Mono)
+            // Convert sang chuẩn Zalo Voice Bubble (.m4a AAC-LC 24kHz 64kbps Mono)
             await convertToZaloVoiceBubble(tempAudioPath, outputPath);
             if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
               console.log(
@@ -929,12 +951,16 @@ async function synthesizeWithGoogleAIStudioMultiSpeaker(
           }
         }
       } catch (err: any) {
+        all429OnKey = false;
         console.warn(`[voice-generator] Lỗi gọi Google AI Studio Multi-Speaker (${model}, Key #${keyIdx + 1}):`, err?.message || err);
       } finally {
         try {
           if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
         } catch {}
       }
+    }
+    if (all429OnKey) {
+      voiceKeyCooldownMap.set(apiKey, Date.now() + 60_000);
     }
   }
 
@@ -1307,7 +1333,7 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
     // Tạo khoảng lặng 250ms giữa các câu thoại
     let hasSilence = false;
     try {
-      await execPromise(`ffmpeg -y -v error -f lavfi -i anullsrc=r=44100:cl=mono -t 0.25 -c:a aac "${silencePath}"`);
+      await execPromise(`ffmpeg -y -v error -f lavfi -i anullsrc=r=24000:cl=mono -t 0.25 -c:a aac -profile:a aac_low -b:a 64k "${silencePath}"`);
       hasSilence = fs.existsSync(silencePath) && fs.statSync(silencePath).size > 0;
     } catch {
       hasSilence = false;
@@ -1325,12 +1351,12 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
     fs.writeFileSync(listFilePath, concatLines.join("\n"), "utf8");
 
     try {
-      const concatCmd = `ffmpeg -y -v error -f concat -safe 0 -i "${listFilePath}" -vn -map_metadata -1 -c:a aac -b:a 128k -ar 44100 -ac 1 -movflags +faststart "${finalM4aPath}"`;
+      const concatCmd = `ffmpeg -y -v error -f concat -safe 0 -i "${listFilePath}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 24000 -ac 1 -movflags +faststart "${finalM4aPath}"`;
       await execPromise(concatCmd);
     } catch (ffmpegErr) {
       console.warn("[voice-generator] FFmpeg concat dialogue không thành công, re-encode từ file part đầu tiên:", ffmpegErr);
       if (partFiles[0]) {
-        await execPromise(`ffmpeg -y -v error -i "${partFiles[0]}" -vn -map_metadata -1 -c:a aac -b:a 128k -ar 44100 -ac 1 -movflags +faststart "${finalM4aPath}"`);
+        await execPromise(`ffmpeg -y -v error -i "${partFiles[0]}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 24000 -ac 1 -movflags +faststart "${finalM4aPath}"`);
       }
     }
 
