@@ -630,16 +630,13 @@ export function cleanTextForTTS(rawText: string): string {
     // Loại bỏ in đậm / in nghiêng markdown: **text** hoặc *text* hoặc __text__ hoặc _text_
     .replace(/(\*\*|__)(.*?)\1/g, "$2")
     .replace(/(\*|_)(.*?)\1/g, "$2")
-    // Loại bỏ chỉ dẫn cảm xúc / hành động sân khấu trong ngoặc đơn: (cười), (hào hứng), (thở dài), v.v.
+    // Loại bỏ chỉ dẫn cảm xúc / hành động sân khấu trong ngoặc đơn hoặc ngoặc vuông
     .replace(
-      /\((?:cười|cười lớn|hào hứng|ngạc nhiên|vui vẻ|trầm ấm|trầm ngâm|thì thầm|hồi hộp|thở dài|vỗ tay|khóc|lo lắng|xúc động|tự tin|ngập ngừng|tức giận|hài hước|nghẹn ngào|ngơ ngác|tươi vui|nhí nhảnh|dõng dạc|nghiêm túc|cảm xúc)[^)]*\)/gi,
+      /(?:\(|\[)(?:[^)\]\n]*(?:cười|khóc|thở|ngạc nhiên|vui|buồn|trầm|hào hứng|hồi hộp|thì thầm|vỗ tay|lo lắng|xúc động|tự tin|ngập ngừng|tức giận|hài hước|nghẹn ngào|ngơ ngác|tươi|nhí nhảnh|dõng dạc|nghiêm túc|cảm xúc|nhìn|quay|dừng|ngắt|nói|hướng|giọng|trìu mến|ấm áp|lắng đọng|bất ngờ)[^)\]\n]*)(?:\)|\])/gi,
       "",
     )
-    // Loại bỏ chỉ dẫn cảm xúc trong ngoặc vuông: [cười], [hào hứng], v.v.
-    .replace(
-      /\[(?:cười|cười lớn|hào hứng|ngạc nhiên|vui vẻ|trầm ấm|trầm ngâm|thì thầm|hồi hộp|thở dài|vỗ tay|khóc|lo lắng|xúc động|tự tin|ngập ngừng|tức giận|hài hước|nghẹn ngào|ngơ ngác|tươi vui|nhí nhảnh|dõng dạc|nghiêm túc|cảm xúc)[^\]]*\]/gi,
-      "",
-    )
+    .replace(/^\s*(?:\([^)\n]+\)|\[[^\]\n]+\])\s*/gm, "")
+    .replace(/[*_~`]/g, "")
     // Chuẩn hóa khoảng trắng trước dấu câu (ví dụ: "Nam :" -> "Nam:")
     .replace(/[ \t]+([,:?.!])/g, "$1")
     // Thu gọn khoảng trắng thừa
@@ -787,6 +784,51 @@ async function synthesizeWithGoogleAIStudio(
 }
 
 /**
+ * Làm sạch nhãn tên nhân vật trong kịch bản thoại (loại bỏ markdown, bullet, ngoặc, cảm xúc)
+ */
+export function cleanSpeakerLabel(raw: string): string {
+  if (!raw) return "";
+  let s = raw.trim();
+  s = s.replace(/^[\s\-*•#>`_~]+/, "").replace(/[\s\-*•#>`_~:：]+$/, "").trim();
+  if (/^\[[^\]]+\]$/.test(s)) s = s.slice(1, -1).trim();
+  if (/^\([^)]+\)$/.test(s)) s = s.slice(1, -1).trim();
+  s = s.replace(/\([^)]*\)/g, "").replace(/\[[^\]]*\]/g, "");
+  s = s.replace(/[*_~`]/g, "");
+  s = s.replace(/^[\s\-*•#>[\]():：]+/, "").replace(/[\s\-*•#[\]():：]+$/, "");
+  return s.trim();
+}
+
+/**
+ * Nhận diện giới tính nhân vật hỗ trợ chuẩn Unicode tiếng Việt
+ */
+export function detectGenderFromName(name: string): "male" | "female" | null {
+  const clean = cleanSpeakerLabel(name).toLowerCase();
+  if (!clean) return null;
+
+  const maleKeywords = [
+    "nam", "anh", "ông", "chú", "bác", "bố", "cha", "trai", "boy", "man", "male",
+    "puck", "fenrir", "charon", "tiến", "hùng", "dũng", "tuấn", "minh", "long",
+    "hoàng", "khoa", "thành", "đức", "hải", "quân", "bình", "trung", "huy", "việt"
+  ];
+  const femaleKeywords = [
+    "nữ", "nu", "chị", "cô", "bà", "mẹ", "gái", "girl", "woman", "female",
+    "aoede", "kore", "mai", "lan", "hoa", "linh", "hương", "nga", "thảo", "hà",
+    "trang", "vy", "quỳnh", "ngọc", "yến", "miên", "thư", "an", "huyền", "dung"
+  ];
+
+  const words = clean.split(/[^a-zà-ỹ0-9_]+/).filter(Boolean);
+  for (const w of words) {
+    if (femaleKeywords.includes(w)) return "female";
+    if (maleKeywords.includes(w)) return "male";
+  }
+
+  if (clean.includes("mc nam") || clean.includes("host nam")) return "male";
+  if (clean.includes("mc nữ") || clean.includes("host nữ") || clean.includes("mc nu")) return "female";
+
+  return null;
+}
+
+/**
  * Sinh âm thanh đối thoại đa nhân vật (Podcast / Dialogue) qua Google AI Studio Native Multi-Speaker TTS.
  * Sử dụng cấu hình multiSpeakerVoiceConfig trong 1 request duy nhất, đảm bảo tính liền mạch cảm xúc,
  * nhịp điệu tương tác tự nhiên và tạo trực tiếp file Zalo Voice Bubble (.m4a) chuẩn không cần ghép nối.
@@ -807,31 +849,43 @@ async function synthesizeWithGoogleAIStudioMultiSpeaker(
   const spk1 = activeSpeakers[1];
   if (!spk0 || !spk1) return false;
 
+  const spk0Clean = cleanSpeakerLabel(spk0.speaker).toLowerCase();
+  const spk1Clean = cleanSpeakerLabel(spk1.speaker).toLowerCase();
+  const gender0 = detectGenderFromName(spk0.speaker);
+  const gender1 = detectGenderFromName(spk1.speaker);
+
   // Bóc tách dialogueText thành các lượt thoại (turns)
   const lines = dialogueText.split("\n").map((l) => l.trim()).filter(Boolean);
-  const turns: { speaker: string; text: string }[] = [];
-  let currentSpeaker = spk0.speaker;
+  const turns: { speakerId: "Speaker1" | "Speaker2"; text: string }[] = [];
+  let currentSpeakerId: "Speaker1" | "Speaker2" = "Speaker1";
 
   for (const line of lines) {
-    const match = line.match(/^(?:[-*•]\s*)?([^:：\n]+)[:：]\s*(.*)$/);
+    const match = line.match(/^(?:[-*•#>\s]*\[?|\(?)([^:：\n]+?)\]?[:：]\s*(.*)$/);
     if (match && match[1] && match[2]) {
-      const rawLabel = match[1].replace(/\([^)]+\)/g, "").trim().toLowerCase();
-      const sentence = match[2].trim().replace(/^["'“”«»]+|["'“”«»]+$/g, "").trim();
+      const rawLabel = cleanSpeakerLabel(match[1]).toLowerCase();
+      const sentence = cleanTextForTTS(match[2]);
       if (!sentence) continue;
 
-      if (rawLabel === spk1.speaker.toLowerCase()) {
-        currentSpeaker = spk1.speaker;
-      } else if (rawLabel === spk0.speaker.toLowerCase()) {
-        currentSpeaker = spk0.speaker;
+      if (rawLabel === spk1Clean || (spk1Clean && rawLabel.includes(spk1Clean))) {
+        currentSpeakerId = "Speaker2";
+      } else if (rawLabel === spk0Clean || (spk0Clean && rawLabel.includes(spk0Clean))) {
+        currentSpeakerId = "Speaker1";
       } else {
-        // Luân phiên nếu là nhãn nhân vật khác
-        currentSpeaker = currentSpeaker === spk0.speaker ? spk1.speaker : spk0.speaker;
+        const detectedGen = detectGenderFromName(rawLabel);
+        if (detectedGen && detectedGen === gender0 && detectedGen !== gender1) {
+          currentSpeakerId = "Speaker1";
+        } else if (detectedGen && detectedGen === gender1 && detectedGen !== gender0) {
+          currentSpeakerId = "Speaker2";
+        } else {
+          // Luân phiên nếu không khớp rõ
+          currentSpeakerId = currentSpeakerId === "Speaker1" ? "Speaker2" : "Speaker1";
+        }
       }
-      turns.push({ speaker: currentSpeaker, text: sentence });
+      turns.push({ speakerId: currentSpeakerId, text: sentence });
     } else {
-      const sentence = line.replace(/^["'“”«»]+|["'“”«»]+$/g, "").trim();
+      const sentence = cleanTextForTTS(line);
       if (sentence) {
-        turns.push({ speaker: currentSpeaker, text: sentence });
+        turns.push({ speakerId: currentSpeakerId, text: sentence });
       }
     }
   }
@@ -839,16 +893,26 @@ async function synthesizeWithGoogleAIStudioMultiSpeaker(
   if (turns.length === 0) return false;
 
   // Kịch bản thoại sạch chuẩn hóa cho model Gemini 2.5 fallback
-  const cleanDialogueScript = turns.map((t) => `${t.speaker}: ${t.text}`).join("\n");
+  const cleanDialogueScript = turns.map((t) => `${t.speakerId}: ${t.text}`).join("\n");
 
-  const speakerVoiceConfigs = activeSpeakers.map((s) => ({
-    speaker: s.speaker,
-    voiceConfig: {
-      prebuiltVoiceConfig: {
-        voiceName: s.voiceName,
+  const speakerVoiceConfigs = [
+    {
+      speaker: "Speaker1",
+      voiceConfig: {
+        prebuiltVoiceConfig: {
+          voiceName: spk0.voiceName,
+        },
       },
     },
-  }));
+    {
+      speaker: "Speaker2",
+      voiceConfig: {
+        prebuiltVoiceConfig: {
+          voiceName: spk1.voiceName,
+        },
+      },
+    },
+  ];
 
   // Ưu tiên Gemini 3.8 Flash Lite TTS vì hỗ trợ cấu trúc speech_metadata đa nhân vật chuẩn xác và quota dồi dào
   const models = ["gemini-3.8-flash-lite-tts", "gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"];
@@ -872,7 +936,6 @@ async function synthesizeWithGoogleAIStudioMultiSpeaker(
         let payload: any;
         if (model.includes("3.8")) {
           // Gemini 3.8: Mỗi lượt thoại là 1 part riêng biệt có speech_metadata.speaker
-          // Tuyệt đối không chèn prefix "Read the following..." để tránh voice đọc thừa
           payload = {
             contents: [
               {
@@ -880,7 +943,7 @@ async function synthesizeWithGoogleAIStudioMultiSpeaker(
                 parts: turns.map((t) => ({
                   text: t.text,
                   speech_metadata: {
-                    speaker: t.speaker,
+                    speaker: t.speakerId,
                     ...(options?.stylePrompt ? { style: options.stylePrompt } : {}),
                   },
                 })),
@@ -1072,10 +1135,16 @@ export async function synthesizeSpeech(options: SynthesizeOptions): Promise<Voic
 export function normalizeDialogueTurns(text: string): string {
   if (!text) return "";
   let clean = text.trim();
-  // 1. Tách dòng khi có một lượt nói mới (VD: "Nam:", "Nữ:", "MC:", v.v.) sau dấu kết thúc câu hoặc khoảng trắng
-  clean = clean.replace(/([.!?…"]\s+)(?=(?:[-*•]\s*)?(?:Nam|Nữ|MC|Host|[A-ZÀ-Ỹa-zà-ỹ0-9_ -]+)[:：]\s*)/g, "$1\n");
-  // 2. Tách dòng nếu giữa 2 câu có dấu gạch đầu dòng '- Nam:'
-  clean = clean.replace(/(\s+)(?=[-•*]\s*(?:Nam|Nữ|MC|Host|[A-ZÀ-Ỹa-zà-ỹ0-9_ -]+)[:：]\s*)/g, "\n");
+  // 1. Tách dòng khi có một lượt nói mới sau dấu kết thúc câu hoặc khoảng trắng
+  clean = clean.replace(
+    /([.!?…"]\s+)(?=(?:[-*•#>\s]*\[?|\(?)(?:\*{1,2}|_{1,2})?(?:[A-ZÀ-Ỹa-zà-ỹ0-9_ -]+)(?:\([^)]*\))?(?:\*{1,2}|_{1,2})?\]?[:：]\s*)/g,
+    "$1\n",
+  );
+  // 2. Tách dòng nếu giữa 2 câu có dấu gạch đầu dòng '- Nam:' hoặc '- **Nam**:'
+  clean = clean.replace(
+    /(\s+)(?=[-•*#>]+\s*(?:\*{1,2}|_{1,2})?(?:[A-ZÀ-Ỹa-zà-ỹ0-9_ -]+)(?:\([^)]*\))?(?:\*{1,2}|_{1,2})?[:：]\s*)/g,
+    "\n",
+  );
   return clean;
 }
 
@@ -1099,17 +1168,15 @@ export function isDialogueText(text: string): boolean {
   let speakerTurnCount = 0;
 
   for (const line of lines) {
-    const match = line.match(/^(?:[-*•]\s*)?([^:：\n]{1,30})[:：]\s*(.+)$/);
+    const match = line.match(/^(?:[-*•#>\s]*\[?|\(?)([^:：\n]{1,35})\]?[:：]\s*(.+)$/);
     if (!match || !match[1] || !match[2]) continue;
 
-    const rawLabel = match[1].trim();
-    if (METADATA_PREFIX_REGEX.test(rawLabel)) continue;
-    if (/^\d+$/.test(rawLabel)) continue;
-
-    const cleanSpeaker = rawLabel.replace(/\([^)]+\)/g, "").trim().toLowerCase();
+    const cleanSpeaker = cleanSpeakerLabel(match[1]);
     if (!cleanSpeaker) continue;
+    if (METADATA_PREFIX_REGEX.test(cleanSpeaker)) continue;
+    if (/^\d+$/.test(cleanSpeaker)) continue;
 
-    speakerSet.add(cleanSpeaker);
+    speakerSet.add(cleanSpeaker.toLowerCase());
     speakerTurnCount++;
   }
 
@@ -1141,21 +1208,6 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
   const timestamp = Date.now();
   const finalM4aPath = path.join(VOICE_CACHE_DIR, `podcast_${timestamp}.m4a`);
 
-  const detectGenderFromName = (name: string): "male" | "female" | null => {
-    const n = name.toLowerCase().trim();
-    if (
-      /(?:^|\b)(?:nam|anh|ông|chú|bác|bố|cha|trai|boy|man|male|mc\s*nam|host\s*nam|puck|fenrir|charon|tiến|hùng|dũng|tuấn|minh|long|hoàng|khoa|thành|đức|hải|quân)(?:\b|$)/i.test(n)
-    ) {
-      return "male";
-    }
-    if (
-      /(?:^|\b)(?:nữ|nu|chị|cô|bà|mẹ|gái|girl|woman|female|mc\s*nữ|host\s*nữ|aoede|kore|mai|lan|hoa|linh|hương|nga|thảo|hà|trang|vy|quỳnh|ngọc|yến)(?:\b|$)/i.test(n)
-    ) {
-      return "female";
-    }
-    return null;
-  };
-
   // 1. Trích xuất danh sách nhân vật đối thoại theo thứ tự xuất hiện
   const extractedSpeakers: { speaker: string; voiceName: string }[] = [];
   const speakerMap: Record<string, string> = {};
@@ -1163,64 +1215,77 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
   if (Array.isArray(options.speakers) && options.speakers.length > 0) {
     for (const s of options.speakers) {
       if (s.speaker) {
-        const cleanName = s.speaker.trim();
+        const cleanName = cleanSpeakerLabel(s.speaker);
         const vName = resolveAIStudioVoice(s.voice || cleanName, options.stylePrompt || options.style);
         extractedSpeakers.push({ speaker: cleanName, voiceName: vName });
         speakerMap[cleanName.toLowerCase()] = vName;
       }
     }
   } else {
-    const defaultAIStudioVoices = ["Puck", "Aoede", "Fenrir", "Kore", "Charon"];
-    let aiIndex = 0;
+    const detectedNames: string[] = [];
     const seen = new Set<string>();
 
     for (const line of lines) {
-      const match = line.match(/^(?:[-*•]\s*)?([^:：\n]{1,30})[:：]\s*(.+)$/);
+      const match = line.match(/^(?:[-*•#>\s]*\[?|\(?)([^:：\n]{1,35})\]?[:：]\s*(.+)$/);
       if (match && match[1]) {
-        const rawLabel = match[1].replace(/\([^)]+\)/g, "").trim();
-        if (!METADATA_PREFIX_REGEX.test(rawLabel)) {
-          const lower = rawLabel.toLowerCase();
+        const cleanName = cleanSpeakerLabel(match[1]);
+        if (cleanName && !METADATA_PREFIX_REGEX.test(cleanName) && !/^\d+$/.test(cleanName)) {
+          const lower = cleanName.toLowerCase();
           if (!seen.has(lower)) {
             seen.add(lower);
-            const gender = detectGenderFromName(rawLabel);
-            let assignedVoice = "";
-            if (gender === "male") {
-              assignedVoice = "Puck";
-            } else if (gender === "female") {
-              assignedVoice = "Aoede";
-            } else {
-              assignedVoice = defaultAIStudioVoices[aiIndex % defaultAIStudioVoices.length] || "Puck";
-              aiIndex++;
-            }
-            extractedSpeakers.push({ speaker: rawLabel, voiceName: assignedVoice });
-            speakerMap[lower] = assignedVoice;
+            detectedNames.push(cleanName);
           }
         }
       }
     }
-  }
 
-  // Chuẩn hóa nội dung kịch bản cho Multi-Speaker: loại bỏ markdown thừa
-  const cleanScriptLines: string[] = [];
-  for (const line of lines) {
-    const match = line.match(/^(?:[-*•]\s*)?([^:：\n]+)[:：]\s*(.*)$/);
-    if (match && match[1] && match[2]) {
-      const rawLabel = match[1].replace(/\([^)]+\)/g, "").trim();
-      const sentence = match[2].trim().replace(/^["'“”«»]+|["'“”«»]+$/g, "").trim();
-      if (sentence) {
-        cleanScriptLines.push(`${rawLabel}: ${sentence}`);
-      }
+    const spk0Name = detectedNames[0] || "Nam";
+    const spk1Name = detectedNames[1] || "Nữ";
+    const gender0 = detectGenderFromName(spk0Name);
+    const gender1 = detectGenderFromName(spk1Name);
+
+    let voice0 = "Puck";
+    let voice1 = "Aoede";
+
+    if (gender0 === "female" && gender1 === "male") {
+      voice0 = "Aoede";
+      voice1 = "Puck";
+    } else if (gender0 === "male" && gender1 === "female") {
+      voice0 = "Puck";
+      voice1 = "Aoede";
+    } else if (gender0 === "female" && gender1 !== "female") {
+      voice0 = "Aoede";
+      voice1 = "Puck";
+    } else if (gender0 === "male" && gender1 !== "male") {
+      voice0 = "Puck";
+      voice1 = "Aoede";
+    } else if (gender1 === "female") {
+      voice0 = "Puck";
+      voice1 = "Aoede";
+    } else if (gender1 === "male") {
+      voice0 = "Aoede";
+      voice1 = "Puck";
+    } else if (gender0 === "male" && gender1 === "male") {
+      voice0 = "Puck";
+      voice1 = "Fenrir";
+    } else if (gender0 === "female" && gender1 === "female") {
+      voice0 = "Aoede";
+      voice1 = "Kore";
     } else {
-      const trimmed = line.trim();
-      if (trimmed) cleanScriptLines.push(trimmed);
+      voice0 = "Puck";
+      voice1 = "Aoede";
     }
+
+    extractedSpeakers.push({ speaker: spk0Name, voiceName: voice0 });
+    extractedSpeakers.push({ speaker: spk1Name, voiceName: voice1 });
+    speakerMap[spk0Name.toLowerCase()] = voice0;
+    speakerMap[spk1Name.toLowerCase()] = voice1;
   }
-  const cleanScript = cleanScriptLines.join("\n");
 
   // 2. TIER 1: Thử nghiệm Google AI Studio Native Multi-Speaker TTS (1-shot synthesis)
   if (extractedSpeakers.length >= 2) {
     const nativeOk = await synthesizeWithGoogleAIStudioMultiSpeaker(
-      cleanScript,
+      content,
       finalM4aPath,
       extractedSpeakers,
       { stylePrompt: options.stylePrompt || options.style },
@@ -1258,44 +1323,53 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
       const line = rawLine.trim();
       if (!line) continue;
 
-      const match = line.match(/^([^:：]+)[:：]\s*(.*)$/);
       let speakerRaw = "";
       let sentence = line;
 
+      const match = line.match(/^(?:[-*•#>\s]*\[?|\(?)([^:：\n]+?)\]?[:：]\s*(.*)$/);
       if (match && match[1] && match[2]) {
-        speakerRaw = match[1].replace(/^[\s\-*•]+/, "").trim();
-        sentence = match[2].trim().replace(/^["'“”«»]+|["'“”«»]+$/g, "").trim();
+        speakerRaw = match[1];
+        sentence = match[2];
       }
 
-      if (!sentence) continue;
+      const cleanSentence = cleanTextForTTS(sentence);
+      if (!cleanSentence) continue;
 
       let turnEmotion = "";
       const speakerEmotionMatch = speakerRaw.match(/\(([^)]+)\)/);
       if (speakerEmotionMatch && speakerEmotionMatch[1]) {
         turnEmotion = speakerEmotionMatch[1].trim();
       }
-      const sentenceEmotionMatch = sentence.match(/^\(([^)]+)\)\s*/);
-      if (sentenceEmotionMatch && sentenceEmotionMatch[1]) {
-        if (!turnEmotion) turnEmotion = sentenceEmotionMatch[1].trim();
-        sentence = sentence.replace(/^\([^)]+\)\s*/, "").trim();
-      }
 
-      const speakerName = speakerRaw.replace(/\([^)]+\)/g, "").trim().toLowerCase();
+      const speakerName = cleanSpeakerLabel(speakerRaw).toLowerCase();
+      let assignedVoice = lastAssignedVoice;
 
-      if (speakerName && !speakerToVoiceFallback[speakerName]) {
-        const detectedGender = detectGenderFromName(speakerName);
-        if (detectedGender === "male") {
-          speakerToVoiceFallback[speakerName] = "vi-VN-Wavenet-B";
-        } else if (detectedGender === "female") {
-          speakerToVoiceFallback[speakerName] = "vi-VN-Neural2-A";
-        } else {
-          speakerToVoiceFallback[speakerName] = defaultVoices[autoSpeakerIndex % defaultVoices.length] || "vi-VN-Wavenet-B";
-          autoSpeakerIndex++;
+      if (speakerName) {
+        if (!speakerToVoiceFallback[speakerName]) {
+          const spk0Name = extractedSpeakers[0]?.speaker ? cleanSpeakerLabel(extractedSpeakers[0].speaker).toLowerCase() : "";
+          const spk1Name = extractedSpeakers[1]?.speaker ? cleanSpeakerLabel(extractedSpeakers[1].speaker).toLowerCase() : "";
+
+          if (speakerName === spk0Name || (spk0Name && speakerName.includes(spk0Name))) {
+            const g0 = detectGenderFromName(spk0Name);
+            speakerToVoiceFallback[speakerName] = g0 === "female" ? "vi-VN-Neural2-A" : "vi-VN-Wavenet-B";
+          } else if (speakerName === spk1Name || (spk1Name && speakerName.includes(spk1Name))) {
+            const g1 = detectGenderFromName(spk1Name);
+            const g0 = detectGenderFromName(spk0Name);
+            speakerToVoiceFallback[speakerName] = g1 === "female" ? "vi-VN-Neural2-A" : (g0 === "female" ? "vi-VN-Wavenet-B" : "vi-VN-Neural2-A");
+          } else {
+            const detectedGender = detectGenderFromName(speakerName);
+            if (detectedGender === "male") {
+              speakerToVoiceFallback[speakerName] = "vi-VN-Wavenet-B";
+            } else if (detectedGender === "female") {
+              speakerToVoiceFallback[speakerName] = "vi-VN-Neural2-A";
+            } else {
+              speakerToVoiceFallback[speakerName] = defaultVoices[autoSpeakerIndex % defaultVoices.length] || "vi-VN-Wavenet-B";
+              autoSpeakerIndex++;
+            }
+          }
         }
+        assignedVoice = speakerToVoiceFallback[speakerName] || defaultVoices[0]!;
       }
-
-      // Giữ nguyên giọng của người nói trước nếu câu này không có nhãn nhân vật mới (tránh đổi giọng ngẫu nhiên giữa chừng)
-      const assignedVoice = speakerName ? speakerToVoiceFallback[speakerName] || defaultVoices[0]! : lastAssignedVoice;
       lastAssignedVoice = assignedVoice;
 
       const partRaw = path.join(VOICE_CACHE_DIR, `part_raw_${timestamp}_${i}.mp3`);
@@ -1306,8 +1380,6 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
       }
 
       const turnStyle = [options.stylePrompt || options.style, turnEmotion].filter(Boolean).join(", ");
-      const cleanSentence = cleanTextForTTS(sentence);
-      if (!cleanSentence) continue;
 
       const p = await synthesizeSingleAudio(cleanSentence, partRaw, assignedVoice, {
         rate: options.rate,

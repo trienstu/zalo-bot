@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execSync } from "node:child_process";
 import { Zalo, LoginQRCallbackEventType, ThreadType, Reactions } from "zca-js";
 export { Reactions };
 import qrcodeTerminal from "qrcode-terminal";
@@ -1213,8 +1214,135 @@ export async function sendDirectFile(
 }
 
 /**
+ * Lấy thời lượng file audio (ms) bằng ffprobe.
+ * Fallback ước lượng an toàn từ dung lượng file nếu ffprobe không khả dụng.
+ */
+export function getAudioDurationMs(filePath: string): number {
+  try {
+    const stdout = execSync(
+      `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`,
+      { encoding: "utf8", timeout: 5000 },
+    ).trim();
+    const sec = parseFloat(stdout);
+    if (!isNaN(sec) && sec > 0) {
+      return Math.round(sec * 1000);
+    }
+  } catch {
+    // ffprobe không khả dụng hoặc timeout
+  }
+
+  try {
+    const stats = fs.statSync(filePath);
+    // Với AAC 64kbps mono xấp xỉ ~8000 bytes/giây
+    return Math.max(1000, Math.round((stats.size / 8000) * 1000));
+  } catch {
+    return 5000;
+  }
+}
+
+/**
+ * Trích xuất context nội bộ (ctx, utils) từ zca-js api để cấu hình đầy đủ msgInfo
+ */
+function getZaloInternals(api: ZaloApi): { ctx: any; utils: any } | null {
+  if (!api || typeof api.custom !== "function") return null;
+  let internals: { ctx: any; utils: any } | null = null;
+  try {
+    api.custom("__getInternals", ({ ctx, utils }: any) => {
+      internals = { ctx, utils };
+    });
+    api.__getInternals({});
+  } catch (err) {
+    console.warn("[getZaloInternals] Không thể trích xuất Zalo internals:", err);
+  }
+  return internals;
+}
+
+/**
+ * Gửi Voice Bubble có kèm đầy đủ metadata thời lượng (duration, totalTime, voiceLen)
+ * để Zalo trên iOS (iPhone/iPad), Android và Desktop PC đều hiển thị chuẩn số giây và phát được bình thường.
+ */
+async function sendVoiceBubbleWithDuration(
+  api: ZaloApi,
+  threadId: string,
+  type: ThreadType,
+  voiceUrl: string,
+  filePath: string,
+): Promise<boolean> {
+  const internals = getZaloInternals(api);
+  if (!internals || !internals.ctx || !internals.utils) {
+    return false;
+  }
+
+  const { ctx, utils } = internals;
+  const serviceBase = api.zpwServiceMap?.file?.[0];
+  if (!serviceBase) return false;
+
+  const serviceURL = {
+    [ThreadType.User]: utils.makeURL(`${serviceBase}/api/message/forward`),
+    [ThreadType.Group]: utils.makeURL(`${serviceBase}/api/group/forward`),
+  };
+
+  const targetUrl = serviceURL[type];
+  if (!targetUrl) return false;
+
+  const durationMs = getAudioDurationMs(filePath);
+  const totalSec = Math.max(1, Math.round(durationMs / 1000));
+  let fileSize = 0;
+  try {
+    fileSize = fs.statSync(filePath).size;
+  } catch {}
+
+  const msgInfoObj = {
+    voiceUrl,
+    m4aUrl: voiceUrl,
+    fileSize: fileSize || 0,
+    duration: durationMs,
+    voiceLen: durationMs,
+    totalTime: totalSec,
+    time: totalSec,
+  };
+
+  const clientId = Date.now().toString();
+  const params =
+    type === ThreadType.User
+      ? {
+          toId: threadId,
+          ttl: 0,
+          zsource: -1,
+          msgType: 3,
+          clientId,
+          msgInfo: JSON.stringify(msgInfoObj),
+          imei: ctx.imei,
+        }
+      : {
+          grid: threadId,
+          visibility: 0,
+          ttl: 0,
+          zsource: -1,
+          msgType: 3,
+          clientId,
+          msgInfo: JSON.stringify(msgInfoObj),
+          imei: ctx.imei,
+        };
+
+  const encryptedParams = utils.encodeAES(JSON.stringify(params));
+  if (!encryptedParams) return false;
+
+  const response = await utils.request(targetUrl, {
+    method: "POST",
+    body: new URLSearchParams({
+      params: encryptedParams,
+    }),
+  });
+
+  const res = await utils.resolve(response);
+  return !!res;
+}
+
+/**
  * Gửi tin nhắn thoại trực tiếp (Zalo Voice Bubble có sóng âm và nút Play) vào Group Zalo.
- * Ưu tiên gửi native qua api.uploadAttachment + api.sendVoice; tự động fallback sang file nếu lỗi.
+ * Ưu tiên gửi với đầy đủ thời lượng (duration) để hỗ trợ cả iPhone iOS, Android và PC;
+ * tự động fallback sang api.sendVoice và gửi file nếu lỗi.
  */
 export async function sendGroupVoice(
   api: ZaloApi,
@@ -1236,14 +1364,27 @@ export async function sendGroupVoice(
   }
 
   try {
-    if (typeof api.uploadAttachment === "function" && typeof api.sendVoice === "function") {
+    if (typeof api.uploadAttachment === "function") {
       const uploadRes = await api.uploadAttachment([filePath], threadIdStr, ThreadType.Group);
       const voiceUrl = uploadRes?.[0]?.fileUrl || uploadRes?.[0]?.url;
       if (voiceUrl) {
         console.log(`[sendGroupVoice] 🚀 Đã upload audio lên Zalo CDN (${voiceUrl}). Đang phát Voice Bubble...`);
-        await api.sendVoice({ voiceUrl }, threadIdStr, ThreadType.Group);
-        console.log(`[sendGroupVoice] ✅ Đã gửi Voice Bubble thành công vào nhóm [${threadIdStr}]!`);
-        return;
+        let sent = false;
+        try {
+          sent = await sendVoiceBubbleWithDuration(api, threadIdStr, ThreadType.Group, voiceUrl, filePath);
+        } catch (bubbleErr) {
+          console.warn("[sendGroupVoice] Gửi custom Voice Bubble lỗi, thử fallback sendVoice mặc định:", bubbleErr);
+        }
+
+        if (!sent && typeof api.sendVoice === "function") {
+          await api.sendVoice({ voiceUrl }, threadIdStr, ThreadType.Group);
+          sent = true;
+        }
+
+        if (sent) {
+          console.log(`[sendGroupVoice] ✅ Đã gửi Voice Bubble thành công vào nhóm [${threadIdStr}]!`);
+          return;
+        }
       }
     }
   } catch (voiceErr) {
@@ -1256,7 +1397,8 @@ export async function sendGroupVoice(
 
 /**
  * Gửi tin nhắn thoại trực tiếp (Zalo Voice Bubble có sóng âm và nút Play) 1:1 cho người dùng / Admin.
- * Ưu tiên gửi native qua api.uploadAttachment + api.sendVoice; tự động fallback sang file nếu lỗi.
+ * Ưu tiên gửi với đầy đủ thời lượng (duration) để hỗ trợ cả iPhone iOS, Android và PC;
+ * tự động fallback sang api.sendVoice và gửi file nếu lỗi.
  */
 export async function sendDirectVoice(
   api: ZaloApi,
@@ -1277,14 +1419,27 @@ export async function sendDirectVoice(
   }
 
   try {
-    if (typeof api.uploadAttachment === "function" && typeof api.sendVoice === "function") {
+    if (typeof api.uploadAttachment === "function") {
       const uploadRes = await api.uploadAttachment([filePath], targetId, ThreadType.User);
       const voiceUrl = uploadRes?.[0]?.fileUrl || uploadRes?.[0]?.url;
       if (voiceUrl) {
         console.log(`[sendDirectVoice] 🚀 Đã upload audio lên Zalo CDN (${voiceUrl}). Đang phát Voice Bubble 1:1...`);
-        await api.sendVoice({ voiceUrl }, targetId, ThreadType.User);
-        console.log(`[sendDirectVoice] ✅ Đã gửi Voice Bubble 1:1 thành công đến [${targetId}]!`);
-        return;
+        let sent = false;
+        try {
+          sent = await sendVoiceBubbleWithDuration(api, targetId, ThreadType.User, voiceUrl, filePath);
+        } catch (bubbleErr) {
+          console.warn("[sendDirectVoice] Gửi custom Voice Bubble lỗi, thử fallback sendVoice mặc định:", bubbleErr);
+        }
+
+        if (!sent && typeof api.sendVoice === "function") {
+          await api.sendVoice({ voiceUrl }, targetId, ThreadType.User);
+          sent = true;
+        }
+
+        if (sent) {
+          console.log(`[sendDirectVoice] ✅ Đã gửi Voice Bubble 1:1 thành công đến [${targetId}]!`);
+          return;
+        }
       }
     }
   } catch (voiceErr) {
