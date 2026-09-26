@@ -27,6 +27,7 @@ import {
   normalizeDialogueTurns,
 } from "./tools/voice-generator.js";
 import { runPythonCode } from "./tools/python-runner.js";
+import { generateMusic } from "./tools/music-generator.js";
 import {
   getCryptoTicker,
   getFearAndGreedIndex,
@@ -1105,6 +1106,36 @@ const AGENT_TOOLS_DECLARATION = {
         required: ["prompt"],
       },
     },
+    {
+      name: "generate_music",
+      description: "Sáng tác ca khúc, phối khí âm nhạc và tạo bài hát AI hoàn chỉnh (gồm giọng ca sĩ hát tiếng Việt/tiếng Anh hoặc nhạc beat không lời) bằng mô hình Suno AI. BẮT BUỘC DÙNG khi người dùng yêu cầu: sáng tác bài hát, làm bài nhạc, tạo bài hát chúc mừng sinh nhật/sự kiện, viết nhạc rap/ballad/pop/bolero, tạo beat lofi/edm/acoustic, hoặc phối nhạc theo chủ đề.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          prompt: {
+            type: "STRING",
+            description: "Mô tả chủ đề, ý tưởng hoặc bối cảnh của bài hát cần sáng tác (ví dụ: 'Bài hát chúc mừng sinh nhật anh Tuấn phong cách rap sôi động hài hước', 'Bài hát ballad về mùa thu Hà Nội')",
+          },
+          lyrics: {
+            type: "STRING",
+            description: "Lời bài hát chi tiết theo từng đoạn [Verse 1], [Chorus], [Verse 2], [Outro]. Nếu người dùng không đưa sẵn lời, AI HÃY TỰ VIẾT LỜI BÀI HÁT đầy đủ, vần điệu và giàu cảm xúc vào tham số này!",
+          },
+          style: {
+            type: "STRING",
+            description: "Thể loại hoặc phong cách âm nhạc (ví dụ: 'vietnamese rap, upbeat, hip hop', 'vietnamese ballad, acoustic, emotional', 'bolero, trữ tình', 'lofi, chill, piano', 'edm, festival, energetic')",
+          },
+          title: {
+            type: "STRING",
+            description: "Tiêu đề bài hát (ví dụ: 'Sinh Nhật Vui Vẻ', 'Mưa Thu Hà Nội')",
+          },
+          instrumental: {
+            type: "BOOLEAN",
+            description: "True nếu người dùng chỉ muốn nhạc nền / beat không lời; False nếu muốn có ca sĩ hát",
+          },
+        },
+        required: ["prompt"],
+      },
+    },
   ],
 };
 
@@ -1241,6 +1272,17 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
         const result = await synthesizeSpeech({ text, voice, caption, stylePrompt: voice_style });
         return result;
       }
+    }
+    case "generate_music": {
+      const prompt = String(args?.prompt || "").trim();
+      if (!prompt) return { error: "Thiếu mô tả bài hát cần tạo" };
+      const lyrics = args?.lyrics ? String(args.lyrics).trim() : undefined;
+      const style = args?.style ? String(args.style).trim() : undefined;
+      const title = args?.title ? String(args.title).trim() : undefined;
+      const instrumental = Boolean(args?.instrumental);
+
+      const result = await generateMusic({ prompt, lyrics, style, title, instrumental });
+      return result;
     }
     case "python_interpreter": {
       const code = String(args?.code || "").trim();

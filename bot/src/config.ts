@@ -363,6 +363,12 @@ export const config = {
   googleTtsVoiceFemale: process.env.GOOGLE_TTS_VOICE_FEMALE?.trim() || "vi-VN-Neural2-A",
   googleTtsVoiceMale: process.env.GOOGLE_TTS_VOICE_MALE?.trim() || "vi-VN-Wavenet-B",
 
+  /** Suno AI Music Generation (Sáng tác và hòa âm phối khí ca khúc tự động) */
+  sunoCookie: process.env.SUNO_COOKIE?.trim() || "",
+  sunoApiUrl: process.env.SUNO_API_URL?.trim() || "",
+  sunoApiKey: process.env.SUNO_API_KEY?.trim() || "",
+  sunoModel: process.env.SUNO_MODEL?.trim() || "chirp-v3-5",
+
   /** API key DeepSeek cho tóm tắt hằng ngày (https://platform.deepseek.com). Rỗng = tắt. */
   deepseekApiKey: process.env.DEEPSEEK_API_KEY?.trim() || "",
 

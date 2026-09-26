@@ -46,6 +46,58 @@ import { githubSearch } from "./tools/vertical-tools.js";
 import { checkIsFileOrVoiceGeneration, checkIsVoiceRequest } from "./tools/file-generator.js";
 import { interceptAndExecuteSimulatedTool, extractSpeechFallbackText } from "./tools/simulated-tool-interceptor.js";
 import { cleanOutdatedVoicePromisesFromAnswer, cleanCoreSpeechText } from "./tools/voice-generator.js";
+import { generateMusic } from "./tools/music-generator.js";
+
+async function deliverGeneratedToolFile(
+  api: any,
+  threadId: string,
+  file: any,
+  botName: string,
+  displayName: string,
+  isSuperAdmin: boolean,
+): Promise<void> {
+  const isMusic = Boolean(file.isMusic) || file.fileName?.startsWith("suno_");
+  if (isMusic) {
+    await sendGroupFile(
+      api,
+      threadId,
+      file.filePath,
+      file.caption || `🎵 ${botName} gửi bài hát [${file.title || "Suno AI"}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
+    );
+    if (file.coverPath && fs.existsSync(file.coverPath)) {
+      await sendGroupFile(
+        api,
+        threadId,
+        file.coverPath,
+        `🎶 Ảnh bìa ca khúc: ${file.title || "Suno AI Music"}`,
+      );
+    }
+    return;
+  }
+
+  const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+  if (isVoice) {
+    await sendGroupVoice(
+      api,
+      threadId,
+      file.filePath,
+      file.caption || `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
+    );
+    return;
+  }
+
+  const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
+  await sendGroupFile(
+    api,
+    threadId,
+    file.filePath,
+    file.caption || (
+      isImg
+        ? `🎨 ${botName} gửi ảnh/poster cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+        : `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+    ),
+  );
+}
 import {
   isMemoryControlCommand,
   handleMemoryControlCommand,
@@ -1376,20 +1428,8 @@ async function handleHistoryQA(
           const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
           if (isVoice) {
             voiceGenerated = true;
-            await sendGroupVoice(
-              options.api,
-              threadId,
-              file.filePath,
-              file.caption || `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
-            );
-          } else {
-            await sendGroupFile(
-              options.api,
-              threadId,
-              file.filePath,
-              file.caption || `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`,
-            );
           }
+          await deliverGeneratedToolFile(options.api, threadId, file, botName, displayName, isSuperAdmin);
         }
       });
 
@@ -1811,20 +1851,8 @@ QUY TẮC BẮT BUỘC:
           const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
           if (isVoice) {
             voiceGenerated = true;
-            await sendGroupVoice(
-              options.api,
-              threadId,
-              file.filePath,
-              file.caption || `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
-            );
-          } else {
-            await sendGroupFile(
-              options.api,
-              threadId,
-              file.filePath,
-              file.caption || `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`,
-            );
           }
+          await deliverGeneratedToolFile(options.api, threadId, file, botName, displayName, isSuperAdmin);
         }
       });
 
@@ -2771,25 +2799,8 @@ QUY TẮC BẮT BUỘC:
         const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
         if (isVoice) {
           voiceGenerated = true;
-          await sendGroupVoice(
-            options.api,
-            threadId,
-            file.filePath,
-            file.caption || `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
-          );
-        } else {
-          const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
-          await sendGroupFile(
-            options.api,
-            threadId,
-            file.filePath,
-            file.caption || (
-              isImg
-                ? `🎨 ${botName} gửi ảnh/poster cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
-                : `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
-            ),
-          );
         }
+        await deliverGeneratedToolFile(options.api, threadId, file, botName, displayName, isSuperAdmin);
       }
     });
 
@@ -3386,6 +3397,51 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     } catch (err: any) {
       console.error(`[member-assistant] ❌ Lỗi tra cứu bản tin:`, err);
       await sendGroupText(api, threadId, `⚠️ Không thể lấy bản tin lúc này. Vui lòng thử lại sau ít phút.`);
+    }
+    return;
+  }
+
+  // 6.2. Lệnh /suno, /music, /nhac (Tạo bài hát / giai điệu AI bằng Suno)
+  if (
+    lower.startsWith("/suno") ||
+    lower.startsWith("!suno") ||
+    lower.startsWith("/music") ||
+    lower.startsWith("!music") ||
+    lower.startsWith("/nhac") ||
+    lower.startsWith("!nhac")
+  ) {
+    userCooldowns.set(sender, now);
+    const musicPrompt = rawText
+      .replace(/^[\/!](?:suno|music|nhac)\s*/i, "")
+      .trim();
+
+    if (!musicPrompt) {
+      await sendGroupText(
+        api,
+        threadId,
+        `🎵 Hướng dẫn tạo nhạc Suno AI:\n👉 Cú pháp: \`/suno [Mô tả bài hát / Thể loại / Lời bài hát]\`\n\nVí dụ:\n• \`/suno Bài hát rap chúc mừng sinh nhật anh Tuấn vui nhộn\`\n• \`/suno Nhạc ballad mưa Hà Nội nhẹ nhàng acoustic\``,
+      );
+      return;
+    }
+
+    const isSuperAdmin = isUserAdmin(sender);
+    void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.HEART);
+    void sendTyping(api, threadId);
+    await sendGroupText(
+      api,
+      threadId,
+      `🎵 ${botName} đang bắt đầu sáng tác và hòa âm phối khí theo yêu cầu: "${musicPrompt}"...\n⏱️ Quá trình này mất khoảng 1 - 2 phút, ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} đợi một chút nhé! ✨`,
+    );
+
+    const musicRes = await generateMusic({ prompt: musicPrompt });
+    if (musicRes.success && musicRes.filePath) {
+      await deliverGeneratedToolFile(api, threadId, { ...musicRes, isMusic: true }, botName, displayName, isSuperAdmin);
+    } else {
+      await sendGroupText(
+        api,
+        threadId,
+        musicRes.message || `⚠️ Không thể tạo nhạc lúc này. Vui lòng thử lại sau ít phút.`,
+      );
     }
     return;
   }

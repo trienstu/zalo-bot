@@ -326,12 +326,129 @@ export function extractSimulatedGenerateImage(text: string): ExtractedImageCall 
 }
 
 /**
- * Chặn và thực thi tool giả lập ngầm, gửi file/voice và làm sạch văn bản chat
+ * Bóc tách lệnh generate_music từ text thô
+ */
+export function extractSimulatedGenerateMusic(text: string): {
+  toolName: "generate_music";
+  args: {
+    prompt: string;
+    lyrics?: string;
+    style?: string;
+    title?: string;
+    instrumental?: boolean;
+  };
+  rawMatch: string;
+} | null {
+  if (!text) return null;
+
+  const tagMatch =
+    text.match(/\[\s*generate_music\b([\s\S]*?)\/\s*\]/i) ||
+    text.match(/<\s*generate_music\b([\s\S]*?)\/\s*>/i) ||
+    text.match(/\[\s*generate_music\b([\s\S]*?)\]/i) ||
+    text.match(/<\s*generate_music\b([\s\S]*?)>/i);
+  const funcMatch = text.match(/\[?\bgenerate_music\s*\(([\s\S]*?)\)\]?/i);
+
+  const match = tagMatch || funcMatch;
+  if (!match) return null;
+
+  const inner = match[1] || "";
+  const args: Record<string, any> = {};
+
+  const promptTripleMatch = inner.match(/prompt\s*=\s*(?:'''|""")([\s\S]*?)(?:'''|""")/i);
+  if (promptTripleMatch && promptTripleMatch[1]) {
+    args.prompt = promptTripleMatch[1].trim();
+  } else {
+    const promptQuoteMatch =
+      inner.match(/prompt\s*=\s*(['"])([\s\S]*?)\1(?=\s*(?:[a-zA-Z_]+\s*=|(?:\/\]|\]|>|$)))/i) ||
+      inner.match(/prompt\s*=\s*(['"])([\s\S]*?)\1/i);
+    if (promptQuoteMatch && promptQuoteMatch[2]) {
+      args.prompt = promptQuoteMatch[2].trim();
+    }
+  }
+
+  const lyricsTripleMatch = inner.match(/lyrics\s*=\s*(?:'''|""")([\s\S]*?)(?:'''|""")/i);
+  if (lyricsTripleMatch && lyricsTripleMatch[1]) {
+    args.lyrics = lyricsTripleMatch[1].trim();
+  } else {
+    const lyricsQuoteMatch =
+      inner.match(/lyrics\s*=\s*(['"])([\s\S]*?)\1(?=\s*(?:[a-zA-Z_]+\s*=|(?:\/\]|\]|>|$)))/i) ||
+      inner.match(/lyrics\s*=\s*(['"])([\s\S]*?)\1/i);
+    if (lyricsQuoteMatch && lyricsQuoteMatch[2]) {
+      args.lyrics = lyricsQuoteMatch[2].trim();
+    }
+  }
+
+  const styleMatch = inner.match(/style\s*=\s*['"]([^'"]+)['"]/i);
+  if (styleMatch && styleMatch[1]) {
+    args.style = styleMatch[1].trim();
+  }
+
+  const titleMatch = inner.match(/title\s*=\s*['"]([^'"]+)['"]/i);
+  if (titleMatch && titleMatch[1]) {
+    args.title = titleMatch[1].trim();
+  }
+
+  const instrumentalMatch = inner.match(/instrumental\s*=\s*(true|false)/i);
+  if (instrumentalMatch && instrumentalMatch[1]) {
+    args.instrumental = instrumentalMatch[1].toLowerCase() === "true";
+  }
+
+  if (!args.prompt && !args.lyrics) return null;
+
+  return {
+    toolName: "generate_music",
+    args: {
+      prompt: args.prompt || args.lyrics || "Bài hát AI",
+      lyrics: args.lyrics,
+      style: args.style,
+      title: args.title,
+      instrumental: args.instrumental,
+    },
+    rawMatch: match[0],
+  };
+}
+
+/**
+ * Chặn và thực thi tool giả lập ngầm, gửi file/voice/nhạc và làm sạch văn bản chat
  */
 export async function interceptAndExecuteSimulatedTool(
   text: string,
   onFileGenerated?: (file: GeneratedFileResult | any) => Promise<void>,
 ): Promise<string> {
+  // 0.5. Kiểm tra generate_music giả lập
+  const musicExtracted = extractSimulatedGenerateMusic(text);
+  if (musicExtracted && (musicExtracted.args.prompt || musicExtracted.args.lyrics)) {
+    try {
+      console.log(
+        `[simulated-tool-interceptor] 🛡️ Phát hiện [generate_music] thô trong output text! ` +
+        `Kích hoạt tạo nhạc ngầm: prompt="${(musicExtracted.args.prompt || "").slice(0, 45)}...", style=${musicExtracted.args.style || "pop"}`,
+      );
+
+      const result = await executeAgentTool("generate_music", musicExtracted.args);
+      if (result?.success && onFileGenerated) {
+        try {
+          await onFileGenerated({
+            ...result,
+            isMusic: true,
+          });
+        } catch (fileErr) {
+          console.warn("[simulated-tool-interceptor] Lỗi gửi nhạc qua onFileGenerated:", fileErr);
+        }
+      }
+
+      let cleanedText = text.replace(musicExtracted.rawMatch, "").trim();
+      if (
+        !cleanedText ||
+        /^(?:anh|chị|bác|sếp|bạn)?\s*(?:đã\s+)?(?:nghe|nhận|thấy)\s*(?:được\s+)?(?:nhạc|bài hát|track)\s*(?:chưa|chưa\s*ạ)?\s*[?]?$/i.test(cleanedText)
+      ) {
+        cleanedText = `🎵 Em đã sáng tác bài hát [${result?.title || "Suno AI"}] và gửi vào nhóm rồi nhé! ✨`;
+      }
+      return cleanedText;
+    } catch (err) {
+      console.warn("[simulated-tool-interceptor] Lỗi thực thi simulated generate_music:", err);
+    }
+  }
+
   // 1. Kiểm tra create_voice giả lập trước
   const voiceExtracted = extractSimulatedCreateVoice(text);
   if (voiceExtracted && voiceExtracted.args.text) {

@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import {
   getDb,
   isUserAdmin,
@@ -43,6 +44,57 @@ import { normalizeExecutionSignals, selectResponseMode } from "./hybrid-routing.
 import { checkIsFileOrVoiceGeneration, checkIsVoiceRequest } from "./tools/file-generator.js";
 import { interceptAndExecuteSimulatedTool, extractSpeechFallbackText } from "./tools/simulated-tool-interceptor.js";
 import { cleanOutdatedVoicePromisesFromAnswer, cleanCoreSpeechText } from "./tools/voice-generator.js";
+import { generateMusic } from "./tools/music-generator.js";
+
+async function deliverGeneratedToolFileDirect(
+  api: any,
+  sender: string,
+  file: any,
+  botName: string,
+  userGreeting: string,
+): Promise<void> {
+  const isMusic = Boolean(file.isMusic) || file.fileName?.startsWith("suno_");
+  if (isMusic) {
+    await sendDirectFile(
+      api,
+      sender,
+      file.filePath,
+      file.caption || `🎵 ${botName} gửi bài hát [${file.title || "Suno AI"}] cho ${userGreeting} nghe nhé!`,
+    );
+    if (file.coverPath && fs.existsSync(file.coverPath)) {
+      await sendDirectFile(
+        api,
+        sender,
+        file.coverPath,
+        `🎶 Ảnh bìa ca khúc: ${file.title || "Suno AI Music"}`,
+      );
+    }
+    return;
+  }
+
+  const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+  if (isVoice) {
+    await sendDirectVoice(
+      api,
+      sender,
+      file.filePath,
+      file.caption || `🎙️ ${botName} gửi voice cho ${userGreeting} nghe nhé!`,
+    );
+    return;
+  }
+
+  const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
+  await sendDirectFile(
+    api,
+    sender,
+    file.filePath,
+    file.caption || (
+      isImg
+        ? `🎨 ${botName} gửi ảnh/poster cho ${userGreeting}!`
+        : `📄 ${botName} gửi file [${file.fileName}] cho ${userGreeting}!`
+    ),
+  );
+}
 import {
   isMemoryControlCommand,
   handleMemoryControlCommand,
@@ -633,6 +685,48 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     const cityInput = rawText.replace(/^\/(?:thoitiet|!thoitiet)\s*/i, "").trim() || "Hồ Chí Minh";
     const weatherMsg = await getWeatherReport(cityInput);
     await sendDirectText(api, sender, weatherMsg);
+    return;
+  }
+
+  // 2.35. Lệnh /suno, /music, /nhac (Tạo bài hát / giai điệu AI bằng Suno)
+  if (
+    lower.startsWith("/suno") ||
+    lower.startsWith("!suno") ||
+    lower.startsWith("/music") ||
+    lower.startsWith("!music") ||
+    lower.startsWith("/nhac") ||
+    lower.startsWith("!nhac")
+  ) {
+    const userGreeting = isAdmin ? "Sếp" : (displayName ? `bác @${displayName}` : "bạn");
+    const musicPrompt = rawText
+      .replace(/^[\/!](?:suno|music|nhac)\s*/i, "")
+      .trim();
+
+    if (!musicPrompt) {
+      await sendDirectText(
+        api,
+        sender,
+        `🎵 Hướng dẫn tạo nhạc Suno AI:\n👉 Cú pháp: \`/suno [Mô tả bài hát / Thể loại / Lời bài hát]\`\n\nVí dụ:\n• \`/suno Bài hát rap chúc mừng sinh nhật anh Tuấn vui nhộn\`\n• \`/suno Nhạc ballad mưa Hà Nội nhẹ nhàng acoustic\``,
+      );
+      return;
+    }
+
+    await sendDirectText(
+      api,
+      sender,
+      `🎵 ${defaultBotName} đang bắt đầu sáng tác và hòa âm phối khí theo yêu cầu: "${musicPrompt}"...\n⏱️ Quá trình này mất khoảng 1 - 2 phút, ${userGreeting} đợi một chút nhé! ✨`,
+    );
+
+    const musicRes = await generateMusic({ prompt: musicPrompt });
+    if (musicRes.success && musicRes.filePath) {
+      await deliverGeneratedToolFileDirect(api, sender, { ...musicRes, isMusic: true }, defaultBotName, userGreeting);
+    } else {
+      await sendDirectText(
+        api,
+        sender,
+        musicRes.message || `⚠️ Không thể tạo nhạc lúc này. Vui lòng thử lại sau ít phút.`,
+      );
+    }
     return;
   }
 
@@ -1812,22 +1906,10 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       try {
         const userGreeting = isAdmin ? "Sếp" : pronouns.userTitle;
         const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
-        const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
         if (isVoice) {
           voiceGenerated = true;
-          await sendDirectVoice(api, sender, file.filePath, file.caption || `🎙️ ${defaultBotName} gửi voice cho ${userGreeting} nghe nhé!`);
-        } else {
-          await sendDirectFile(
-            api,
-            sender,
-            file.filePath,
-            file.caption || (
-              isImg
-                ? `🎨 ${defaultBotName} gửi ảnh/poster cho ${userGreeting}!`
-                : `📄 ${defaultBotName} gửi file [${file.fileName}] cho ${userGreeting}!`
-            ),
-          );
         }
+        await deliverGeneratedToolFileDirect(api, sender, file, defaultBotName, userGreeting);
       } catch (fileErr) {
         console.warn("[admin-assistant] Interceptor sendDirectFile error:", fileErr);
       }
