@@ -200,6 +200,17 @@ function AppShellInner({
   }
 
   useEffect(() => {
+    if (typeof document !== "undefined") {
+      const hostname = window.location.hostname;
+      if (hostname.includes("b1.") && document.cookie.includes("active_bot_id=bot-2")) {
+        document.cookie = "active_bot_id=; path=/; domain=.triennguyen.com; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+        document.cookie = "active_bot_id=bot-1; path=/; max-age=31536000; SameSite=Lax";
+      } else if (hostname.includes("b2.") && document.cookie.includes("active_bot_id=bot-1")) {
+        document.cookie = "active_bot_id=; path=/; domain=.triennguyen.com; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+        document.cookie = "active_bot_id=bot-2; path=/; max-age=31536000; SameSite=Lax";
+      }
+    }
+
     async function checkAuth() {
       try {
         const hasLocalAuth = typeof window !== "undefined" && localStorage.getItem("admin_auth") === "true";

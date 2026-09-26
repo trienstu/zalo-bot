@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { dbExists, listGroupMessages, type MessageFilters } from "@/lib/db";
+import { resolveBotIdFromRequest } from "@/lib/bot-id";
 
 export const dynamic = "force-dynamic";
 
@@ -17,11 +17,7 @@ function csvCell(value: unknown): string {
 }
 
 export async function GET(request: Request) {
-  let botId = "bot-1";
-  try {
-    const cookieStore = await cookies();
-    botId = cookieStore.get("active_bot_id")?.value || "bot-1";
-  } catch {}
+  const botId = resolveBotIdFromRequest(request);
 
   if (!dbExists(botId)) {
     return NextResponse.json({ error: "Bot chưa tạo DB." }, { status: 503 });

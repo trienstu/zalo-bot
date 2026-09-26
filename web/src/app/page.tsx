@@ -43,11 +43,11 @@ function warmupInfo(warmupDays: number): { collected: number; remaining: number;
   return { collected, remaining: Math.max(0, warmupDays - collected), startedAt };
 }
 
-import { cookies } from "next/headers";
+import { resolveRequestBotId } from "@/lib/bot-id";
 
 export default async function DashboardPage({ searchParams }: { searchParams?: Promise<SearchParams> }) {
-  const cookieStore = await cookies();
-  const botId = cookieStore.get("active_bot_id")?.value || "bot-1";
+  const params = await searchParams;
+  const botId = await resolveRequestBotId(one(params, "botId"));
 
   if (!dbExists(botId)) {
     return (
@@ -60,7 +60,6 @@ export default async function DashboardPage({ searchParams }: { searchParams?: P
     );
   }
 
-  const params = await searchParams;
   const groups = listManagedGroups(botId);
   const defaultGroupId = groups[0]?.id || "";
   const selectedGroupId = one(params, "group") || defaultGroupId || "all";

@@ -9,22 +9,15 @@ import {
 } from "@/lib/logs";
 import { dbExists, listBotErrors, listManagedGroups, type ManagedGroup } from "@/lib/db";
 
+import { resolveBotIdFromRequest } from "@/lib/bot-id";
+
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
-    const hostHeader = req.headers.get("host") || "";
-    const cookieBotId = req.cookies.get("active_bot_id")?.value;
     const queryBotId = url.searchParams.get("botId");
-
-    // Ưu tiên botId được chỉ định, nếu không thì tự động nhận diện từ Host / Port
-    let botId: "bot-1" | "bot-2" = "bot-1";
-    if (queryBotId === "bot-2" || cookieBotId === "bot-2") {
-      botId = "bot-2";
-    } else {
-      botId = detectCurrentBotId(hostHeader || url.host);
-    }
+    const botId = (resolveBotIdFromRequest(req, queryBotId) === "bot-2" ? "bot-2" : "bot-1") as "bot-1" | "bot-2";
 
     const stream = url.searchParams.get("stream") || "bot-all";
     const linesParam = parseInt(url.searchParams.get("lines") || "150", 10);

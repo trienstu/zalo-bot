@@ -74,17 +74,16 @@ function rankTrophyBadge(rank: number) {
   return null;
 }
 
-import { cookies } from "next/headers";
+import { resolveRequestBotId } from "@/lib/bot-id";
 
 export default async function LeaderboardPage({
   searchParams,
 }: {
   searchParams?: Promise<SearchParams>;
 }) {
-  const cookieStore = await cookies();
-  const botId = cookieStore.get("active_bot_id")?.value || "bot-1";
-
   const params = await searchParams;
+  const botId = await resolveRequestBotId(one(params, "botId"));
+
   const currentTab = one(params, "tab") === "inactive" ? "inactive" : "active";
   const period = readPeriod(params);
   const activePeriod = PERIODS.find((item) => item.value === period) ?? PERIODS[0];

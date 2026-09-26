@@ -3,6 +3,7 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import { friendSyncRequestPath } from "@/lib/login-status";
 import { isOriginAllowed } from "@/lib/http";
+import { resolveBotIdFromRequest } from "@/lib/bot-id";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,7 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json().catch(() => ({}))) as { botId?: string };
-  const botId = body.botId || "bot-1";
+  const botId = resolveBotIdFromRequest(request, body.botId);
   const requestPath = friendSyncRequestPath(botId);
   const dir = path.dirname(requestPath);
   const tempPath = `${requestPath}.${process.pid}.tmp`;

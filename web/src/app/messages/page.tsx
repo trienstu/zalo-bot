@@ -70,12 +70,11 @@ function exportHref(params: SearchParams | undefined): string {
   return `/api/messages/export${qs.toString() ? `?${qs.toString()}` : ""}`;
 }
 
-import { cookies } from "next/headers";
+import { resolveRequestBotId } from "@/lib/bot-id";
 
 export default async function MessagesPage({ searchParams }: { searchParams?: Promise<SearchParams> }) {
   const params = await searchParams;
-  const cookieStore = await cookies();
-  const botId = one(params, "botId") || cookieStore.get("active_bot_id")?.value || "bot-1";
+  const botId = await resolveRequestBotId(one(params, "botId"));
 
   if (!dbExists(botId)) {
     return (

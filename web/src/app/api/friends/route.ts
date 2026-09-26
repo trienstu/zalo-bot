@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import fs from "node:fs";
 import {
   DbNotReadyError,
@@ -11,6 +10,7 @@ import {
 } from "@/lib/db";
 import { friendSyncRequestPath } from "@/lib/login-status";
 import { isOriginAllowed } from "@/lib/http";
+import { resolveBotIdFromRequest } from "@/lib/bot-id";
 
 export const dynamic = "force-dynamic";
 
@@ -23,10 +23,7 @@ function handleDbError(e: unknown): NextResponse | never {
 
 export async function GET(request: Request) {
   try {
-    const url = new URL(request.url);
-    const cookieStore = await cookies();
-    const activeBotCookie = cookieStore.get("active_bot_id")?.value;
-    const botId = url.searchParams.get("botId") || activeBotCookie || "bot-1";
+    const botId = resolveBotIdFromRequest(request);
 
     const friends = listBotFriends(botId);
     const syncStatus = getFriendSyncStatus(botId);
@@ -60,7 +57,7 @@ export async function POST(request: Request) {
       botId?: string;
     };
 
-    const botId = body.botId || "bot-1";
+    const botId = resolveBotIdFromRequest(request, body.botId);
     const ok = setAutoFriendSettings(
       {
         autoAccept: body.autoAccept,
@@ -95,7 +92,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Thiếu userId" }, { status: 400 });
     }
 
-    const botId = body.botId || "bot-1";
+    const botId = resolveBotIdFromRequest(request, body.botId);
     const allow = Boolean(body.allowDirect);
     const success = setFriendAllowDirect(body.userId, allow, botId);
 

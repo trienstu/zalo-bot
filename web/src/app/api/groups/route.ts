@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { cookies } from "next/headers";
 import { getBotInfo } from "@/lib/bot-registry";
+import { resolveBotIdFromRequest, resolveRequestBotIdSync } from "@/lib/bot-id";
 
 export const dynamic = "force-dynamic";
 
@@ -77,15 +77,7 @@ async function getActiveBotDbPath(overrideBotId?: string, reqUrl?: string, hostH
     return process.env.WEB_DB_PATH.trim();
   }
 
-  let botId = overrideBotId;
-  if (!botId) {
-    try {
-      const cookieStore = await cookies();
-      botId = cookieStore.get("active_bot_id")?.value || "bot-1";
-    } catch {
-      botId = "bot-1";
-    }
-  }
+  const botId = resolveRequestBotIdSync(overrideBotId, hostHeader);
 
   if (botId && botId !== "bot-1") {
     const candidates = [
@@ -108,25 +100,9 @@ async function getActiveBotDbPath(overrideBotId?: string, reqUrl?: string, hostH
 
 export async function GET(request: Request) {
   try {
-    let botId = "";
-    let reqUrl = request.url;
-    let hostHeader = request.headers.get("host") || "";
-    try {
-      const url = new URL(request.url);
-      botId = url.searchParams.get("botId") || "";
-      if (!botId) {
-        if (hostHeader.includes("b2.") || url.port === "3002" || url.port === "3001" || hostHeader.includes(":3001") || hostHeader.includes(":3002")) {
-          botId = "bot-2";
-        } else if (hostHeader.includes("b1.") || url.port === "3000" || hostHeader.includes(":3000")) {
-          botId = "bot-1";
-        } else {
-          const cookieStore = await cookies();
-          botId = cookieStore.get("active_bot_id")?.value || "bot-1";
-        }
-      }
-    } catch {
-      botId = "bot-1";
-    }
+    const botId = resolveBotIdFromRequest(request);
+    const reqUrl = request.url;
+    const hostHeader = request.headers.get("host") || "";
 
     const dbPath = await getActiveBotDbPath(botId, reqUrl, hostHeader);
     const isBot2 = botId === "bot-2" || dbPath.includes("bot-2") || process.env.BOT_ID === "bot-2";
@@ -300,24 +276,9 @@ export async function POST(request: Request) {
       newsTopic?: string;
     };
 
-    let botId = body.botId;
+    const botId = resolveBotIdFromRequest(request, body.botId);
     const reqUrl = request.url;
     const hostHeader = request.headers.get("host") || "";
-    if (!botId) {
-      try {
-        const url = new URL(request.url);
-        if (hostHeader.includes("b2.") || url.port === "3002" || url.port === "3001" || hostHeader.includes(":3001") || hostHeader.includes(":3002")) {
-          botId = "bot-2";
-        } else if (hostHeader.includes("b1.") || url.port === "3000" || hostHeader.includes(":3000")) {
-          botId = "bot-1";
-        } else {
-          const cookieStore = await cookies();
-          botId = cookieStore.get("active_bot_id")?.value || "bot-1";
-        }
-      } catch {
-        botId = "bot-1";
-      }
-    }
 
     const dbPath = await getActiveBotDbPath(botId, reqUrl, hostHeader);
     const isBot2 = botId === "bot-2" || dbPath.includes("bot-2") || process.env.BOT_ID === "bot-2";

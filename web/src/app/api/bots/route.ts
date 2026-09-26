@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
 import { listAllBots, createNewBot, updateBotMeta, getBotInfo } from "@/lib/bot-registry";
-import { cookies } from "next/headers";
+import { resolveBotIdFromRequest } from "@/lib/bot-id";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
-    const cookieStore = await cookies();
-    const activeBotId = cookieStore.get("active_bot_id")?.value || "bot-1";
+    const activeBotId = resolveBotIdFromRequest(request);
     const bots = listAllBots();
 
     return NextResponse.json({
