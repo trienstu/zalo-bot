@@ -1799,7 +1799,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     const needsSearch = !isSearchDisabled && (
       planNeedsSearch ||
       isRealEstateProjectProfileQuery(rawText) ||
-      /(?:thời tiết|giá vàng|tỷ giá|chứng khoán|tin tức|mới nhất|khi nào|bao giờ|ai là|lịch thi đấu|tỉ số|kết quả|vừa ra mắt)/i.test(rawText)
+      /(?:thời tiết|giá vàng|tỷ giá|chứng khoán|tin tức|mới nhất|khi nào|bao giờ|ai là|lịch thi đấu|tỉ số|kết quả|vừa ra mắt|tối nay|chiều nay|sáng nay|đêm nay|ngày mai|đá lúc|mấy giờ|trận đấu|kênh chiếu|phát sóng|trực tiếp|đội tuyển|bóng đá|đá banh|đá bóng)/i.test(rawText)
     );
 
     let effectiveUserPrompt = userPrompt;
@@ -1903,11 +1903,21 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       try {
         const userGreeting = isAdmin ? "Sếp" : pronouns.userTitle;
         const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+        const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
         if (isVoice) {
           voiceGenerated = true;
           await sendDirectVoice(api, sender, file.filePath, file.caption || `🎙️ ${defaultBotName} gửi voice cho ${userGreeting} nghe nhé!`);
         } else {
-          await sendDirectFile(api, sender, file.filePath, file.caption || `📄 ${defaultBotName} gửi file [${file.fileName}] cho ${userGreeting}!`);
+          await sendDirectFile(
+            api,
+            sender,
+            file.filePath,
+            file.caption || (
+              isImg
+                ? `🎨 ${defaultBotName} gửi ảnh/poster cho ${userGreeting}!`
+                : `📄 ${defaultBotName} gửi file [${file.fileName}] cho ${userGreeting}!`
+            ),
+          );
         }
       } catch (fileErr) {
         console.warn("[admin-assistant] Interceptor sendDirectFile error:", fileErr);

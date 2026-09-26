@@ -4,6 +4,8 @@
  * như `[generate_file(...)]` nếu LLM vô tình in text thô thay vì gọi Function Calling native.
  */
 
+import fs from "node:fs";
+import path from "node:path";
 import { executeAgentTool } from "../gemini.js";
 import type { GeneratedFileResult } from "./file-generator.js";
 import { cleanCoreSpeechText } from "./voice-generator.js";
@@ -153,6 +155,104 @@ export function extractSimulatedCreateVoice(text: string): ExtractedVoiceCall | 
   };
 }
 
+export interface ExtractedPythonCall {
+  toolName: "python_interpreter";
+  code: string;
+  rawMatch: string;
+}
+
+/**
+ * Bóc tách mã Python giả lập từ text thô (khi LLM in [python_interpreter]...)
+ */
+export function extractSimulatedPythonInterpreter(text: string): ExtractedPythonCall | null {
+  if (!text) return null;
+
+  // 1. Tag đóng mở hoàn chỉnh: [python_interpreter]...[/python_interpreter] hoặc <python_interpreter>...</python_interpreter>
+  const fullTagMatch =
+    text.match(/\[\s*python_interpreter\b([\s\S]*?)\]([\s\S]*?)\[\/\s*python_interpreter\s*\]/i) ||
+    text.match(/<\s*python_interpreter\b([\s\S]*?)>([\s\S]*?)<\/\s*python_interpreter\s*>/i);
+
+  if (fullTagMatch && fullTagMatch[2]) {
+    let code = fullTagMatch[2].trim();
+    const fenceMatch = code.match(/```(?:python)?\s*([\s\S]*?)\s*```/i);
+    if (fenceMatch && fenceMatch[1]) {
+      code = fenceMatch[1].trim();
+    }
+    if (code) {
+      return {
+        toolName: "python_interpreter",
+        code,
+        rawMatch: fullTagMatch[0],
+      };
+    }
+  }
+
+  // 2. Cú pháp hàm: [python_interpreter(code="...")] hoặc python_interpreter(code="...")
+  const funcTripleMatch = text.match(/\[?\bpython_interpreter\s*\(\s*code\s*=\s*(?:'''|""")([\s\S]*?)(?:'''|""")\s*\)\]?/i);
+  if (funcTripleMatch && funcTripleMatch[1]) {
+    return {
+      toolName: "python_interpreter",
+      code: funcTripleMatch[1].trim(),
+      rawMatch: funcTripleMatch[0],
+    };
+  }
+
+  const funcQuoteMatch = text.match(/\[?\bpython_interpreter\s*\(\s*code\s*=\s*(['"])([\s\S]*?)\1\s*\)\]?/i);
+  if (funcQuoteMatch && funcQuoteMatch[2]) {
+    return {
+      toolName: "python_interpreter",
+      code: funcQuoteMatch[2].trim(),
+      rawMatch: funcQuoteMatch[0],
+    };
+  }
+
+  // 3. Cú pháp tag mở [python_interpreter] kèm khối markdown hoặc code trực tiếp
+  const openTagMatch = text.match(/\[\s*python_interpreter\s*\]([\s\S]*)/i) ||
+                       text.match(/<\s*python_interpreter\s*>([\s\S]*)/i);
+  if (openTagMatch && openTagMatch.index !== undefined) {
+    const remainder = openTagMatch[1] || "";
+    const fenceMatch = remainder.match(/```(?:python)?\s*([\s\S]*?)\s*```/i);
+    if (fenceMatch && fenceMatch[1]) {
+      const code = fenceMatch[1].trim();
+      const rawMatch = text.slice(openTagMatch.index, openTagMatch.index + openTagMatch[0].length + remainder.indexOf(fenceMatch[0]) + fenceMatch[0].length);
+      return {
+        toolName: "python_interpreter",
+        code,
+        rawMatch,
+      };
+    }
+
+    // Không có markdown fence, trích xuất các dòng mã python liên tục
+    const lines = remainder.split("\n");
+    const codeLines: string[] = [];
+    let isCode = false;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed && !isCode) continue;
+      if (
+        /^(?:import\s+|from\s+|def\s+|class\s+|plt\.|fig|ax|img|draw|Image|font|#)/.test(trimmed) ||
+        (isCode && (line.startsWith(" ") || line.startsWith("\t") || trimmed === "" || /^[a-zA-Z_0-9]+(?:\.[a-zA-Z_0-9]+)?\s*=\s*/.test(trimmed) || trimmed.startsWith("plt.") || trimmed.startsWith("img.") || trimmed.startsWith("draw.") || trimmed.startsWith("print(")))
+      ) {
+        isCode = true;
+        codeLines.push(line);
+      } else if (isCode && trimmed.length > 0) {
+        break;
+      }
+    }
+    const code = codeLines.join("\n").trim();
+    if (code && (code.includes("plt.") || code.includes("matplotlib") || code.includes("PIL") || code.includes("Image"))) {
+      const rawMatch = text.slice(openTagMatch.index, openTagMatch.index + openTagMatch[0].length + code.length);
+      return {
+        toolName: "python_interpreter",
+        code,
+        rawMatch,
+      };
+    }
+  }
+
+  return null;
+}
+
 /**
  * Chặn và thực thi tool giả lập ngầm, gửi file/voice và làm sạch văn bản chat
  */
@@ -197,7 +297,49 @@ export async function interceptAndExecuteSimulatedTool(
     }
   }
 
-  // 2. Kiểm tra generate_file giả lập
+  // 2. Kiểm tra python_interpreter giả lập (vẽ biểu đồ, infographic, poster...)
+  const pythonExtracted = extractSimulatedPythonInterpreter(text);
+  if (pythonExtracted && pythonExtracted.code) {
+    try {
+      console.log(
+        `[simulated-tool-interceptor] 🛡️ Phát hiện [python_interpreter] thô trong output text! ` +
+        `Kích hoạt thực thi ngầm: code=${pythonExtracted.code.length} chars`,
+      );
+
+      const result = await executeAgentTool("python_interpreter", {
+        code: pythonExtracted.code,
+      });
+
+      if (result?.success && onFileGenerated) {
+        const allFiles = [...(result.generatedImages || []), ...(result.generatedFiles || [])];
+        for (const itemPath of allFiles) {
+          try {
+            await onFileGenerated({
+              success: true,
+              filePath: itemPath,
+              fileName: path.basename(itemPath),
+              fileSize: fs.existsSync(itemPath) ? fs.statSync(itemPath).size : 0,
+            });
+          } catch (fileErr) {
+            console.warn("[simulated-tool-interceptor] Lỗi gửi file python qua onFileGenerated:", fileErr);
+          }
+        }
+      }
+
+      let cleanedText = text.replace(pythonExtracted.rawMatch, "").trim();
+      if (
+        !cleanedText ||
+        /^(?:anh|chị|bác|sếp|bạn)?\s*(?:đã\s+)?(?:nhận|thấy)\s*(?:được\s+)?(?:ảnh|poster|biểu đồ|hình)\s*(?:chưa|chưa\s*ạ)?\s*[?]?$/i.test(cleanedText)
+      ) {
+        cleanedText = "🎨 Em đã thiết kế hình ảnh/poster theo yêu cầu và gửi lên nhóm rồi nhé! ✨";
+      }
+      return cleanedText;
+    } catch (err) {
+      console.warn("[simulated-tool-interceptor] Lỗi thực thi simulated python_interpreter:", err);
+    }
+  }
+
+  // 3. Kiểm tra generate_file giả lập
   const extracted = extractSimulatedGenerateFile(text);
   if (!extracted || !extracted.args.content) {
     return text;

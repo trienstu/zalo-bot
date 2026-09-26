@@ -1237,9 +1237,9 @@ export async function callGeminiAgentLoop(
     throw new Error("Thiếu GEMINI_API_KEY trong .env");
   }
 
-  let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-2.5-flash";
-  if (!primaryModel || primaryModel.includes("3.1-flash-lite") || primaryModel.includes("3-flash")) {
-    primaryModel = "gemini-2.5-flash";
+  let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-flash-latest";
+  if (!primaryModel || primaryModel.includes("2.5-flash") || primaryModel.includes("3.1-flash-lite")) {
+    primaryModel = "gemini-flash-latest";
   }
   const maxTurns = options?.maxTurns || 2;
   const temperature = options?.temperature ?? 0.2;
@@ -1289,7 +1289,7 @@ export async function callGeminiAgentLoop(
           generationConfig: {
             temperature,
             ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
-            ...(currentModel.includes("3.7") || currentModel.includes("2.5")
+            ...(currentModel.includes("3.7") || currentModel.includes("3.8")
               ? { thinkingConfig: { thinkingBudget: 256 } }
               : {}),
           },
@@ -1315,9 +1315,9 @@ export async function callGeminiAgentLoop(
           }
 
           if (resp.status === 503 || resp.status === 429) {
-            if (currentModel.includes("3-flash")) {
-              console.log(`[gemini-agent] ⚡ Chuyển sang model dự phòng gemini-2.5-flash do ${currentModel} quá tải ${resp.status}...`);
-              currentModel = "gemini-2.5-flash";
+            if (currentModel === "gemini-flash-latest") {
+              console.log(`[gemini-agent] ⚡ Chuyển sang model dự phòng gemini-3.8-flash do ${currentModel} quá tải ${resp.status}...`);
+              currentModel = "gemini-3.8-flash";
             } else if (currentModel !== "gemini-flash-latest") {
               console.log(`[gemini-agent] ⚡ Chuyển sang model dự phòng gemini-flash-latest do ${currentModel} quá tải ${resp.status}...`);
               currentModel = "gemini-flash-latest";
@@ -1329,9 +1329,9 @@ export async function callGeminiAgentLoop(
           if (apiKeys.length > 1) {
             apiKeyIdx = (apiKeyIdx + 1) % apiKeys.length;
           }
-          if (currentModel.includes("3-flash")) {
-            currentModel = "gemini-2.5-flash";
-          } else if (currentModel !== "gemini-flash-latest") {
+          if (currentModel === "gemini-flash-latest") {
+            currentModel = "gemini-3.8-flash";
+          } else {
             currentModel = "gemini-flash-latest";
           }
           await new Promise((r) => setTimeout(r, 1000));

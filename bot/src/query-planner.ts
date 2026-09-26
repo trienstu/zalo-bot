@@ -101,9 +101,9 @@ type PlannerSignals = {
 function detectPlannerSignals(question: string, quoteText = ""): PlannerSignals {
   const text = normalizePlannerText(`${question} ${quoteText}`);
   const scienceLaw = /\b(?:dinh luat|quy luat|luat bao toan|luat hap dan|luat newton|luat ohm)\b/i.test(text);
-  const explicitlyCurrent = /\b(?:hien nay|hien tai|hom nay|luc nay|bay gio|moi nhat|co gi moi|tin moi|nghien cuu moi|vua qua|sap toi|nam nay|thang nay|tuan nay|cap nhat|dang dien ra|con hieu luc|phien ban moi|vua ra mat|sap ra mat|bang gia|bao gia|gia ban|gia mua|gia thi truong|lich thi dau|ket qua|ti so|bang xep hang|du bao|thoi tiet)\b/i.test(text) ||
+  const explicitlyCurrent = /\b(?:hien nay|hien tai|hom nay|toi nay|chieu nay|sang nay|dem nay|trua nay|ngay mai|ngay kia|hom qua|luc nay|bay gio|moi nhat|co gi moi|tin moi|nghien cuu moi|vua qua|sap toi|nam nay|thang nay|tuan nay|cap nhat|dang dien ra|con hieu luc|phien ban moi|vua ra mat|sap ra mat|bang gia|bao gia|gia ban|gia mua|gia thi truong|lich thi dau|ket qua|ti so|bang xep hang|du bao|thoi tiet|may gio|luc may gio|khi nao|bao gio|gio nao)\b/i.test(text) ||
     /^gia\s+/i.test(text);
-  const inherentlyVolatile = /\b(?:lanh dao|chu tich|bi thu|tong bi thu|thu tuong|bo truong|giam doc|ceo|hlv|chuc vu|nhan su|gia vang|gia xang|gia dau|ty gia|lai suat|chung khoan|co phieu|vn-index|crypto|bitcoin|thoi tiet|bao so|bao ap thap|con bao|lu lut|ngap lut|dong dat|lich thi dau|ket qua tran|ti so|bang xep hang|vo dich|chuyen nhuong|phap luat|luat|nghi dinh|thong tu|thue|muc phat|thu tuc|quy hoach|sap nhap|dia gioi|dan so|gdp|du an|bat dong san|mo ban|tien do|phap ly|chu dau tu|chuyen bay|xo so|dich benh|canh bao an ninh|lo hong bao mat|tuyen sinh|diem chuan|hoc phi|lich thi|visa|thi thuc|giay phep|lich mo cua|gio mo cua|thong so ky thuat|ngay phat hanh)\b/i.test(text) && !scienceLaw;
+  const inherentlyVolatile = /\b(?:lanh dao|chu tich|bi thu|tong bi thu|thu tuong|bo truong|giam doc|ceo|hlv|chuc vu|nhan su|gia vang|gia xang|gia dau|ty gia|lai suat|chung khoan|co phieu|vn-index|crypto|bitcoin|thoi tiet|bao so|bao ap thap|con bao|lu lut|ngap lut|dong dat|lich thi dau|ket qua tran|ti so|bang xep hang|vo dich|chuyen nhuong|phap luat|luat|nghi dinh|thong tu|thue|muc phat|thu tuc|quy hoach|sap nhap|dia gioi|dan so|gdp|du an|bat dong san|mo ban|tien do|phap ly|chu dau tu|chuyen bay|xo so|dich benh|canh bao an ninh|lo hong bao mat|tuyen sinh|diem chuan|hoc phi|lich thi|visa|thi thuc|giay phep|lich mo cua|gio mo cua|thong so ky thuat|ngay phat hanh|tran dau|doi tuyen|da bong|da banh|bong da|giai dau|kenh chieu|phat song|truc tiep|xem o dau|da voi ai|da luc|da gio|thi dau)\b/i.test(text) && !scienceLaw;
   const stableTask = /\b(?:dich|viet lai|tom tat van ban|soan|sang tac|dat ten|giai phuong trinh|tinh toan|chung minh|viet code|sua code|regex|thuat toan|giai thich khai niem|la gi|hoat dong nhu the nao|cach hoat dong)\b/i.test(text) &&
     !explicitlyCurrent && !inherentlyVolatile;
   return {
@@ -135,7 +135,7 @@ function fallbackSafePlanner(question: string, quoteText = ""): QueryPlanResult 
   }
 
   // Nếu câu hỏi về thể thao / bóng đá / lịch thi đấu
-  if (/(?:lịch thi đấu|kết quả|bóng đá|la\s*liga|ngoại hạng|champions league|cúp c1|serie a|bundesliga|v-league)/i.test(query)) {
+  if (/(?:lịch thi đấu|kết quả|bóng đá|đá bóng|đá banh|đội tuyển|trận đấu|kênh chiếu|phát sóng|trực tiếp|la\s*liga|ngoại hạng|champions league|cúp c1|serie a|bundesliga|v-league)/i.test(query)) {
     queries.push(`${query} ${currentYear} mới nhất`.slice(0, 80));
   } else if (/(?:giá vàng|tỷ giá|chứng khoán|thời tiết|tin tức)/i.test(query)) {
     queries.push(`${query} hôm nay`.slice(0, 80));
@@ -498,10 +498,18 @@ export async function planSearchQueries(params: {
     const plannerPromise = (async () => {
       const text = await callGemini(system, user, {
         model: "gemini-3.1-flash-lite-preview",
-        maxTokens: 500,
+        maxTokens: 1000,
         json: true,
       });
-      return JSON.parse(text);
+      let clean = (text || "").trim();
+      const codeBlockMatch = clean.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+      if (codeBlockMatch && codeBlockMatch[1]) {
+        clean = codeBlockMatch[1].trim();
+      } else {
+        const jsonMatch = clean.match(/\{[\s\S]*\}/);
+        if (jsonMatch && jsonMatch[0]) clean = jsonMatch[0].trim();
+      }
+      return JSON.parse(clean);
     })();
 
     const timeoutPromise = new Promise<never>((_, reject) =>

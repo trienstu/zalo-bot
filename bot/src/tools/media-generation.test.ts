@@ -21,7 +21,7 @@ import {
   cleanOutdatedVoicePromisesFromAnswer,
 } from "./voice-generator.js";
 import { validatePythonCodeSafety } from "./python-runner.js";
-import { extractSimulatedGenerateFile, extractSimulatedCreateVoice, extractSpeechFallbackText } from "./simulated-tool-interceptor.js";
+import { extractSimulatedGenerateFile, extractSimulatedCreateVoice, extractSimulatedPythonInterpreter, extractSpeechFallbackText } from "./simulated-tool-interceptor.js";
 
 test("generatePowerPointFile tạo file .pptx thành công với các slide bố cục chuẩn và hiện đại", async () => {
   const res = await generatePowerPointFile(
@@ -766,5 +766,39 @@ Sếp nghe xong thấy thế nào ạ? Chúc Sếp có những giây phút thư 
   assert.ok(!cleaned.includes("---"), "Không chứa đường kẻ markdown!");
 });
 
+test("extractSimulatedPythonInterpreter bóc tách chính xác code Python từ tag hoặc hàm giả lập", () => {
+  const simulatedTag = `Dạ Sếp, em đã tạo poster cổ động:
+[python_interpreter]
+import matplotlib.pyplot as plt
+fig, ax = plt.subplots(figsize=(8, 12))
+ax.text(0.5, 0.5, "VIỆT NAM CHIẾN THẮNG!", color="gold", fontsize=24)
+plt.savefig("poster.png")
+[/python_interpreter]
+Chúc đội tuyển Việt Nam thi đấu rực rỡ!`;
 
+  const res1 = extractSimulatedPythonInterpreter(simulatedTag);
+  assert.ok(res1, "Phải bóc tách được từ [python_interpreter]");
+  assert.equal(res1?.toolName, "python_interpreter");
+  assert.ok(res1?.code.includes("VIỆT NAM CHIẾN THẮNG!"));
+  assert.ok(res1?.rawMatch.includes("[/python_interpreter]"));
 
+  const simulatedFunc = `[python_interpreter(code="import matplotlib.pyplot as plt\\nplt.plot([1, 2, 3])\\nplt.savefig('chart.png')")]`;
+  const res2 = extractSimulatedPythonInterpreter(simulatedFunc);
+  assert.ok(res2, "Phải bóc tách được từ [python_interpreter(code=...)]");
+  assert.ok(res2?.code.includes("plt.plot"));
+
+  const simulatedOpenTagWithFences = `Dạ em vẽ biểu đồ cho Sếp:
+[python_interpreter]
+\`\`\`python
+import matplotlib.pyplot as plt
+import numpy as np
+plt.bar(['A', 'B'], [10, 20])
+plt.savefig('result.png')
+\`\`\`
+Sếp xem biểu đồ nhé!`;
+
+  const res3 = extractSimulatedPythonInterpreter(simulatedOpenTagWithFences);
+  assert.ok(res3, "Phải bóc tách được từ [python_interpreter] kèm markdown fence");
+  assert.ok(res3?.code.includes("plt.bar"));
+  assert.ok(!res3?.code.includes("```"));
+});

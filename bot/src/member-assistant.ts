@@ -2674,7 +2674,7 @@ QUY TẮC BẮT BUỘC:
         planNeedsSearch ||
         (isResourceQuery && relevantLinks.length === 0) ||
         isRealEstateProjectProfileQuery(question) ||
-        /(?:thời tiết|giá vàng|tỷ giá|chứng khoán|tin tức|mới nhất|khi nào|bao giờ|ai là|lịch thi đấu|tỉ số|kết quả|vừa ra mắt)/i.test(question)
+        /(?:thời tiết|giá vàng|tỷ giá|chứng khoán|tin tức|mới nhất|khi nào|bao giờ|ai là|lịch thi đấu|tỉ số|kết quả|vừa ra mắt|tối nay|chiều nay|sáng nay|đêm nay|ngày mai|đá lúc|mấy giờ|trận đấu|kênh chiếu|phát sóng|trực tiếp|đội tuyển|bóng đá|đá banh|đá bóng)/i.test(question)
       );
 
       let effectiveUserPrompt = userPrompt;
@@ -2735,11 +2735,16 @@ QUY TẮC BẮT BUỘC:
             file.caption || `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
           );
         } else {
+          const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
           await sendGroupFile(
             options.api,
             threadId,
             file.filePath,
-            file.caption || `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`,
+            file.caption || (
+              isImg
+                ? `🎨 ${botName} gửi ảnh/poster cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+                : `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+            ),
           );
         }
       }
