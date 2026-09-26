@@ -433,6 +433,7 @@ export async function login(): Promise<ZaloApi> {
         });
         console.log("[zalo] Đăng nhập lại bằng session đã lưu.");
         writeLoginStatus("logged_in");
+        attachZaloInternals(api);
         return api;
       } catch (e: any) {
         const errMsg = String(e?.message || e);
@@ -529,6 +530,7 @@ export async function login(): Promise<ZaloApi> {
       }
     }
   });
+  attachZaloInternals(api);
   return api;
 }
 
@@ -1240,21 +1242,44 @@ export function getAudioDurationMs(filePath: string): number {
   }
 }
 
+let cachedZaloInternals: { ctx: any; utils: any } | null = null;
+
+/**
+ * Gắn và trích xuất context nội bộ (ctx, utils) từ zca-js api ngay khi đăng nhập
+ */
+export function attachZaloInternals(api: ZaloApi): ZaloApi {
+  if (!api) return api;
+  if (cachedZaloInternals) return api;
+  if (typeof api.custom === "function") {
+    try {
+      if (typeof api.__getInternals !== "function") {
+        api.custom("__getInternals", ({ ctx, utils }: any) => {
+          api.__cachedInternals = { ctx, utils };
+          cachedZaloInternals = { ctx, utils };
+        });
+      }
+      if (typeof api.__getInternals === "function") {
+        api.__getInternals({});
+      }
+    } catch {
+      // Bỏ qua nếu đã được gắn
+    }
+  }
+  return api;
+}
+
 /**
  * Trích xuất context nội bộ (ctx, utils) từ zca-js api để cấu hình đầy đủ msgInfo
  */
 function getZaloInternals(api: ZaloApi): { ctx: any; utils: any } | null {
-  if (!api || typeof api.custom !== "function") return null;
-  let internals: { ctx: any; utils: any } | null = null;
-  try {
-    api.custom("__getInternals", ({ ctx, utils }: any) => {
-      internals = { ctx, utils };
-    });
-    api.__getInternals({});
-  } catch (err) {
-    console.warn("[getZaloInternals] Không thể trích xuất Zalo internals:", err);
+  if (cachedZaloInternals) return cachedZaloInternals;
+  if (!api) return null;
+  if (api.__cachedInternals) {
+    cachedZaloInternals = api.__cachedInternals;
+    return cachedZaloInternals;
   }
-  return internals;
+  attachZaloInternals(api);
+  return cachedZaloInternals || api.__cachedInternals || null;
 }
 
 /**
@@ -1270,12 +1295,16 @@ async function sendVoiceBubbleWithDuration(
 ): Promise<boolean> {
   const internals = getZaloInternals(api);
   if (!internals || !internals.ctx || !internals.utils) {
+    console.warn("[sendVoiceBubbleWithDuration] ⚠️ Không có Zalo internals, bỏ qua custom voice bubble.");
     return false;
   }
 
   const { ctx, utils } = internals;
   const serviceBase = api.zpwServiceMap?.file?.[0];
-  if (!serviceBase) return false;
+  if (!serviceBase) {
+    console.warn("[sendVoiceBubbleWithDuration] ⚠️ Không có zpwServiceMap.file[0]");
+    return false;
+  }
 
   const serviceURL = {
     [ThreadType.User]: utils.makeURL(`${serviceBase}/api/message/forward`),
@@ -1283,7 +1312,10 @@ async function sendVoiceBubbleWithDuration(
   };
 
   const targetUrl = serviceURL[type];
-  if (!targetUrl) return false;
+  if (!targetUrl) {
+    console.warn("[sendVoiceBubbleWithDuration] ⚠️ targetUrl không hợp lệ cho thread type:", type);
+    return false;
+  }
 
   const durationMs = getAudioDurationMs(filePath);
   const totalSec = Math.max(1, Math.round(durationMs / 1000));
@@ -1292,9 +1324,11 @@ async function sendVoiceBubbleWithDuration(
     fileSize = fs.statSync(filePath).size;
   } catch {}
 
+  const m4aAudioUrl = voiceUrl.includes("?") ? `${voiceUrl}&ext=.m4a` : `${voiceUrl}?ext=.m4a`;
+
   const msgInfoObj = {
     voiceUrl,
-    m4aUrl: voiceUrl,
+    m4aUrl: m4aAudioUrl,
     fileSize: fileSize || 0,
     duration: durationMs,
     voiceLen: durationMs,
@@ -1325,8 +1359,13 @@ async function sendVoiceBubbleWithDuration(
           imei: ctx.imei,
         };
 
+  console.log(`[sendVoiceBubbleWithDuration] 🎙️ Gửi custom Voice Bubble (${totalSec}s / ${durationMs}ms, ${fileSize} bytes) vào [${threadId}]...`);
+
   const encryptedParams = utils.encodeAES(JSON.stringify(params));
-  if (!encryptedParams) return false;
+  if (!encryptedParams) {
+    console.warn("[sendVoiceBubbleWithDuration] ⚠️ utils.encodeAES trả về rỗng.");
+    return false;
+  }
 
   const response = await utils.request(targetUrl, {
     method: "POST",
@@ -1336,7 +1375,8 @@ async function sendVoiceBubbleWithDuration(
   });
 
   const res = await utils.resolve(response);
-  return !!res;
+  console.log(`[sendVoiceBubbleWithDuration] ✅ Zalo server phản hồi:`, res);
+  return true;
 }
 
 /**
