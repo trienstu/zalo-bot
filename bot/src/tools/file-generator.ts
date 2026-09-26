@@ -144,6 +144,10 @@ export interface GeneratedFileResult {
   fileSize: number;
   caption?: string;
   message?: string;
+  isMusic?: boolean;
+  listenUrl?: string;
+  coverPath?: string;
+  title?: string;
 }
 
 export type ThemeName = "navy" | "blue" | "green" | "burgundy" | "slate" | "teal" | "emerald" | "luxury";

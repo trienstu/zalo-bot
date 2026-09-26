@@ -56,21 +56,25 @@ async function deliverGeneratedToolFile(
   displayName: string,
   isSuperAdmin: boolean,
 ): Promise<void> {
-  const isMusic = Boolean(file.isMusic) || file.fileName?.startsWith("suno_");
+  const isMusic = Boolean(file.isMusic) || file.fileName?.startsWith("suno_") || Boolean(file.listenUrl);
   if (isMusic) {
-    await sendGroupFile(
-      api,
-      threadId,
-      file.filePath,
-      file.caption || `🎵 ${botName} gửi bài hát [${file.title || "Suno AI"}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
-    );
-    if (file.coverPath && fs.existsSync(file.coverPath)) {
+    if (file.filePath && fs.existsSync(file.filePath)) {
       await sendGroupFile(
         api,
         threadId,
-        file.coverPath,
-        `🎶 Ảnh bìa ca khúc: ${file.title || "Suno AI Music"}`,
+        file.filePath,
+        file.caption || `🎵 ${botName} gửi bài hát [${file.title || "Suno AI"}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`,
       );
+      if (file.coverPath && fs.existsSync(file.coverPath) && file.coverPath !== file.filePath) {
+        await sendGroupFile(
+          api,
+          threadId,
+          file.coverPath,
+          `🎶 Ảnh bìa ca khúc: ${file.title || "Suno AI Music"}`,
+        );
+      }
+    } else if (file.caption) {
+      await sendGroupText(api, threadId, file.caption);
     }
     return;
   }
@@ -2660,10 +2664,10 @@ QUY TẮC BẮT BUỘC:
     `      + TUYỆT ĐỐI CẤM bịa đặt các câu như 'hạn mức 2 tác vụ/giờ', 'đạt ngưỡng hệ thống', 'chỉ chủ nhân mới có quyền', 'lát nữa em mới thu âm', 'uống trà đợi em'. Khi người dùng yêu cầu, PHẢI THỰC HIỆN NGAY LẬP TỨC!\n` +
     `- KỸ NĂNG TẠO NHẠC & SÁNG TÁC CA KHÚC BẰNG SUNO AI (generate_music):\n` +
     `  + Khi người dùng yêu cầu tạo nhạc, sáng tác bài hát, viết ca khúc, phối beat, làm bài nhạc, tạo giai điệu (lofi, rap, ballad, pop, rock, acoustic, bolero...):\n` +
-    `    * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_music' (với prompt, style, title, lyrics, instrumental) để AI Suno thực sự tạo bài hát và xuất file âm thanh .mp3 gửi lên Zalo!\n` +
+    `    * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_music' (với prompt, style, title, lyrics, instrumental) để AI Suno thực sự tạo bài hát và xuất thẻ bài hát kèm link nghe trực tiếp!\n` +
     `    * TUYỆT ĐỐI CẤM gọi nhầm sang 'create_voice' (create_voice chỉ dùng để đọc giọng văn bản/thơ/podcast bằng Text-to-Speech, không biết tạo bài hát/giai điệu/nhạc cụ)!\n` +
     `    * TUYỆT ĐỐI CẤM chỉ in lời bài hát ra chat rồi hứa hẹn suông là hệ thống đang xử lý âm thanh mà không gọi tool! BẮT BUỘC PHẢI THỰC SỰ GỌI FUNCTION CALL 'generate_music'!\n` +
-    `    * [CÂU TRẢ LỜI BẰNG CHỮ KÈM THEO]: Bạn có thể in lời bài hát đã sáng tác ra tin nhắn chat để người dùng tiện theo dõi lời trong lúc nghe bài hát được gửi lên.\n` +
+    `    * [CÂU TRẢ LỜI BẰNG CHỮ KÈM THEO]: Bạn PHẢI trình bày Card thông tin bài hát rõ ràng: Tựa đề bài hát, Thể loại/Phong cách âm nhạc, Link nghe trực tiếp trên Suno (được cung cấp từ kết quả tool), và toàn văn lời bài hát đã sáng tác để người dùng vừa xem lời vừa bấm link nghe bài hát trực tiếp!\n` +
     `- KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
     `  + Khi người dùng yêu cầu vẽ biểu đồ, đồ thị, sơ đồ, poster lịch thi đấu, bảng xếp hạng hoặc yêu cầu làm lại/sửa lại ảnh/biểu đồ: BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM in code Python ra chat!\n` +
     `  + Với lịch thi đấu/bảng sự kiện/roadmap: Dùng PIL vẽ Infographic Poster Card Layout nền tối (burgundy/navy), thẻ bo góc, badge nổi bật ([CHÍNH THỨC], [GIAO HỮU]), tiêu đề vàng kim #FFD700. Với số liệu: Dùng matplotlib dark theme.\n` +
@@ -2730,6 +2734,11 @@ QUY TẮC BẮT BUỘC:
         onFileGenerated: async (file) => {
           try {
             if (options?.api) {
+              const isMusic = Boolean(file.isMusic) || file.fileName?.startsWith("suno_") || Boolean(file.listenUrl);
+              if (isMusic) {
+                await deliverGeneratedToolFile(options.api, threadId, file, botName, displayName, isSuperAdmin);
+                return;
+              }
               const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
               const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
               const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);

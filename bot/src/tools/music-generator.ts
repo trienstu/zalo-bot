@@ -31,12 +31,14 @@ export interface GeneratedMusicTrack {
   prompt?: string;
   localAudioPath?: string;
   localImagePath?: string;
+  listenUrl?: string;
 }
 
 export interface MusicGenerateResult {
   success: boolean;
   message?: string;
   tracks?: GeneratedMusicTrack[];
+  allTracks?: GeneratedMusicTrack[];
   primaryTrack?: GeneratedMusicTrack;
   filePath?: string;
   fileName?: string;
@@ -46,6 +48,7 @@ export interface MusicGenerateResult {
   title?: string;
   lyrics?: string;
   style?: string;
+  listenUrl?: string;
 }
 
 function ensureMusicDir(): string {
@@ -294,20 +297,19 @@ async function generateViaSunoCookie(
     };
   }
 
-  // Tải bản nhạc hoàn thiện nhất về máy chủ
+  // Lấy clip hoàn thiện nhất và clip phụ (Suno tạo ra 2 bản cùng lúc)
   const bestClip = completedClips[0];
-  const audioFileName = `suno_${bestClip.id}.mp3`;
-  const localAudioPath = path.join(cacheDir, audioFileName);
+  const secondClip = completedClips.length > 1 ? completedClips[1] : undefined;
 
-  const downloadedAudio = await downloadMediaFile(bestClip.audio_url, localAudioPath);
-  if (!downloadedAudio || !fs.existsSync(localAudioPath)) {
-    return {
-      success: false,
-      message: `Tạo nhạc thành công nhưng không thể tải file âm thanh từ Suno: ${bestClip.audio_url}`,
-    };
-  }
+  const songTitle = bestClip.title || options.title || "Bài hát AI";
+  const songStyle = bestClip.metadata?.tags || options.style || "Pop";
+  const songLyrics = bestClip.metadata?.prompt || options.lyrics || options.prompt;
+  const durationSec = Math.round(Number(bestClip.duration || 0));
 
-  // Tải thêm ảnh bìa cover art (nếu có)
+  const listenUrl1 = `https://suno.com/song/${bestClip.id}`;
+  const listenUrl2 = secondClip ? `https://suno.com/song/${secondClip.id}` : undefined;
+
+  // 1. Tải ảnh bìa cover art (nếu có)
   let localImagePath: string | undefined;
   const coverUrl = bestClip.image_large_url || bestClip.image_url;
   if (coverUrl) {
@@ -318,13 +320,36 @@ async function generateViaSunoCookie(
     }
   }
 
-  const fileSize = fs.statSync(localAudioPath).size;
-  const songTitle = bestClip.title || options.title || "Bài hát AI";
-  const songStyle = bestClip.metadata?.tags || options.style || "Pop";
-  const songLyrics = bestClip.metadata?.prompt || options.lyrics || options.prompt;
-  const durationSec = Math.round(Number(bestClip.duration || 0));
+  // 2. Thử tải file âm thanh (.mp3) nếu có URL download hợp lệ và không dính forbidden
+  let localAudioPathResult: string | undefined;
+  let audioFileName: string | undefined;
+  let fileSize = 0;
+  if (bestClip.audio_url && !bestClip.audio_url.includes("forbidden")) {
+    const targetAudioFile = `suno_${bestClip.id}.mp3`;
+    const targetAudioPath = path.join(cacheDir, targetAudioFile);
+    if (await downloadMediaFile(bestClip.audio_url, targetAudioPath)) {
+      localAudioPathResult = targetAudioPath;
+      audioFileName = targetAudioFile;
+      fileSize = fs.existsSync(targetAudioPath) ? fs.statSync(targetAudioPath).size : 0;
+    }
+  }
 
-  const caption = `🎵 [Sen Chúa AI Music] ${songTitle}\n🎸 Phong cách: ${songStyle}${durationSec ? ` (${durationSec}s)` : ""}\n📝 Lời bài hát:\n${songLyrics.slice(0, 300)}${songLyrics.length > 300 ? "..." : ""}`;
+  // 3. Xây dựng Card bài hát chuẩn mực, đầy đủ link nghe trực tiếp và lời ca khúc
+  let caption = `🎵 [Sáng Tác Ca Khúc AI] ${songTitle}\n` +
+    `🎸 Thể loại: ${songStyle}${durationSec ? ` (${durationSec}s)` : ""}\n` +
+    `🎧 Link nghe bài hát trực tiếp trên Suno:\n` +
+    `👉 Bản 1: ${listenUrl1}\n`;
+  if (listenUrl2) {
+    caption += `👉 Bản 2: ${listenUrl2}\n`;
+  }
+  if (songLyrics) {
+    caption += `\n📝 Lời bài hát:\n${songLyrics.trim()}`;
+  }
+
+  // Nếu tải được file âm thanh (.mp3) thì ưu tiên gửi file âm thanh, nếu không thì gửi ảnh bìa đại diện
+  const primaryFile = localAudioPathResult || localImagePath;
+  const finalFileName = primaryFile ? path.basename(primaryFile) : audioFileName;
+  const finalFileSize = primaryFile && fs.existsSync(primaryFile) ? fs.statSync(primaryFile).size : fileSize;
 
   const primaryTrack: GeneratedMusicTrack = {
     id: bestClip.id,
@@ -335,21 +360,36 @@ async function generateViaSunoCookie(
     duration: durationSec,
     tags: songStyle,
     prompt: songLyrics,
-    localAudioPath,
+    localAudioPath: localAudioPathResult,
     localImagePath,
+    listenUrl: listenUrl1,
   };
+
+  const allTracks: GeneratedMusicTrack[] = completedClips.map((c) => ({
+    id: c.id,
+    title: c.title || songTitle,
+    audioUrl: c.audio_url,
+    videoUrl: c.video_url,
+    imageUrl: c.image_large_url || c.image_url,
+    duration: Math.round(Number(c.duration || 0)),
+    tags: c.metadata?.tags || songStyle,
+    prompt: c.metadata?.prompt || songLyrics,
+    listenUrl: `https://suno.com/song/${c.id}`,
+  }));
 
   return {
     success: true,
     primaryTrack,
-    filePath: localAudioPath,
-    fileName: audioFileName,
-    fileSize,
+    allTracks,
+    filePath: primaryFile,
+    fileName: finalFileName,
+    fileSize: finalFileSize,
     coverPath: localImagePath,
     caption,
     title: songTitle,
     lyrics: songLyrics,
     style: songStyle,
+    listenUrl: listenUrl1,
   };
 }
 

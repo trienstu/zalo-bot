@@ -53,21 +53,25 @@ async function deliverGeneratedToolFileDirect(
   botName: string,
   userGreeting: string,
 ): Promise<void> {
-  const isMusic = Boolean(file.isMusic) || file.fileName?.startsWith("suno_");
+  const isMusic = Boolean(file.isMusic) || file.fileName?.startsWith("suno_") || Boolean(file.listenUrl);
   if (isMusic) {
-    await sendDirectFile(
-      api,
-      sender,
-      file.filePath,
-      file.caption || `🎵 ${botName} gửi bài hát [${file.title || "Suno AI"}] cho ${userGreeting} nghe nhé!`,
-    );
-    if (file.coverPath && fs.existsSync(file.coverPath)) {
+    if (file.filePath && fs.existsSync(file.filePath)) {
       await sendDirectFile(
         api,
         sender,
-        file.coverPath,
-        `🎶 Ảnh bìa ca khúc: ${file.title || "Suno AI Music"}`,
+        file.filePath,
+        file.caption || `🎵 ${botName} gửi bài hát [${file.title || "Suno AI"}] cho ${userGreeting} nghe nhé!`,
       );
+      if (file.coverPath && fs.existsSync(file.coverPath) && file.coverPath !== file.filePath) {
+        await sendDirectFile(
+          api,
+          sender,
+          file.coverPath,
+          `🎶 Ảnh bìa ca khúc: ${file.title || "Suno AI Music"}`,
+        );
+      }
+    } else if (file.caption) {
+      await sendDirectText(api, sender, file.caption);
     }
     return;
   }
@@ -718,7 +722,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     );
 
     const musicRes = await generateMusic({ prompt: musicPrompt });
-    if (musicRes.success && musicRes.filePath) {
+    if (musicRes.success) {
       await deliverGeneratedToolFileDirect(api, sender, { ...musicRes, isMusic: true }, defaultBotName, userGreeting);
     } else {
       await sendDirectText(
@@ -1761,10 +1765,10 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `      * Tuyệt đối cấm bịa đặt tin nhắn đã gửi file khi chưa gọi tool!\n` +
     `\n14b. KỸ NĂNG TẠO NHẠC & SÁNG TÁC CA KHÚC BẰNG SUNO AI (generate_music):\n` +
     `    - Khi người dùng yêu cầu tạo nhạc, sáng tác bài hát, viết ca khúc, phối beat, làm bài nhạc, tạo giai điệu (lofi, rap, ballad, pop, rock, acoustic, bolero...):\n` +
-    `      * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_music' (với prompt, style, title, lyrics, instrumental) để AI Suno thực sự tạo bài hát và xuất file âm thanh .mp3 gửi lên Zalo!\n` +
+    `      * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_music' (với prompt, style, title, lyrics, instrumental) để AI Suno thực sự tạo bài hát và xuất thẻ bài hát kèm link nghe trực tiếp!\n` +
     `      * TUYỆT ĐỐI CẤM gọi nhầm sang 'create_voice' (create_voice chỉ dùng để đọc giọng văn bản/thơ/podcast bằng Text-to-Speech, không biết tạo bài hát/giai điệu/nhạc cụ)!\n` +
     `      * TUYỆT ĐỐI CẤM chỉ in lời bài hát ra chat rồi hứa hẹn suông là hệ thống đang xử lý âm thanh mà không gọi tool! BẮT BUỘC PHẢI THỰC SỰ GỌI FUNCTION CALL 'generate_music'!\n` +
-    `      * [CÂU TRẢ LỜI BẰNG CHỮ KÈM THEO]: Bạn có thể in lời bài hát đã sáng tác ra tin nhắn chat để người dùng tiện theo dõi lời trong lúc nghe bài hát được gửi lên.\n` +
+    `      * [CÂU TRẢ LỜI BẰNG CHỮ KÈM THEO]: Bạn PHẢI trình bày Card thông tin bài hát rõ ràng: Tựa đề bài hát, Thể loại/Phong cách âm nhạc, Link nghe trực tiếp trên Suno (được cung cấp từ kết quả tool), và toàn văn lời bài hát đã sáng tác để người dùng vừa xem lời vừa bấm link nghe bài hát trực tiếp!\n` +
     `\n15. TỐI ƯU TỐC ĐỘ PHẢN HỒI (AGENT SPEED OPTIMIZATION):\n` +
     `    - Nếu trong phần [DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT] hoặc context bên dưới đã có đầy đủ thông tin/tin tức/số liệu để trả lời câu hỏi, bạn PHẢI TẬP TRUNG TRẢ LỜI NGAY TRONG VÒNG ĐẦU TIÊN, TUYỆT ĐỐI KHÔNG GỌI THÊM CÔNG CỤ TÌM KIẾM (web_search) LẶP LẠI để tránh làm chậm thời gian phản hồi của người dùng!\n` +
     `    - Chỉ gọi công cụ (finance_market_lookup, web_search, generate_file, fetch_url, python_interpreter) KHI dữ liệu cung cấp chưa có hoặc người dùng yêu cầu rõ việc tra cứu/tạo file/vẽ biểu đồ số liệu.\n` +

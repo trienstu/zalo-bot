@@ -1537,9 +1537,12 @@ export async function callGeminiAgentLoop(
           }
           options?.onToolCall?.(fc.name, fc.args || {});
           const result = await executeAgentTool(fc.name, fc.args || {});
-          if ((fc.name === "generate_file" || fc.name === "create_voice" || fc.name === "generate_image") && result?.success && options?.onFileGenerated) {
+          if ((fc.name === "generate_file" || fc.name === "create_voice" || fc.name === "generate_image" || fc.name === "generate_music") && result?.success && options?.onFileGenerated) {
             try {
-              await options.onFileGenerated(result);
+              await options.onFileGenerated({
+                ...result,
+                isMusic: fc.name === "generate_music",
+              });
             } catch (fileErr) {
               console.warn(`[gemini-agent] onFileGenerated for ${fc.name} error:`, fileErr);
             }
