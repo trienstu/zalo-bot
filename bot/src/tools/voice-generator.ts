@@ -686,31 +686,37 @@ async function synthesizeWithGoogleAIStudio(
   const voiceName = resolveAIStudioVoice(voiceHint, options?.stylePrompt);
   const models = ["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"];
 
-  const promptPrefix = options?.stylePrompt
-    ? `Read the following text aloud with style (${options.stylePrompt}):\n`
-    : `Read the following text aloud:\n`;
-
-  const payload = {
-    contents: [
-      {
-        parts: [{ text: `${promptPrefix}${cleanInput}` }],
-      },
-    ],
-    generationConfig: {
-      responseModalities: ["AUDIO"],
-      speechConfig: {
-        voiceConfig: {
-          prebuiltVoiceConfig: {
-            voiceName,
-          },
-        },
-      },
-    },
-  };
-
   for (const apiKey of apiKeys) {
     for (const model of models) {
       try {
+        // Tuyệt đối không dùng promptPrefix ("Read the following...") vì Gemini TTS coi text là transcript
+        // nguyên văn, khiến giọng đọc phát âm cả câu lệnh tiếng Anh.
+        // Với model 3.8, phong cách / style được đưa vào speech_metadata.style.
+        const isGemini38 = model.includes("3.8");
+        const payload = {
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: cleanInput,
+                  ...(isGemini38 && options?.stylePrompt ? { speech_metadata: { style: options.stylePrompt } } : {}),
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            responseModalities: ["AUDIO"],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: {
+                  voiceName,
+                },
+              },
+            },
+          },
+        };
+
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
         const res = await fetch(url, {
           method: "POST",
@@ -758,9 +764,47 @@ async function synthesizeWithGoogleAIStudioMultiSpeaker(
   const apiKeys = rawKey.split(",").map((k) => k.trim()).filter(Boolean);
   if (apiKeys.length === 0) return false;
 
-  const models = ["gemini-2.5-flash-preview-tts", "gemini-3.8-flash-tts"];
+  // Google AI Studio Native Multi-Speaker yêu cầu chính xác 2 speaker trong speakerVoiceConfigs
+  const activeSpeakers = speakers.slice(0, 2);
+  const spk0 = activeSpeakers[0];
+  const spk1 = activeSpeakers[1];
+  if (!spk0 || !spk1) return false;
 
-  const speakerVoiceConfigs = speakers.map((s) => ({
+  // Bóc tách dialogueText thành các lượt thoại (turns)
+  const lines = dialogueText.split("\n").map((l) => l.trim()).filter(Boolean);
+  const turns: { speaker: string; text: string }[] = [];
+  let currentSpeaker = spk0.speaker;
+
+  for (const line of lines) {
+    const match = line.match(/^(?:[-*•]\s*)?([^:：\n]+)[:：]\s*(.*)$/);
+    if (match && match[1] && match[2]) {
+      const rawLabel = match[1].replace(/\([^)]+\)/g, "").trim().toLowerCase();
+      const sentence = match[2].trim().replace(/^["'“”«»]+|["'“”«»]+$/g, "").trim();
+      if (!sentence) continue;
+
+      if (rawLabel === spk1.speaker.toLowerCase()) {
+        currentSpeaker = spk1.speaker;
+      } else if (rawLabel === spk0.speaker.toLowerCase()) {
+        currentSpeaker = spk0.speaker;
+      } else {
+        // Luân phiên nếu là nhãn nhân vật khác
+        currentSpeaker = currentSpeaker === spk0.speaker ? spk1.speaker : spk0.speaker;
+      }
+      turns.push({ speaker: currentSpeaker, text: sentence });
+    } else {
+      const sentence = line.replace(/^["'“”«»]+|["'“”«»]+$/g, "").trim();
+      if (sentence) {
+        turns.push({ speaker: currentSpeaker, text: sentence });
+      }
+    }
+  }
+
+  if (turns.length === 0) return false;
+
+  // Kịch bản thoại sạch chuẩn hóa cho model Gemini 2.5 fallback
+  const cleanDialogueScript = turns.map((t) => `${t.speaker}: ${t.text}`).join("\n");
+
+  const speakerVoiceConfigs = activeSpeakers.map((s) => ({
     speaker: s.speaker,
     voiceConfig: {
       prebuiltVoiceConfig: {
@@ -769,31 +813,59 @@ async function synthesizeWithGoogleAIStudioMultiSpeaker(
     },
   }));
 
-  const promptPrefix = options?.stylePrompt
-    ? `Read the following dialogue aloud with style (${options.stylePrompt}):\n`
-    : `Read the following dialogue aloud:\n`;
-
-  const payload = {
-    contents: [
-      {
-        parts: [{ text: `${promptPrefix}${dialogueText}` }],
-      },
-    ],
-    generationConfig: {
-      responseModalities: ["AUDIO"],
-      speechConfig: {
-        multiSpeakerVoiceConfig: {
-          speakerVoiceConfigs,
-        },
-      },
-    },
-  };
-
-  const tempPcmPath = path.join(VOICE_CACHE_DIR, `multispeaker_${Date.now()}.pcm`);
+  // Ưu tiên Gemini 3.8 Flash TTS vì hỗ trợ cấu trúc speech_metadata đa nhân vật chuẩn xác
+  const models = ["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"];
+  const tempAudioPath = path.join(VOICE_CACHE_DIR, `multispeaker_${Date.now()}.audio`);
 
   for (const apiKey of apiKeys) {
     for (const model of models) {
       try {
+        let payload: any;
+        if (model.includes("3.8")) {
+          // Gemini 3.8: Mỗi lượt thoại là 1 part riêng biệt có speech_metadata.speaker
+          // Tuyệt đối không chèn prefix "Read the following..." để tránh voice đọc thừa
+          payload = {
+            contents: [
+              {
+                role: "user",
+                parts: turns.map((t) => ({
+                  text: t.text,
+                  speech_metadata: {
+                    speaker: t.speaker,
+                    ...(options?.stylePrompt ? { style: options.stylePrompt } : {}),
+                  },
+                })),
+              },
+            ],
+            generationConfig: {
+              responseModalities: ["AUDIO"],
+              speechConfig: {
+                multiSpeakerVoiceConfig: {
+                  speakerVoiceConfigs,
+                },
+              },
+            },
+          };
+        } else {
+          // Gemini 2.5: Script đối thoại trực tiếp không kèm prompt prefix
+          payload = {
+            contents: [
+              {
+                role: "user",
+                parts: [{ text: cleanDialogueScript }],
+              },
+            ],
+            generationConfig: {
+              responseModalities: ["AUDIO"],
+              speechConfig: {
+                multiSpeakerVoiceConfig: {
+                  speakerVoiceConfigs,
+                },
+              },
+            },
+          };
+        }
+
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
         const res = await fetch(url, {
           method: "POST",
@@ -813,12 +885,12 @@ async function synthesizeWithGoogleAIStudioMultiSpeaker(
         if (part?.inlineData?.data) {
           const buffer = Buffer.from(part.inlineData.data, "base64");
           if (buffer.length > 0) {
-            fs.writeFileSync(tempPcmPath, buffer);
-            const cmd = `ffmpeg -y -v error -f s16le -ar 24000 -ac 1 -i "${tempPcmPath}" -vn -map_metadata -1 -c:a aac -b:a 128k -ar 44100 -ac 1 -movflags +faststart "${outputPath}"`;
-            await execPromise(cmd);
+            fs.writeFileSync(tempAudioPath, buffer);
+            // Convert sang chuẩn Zalo Voice Bubble (.m4a AAC 44.1kHz 128kbps Mono)
+            await convertToZaloVoiceBubble(tempAudioPath, outputPath);
             if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
               console.log(
-                `[voice-generator] ✅ Sinh Podcast đa nhân vật thành công qua Google AI Studio (${model}, ${speakers.length} speakers, ${buffer.length} bytes PCM)`,
+                `[voice-generator] ✅ Sinh Podcast đa nhân vật thành công qua Google AI Studio (${model}, ${activeSpeakers.length} speakers, ${buffer.length} bytes)`,
               );
               return true;
             }
@@ -828,7 +900,7 @@ async function synthesizeWithGoogleAIStudioMultiSpeaker(
         console.warn(`[voice-generator] Lỗi gọi Google AI Studio Multi-Speaker (${model}):`, err?.message || err);
       } finally {
         try {
-          if (fs.existsSync(tempPcmPath)) fs.unlinkSync(tempPcmPath);
+          if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
         } catch {}
       }
     }
