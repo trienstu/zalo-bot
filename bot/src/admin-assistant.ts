@@ -45,6 +45,7 @@ import { checkIsFileOrVoiceGeneration, checkIsVoiceRequest } from "./tools/file-
 import { interceptAndExecuteSimulatedTool, extractSpeechFallbackText } from "./tools/simulated-tool-interceptor.js";
 import { cleanOutdatedVoicePromisesFromAnswer, cleanCoreSpeechText } from "./tools/voice-generator.js";
 import { generateMusic } from "./tools/music-generator.js";
+import { transcribeAudioBuffer } from "./audio-transcoder.js";
 
 async function deliverGeneratedToolFileDirect(
   api: any,
@@ -113,10 +114,10 @@ export interface ConversationPronouns {
 }
 
 function matchesPronoun(text: string, words: string[]): boolean {
+  // Chuẩn hóa xóa dấu nhưng GIỮ NGUYÊN ký tự 'đ' (không đổi thành 'd' để tránh nhầm trợ từ 'đi' thành 'dì')
   const norm = String(text || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/gi, "d")
     .toLowerCase();
   const pattern = new RegExp(`\\b(?:${words.join("|")})\\b`, "i");
   return pattern.test(norm);
@@ -143,15 +144,83 @@ export function deriveConversationPronouns(params: {
   const memTexts = memories.map((m) => `${m.memory_key || ""} ${m.memory_value || ""}`).join(" ");
   const currentTexts = `${rawText} ${quoteText}`;
 
-  // 1. Nhận diện vai vế lớn hơn (Chú, Bác, Cô, Dì, Thím, Cậu)
+  // 1. Kiểm tra ưu tiên từ trí nhớ dài hạn (đã được lưu chính xác trước đó)
+  if (matchesPronoun(memTexts, ["chu"])) {
+    return {
+      botPronoun: "cháu",
+      userTitle: "Chú",
+      instruction: `QUY TẮC XƯNG HÔ ĐỐI XỨNG & KÍNH TRỌNG: Người dùng là bề trên (Chú). BẮT BUỘC xưng 'cháu', gọi người dùng là 'Chú'. TUYỆT ĐỐI CẤM xưng cọc cạch như 'em' với 'Chú'! Lễ phép, tự nhiên, chuẩn mực thuần phong mỹ tục Việt Nam.`,
+    };
+  }
+  if (matchesPronoun(memTexts, ["bac"])) {
+    return {
+      botPronoun: "cháu",
+      userTitle: "Bác",
+      instruction: `QUY TẮC XƯNG HÔ ĐỐI XỨNG & KÍNH TRỌNG: Người dùng là bề trên (Bác). BẮT BUỘC xưng 'cháu', gọi người dùng là 'Bác'. Lễ phép, tự nhiên.`,
+    };
+  }
+  if (matchesPronoun(memTexts, ["co"])) {
+    return {
+      botPronoun: "cháu",
+      userTitle: "Cô",
+      instruction: `QUY TẮC XƯNG HÔ ĐỐI XỨNG & KÍNH TRỌNG: Người dùng là bề trên (Cô). BẮT BUỘC xưng 'cháu', gọi người dùng là 'Cô'. Lễ phép, tự nhiên.`,
+    };
+  }
+  if (/\b(?:dì|thím|di|thim)\b/i.test(memTexts)) {
+    return {
+      botPronoun: "cháu",
+      userTitle: "Dì",
+      instruction: `QUY TẮC XƯNG HÔ ĐỐI XỨNG & KÍNH TRỌNG: Người dùng là bề trên (Dì). BẮT BUỘC xưng 'cháu', gọi người dùng là 'Dì'. Lễ phép, tự nhiên.`,
+    };
+  }
+
+  // 2. Xử lý ngữ cảnh tin nhắn hiện tại (currentTexts)
+  // Xóa các trợ từ câu cầu khiến "đi", "đi mà", "đi e", "đi em" để tuyệt đối không nhầm sang "dì"
+  const cleanForPronoun = currentTexts
+    .replace(/\b(?:cho\s+\w+\s+)?đi(?:\s+(?:nhe|nhé|nha|ạ|a|e|em|bot|luôn|mau|lẹ))?\b/gi, " ")
+    .replace(/\bđi\b/gi, " ");
+
+  // 2.1. Nhận diện trường hợp gọi bot là "chú mày" (người dùng là bậc anh/bề trên gọi bot)
+  const isCallingBotChuMay = /\b(?:chú\s+mày|chu\s+may)\b/i.test(currentTexts);
+
+  // 2.2. Nhận diện người dùng tự xưng hoặc ra lệnh bằng danh xưng rõ ràng (Self-Declaration)
+  // Khách xưng là Chị: "cho chị", "chị nhờ", "chị bảo", "cho c", "c nha", "c bảo"
+  const isSelfChi =
+    /\b(?:cho\s+chị|chị\s+(?:nhờ|bảo|cần|muốn|gửi|hỏi|xin|nè)|chị\s+đi|cho\s+c\b|c\s+(?:nha|nhé|bảo|cần|muốn|gửi|nhờ))\b/i.test(cleanForPronoun);
+
+  // Khách xưng là Anh: "cho anh", "anh nhờ", "anh bảo", "cho a", "a nha", "a bảo", hoặc gọi bot "chú mày"
+  const isSelfAnh =
+    isCallingBotChuMay ||
+    /\b(?:cho\s+anh|anh\s+(?:nhờ|bảo|cần|muốn|gửi|hỏi|xin|nè)|anh\s+đi|cho\s+a\b|a\s+(?:nha|nhé|bảo|cần|muốn|gửi|nhờ))\b/i.test(cleanForPronoun);
+
+  if (isSelfChi) {
+    return {
+      botPronoun: "em",
+      userTitle: "Chị",
+      instruction: `QUY TẮC XƯNG HÔ: Người dùng xưng 'chị'. BẮT BUỘC xưng 'em', gọi người dùng là 'Chị'. Thân thiện, chu đáo, tôn trọng.`,
+    };
+  }
+
+  if (isSelfAnh) {
+    return {
+      botPronoun: "em",
+      userTitle: "Anh",
+      instruction: `QUY TẮC XƯNG HÔ: Người dùng xưng 'anh' (hoặc gọi thân mật 'chú mày'). BẮT BUỘC xưng 'em', gọi người dùng là 'Anh'. Thân thiện, chu đáo, tôn trọng.`,
+    };
+  }
+
+  // 2.3. Nhận diện vai vế bề trên trong tin nhắn (loại trừ cụm "chú mày" và trợ từ "đi")
   let foundElder: string | null = null;
-  if (matchesPronoun(memTexts, ["chu"]) || matchesPronoun(currentTexts, ["chu"])) {
+  const textWithoutChuMay = cleanForPronoun.replace(/\b(?:chú\s+mày|chu\s+may)\b/gi, " ");
+
+  if (matchesPronoun(textWithoutChuMay, ["chu"])) {
     foundElder = "Chú";
-  } else if (matchesPronoun(memTexts, ["bac"]) || matchesPronoun(currentTexts, ["bac"])) {
+  } else if (matchesPronoun(textWithoutChuMay, ["bac"])) {
     foundElder = "Bác";
-  } else if (matchesPronoun(memTexts, ["co"]) || matchesPronoun(currentTexts, ["co"])) {
+  } else if (matchesPronoun(textWithoutChuMay, ["co"])) {
     foundElder = "Cô";
-  } else if (matchesPronoun(memTexts, ["di", "thim"]) || matchesPronoun(currentTexts, ["di", "thim"])) {
+  } else if (/\b(?:dì|thím)\b/i.test(textWithoutChuMay) || /\b(?:chào|thưa|gọi|kính|cháu)\s+(?:dì|di)\b/i.test(textWithoutChuMay)) {
+    // Chỉ nhận diện "Dì" khi có dấu 'dì' rõ ràng hoặc có từ xưng hô tôn kính đi kèm, tránh hoàn toàn từ không dấu gây hiểu lầm
     foundElder = "Dì";
   }
 
@@ -163,11 +232,11 @@ export function deriveConversationPronouns(params: {
     };
   }
 
-  // 2. Nhận diện anh/chị
+  // 2.4. Nhận diện anh/chị thông thường
   let foundSibling: string | null = null;
-  if (matchesPronoun(memTexts, ["chi"]) || matchesPronoun(currentTexts, ["chi"])) {
+  if (matchesPronoun(cleanForPronoun, ["chi"])) {
     foundSibling = "Chị";
-  } else if (matchesPronoun(memTexts, ["anh"]) || matchesPronoun(currentTexts, ["anh"])) {
+  } else if (matchesPronoun(cleanForPronoun, ["anh"])) {
     foundSibling = "Anh";
   }
 
@@ -1408,6 +1477,27 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   // =========================================================================
   console.log(`[admin-assistant] 💬 Nhận tin nhắn 1:1 từ ${isAdmin ? "Admin" : "User"} ${displayName}: "${rawText}" (File=${hasFile}, Image=${hasImage})`);
 
+  // Lấy bộ nhớ cá nhân và xác định xưng hô trước để cá nhân hóa chính xác
+  let userMemories: any[] = [];
+  let userMemorySection = "";
+  try {
+    userMemories = getUserMemories(sender, 8);
+    if (userMemories.length > 0) {
+      userMemorySection = `\n\n` + formatUserMemoriesForPrompt(userMemories, displayName);
+    }
+  } catch (e) {
+    console.warn("[admin-assistant] Lỗi getUserMemories:", e);
+  }
+
+  const pronouns = deriveConversationPronouns({
+    isAdmin,
+    displayName,
+    rawText,
+    quoteText: event.quote?.text,
+    memories: userMemories,
+  });
+  const userGreeting = isAdmin ? "Sếp" : pronouns.userTitle;
+
   // Tải file hoặc hình ảnh nếu có
   let mediaPart: GeminiMediaPart | null = null;
   let fileTextContent: string | null = null;
@@ -1426,6 +1516,21 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     const fileRes = await downloadFileContent(targetUrl, fileName);
     if (fileRes?.mediaPart) {
       mediaPart = fileRes.mediaPart;
+
+      // 🎙️ TỰ ĐỘNG BÓC BĂNG FILE ÂM THANH (STT): Đọc transcript vào fileTextContent để sẵn sàng xuất Word hoặc in chữ
+      if (fileRes.mediaPart.mimeType?.startsWith("audio/") && fileRes.audioBuffer) {
+        console.log(`[admin-assistant] 🎙️ Phát hiện file âm thanh "${fileName}", đang tự động bóc băng (STT)...`);
+        const transcript = await transcribeAudioBuffer(fileRes.audioBuffer, fileRes.mediaPart.mimeType, fileName);
+        if (transcript) {
+          fileTextContent = transcript;
+          lastAnalyzedDocuments.set(sender, {
+            name: fileName || "File âm thanh",
+            text: fileTextContent,
+            timestamp: Date.now(),
+          });
+          saveRecentDirectDocument(sender, fileName || "File âm thanh", fileTextContent);
+        }
+      }
     } else if (fileRes?.textContent) {
       fileTextContent = fileRes.textContent;
       lastAnalyzedDocuments.set(sender, {
@@ -1435,13 +1540,13 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       });
       saveRecentDirectDocument(sender, fileName || "Tài liệu", fileTextContent);
     } else {
-      // Báo rõ cho Admin thay vì để Gemini tự đoán mò từ tên file
+      // Báo rõ lỗi tải file theo đúng danh xưng của người dùng
       if (fileRes?.error === "UNSUPPORTED_IMAGE_FORMAT") {
         await sendDirectText(
           api,
           sender,
-          `⚠️ Dạ Sếp ơi, hình ảnh đính kèm có định dạng "${fileRes.unsupportedMime || "tệp"}" hiện AI chưa hỗ trợ giải mã trực tiếp ạ!\n\n` +
-          `👉 Kính nhờ Sếp chụp lại màn hình hoặc lưu ảnh dạng JPG/PNG gửi lại giúp em nhé! ☘️`,
+          `⚠️ Dạ ${userGreeting} ơi, hình ảnh đính kèm có định dạng "${fileRes.unsupportedMime || "tệp"}" hiện AI chưa hỗ trợ giải mã trực tiếp ạ!\n\n` +
+          `👉 Kính nhờ ${userGreeting} chụp lại màn hình hoặc lưu ảnh dạng JPG/PNG gửi lại giúp em nhé! ☘️`,
         );
         return;
       }
@@ -1450,11 +1555,11 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         await sendDirectText(
           api,
           sender,
-          `⚠️ Dạ Sếp ơi, file "${fileName || "tài liệu"}" có dung lượng quá lớn (${mb} MB)!\n\n` +
-          `👉 Do file vượt quá 50MB (gần 1GB) nên máy chủ không thể tải và giải mã trực tiếp trong vài giây được.\n` +
-          `👉 Sếp giúp em:\n` +
-          `1. Xuất lại file PDF ở mức Standard / Nén dung lượng (khuyên dùng dưới 30MB - 50MB).\n` +
-          `2. Hoặc gửi file Word (.docx) / Bảng giá Excel (.xlsx) / dán trực tiếp văn bản nội dung dự án vào đây, em sẽ nạp và ghi nhớ ngay lập tức cho Sếp ạ! ☘️`,
+          `⚠️ Dạ ${userGreeting} ơi, file "${fileName || "tài liệu"}" có dung lượng quá lớn (${mb} MB)!\n\n` +
+          `👉 Do file vượt quá 50MB nên máy chủ không thể tải và giải mã trực tiếp trong vài giây được.\n` +
+          `👉 ${userGreeting} giúp em:\n` +
+          `1. Xuất lại file ở mức Standard / Nén dung lượng (khuyên dùng dưới 30MB - 50MB).\n` +
+          `2. Hoặc gửi file Word (.docx) / Excel (.xlsx) / dán trực tiếp văn bản vào đây, em sẽ nạp và ghi nhớ ngay lập tức ạ! ☘️`,
         );
         return;
       }
@@ -1462,17 +1567,17 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         await sendDirectText(
           api,
           sender,
-          `⚠️ Dạ Sếp ơi, đường truyền tải file "${fileName || "tài liệu"}" từ Zalo bị gián đoạn hoặc timeout (do file quá nặng)!\n\n` +
-          `👉 Sếp vui lòng gửi file nhẹ hơn (dưới 30MB) hoặc gửi file Word / text trực tiếp để em hỗ trợ Sếp nhé!`,
+          `⚠️ Dạ ${userGreeting} ơi, đường truyền tải file "${fileName || "tài liệu"}" từ Zalo bị gián đoạn hoặc timeout (do file quá nặng)!\n\n` +
+          `👉 ${userGreeting} vui lòng gửi file nhẹ hơn (dưới 30MB) hoặc gửi file Word / text trực tiếp để em hỗ trợ nhé!`,
         );
         return;
       }
       await sendDirectText(
         api,
         sender,
-        `⚠️ Dạ Sếp ơi, em không thể tải hoặc đọc được nội dung từ file "${fileName || "tài liệu"}"!\n\n` +
-        `👉 Nguyên nhân: Link tải file từ Zalo bị gián đoạn, quá hạn hoặc file PDF scan dạng ảnh không có lớp chữ.\n` +
-        `👉 Sếp vui lòng gửi file dạng văn bản (Word, Excel, PDF chuẩn) hoặc nén file nhẹ hơn để em hỗ trợ Sếp nhé!`,
+        `⚠️ Dạ ${userGreeting} ơi, em không thể tải hoặc đọc được nội dung từ file "${fileName || "tài liệu"}"!\n\n` +
+        `👉 Nguyên nhân: Link tải file từ Zalo bị gián đoạn, quá hạn hoặc file scan dạng ảnh không có lớp chữ.\n` +
+        `👉 ${userGreeting} vui lòng gửi file dạng văn bản (Word, Excel, PDF chuẩn) hoặc nén file nhẹ hơn để em hỗ trợ nhé!`,
       );
       return;
     }
@@ -1494,24 +1599,6 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       .join("\n")
     : "";
 
-  let userMemories: any[] = [];
-  let userMemorySection = "";
-  try {
-    userMemories = getUserMemories(sender, 8);
-    if (userMemories.length > 0) {
-      userMemorySection = `\n\n` + formatUserMemoriesForPrompt(userMemories, displayName);
-    }
-  } catch (e) {
-    console.warn("[admin-assistant] Lỗi getUserMemories:", e);
-  }
-
-  const pronouns = deriveConversationPronouns({
-    isAdmin,
-    displayName,
-    rawText,
-    quoteText: event.quote?.text,
-    memories: userMemories,
-  });
 
   const temporalPrompt = getSystemTemporalPrompt();
   const systemPrompt = `${temporalPrompt}\n\n` + (isAdmin
@@ -1753,6 +1840,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `      * Với slide PowerPoint (.pptx): Phải chia nội dung thành các slide rõ ràng bằng các tiêu đề markdown '# Tiêu đề slide' và nội dung gạch đầu dòng chi tiết cho từng slide.\n` +
     `      * TUYỆT ĐỐI CẤM CHỈ GÕ DÀN Ý BẰNG CHỮ RỒI HỎI NGƯỢC LẠI NGƯỜI DÙNG có muốn soạn không. Hãy hành động và xuất file ngay lập tức!\n` +
     `      * [QUY TẮC BẢO LƯU NGUYÊN VẸN TRI THỨC KHI ĐÓNG GÓI / XUẤT FILE ĐA LĨNH VỰC]: Khi người dùng yêu cầu 'đóng gói', 'xuất file', 'lưu vào file', 'chuyển thành file' (Word/docx, Excel/xlsx, PowerPoint/pptx, PDF, CSV, TXT...) từ nội dung tin nhắn được trích dẫn (quote) hoặc nội dung đã bàn luận trước đó: BẮT BUỘC PHẢI BẢO LƯU NGUYÊN VẸN 100% TOÀN BỘ NỘI DUNG CHI TIẾT GỐC VÀO THAM SỐ 'content' CỦA TOOL 'generate_file' (bao gồm đầy đủ căn cứ/điều khoản pháp luật, bảng biểu/số liệu tài chính - BĐS, toàn bộ lời thoại/phân cảnh kịch bản media, mã nguồn/kiến trúc kỹ thuật, quy chế doanh nghiệp...). TUYỆT ĐỐI CẤM tự ý tóm tắt thành dàn ý gạch đầu dòng sơ sài làm mất mát dữ liệu và tri thức chuyên sâu của người dùng!\n` +
+      `      * [QUY TẮC CHUYỂN ĐỔI FILE GHI ÂM / ÂM THANH SANG FILE WORD (.DOCX)]: Khi người dùng gửi file ghi âm/âm thanh và yêu cầu 'chuyển sang word', 'sang words', 'xuất file word', 'cho vào file word' hoặc 'chuyển thành docx': BẮT BUỘC lấy toàn bộ nội dung đã bóc băng trong mục [NỘI DUNG TÀI LIỆU ĐÍNH KÈM], định dạng tài liệu Word chuyên nghiệp (Tiêu đề rõ ràng, phân đoạn mạch lạc) và BẮT BUỘC GỌI 'generate_file' (fileType='docx') để đóng gói thành file Word thật gửi lên Zalo cho người dùng!\n` +
     `      * [QUY TẮC NỘI DUNG VOICE / TTS CHO MỌI LĨNH VỰC (Thơ ca, Tin tức, Pháp luật, Tài chính, Kịch bản, Kể chuyện)]: Khi gọi 'create_voice', tham số 'text' CHỈ ĐƯỢC CHỨA NỘI DUNG CỐT LÕI CẦN ĐỌC THÀNH TIẾNG (Tên tác phẩm/bản tin/điều luật, Tác giả/Nguồn nếu có, và toàn bộ nội dung chi tiết bài thơ / tin tức / đối thoại / câu chuyện). TUYỆT ĐỐI CẤM đưa lời chào xưng hô (@mention, 'Dạ Sếp...', 'Em xin gửi...'), lời dẫn phiếm đàm ('Dưới đây là...'), thông báo tiến độ ('Hệ thống đang xử lý qua worker...'), câu hỏi kết thúc ('Sếp có muốn...', 'Chúc bạn nghe vui...'), ĐẶC BIỆT TUYỆT ĐỐI CẤM đưa các đoạn phân tích, bình luận, cảm nhận, ý nghĩa, bối cảnh sáng tác hay giải thích bên dưới vào tham số 'text' của giọng đọc (người dùng chỉ muốn nghe chính tác phẩm, không nghe phân tích ngoài lề)!\n` +
       `      * [KỊCH BẢN ĐỐI THOẠI / PODCAST 2 NGƯỜI]: Khi người dùng yêu cầu kịch bản 2 người nói chuyện, cuộc đối thoại, hoặc podcast 2 người: BẮT BUỘC tự động soạn kịch bản đối đáp sinh động, phân vai rõ ràng theo từng lượt nói (ví dụ: 'Nam: ...\nNữ: ...' hoặc 'MC Nam: ...\nKhách mời: ...', có thể thêm cảm xúc trong ngoặc như 'Nam (hào hứng): ...') và BẮT BUỘC GỌI 'create_voice' truyền toàn bộ kịch bản vào tham số 'text' để hệ thống tự động tổng hợp thành file Podcast .m4a 2 giọng gửi lên Zalo!\n` +
     `      * TUYỆT ĐỐI CẤM in cú pháp giả lập dạng '[create_voice text="..."]' hoặc '[generate_file(...)]' ra tin nhắn văn bản! BẮT BUỘC PHẢI THỰC SỰ GỌI FUNCTION CALLING CỦA TOOL!\n` +

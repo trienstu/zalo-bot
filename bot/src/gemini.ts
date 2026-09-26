@@ -43,6 +43,11 @@ import {
   markGroundingExhausted,
 } from "./grounding-quota.js";
 import { callVertexGemini, isVertexConfigured } from "./vertex-gemini.js";
+import {
+  detectAudioMimeType,
+  isAudioExtension,
+  transcodeAudioWithFfmpeg,
+} from "./audio-transcoder.js";
 
 /**
  * Lớp gọi Google Gemini API dùng chung (Tóm tắt hội thoại Zalo, bóc tách dữ liệu).
@@ -85,6 +90,9 @@ function detectMimeType(buffer: Buffer, fileName = "", headerContentType = ""): 
   if (cleanHeader && cleanHeader !== "application/octet-stream" && cleanHeader !== "binary/octet-stream") {
     return cleanHeader;
   }
+
+  const audioMime = detectAudioMimeType(buffer, fileName);
+  if (audioMime) return audioMime;
 
   const ext = (fileName.split(".").pop() || "").toLowerCase();
   if (ext === "png") return "image/png";
@@ -170,6 +178,7 @@ export async function downloadImageBase64(url: string): Promise<GeminiImagePart 
 export interface DownloadFileResult {
   textContent?: string;
   mediaPart?: GeminiMediaPart;
+  audioBuffer?: Buffer;
   error?: "FILE_TOO_LARGE" | "DOWNLOAD_TIMEOUT" | "DOWNLOAD_FAILED" | "UNSUPPORTED_IMAGE_FORMAT";
   fileSizeBytes?: number;
   unsupportedMime?: string;
@@ -352,13 +361,32 @@ export async function downloadFileContent(
       }
     }
 
-    // 2. File Âm thanh / Voice
-    if (detectedMime.startsWith("audio/") || ["mp3", "wav", "m4a", "ogg", "aac"].includes(ext)) {
+    // 2. File Âm thanh / Voice (Mở rộng hỗ trợ WMA, FLAC, AMR, WAV, MP3, M4A, OGG...)
+    const audioMime = detectAudioMimeType(buffer, fileName || url);
+    const isAudio = Boolean(audioMime) || detectedMime.startsWith("audio/") || isAudioExtension(ext);
+    if (isAudio) {
+      let finalAudioBuffer = buffer;
+      let finalMime = audioMime || (detectedMime.startsWith("audio/") ? detectedMime : "audio/mp3");
+
+      // Nếu là WMA, AMR hoặc các định dạng AI không đọc trực tiếp được, tự động chuyển đổi sang MP3 chuẩn
+      if (ext === "wma" || ext === "amr" || finalMime.includes("wma") || finalMime.includes("amr")) {
+        try {
+          console.log(`[gemini] 🔄 Đang tự động convert file âm thanh [${fileName || ext}] sang MP3 bằng ffmpeg...`);
+          const converted = await transcodeAudioWithFfmpeg(buffer, "mp3");
+          finalAudioBuffer = converted.buffer;
+          finalMime = converted.mimeType;
+          console.log(`[gemini] ✅ Đã convert thành công sang ${finalMime} (${finalAudioBuffer.length} bytes)`);
+        } catch (convErr) {
+          console.warn(`[gemini] Lỗi convert audio [${fileName}]:`, convErr);
+        }
+      }
+
       return {
         mediaPart: {
-          data: buffer.toString("base64"),
-          mimeType: detectedMime.startsWith("audio/") ? detectedMime : "audio/mp3",
+          data: finalAudioBuffer.toString("base64"),
+          mimeType: finalMime.startsWith("audio/") ? finalMime : "audio/mp3",
         },
+        audioBuffer: finalAudioBuffer,
       };
     }
 
