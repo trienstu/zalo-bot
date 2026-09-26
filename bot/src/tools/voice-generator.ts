@@ -666,6 +666,9 @@ export function resolveAIStudioVoice(voiceHint?: string, styleHint?: string): st
   return "Aoede";
 }
 
+let voiceKeyOffset = 0;
+const voiceKeyCooldownMap = new Map<string, number>();
+
 /**
  * Sinh âm thanh qua Google AI Studio (Gemini Flash TTS)
  * Hỗ trợ diễn cảm, ngâm thơ, phong cách vùng miền (Huế, Nam, Bắc) và ngữ điệu tự nhiên.
@@ -686,12 +689,20 @@ async function synthesizeWithGoogleAIStudio(
   const voiceName = resolveAIStudioVoice(voiceHint, options?.stylePrompt);
   const models = ["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"];
 
-  for (const apiKey of apiKeys) {
+  const numKeys = apiKeys.length;
+  for (let attempt = 0; attempt < numKeys; attempt++) {
+    const keyIdx = (voiceKeyOffset + attempt) % numKeys;
+    const apiKey = apiKeys[keyIdx];
+    if (!apiKey) continue;
+
+    // Bỏ qua các key vừa bị 429 cạn hạn mức trong 60 giây qua
+    const cooldownUntil = voiceKeyCooldownMap.get(apiKey) || 0;
+    if (Date.now() < cooldownUntil && attempt < numKeys - 1) {
+      continue;
+    }
+
     for (const model of models) {
       try {
-        // Tuyệt đối không dùng promptPrefix ("Read the following...") vì Gemini TTS coi text là transcript
-        // nguyên văn, khiến giọng đọc phát âm cả câu lệnh tiếng Anh.
-        // Với model 3.8, phong cách / style được đưa vào speech_metadata.style.
         const isGemini38 = model.includes("3.8");
         const payload = {
           contents: [
@@ -722,12 +733,16 @@ async function synthesizeWithGoogleAIStudio(
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(30_000),
+          signal: AbortSignal.timeout(20_000),
         });
 
         if (!res.ok) {
-          const errText = await res.text();
-          console.warn(`[voice-generator] Google AI Studio TTS (${model}) HTTP ${res.status}:`, errText.slice(0, 150));
+          const errText = await res.text().catch(() => "");
+          console.warn(`[voice-generator] Google AI Studio TTS (${model}, Key #${keyIdx + 1}) HTTP ${res.status}:`, errText.slice(0, 150));
+          if (res.status === 429) {
+            voiceKeyCooldownMap.set(apiKey, Date.now() + 60_000);
+            break; // Cạn quota trên key này, chuyển ngay sang Key tiếp theo, không thử model thứ hai
+          }
           continue;
         }
 
@@ -737,12 +752,13 @@ async function synthesizeWithGoogleAIStudio(
           const buffer = Buffer.from(part.inlineData.data, "base64");
           if (buffer.length > 0) {
             fs.writeFileSync(outputPath, buffer);
-            console.log(`[voice-generator] ✅ Sinh âm thanh thành công qua Google AI Studio (${model}, ${voiceName}, ${buffer.length} bytes)`);
+            console.log(`[voice-generator] ✅ Sinh âm thanh thành công qua Google AI Studio (${model}, Key #${keyIdx + 1}, ${voiceName}, ${buffer.length} bytes)`);
+            voiceKeyOffset = (keyIdx + 1) % numKeys;
             return true;
           }
         }
       } catch (err: any) {
-        console.warn(`[voice-generator] Lỗi gọi Google AI Studio TTS (${model}):`, err?.message || err);
+        console.warn(`[voice-generator] Lỗi gọi Google AI Studio TTS (${model}, Key #${keyIdx + 1}):`, err?.message || err);
       }
     }
   }
@@ -817,7 +833,18 @@ async function synthesizeWithGoogleAIStudioMultiSpeaker(
   const models = ["gemini-3.8-flash-tts", "gemini-2.5-flash-preview-tts"];
   const tempAudioPath = path.join(VOICE_CACHE_DIR, `multispeaker_${Date.now()}.audio`);
 
-  for (const apiKey of apiKeys) {
+  const numKeys = apiKeys.length;
+  for (let attempt = 0; attempt < numKeys; attempt++) {
+    const keyIdx = (voiceKeyOffset + attempt) % numKeys;
+    const apiKey = apiKeys[keyIdx];
+    if (!apiKey) continue;
+
+    // Bỏ qua các key vừa bị 429 cạn hạn mức trong 60 giây qua
+    const cooldownUntil = voiceKeyCooldownMap.get(apiKey) || 0;
+    if (Date.now() < cooldownUntil && attempt < numKeys - 1) {
+      continue;
+    }
+
     for (const model of models) {
       try {
         let payload: any;
@@ -871,12 +898,16 @@ async function synthesizeWithGoogleAIStudioMultiSpeaker(
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(45_000),
+          signal: AbortSignal.timeout(30_000),
         });
 
         if (!res.ok) {
-          const errText = await res.text();
-          console.warn(`[voice-generator] Google AI Studio Multi-Speaker (${model}) HTTP ${res.status}:`, errText.slice(0, 150));
+          const errText = await res.text().catch(() => "");
+          console.warn(`[voice-generator] Google AI Studio Multi-Speaker (${model}, Key #${keyIdx + 1}) HTTP ${res.status}:`, errText.slice(0, 150));
+          if (res.status === 429) {
+            voiceKeyCooldownMap.set(apiKey, Date.now() + 60_000);
+            break; // Cạn quota trên key này, chuyển ngay sang Key tiếp theo, không thử model thứ hai
+          }
           continue;
         }
 
@@ -890,14 +921,15 @@ async function synthesizeWithGoogleAIStudioMultiSpeaker(
             await convertToZaloVoiceBubble(tempAudioPath, outputPath);
             if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
               console.log(
-                `[voice-generator] ✅ Sinh Podcast đa nhân vật thành công qua Google AI Studio (${model}, ${activeSpeakers.length} speakers, ${buffer.length} bytes)`,
+                `[voice-generator] ✅ Sinh Podcast đa nhân vật thành công qua Google AI Studio (${model}, Key #${keyIdx + 1}, ${activeSpeakers.length} speakers, ${buffer.length} bytes)`,
               );
+              voiceKeyOffset = (keyIdx + 1) % numKeys;
               return true;
             }
           }
         }
       } catch (err: any) {
-        console.warn(`[voice-generator] Lỗi gọi Google AI Studio Multi-Speaker (${model}):`, err?.message || err);
+        console.warn(`[voice-generator] Lỗi gọi Google AI Studio Multi-Speaker (${model}, Key #${keyIdx + 1}):`, err?.message || err);
       } finally {
         try {
           if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
