@@ -1,4 +1,6 @@
+import fs from "node:fs";
 import { config } from "./config.js";
+
 import { runtimeConfig } from "./runtime-config.js";
 import {
   login,
@@ -11,10 +13,12 @@ import {
   consumeReloginRequest,
   consumeKickNowRequest,
   consumeSummarySendRequest,
+  consumeDirectSendRequest,
   listGroups,
   syncFriends,
   sendGroupText,
   sendDirectText,
+  sendDirectFile,
   sleep,
   reloginRequestExists,
   hasSavedCredentials,
@@ -709,6 +713,45 @@ export async function runListener(): Promise<void> {
             Date.now(),
           );
           console.warn(`[listener] Gửi bản tóm tắt thất bại: ${String(e)}`);
+        }
+      })();
+    }
+
+    // 7. Gửi tin nhắn / file 1:1 theo yêu cầu background hoặc dashboard
+    const directReq = consumeDirectSendRequest();
+    if (directReq) {
+      void (async () => {
+        try {
+          console.log(`[listener] 📤 Đang xử lý DirectSendRequest đến ${directReq.userId}...`);
+          if (directReq.filePath && fs.existsSync(directReq.filePath)) {
+            await sendDirectFile(api, directReq.userId, directReq.filePath, directReq.caption || directReq.text || "");
+          } else if (directReq.text) {
+            await sendDirectText(api, directReq.userId, directReq.text);
+          }
+          setBotState(
+            "direct_send_result",
+            JSON.stringify({
+              requestId: directReq.requestId,
+              userId: directReq.userId,
+              ok: true,
+              sentAt: Date.now(),
+            }),
+            Date.now(),
+          );
+          console.log(`[listener] ✅ Đã gửi DirectSendRequest thành công đến ${directReq.userId}.`);
+        } catch (e) {
+          console.warn(`[listener] DirectSendRequest lỗi:`, e);
+          setBotState(
+            "direct_send_result",
+            JSON.stringify({
+              requestId: directReq.requestId,
+              userId: directReq.userId,
+              ok: false,
+              error: String(e),
+              failedAt: Date.now(),
+            }),
+            Date.now(),
+          );
         }
       })();
     }

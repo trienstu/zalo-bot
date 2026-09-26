@@ -71,6 +71,8 @@ const FRIEND_SYNC_REQUEST_FILE = "friend-sync-request.json";
 const PERMISSION_CHECK_REQUEST_FILE = "permission-check-request.json";
 const KICK_NOW_REQUEST_FILE = "kick-now-request.json";
 const SUMMARY_SEND_REQUEST_FILE = "summary-send-request.json";
+const DIRECT_SEND_REQUEST_FILE = "direct-send-request.json";
+
 
 /** Ghi trạng thái login + đường dẫn QR ra file để web panel hiển thị. */
 function writeLoginStatus(state: LoginState, extra?: Record<string, unknown>): void {
@@ -339,6 +341,76 @@ export function consumeSummarySendRequest(): SummarySendRequest | null {
     requestedBy: typeof obj.requestedBy === "string" && obj.requestedBy.trim() ? obj.requestedBy.trim() : "dashboard",
   };
 }
+
+export interface DirectSendRequest {
+  requestId: string;
+  userId: string;
+  text?: string;
+  filePath?: string;
+  caption?: string;
+  requestedAt: number;
+  requestedBy: string;
+}
+
+/**
+ * Yêu cầu gửi file hoặc tin nhắn trực tiếp 1:1 qua Zalo do background task/dashboard ghi ra file.
+ */
+export function consumeDirectSendRequest(): DirectSendRequest | null {
+  const candidatePaths = [
+    path.join(config.sessionDir, DIRECT_SEND_REQUEST_FILE),
+    path.join(path.dirname(config.dbPath), DIRECT_SEND_REQUEST_FILE),
+    path.resolve(process.cwd(), "data", DIRECT_SEND_REQUEST_FILE),
+    path.resolve(process.cwd(), "data", "session", DIRECT_SEND_REQUEST_FILE),
+  ];
+
+  let requestPath: string | null = null;
+  for (const p of candidatePaths) {
+    if (fs.existsSync(p)) {
+      requestPath = p;
+      break;
+    }
+  }
+  if (!requestPath) return null;
+
+  let data: unknown;
+  try {
+    data = JSON.parse(fs.readFileSync(requestPath, "utf8"));
+  } catch {
+    data = null;
+  } finally {
+    for (const p of candidatePaths) {
+      try {
+        if (fs.existsSync(p)) fs.rmSync(p, { force: true });
+      } catch {}
+    }
+  }
+
+  const obj = (data ?? {}) as {
+    requestId?: unknown;
+    userId?: unknown;
+    targetId?: unknown;
+    text?: unknown;
+    filePath?: unknown;
+    caption?: unknown;
+    requestedAt?: unknown;
+    requestedBy?: unknown;
+  };
+  const requestId = typeof obj.requestId === "string" && obj.requestId.trim() ? obj.requestId.trim() : `req_${Date.now()}`;
+  const userId =
+    (typeof obj.userId === "string" && obj.userId.trim()) ||
+    (typeof obj.targetId === "string" && obj.targetId.trim()) ||
+    "";
+  if (!userId) return null;
+
+  const text = typeof obj.text === "string" ? obj.text.trim() : "";
+  const filePath = typeof obj.filePath === "string" ? obj.filePath.trim() : "";
+  const caption = typeof obj.caption === "string" ? obj.caption.trim() : "";
+  const requestedAt = typeof obj.requestedAt === "number" ? obj.requestedAt : Date.now();
+  const requestedBy = typeof obj.requestedBy === "string" && obj.requestedBy.trim() ? obj.requestedBy.trim() : "system";
+
+  return { requestId, userId, text, filePath, caption, requestedAt, requestedBy };
+}
+
 
 export function hasSavedCredentials(): boolean {
   return loadCredentials() !== null;
