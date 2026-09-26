@@ -16,6 +16,7 @@ import {
 } from "docx";
 import ExcelJS from "exceljs";
 import PptxGenJS from "pptxgenjs";
+import { checkIsMusicRequest } from "./music-generator.js";
 
 const GENERATED_FILES_DIR = path.resolve(process.cwd(), "data", "generated-files");
 
@@ -63,7 +64,7 @@ export function checkIsVoiceRequest(question: string, quoteText = ""): boolean {
 }
 
 export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): boolean {
-  if (checkIsVoiceRequest(question, quoteText)) return true;
+  if (checkIsVoiceRequest(question, quoteText) || checkIsMusicRequest(question) || checkIsMusicRequest(quoteText)) return true;
 
   const combined = `${question || ""} ${quoteText || ""}`.toLowerCase();
   const qLower = (question || "").toLowerCase();
@@ -76,7 +77,7 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
   if (isGenericCapabilityInquiry) return false;
 
   const hasFileTarget =
-    /(?:powerpoint|slide|pptx|trình\s*chiếu|thuyết\s*trình|word|docx|văn\s*bản\s*hành\s*chính|hợp\s*đồng|excel|xlsx|bảng\s*tính|báo\s*giá|csv|html|báo\s*cáo\s*web|pdf|file|tệp|voice|podcast|thu\s*âm|ghi\s*âm|audio|giọng\s*đọc|poster|biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|hình\s*ảnh|ảnh|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/i.test(combined);
+    /(?:powerpoint|slide|pptx|trình\s*chiếu|thuyết\s*trình|word|docx|văn\s*bản\s*hành\s*chính|hợp\s*đồng|excel|xlsx|bảng\s*tính|báo\s*giá|csv|html|báo\s*cáo\s*web|pdf|file|tệp|voice|podcast|thu\s*âm|ghi\s*âm|audio|giọng\s*đọc|nhạc|bài\s*hát|ca\s*khúc|bản\s*nhạc|beat|track|poster|biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|hình\s*ảnh|ảnh|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/i.test(combined);
 
   // Nhận diện nếu đang trích dẫn một file/ảnh/biểu đồ/voice bot đã tạo trước đó
   const isQuotingGeneratedArtifact =

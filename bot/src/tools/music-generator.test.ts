@@ -52,6 +52,9 @@ test("generateMusic trả lời hướng dẫn rõ ràng khi chưa có SUNO_COOK
   const oldUrl = process.env.SUNO_API_URL;
   delete process.env.SUNO_COOKIE;
   delete process.env.SUNO_API_URL;
+  const { config } = await import("../config.js");
+  const oldConfigCookie = (config as any).sunoCookie;
+  (config as any).sunoCookie = "";
 
   try {
     const res = await generateMusic({ prompt: "Bài hát test" });
@@ -60,5 +63,6 @@ test("generateMusic trả lời hướng dẫn rõ ràng khi chưa có SUNO_COOK
   } finally {
     if (oldCookie) process.env.SUNO_COOKIE = oldCookie;
     if (oldUrl) process.env.SUNO_API_URL = oldUrl;
+    (config as any).sunoCookie = oldConfigCookie;
   }
 });

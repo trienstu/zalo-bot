@@ -9,6 +9,7 @@ import path from "node:path";
 import { executeAgentTool } from "../gemini.js";
 import type { GeneratedFileResult } from "./file-generator.js";
 import { cleanCoreSpeechText } from "./voice-generator.js";
+import { isMusicConfigured } from "./music-generator.js";
 
 export interface ExtractedToolCall {
   toolName: "generate_file";
@@ -453,6 +454,46 @@ export async function interceptAndExecuteSimulatedTool(
   const voiceExtracted = extractSimulatedCreateVoice(text);
   if (voiceExtracted && voiceExtracted.args.text) {
     try {
+      const isSongScript =
+        /(?:bài\s*hát\s*:|sáng\s*tác\s*:|nhạc\s*dạo|\[điệp\s*khúc\]|\[khổ\s*\d|\[verse|\[chorus)/i.test(voiceExtracted.args.text);
+
+      if (isSongScript && isMusicConfigured()) {
+        console.log(
+          `[simulated-tool-interceptor] 🎵 Phát hiện kịch bản bài hát/giai điệu trong [create_voice] giả lập! ` +
+          `Tự động chuyển tiếp sang công cụ Suno AI generate_music...`,
+        );
+
+        const titleMatch = voiceExtracted.args.text.match(/(?:bài\s*hát\s*:\s*|title\s*=\s*['"]?)([^.\n\r]+)/i);
+        const songTitle = (titleMatch?.[1] || "Bài hát AI").replace(/[^\p{L}\p{N}\s_-]/gu, "").trim();
+
+        const musicResult = await executeAgentTool("generate_music", {
+          prompt: songTitle || "Bài hát AI",
+          lyrics: voiceExtracted.args.text,
+          title: songTitle || "Bài hát AI",
+          style: "vietnamese, pop, ballad",
+        });
+
+        if (musicResult?.success && onFileGenerated) {
+          try {
+            await onFileGenerated({
+              ...musicResult,
+              isMusic: true,
+            });
+          } catch (fileErr) {
+            console.warn("[simulated-tool-interceptor] Lỗi gửi nhạc qua onFileGenerated:", fileErr);
+          }
+        }
+
+        let cleanedText = text.replace(voiceExtracted.rawMatch, "").trim();
+        if (
+          !cleanedText ||
+          /^(?:anh|chị|bác|sếp|bạn)?\s*(?:đã\s+)?(?:nghe|nhận|thấy)\s*(?:được\s+)?(?:nhạc|bài hát|track|voice)\s*(?:chưa|chưa\s*ạ)?\s*[?]?$/i.test(cleanedText)
+        ) {
+          cleanedText = `🎵 Em đã sáng tác bài hát [${musicResult?.title || songTitle}] và gửi vào nhóm rồi nhé! ✨`;
+        }
+        return cleanedText;
+      }
+
       console.log(
         `[simulated-tool-interceptor] 🛡️ Phát hiện [create_voice] thô trong output text! ` +
         `Kích hoạt tạo voice ngầm: text=${voiceExtracted.args.text.length} chars, voice=${voiceExtracted.args.voice || "auto"}, style=${voiceExtracted.args.voice_style || "natural"}`,

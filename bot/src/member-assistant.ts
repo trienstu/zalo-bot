@@ -2658,6 +2658,12 @@ QUY TẮC BẮT BUỘC:
     `      + Với Yêu cầu Voice / Đọc bài thơ / Ngâm thơ / Đọc tin tức / Kịch bản / Kể chuyện: BẮT BUỘC PHẢI IN TOÀN BỘ NỘI DUNG BÀI THƠ / BÀI VIẾT / KỊCH BẢN ĐẦY ĐỦ RA TIN NHẮN CHAT (ghi rõ Tên bài thơ/tác phẩm, Tác giả nếu có, và toàn văn từng dòng từng khổ). TUYỆT ĐỐI KHÔNG được chỉ gửi mỗi câu thông báo 1 dòng nhận việc mà quên in nội dung!\n` +
     `    * [TUYỆT ĐỐI CẤM BỊA ĐẶT / ẢO GIÁC VỀ GIỚI HẠN KỸ THUẬT]:\n` +
     `      + TUYỆT ĐỐI CẤM bịa đặt các câu như 'hạn mức 2 tác vụ/giờ', 'đạt ngưỡng hệ thống', 'chỉ chủ nhân mới có quyền', 'lát nữa em mới thu âm', 'uống trà đợi em'. Khi người dùng yêu cầu, PHẢI THỰC HIỆN NGAY LẬP TỨC!\n` +
+    `- KỸ NĂNG TẠO NHẠC & SÁNG TÁC CA KHÚC BẰNG SUNO AI (generate_music):\n` +
+    `  + Khi người dùng yêu cầu tạo nhạc, sáng tác bài hát, viết ca khúc, phối beat, làm bài nhạc, tạo giai điệu (lofi, rap, ballad, pop, rock, acoustic, bolero...):\n` +
+    `    * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_music' (với prompt, style, title, lyrics, instrumental) để AI Suno thực sự tạo bài hát và xuất file âm thanh .mp3 gửi lên Zalo!\n` +
+    `    * TUYỆT ĐỐI CẤM gọi nhầm sang 'create_voice' (create_voice chỉ dùng để đọc giọng văn bản/thơ/podcast bằng Text-to-Speech, không biết tạo bài hát/giai điệu/nhạc cụ)!\n` +
+    `    * TUYỆT ĐỐI CẤM chỉ in lời bài hát ra chat rồi hứa hẹn suông là hệ thống đang xử lý âm thanh mà không gọi tool! BẮT BUỘC PHẢI THỰC SỰ GỌI FUNCTION CALL 'generate_music'!\n` +
+    `    * [CÂU TRẢ LỜI BẰNG CHỮ KÈM THEO]: Bạn có thể in lời bài hát đã sáng tác ra tin nhắn chat để người dùng tiện theo dõi lời trong lúc nghe bài hát được gửi lên.\n` +
     `- KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
     `  + Khi người dùng yêu cầu vẽ biểu đồ, đồ thị, sơ đồ, poster lịch thi đấu, bảng xếp hạng hoặc yêu cầu làm lại/sửa lại ảnh/biểu đồ: BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM in code Python ra chat!\n` +
     `  + Với lịch thi đấu/bảng sự kiện/roadmap: Dùng PIL vẽ Infographic Poster Card Layout nền tối (burgundy/navy), thẻ bo góc, badge nổi bật ([CHÍNH THỨC], [GIAO HỮU]), tiêu đề vàng kim #FFD700. Với số liệu: Dùng matplotlib dark theme.\n` +
@@ -2707,6 +2713,16 @@ QUY TẮC BẮT BUỘC:
                 options.api,
                 threadId,
                 `🎨 ${isSuperAdmin ? `Em đang ${verb} cho Sếp` : `${botName} đang ${verb}`}: "${promptPreview}..."... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em xíu nhé! ✨`,
+              );
+            }
+          }
+          if (toolName === "generate_music") {
+            const promptPreview = String(args?.prompt || "").slice(0, 45);
+            if (options?.api) {
+              void sendGroupText(
+                options.api,
+                threadId,
+                `🎵 ${isSuperAdmin ? "Em đang bắt đầu sáng tác và hòa âm phối khí cho Sếp" : `${botName} đang sáng tác và hòa âm phối khí cho bác @${displayName}`}: "${promptPreview}..."... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em xíu nhé! ✨`,
               );
             }
           }

@@ -1759,6 +1759,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `    * [TUYỆT ĐỐI CẤM BỊA ĐẶT / ẢO GIÁC VỀ GIỚI HẠN KỸ THUẬT]:\n` +
     `      + TUYỆT ĐỐI CẤM bịa đặt các câu như 'hạn mức 2 tác vụ/giờ', 'đạt ngưỡng hệ thống', 'chỉ chủ nhân mới có quyền', 'lát nữa em mới thu âm', 'uống trà đợi em'. Khi người dùng yêu cầu, PHẢI THỰC HIỆN NGAY LẬP TỨC!\n` +
     `      * Tuyệt đối cấm bịa đặt tin nhắn đã gửi file khi chưa gọi tool!\n` +
+    `\n14b. KỸ NĂNG TẠO NHẠC & SÁNG TÁC CA KHÚC BẰNG SUNO AI (generate_music):\n` +
+    `    - Khi người dùng yêu cầu tạo nhạc, sáng tác bài hát, viết ca khúc, phối beat, làm bài nhạc, tạo giai điệu (lofi, rap, ballad, pop, rock, acoustic, bolero...):\n` +
+    `      * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_music' (với prompt, style, title, lyrics, instrumental) để AI Suno thực sự tạo bài hát và xuất file âm thanh .mp3 gửi lên Zalo!\n` +
+    `      * TUYỆT ĐỐI CẤM gọi nhầm sang 'create_voice' (create_voice chỉ dùng để đọc giọng văn bản/thơ/podcast bằng Text-to-Speech, không biết tạo bài hát/giai điệu/nhạc cụ)!\n` +
+    `      * TUYỆT ĐỐI CẤM chỉ in lời bài hát ra chat rồi hứa hẹn suông là hệ thống đang xử lý âm thanh mà không gọi tool! BẮT BUỘC PHẢI THỰC SỰ GỌI FUNCTION CALL 'generate_music'!\n` +
+    `      * [CÂU TRẢ LỜI BẰNG CHỮ KÈM THEO]: Bạn có thể in lời bài hát đã sáng tác ra tin nhắn chat để người dùng tiện theo dõi lời trong lúc nghe bài hát được gửi lên.\n` +
     `\n15. TỐI ƯU TỐC ĐỘ PHẢN HỒI (AGENT SPEED OPTIMIZATION):\n` +
     `    - Nếu trong phần [DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT] hoặc context bên dưới đã có đầy đủ thông tin/tin tức/số liệu để trả lời câu hỏi, bạn PHẢI TẬP TRUNG TRẢ LỜI NGAY TRONG VÒNG ĐẦU TIÊN, TUYỆT ĐỐI KHÔNG GỌI THÊM CÔNG CỤ TÌM KIẾM (web_search) LẶP LẠI để tránh làm chậm thời gian phản hồi của người dùng!\n` +
     `    - Chỉ gọi công cụ (finance_market_lookup, web_search, generate_file, fetch_url, python_interpreter) KHI dữ liệu cung cấp chưa có hoặc người dùng yêu cầu rõ việc tra cứu/tạo file/vẽ biểu đồ số liệu.\n` +

@@ -38,7 +38,7 @@ function isOneOf<T extends readonly string[]>(value: unknown, values: T): value 
 
 function detectToolIntent(text: string): ToolIntent {
   const asksToCreate =
-    /\b(?:tao|xuat|lam|viet|thiet ke|ve|lap|dong goi|gom|cho vao|nhet vao|luu vao|in ra|chuyen)\b.{0,36}\b(?:file|tep|word|excel|docx|xlsx|pdf|bang|bieu do|do thi|so do|mindmap|infographic|anh|hinh|thiep|slide|powerpoint|pptx)\b/i.test(text) ||
+    /\b(?:tao|xuat|lam|viet|thiet ke|ve|lap|dong goi|gom|cho vao|nhet vao|luu vao|in ra|chuyen|phoi|sang tac|hat)\b.{0,36}\b(?:file|tep|word|excel|docx|xlsx|pdf|bang|bieu do|do thi|so do|mindmap|infographic|anh|hinh|thiep|slide|powerpoint|pptx|nhac|bai hat|ca khuc|beat|track|voice|podcast|audio|am thanh)\b/i.test(text) ||
     /\b(?:vao|ra|thanh|sang)\s+(?:file\s+)?(?:docx|word|excel|xlsx|pptx|slide|pdf|csv|txt)\b/i.test(text);
   if (asksToCreate) return "create";
 
