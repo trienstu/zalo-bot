@@ -76,9 +76,14 @@ async function getSunoJwtToken(cookieString: string): Promise<string> {
     return cachedJwtToken.token;
   }
 
-  const cleanCookie = cookieString.trim();
+  let cleanCookie = cookieString.trim();
   if (!cleanCookie) {
     throw new Error("SUNO_COOKIE rỗng");
+  }
+
+  // Nếu người dùng cung cấp raw token JWT (bắt đầu bằng ey) chưa có __client= thì tự động thêm
+  if (!cleanCookie.includes("=") && cleanCookie.startsWith("ey")) {
+    cleanCookie = `__client=${cleanCookie}`;
   }
 
   const headers = {
