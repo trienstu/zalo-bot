@@ -34,7 +34,8 @@ import {
 } from "./tools/finance-tools.js";
 import { fetchWeatherData } from "./weather.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
-import { callCloudflareLlm, isCloudflareConfigured } from "./cloudflare-ai.js";
+import { callCloudflareLlm, isCloudflareConfigured, generateCloudflareImage } from "./cloudflare-ai.js";
+import { generateCodexImage, isCodexImageConfigured, prepareImageDataUrl } from "./codex-image.js";
 import {
   canUseGrounding,
   incrementGroundingUsage,
@@ -803,6 +804,7 @@ export interface AgentLoopOptions {
   maxTokens?: number;
   images?: GeminiImagePart[];
   mediaParts?: GeminiMediaPart[];
+  targetImageUrl?: string;
   onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
   onFileGenerated?: (file: GeneratedFileResult) => Promise<void>;
 }
@@ -1073,6 +1075,35 @@ const AGENT_TOOLS_DECLARATION = {
         required: ["code"],
       },
     },
+    {
+      name: "generate_image",
+      description:
+        "Tạo hình ảnh AI mới hoặc chỉnh sửa/tạo biến thể hình ảnh bằng mô hình AI vẽ ảnh cao cấp (Codex / Cloudflare). BẮT BUỘC DÙNG khi người dùng yêu cầu vẽ ảnh, tạo ảnh, sửa ảnh, tạo poster, vẽ theo prompt của ai đó trong nhóm/cuộc trò chuyện, hoặc dựa trên nội dung/ý tưởng/ảnh được chia sẻ.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          prompt: {
+            type: "STRING",
+            description:
+              "Mô tả trực quan chi tiết và hoàn chỉnh của hình ảnh cần vẽ (bằng tiếng Việt hoặc tiếng Anh tối ưu). NẾU người dùng yêu cầu vẽ theo prompt của một thành viên trong nhóm (ví dụ 'dựa vào prompt của bác xyz ở trên', 'theo prompt này'), HÃY TRÍCH XUẤT ĐẦY ĐỦ NỘI DUNG Ý TƯỞNG ĐÓ từ lịch sử trò chuyện và tổng hợp thành prompt hoàn chỉnh, TUYỆT ĐỐI KHÔNG để prompt là 'dựa vào prompt của bác...' cộc lốc!",
+          },
+          aspectRatio: {
+            type: "STRING",
+            enum: ["1:1", "16:9", "9:16", "4:3", "3:4"],
+            description: "Tỉ lệ khung hình (mặc định 1:1, hoặc 16:9 cho ảnh ngang/wallpaper, 9:16 cho ảnh đứng/story/tiktok)",
+          },
+          imageUrl: {
+            type: "STRING",
+            description: "URL hoặc đường dẫn ảnh gốc nếu người dùng yêu cầu chỉnh sửa/biến thể trên một ảnh đã có trong nhóm hoặc ảnh đính kèm",
+          },
+          isEdit: {
+            type: "BOOLEAN",
+            description: "true nếu là chỉnh sửa/thay đổi/biến thể trên ảnh đã có, false nếu vẽ mới hoàn toàn",
+          },
+        },
+        required: ["prompt"],
+      },
+    },
   ],
 };
 
@@ -1215,6 +1246,72 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
       if (!code) return { error: "Không có mã code Python nào để chạy" };
       const res = await runPythonCode(code);
       return res;
+    }
+    case "generate_image": {
+      const prompt = String(args?.prompt || "").trim();
+      if (!prompt) return { error: "Thiếu mô tả prompt hình ảnh cần tạo" };
+      const aspectRatio = (args?.aspectRatio || "1:1") as any;
+      const isEdit = Boolean(args?.isEdit);
+      const imageUrl = args?.imageUrl ? String(args.imageUrl).trim() : undefined;
+
+      let inputImageDataUrl: string | null = null;
+      if (imageUrl) {
+        if (fs.existsSync(imageUrl)) {
+          inputImageDataUrl = prepareImageDataUrl(imageUrl);
+        } else {
+          const fileRes = await downloadFileContent(imageUrl);
+          if (fileRes?.mediaPart?.data) {
+            inputImageDataUrl = `data:${fileRes.mediaPart.mimeType || "image/png"};base64,${fileRes.mediaPart.data}`;
+          }
+        }
+      }
+
+      const isCodex = config.imageProvider === "codex";
+      if (isCodex) {
+        if (!isCodexImageConfigured()) {
+          return { error: "Tính năng tạo/sửa ảnh AI (Codex) chưa được cấu hình NINE_ROUTER_API_KEY trong file .env." };
+        }
+        const imgRes = await generateCodexImage(prompt, { aspectRatio, image: inputImageDataUrl, isEdit });
+        if (imgRes.success && imgRes.filePath) {
+          const ratioTag = aspectRatio !== "1:1" ? ` (${aspectRatio})` : "";
+          const shortNote = prompt.length <= 40 ? ` ("${prompt}"${ratioTag})` : "";
+          const modelTag = imgRes.tierUsed ? `\n🤖 Model: ${imgRes.tierUsed}` : "";
+          const caption = isEdit
+            ? `🎨 Ảnh sau khi chỉnh sửa đây ạ!${shortNote} ✨${modelTag}`
+            : `🎨 Ảnh theo yêu cầu đây ạ!${shortNote} ✨${modelTag}`;
+          return {
+            success: true,
+            filePath: imgRes.filePath,
+            fileName: path.basename(imgRes.filePath),
+            fileSize: fs.existsSync(imgRes.filePath) ? fs.statSync(imgRes.filePath).size : 0,
+            caption,
+            prompt,
+            aspectRatio,
+            tierUsed: imgRes.tierUsed,
+          };
+        }
+        return { error: imgRes.error || "Lỗi tạo ảnh với Codex" };
+      } else {
+        if (!isCloudflareConfigured()) {
+          return { error: "Tính năng vẽ ảnh AI (Cloudflare) chưa được cấu hình." };
+        }
+        const imgRes = await generateCloudflareImage(prompt, { aspectRatio });
+        if (imgRes.success && imgRes.filePath) {
+          const ratioTag = aspectRatio !== "1:1" ? ` (${aspectRatio})` : "";
+          const shortNote = prompt.length <= 40 ? ` ("${prompt}"${ratioTag})` : "";
+          const caption = `🎨 Ảnh theo yêu cầu đây ạ!${shortNote} ✨`;
+          return {
+            success: true,
+            filePath: imgRes.filePath,
+            fileName: path.basename(imgRes.filePath),
+            fileSize: fs.existsSync(imgRes.filePath) ? fs.statSync(imgRes.filePath).size : 0,
+            caption,
+            prompt,
+            aspectRatio,
+          };
+        }
+        return { error: imgRes.error || "Lỗi tạo ảnh với Cloudflare" };
+      }
     }
     default:
       return { error: `Công cụ ${name} không tồn tại` };
@@ -1386,9 +1483,18 @@ export async function callGeminiAgentLoop(
       // Chạy các tool song song
       const toolResponses = await Promise.all(
         functionCalls.map(async (fc: any) => {
+          if (fc.name === "generate_image") {
+            if (!fc.args) fc.args = {};
+            if (!fc.args.imageUrl && options?.targetImageUrl) {
+              fc.args.imageUrl = options.targetImageUrl;
+            }
+            if (options?.targetImageUrl && fc.args.isEdit === undefined) {
+              fc.args.isEdit = true;
+            }
+          }
           options?.onToolCall?.(fc.name, fc.args || {});
           const result = await executeAgentTool(fc.name, fc.args || {});
-          if ((fc.name === "generate_file" || fc.name === "create_voice") && result?.success && options?.onFileGenerated) {
+          if ((fc.name === "generate_file" || fc.name === "create_voice" || fc.name === "generate_image") && result?.success && options?.onFileGenerated) {
             try {
               await options.onFileGenerated(result);
             } catch (fileErr) {

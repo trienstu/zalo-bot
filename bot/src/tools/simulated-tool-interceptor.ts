@@ -253,6 +253,78 @@ export function extractSimulatedPythonInterpreter(text: string): ExtractedPython
   return null;
 }
 
+export interface ExtractedImageCall {
+  toolName: "generate_image";
+  args: {
+    prompt: string;
+    aspectRatio?: string;
+    imageUrl?: string;
+    isEdit?: boolean;
+    [key: string]: any;
+  };
+  rawMatch: string;
+}
+
+/**
+ * Bóc tách lệnh generate_image từ text thô nếu model in ra thay vì gọi Function Calling
+ */
+export function extractSimulatedGenerateImage(text: string): ExtractedImageCall | null {
+  if (!text) return null;
+
+  const tagMatch =
+    text.match(/\[\s*generate_image\b([\s\S]*?)\/\s*\]/i) ||
+    text.match(/<\s*generate_image\b([\s\S]*?)\/\s*>/i) ||
+    text.match(/\[\s*generate_image\b([\s\S]*?)\]/i) ||
+    text.match(/<\s*generate_image\b([\s\S]*?)>/i);
+  const funcMatch = text.match(/\[?\bgenerate_image\s*\(([\s\S]*?)\)\]?/i);
+
+  const match = tagMatch || funcMatch;
+  if (!match) return null;
+
+  const inner = match[1] || "";
+  const args: Record<string, any> = {};
+
+  const promptTripleMatch = inner.match(/prompt\s*=\s*(?:'''|""")([\s\S]*?)(?:'''|""")/i);
+  if (promptTripleMatch && promptTripleMatch[1]) {
+    args.prompt = promptTripleMatch[1].trim();
+  } else {
+    const promptQuoteMatch =
+      inner.match(/prompt\s*=\s*(['"])([\s\S]*?)\1(?=\s*(?:[a-zA-Z_]+\s*=|(?:\/\]|\]|>|$)))/i) ||
+      inner.match(/prompt\s*=\s*(['"])([\s\S]*?)\1/i);
+    if (promptQuoteMatch && promptQuoteMatch[2]) {
+      args.prompt = promptQuoteMatch[2].trim();
+    }
+  }
+
+  const ratioMatch = inner.match(/aspectRatio\s*=\s*['"]([0-9:]+)['"]/i);
+  if (ratioMatch && ratioMatch[1]) {
+    args.aspectRatio = ratioMatch[1];
+  }
+
+  const isEditMatch = inner.match(/isEdit\s*=\s*(true|false)/i);
+  if (isEditMatch && isEditMatch[1]) {
+    args.isEdit = isEditMatch[1].toLowerCase() === "true";
+  }
+
+  const imageUrlMatch = inner.match(/imageUrl\s*=\s*['"]([^'"]+)['"]/i);
+  if (imageUrlMatch && imageUrlMatch[1]) {
+    args.imageUrl = imageUrlMatch[1].trim();
+  }
+
+  if (!args.prompt) return null;
+
+  return {
+    toolName: "generate_image",
+    args: {
+      prompt: args.prompt,
+      aspectRatio: args.aspectRatio,
+      imageUrl: args.imageUrl,
+      isEdit: args.isEdit,
+    },
+    rawMatch: match[0],
+  };
+}
+
 /**
  * Chặn và thực thi tool giả lập ngầm, gửi file/voice và làm sạch văn bản chat
  */
@@ -339,7 +411,38 @@ export async function interceptAndExecuteSimulatedTool(
     }
   }
 
-  // 3. Kiểm tra generate_file giả lập
+  // 3. Kiểm tra generate_image giả lập
+  const imgExtracted = extractSimulatedGenerateImage(text);
+  if (imgExtracted && imgExtracted.args.prompt) {
+    try {
+      console.log(
+        `[simulated-tool-interceptor] 🛡️ Phát hiện [generate_image] thô trong output text! ` +
+        `Kích hoạt tạo ảnh ngầm: prompt="${imgExtracted.args.prompt.slice(0, 45)}...", ratio=${imgExtracted.args.aspectRatio || "1:1"}`,
+      );
+
+      const result = await executeAgentTool("generate_image", imgExtracted.args);
+      if (result?.success && onFileGenerated) {
+        try {
+          await onFileGenerated(result);
+        } catch (fileErr) {
+          console.warn("[simulated-tool-interceptor] Lỗi gửi ảnh qua onFileGenerated:", fileErr);
+        }
+      }
+
+      let cleanedText = text.replace(imgExtracted.rawMatch, "").trim();
+      if (
+        !cleanedText ||
+        /^(?:anh|chị|bác|sếp|bạn)?\s*(?:đã\s+)?(?:nhận|thấy)\s*(?:được\s+)?(?:ảnh|bức ảnh|tấm ảnh|hình)\s*(?:chưa|chưa\s*ạ)?\s*[?]?$/i.test(cleanedText)
+      ) {
+        cleanedText = "🎨 Em đã tạo ảnh theo yêu cầu và gửi lên rồi nhé! ✨";
+      }
+      return cleanedText;
+    } catch (err) {
+      console.warn("[simulated-tool-interceptor] Lỗi thực thi simulated generate_image:", err);
+    }
+  }
+
+  // 4. Kiểm tra generate_file giả lập
   const extracted = extractSimulatedGenerateFile(text);
   if (!extracted || !extracted.args.content) {
     return text;

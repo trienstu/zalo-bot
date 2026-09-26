@@ -102,9 +102,11 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
   if (hasFileTarget && (hasAction || isAffirmativeFollowUp)) return true;
 
   const isCodeOrChart =
-    /(?:vẽ|tạo|xuất|lập|thiết\s*kế|làm|soạn)(?:\s+lại)?\s*(?:cho\s*.*?\s*)?(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|poster|ảnh|hình|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/i.test(qLower) ||
-    /(?:biểu\s*đồ|đồ\s*họa|poster|infographic|hình\s*ảnh).*?(?:làm\s*lại|sửa\s*lại|vẽ\s*lại|cẩn\s*thận|đẹp\s*hơn|chuyên\s*nghiệp)/i.test(qLower) ||
-    /^[/!](?:taoanh|veanh|draw|plot|chart)\b/i.test(qLower) ||
+    /(?:vẽ|tạo|xuất|lập|thiết\s*kế|làm|soạn|sinh|render)(?:\s+lại)?\s*(?:cho\s*.*?\s*)?(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|poster|ảnh|hình|tranh|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/i.test(qLower) ||
+    /(?:biểu\s*đồ|đồ\s*họa|poster|infographic|hình\s*ảnh|bức\s*ảnh|tấm\s*ảnh).*?(?:làm\s*lại|sửa\s*lại|vẽ\s*lại|cẩn\s*thận|đẹp\s*hơn|chuyên\s*nghiệp)/i.test(qLower) ||
+    /^[/!](?:taoanh|veanh|draw|plot|chart|suaanh|chinhanh|chinhsuaanh|editanh|editimage|modifyimage|imagine|image)\b/i.test(qLower) ||
+    /(?:sửa|chỉnh\s*sửa|chỉnh|edit|thay|đổi|xoá|xóa|làm\s*nét|biến\s*đổi|phục\s*chế)\s+(?:ảnh|hình|bức\s*ảnh|tấm\s*ảnh|phông|nền|background|tóc|áo|quần|váy|kính|màu|người)/i.test(qLower) ||
+    /(?:dựa\s+(?:vào|theo)|theo)\s+(?:prompt|câu\s*lệnh|ý\s*tưởng|mô\s*tả)\b/i.test(qLower) ||
     /(?:chạy|viết|run|execute)\s*(?:code|mã|script)\s*(?:python|py)/i.test(qLower);
 
   return isCodeOrChart;

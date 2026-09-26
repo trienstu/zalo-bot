@@ -40,9 +40,6 @@ import { config, defaultBotName } from "./config.js";
 import { finalizeGroundedAnswer } from "./search-evidence.js";
 import { answerWithHybridRouting } from "./hybrid-agent.js";
 import { normalizeExecutionSignals, selectResponseMode } from "./hybrid-routing.js";
-import { generateCloudflareImage, isCloudflareConfigured } from "./cloudflare-ai.js";
-import { generateCodexImage, isCodexImageConfigured, prepareImageDataUrl } from "./codex-image.js";
-import { collectCandidateUrls } from "./message-extract.js";
 import { isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
 import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from "./grounding-quota.js";
 import { githubSearch } from "./tools/vertical-tools.js";
@@ -1290,10 +1287,19 @@ async function handleHistoryQA(
       `       + Với Yêu cầu Voice / Đọc bài thơ / Ngâm thơ / Đọc tin tức / Kịch bản / Kể chuyện: BẮT BUỘC PHẢI IN TOÀN BỘ NỘI DUNG BÀI THƠ / BÀI VIẾT / KỊCH BẢN ĐẦY ĐỦ RA TIN NHẮN CHAT (ghi rõ Tên bài thơ/tác phẩm, Tác giả nếu có, và toàn văn từng dòng từng khổ). TUYỆT ĐỐI KHÔNG được chỉ gửi mỗi câu thông báo 1 dòng nhận việc mà quên in nội dung!\n` +
       `     * [TUYỆT ĐỐI CẤM BỊA ĐẶT / ẢO GIÁC VỀ GIỚI HẠN KỸ THUẬT]:\n` +
       `       + TUYỆT ĐỐI CẤM bịa đặt các câu như 'hạn mức 2 tác vụ/giờ', 'đạt ngưỡng hệ thống', 'chỉ chủ nhân mới có quyền', 'lát nữa em mới thu âm', 'uống trà đợi em'. Khi người dùng yêu cầu, PHẢI THỰC HIỆN NGAY LẬP TỨC!\n` +
-      `     * Tuyệt đối cấm bịa đặt tin nhắn đã xuất file khi chưa gọi tool!`;
+      `     * Tuyệt đối cấm bịa đặt tin nhắn đã xuất file khi chưa gọi tool!\n` +
+      `   - [KỸ NĂNG TẠO & CHỈNH SỬA ẢNH NGHỆ THUẬT (generate_image)]:\n` +
+      `     + Khi người dùng yêu cầu vẽ ảnh, tạo ảnh, sinh ảnh, tạo tranh, vẽ chân dung, anime, đồ vật, phong cảnh, hoặc sửa ảnh, biến thể ảnh: BẮT BUỘC GỌI TOOL 'generate_image'.\n` +
+      `     + ĐẶC BIỆT KHI NGƯỜI DÙNG BẢO 'dựa vào prompt của...', 'theo prompt này', hoặc 'vẽ ảnh' (kèm quote/ảnh đính kèm): BẮT BUỘC ĐỌC KỸ LỊCH SỬ CHAT VÀ NỘI DUNG QUOTE, TRÍCH XUẤT ĐẦY ĐỦ Ý TƯỞNG/PROMPT ĐÓ ra và truyền vào tham số 'prompt' của tool generate_image. TUYỆT ĐỐI CẤM để prompt cộc lốc!\n` +
+      `     + NẾU là chỉnh sửa/thay đổi trên ảnh có sẵn: Đặt isEdit=true và truyền imageUrl nếu có.\n` +
+      `     + TUYỆT ĐỐI CẤM bịa đặt bằng chữ 'em đang vẽ ảnh / đã gửi ảnh' khi chưa thực sự gọi tool 'generate_image'!`;
+
+    const imageRefHint = targetUrl
+      ? `\n[ẢNH THAM CHIẾU / ĐÍNH KÈM HIỆN TẠI]: "${targetUrl}". Khi người dùng yêu cầu chỉnh sửa, thay đổi chi tiết hoặc biến thể từ ảnh này, hãy gọi 'generate_image' với imageUrl="${targetUrl}" và isEdit=true.\n`
+      : "";
 
     const fastUserPrompt =
-      `${quoteTextSection}${fileContentSnippet}\n` +
+      `${quoteTextSection}${fileContentSnippet}${imageRefHint}\n` +
       `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${question || (fileTextContent ? "Hãy phân tích chi tiết nội dung tài liệu này giúp tôi." : "Hãy phân tích chi tiết hình ảnh này giúp tôi.")}\n\n` +
       `HÃY TRẢ LỜI NGAY:`;
 
@@ -1307,6 +1313,20 @@ async function handleHistoryQA(
           model: "gemini-3.1-flash-lite-preview",
           maxTurns: 3,
           mediaParts: mediaPart ? [mediaPart] : undefined,
+          targetImageUrl: targetUrl,
+          onToolCall: (toolName, args) => {
+            if (toolName === "generate_image") {
+              const promptPreview = String(args?.prompt || "").slice(0, 45);
+              const verb = args?.isEdit ? "chỉnh sửa ảnh" : "vẽ ảnh";
+              if (options?.api) {
+                void sendGroupText(
+                  options.api,
+                  threadId,
+                  `🎨 ${isSuperAdmin ? `Em đang ${verb} cho Sếp` : `${botName} đang ${verb}`}: "${promptPreview}..."... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em xíu nhé! ✨`,
+                );
+              }
+            }
+          },
           onFileGenerated: async (file) => {
             try {
               if (options?.api) {
@@ -2520,10 +2540,15 @@ QUY TẮC BẮT BUỘC:
     `   - Văn bản pháp quy / Hành chính / Thủ tục: Nêu rõ tên văn bản (Luật, Nghị quyết, Nghị định, Thông tư), số hiệu, thời điểm có hiệu lực và nội dung điều khoản áp dụng.\n` +
     `   - Thông tin liên quan có giá trị gia tăng (nếu có): Chỉ ghi chú ngắn gọn, khiêm tốn ở phần phụ: "*(Ngoài ra, nếu anh/chị quan tâm đến [...], thì [...])*".\n` +
     `   - Khi yêu cầu tạo/xuất file (Word .docx, Excel .xlsx...): BẮT BUỘC gọi tool 'generate_file'. Tuyệt đối cấm viết tin nhắn giả mạo khi chưa gọi tool!\n` +
-    `   - KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
-    `     + Khi người dùng yêu cầu vẽ biểu đồ, đồ thị, sơ đồ, poster lịch thi đấu, bảng xếp hạng hoặc yêu cầu làm lại/sửa lại ảnh/biểu đồ: BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM in code Python ra chat!\n` +
+    `   - [KỸ NĂNG TẠO & CHỈNH SỬA ẢNH NGHỆ THUẬT (generate_image)]:\n` +
+    `     + Khi người dùng yêu cầu vẽ ảnh, tạo ảnh, sinh ảnh, tạo tranh, vẽ chân dung, anime, đồ vật, phong cảnh, hoặc sửa ảnh, biến thể ảnh: BẮT BUỘC GỌI TOOL 'generate_image'.\n` +
+    `     + ĐẶC BIỆT KHI NGƯỜI DÙNG BẢO 'dựa vào prompt của bác xyz ở trên', 'theo prompt này', hoặc 'vẽ ảnh' (kèm quote): BẮT BUỘC ĐỌC KỸ LỊCH SỬ CHAT VÀ NỘI DUNG QUOTE, TRÍCH XUẤT ĐẦY ĐỦ Ý TƯỞNG/PROMPT ĐÓ ra và truyền vào tham số 'prompt' của tool generate_image. TUYỆT ĐỐI CẤM để prompt là 'dựa vào prompt của bác...' cộc lốc!\n` +
+    `     + NẾU là chỉnh sửa/thay đổi trên ảnh có sẵn: Đặt isEdit=true và truyền imageUrl nếu có.\n` +
+    `     + TUYỆT ĐỐI CẤM bịa đặt bằng chữ 'em đang vẽ ảnh / đã gửi ảnh' khi chưa thực sự gọi tool 'generate_image'!\n` +
+    `   - KỸ NĂNG VẼ BIỂU ĐỒ, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
+    `     + Khi người dùng yêu cầu vẽ biểu đồ số liệu, đồ thị, sơ đồ, poster lịch thi đấu, bảng xếp hạng hoặc yêu cầu làm lại/sửa lại biểu đồ: BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM in code Python ra chat!\n` +
     `     + Với lịch thi đấu/bảng sự kiện/roadmap: Dùng PIL vẽ Infographic Poster Card Layout nền tối (burgundy/navy), thẻ bo góc, badge nổi bật ([CHÍNH THỨC], [GIAO HỮU]), tiêu đề vàng kim #FFD700. Với số liệu: Dùng matplotlib dark theme.\n` +
-    `     + TUYỆT ĐỐI KHÔNG dùng python_interpreter để sinh ảnh nghệ thuật/minh họa (phong cảnh, chân dung, anime, đồ vật...). TUYỆT ĐỐI CẤM bịa đặt bằng chữ là "đang tạo ảnh / đã gửi ảnh vào nhóm" khi phiên hỏi đáp này không có công cụ sinh ảnh nghệ thuật.\n` +
+    `     + TUYỆT ĐỐI KHÔNG dùng python_interpreter để sinh ảnh nghệ thuật/minh họa (phong cảnh, chân dung, anime, đồ vật...) - những nội dung đó phải dùng 'generate_image'.\n` +
     `3. DẪN NGUỒN THEO BẰNG CHỨNG ĐƯỢC CUNG CẤP (GROUNDING CITATION CHO MỌI LĨNH VỰC):\n` +
     `   - Khi câu trả lời sử dụng dữ liệu thời gian thực (tin tức, thể thao, văn bản pháp luật, đơn vị hành chính, giá cả thị trường, nghiên cứu khoa học):\n` +
     `     + Chỉ sử dụng các bản ghi [E#], URL và ngày công bố xuất hiện trong phần bằng chứng. Không tự thêm tên cơ quan, ngày hoặc URL.\n` +
@@ -2620,8 +2645,12 @@ QUY TẮC BẮT BUỘC:
     searchInstruction +
     directAnswerInstruction;
 
+  const imageRefSection = (options?.imageUrl || targetUrl)
+    ? `\n[ẢNH THAM CHIẾU / ĐÍNH KÈM HIỆN TẠI]: "${options?.imageUrl || targetUrl}". Khi người dùng yêu cầu chỉnh sửa, thay đổi chi tiết hoặc biến thể từ ảnh này, hãy gọi 'generate_image' với imageUrl="${options?.imageUrl || targetUrl}" và isEdit=true.\n`
+    : "";
+
   const userPrompt =
-    `${fileContentSection}${liveNewsSection}\n` +
+    `${fileContentSection}${liveNewsSection}${imageRefSection}\n` +
     `DƯỚI ĐÂY LÀ DỮ LIỆU LỊCH SỬ CHAT NỘI BỘ CỦA CHÍNH NHÓM "${currentGroupName}" (ID: ${threadId}) ĐỂ THAM KHẢO:\n` +
     `<chat_history>\n${contextData}\n</chat_history>\n\n` +
     `${quotePromptSection ? `${quotePromptSection}\n` : ""}` +
@@ -2640,6 +2669,20 @@ QUY TẮC BẮT BUỘC:
         model: "gemini-3.1-flash-lite-preview",
         maxTurns: 3,
         mediaParts: mediaPart ? [mediaPart] : undefined,
+        targetImageUrl: options?.imageUrl || targetUrl,
+        onToolCall: (toolName, args) => {
+          if (toolName === "generate_image") {
+            const promptPreview = String(args?.prompt || "").slice(0, 45);
+            const verb = args?.isEdit ? "chỉnh sửa ảnh" : "vẽ ảnh";
+            if (options?.api) {
+              void sendGroupText(
+                options.api,
+                threadId,
+                `🎨 ${isSuperAdmin ? `Em đang ${verb} cho Sếp` : `${botName} đang ${verb}`}: "${promptPreview}..."... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em xíu nhé! ✨`,
+              );
+            }
+          }
+        },
         onFileGenerated: async (file) => {
           try {
             if (options?.api) {
@@ -2651,7 +2694,7 @@ QUY TẮC BẮT BUỘC:
                 isSlide
                   ? `📊 ${botName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
                   : isImg
-                    ? `📊 Biểu đồ / Hình ảnh đã hoàn tất cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+                    ? `🎨 Ảnh của ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} đây ạ! ✨`
                     : isVoice
                       ? `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`
                       : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
@@ -3347,215 +3390,6 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
-  // 6.2. Vệ Tinh 3: Lệnh /taoanh, /suaanh hoặc Yêu cầu vẽ/sửa ảnh bằng ngôn ngữ tự nhiên ("tạo cho tôi bức ảnh...", "sửa ảnh này thành...")
-  const imageReq = parseImagePromptAndRatio(rawText, botName, event.quote);
-  if (imageReq && (imageReq.prompt.length >= 2 || imageReq.isEdit)) {
-    const isExplicitCommand = /^[/!](?:taoanh|veanh|sinhdan|draw|imagine|image|suaanh|chinhanh|chinhsuaanh|editanh|editimage|modifyimage)\b/i.test(rawText.trim());
-
-    if (!isExplicitCommand) {
-      // Trong nhóm: Nếu không phải lệnh /taoanh rõ ràng thì BẮT BUỘC người dùng phải gọi tên Bot hoặc tag Bot
-      const lowerRaw = rawText.toLowerCase();
-      const lowerBot = botName.toLowerCase().trim();
-      const unaccentedBot = lowerBot.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
-
-      // Kiểm tra xem bot có được tag trực tiếp qua UID không
-      const isTaggedByUid = Boolean(
-        ownId &&
-        Array.isArray(event.mentions) &&
-        event.mentions.some((m: any) => String(m?.uid || m?.id) === ownId)
-      );
-
-      // Kiểm tra xem người dùng có đang tag người khác qua UID không (tag người khác thì bot tuyệt đối không xen vào)
-      const isTaggedOtherUid = Boolean(
-        ownId &&
-        Array.isArray(event.mentions) &&
-        event.mentions.length > 0 &&
-        !isTaggedByUid
-      );
-
-      // Kiểm tra gọi đích danh bot này (bằng tên bot đã cấu hình hoặc không dấu)
-      const botParts = lowerBot.split(/\s+/).filter((p) => p.length >= 3);
-      const mentionsThisBotName =
-        lowerRaw.includes(`@${lowerBot}`) ||
-        lowerRaw.includes(`@${unaccentedBot}`) ||
-        lowerRaw.includes(lowerBot) ||
-        lowerRaw.includes(unaccentedBot) ||
-        lowerRaw.startsWith(lowerBot + " ") ||
-        lowerRaw.startsWith(unaccentedBot + " ") ||
-        lowerRaw.includes(`${lowerBot} ơi`) ||
-        lowerRaw.includes(`${unaccentedBot} oi`) ||
-        lowerRaw.includes(`nhờ ${lowerBot}`) ||
-        lowerRaw.includes(`nhờ ${unaccentedBot}`) ||
-        botParts.some((part) => {
-          const unacc = part.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d");
-          return (
-            lowerRaw.includes(`${part} ơi`) ||
-            lowerRaw.includes(`${unacc} oi`) ||
-            lowerRaw.includes(`nhờ ${part}`) ||
-            lowerRaw.includes(`nhờ ${unacc}`) ||
-            lowerRaw.startsWith(`${part} `) ||
-            lowerRaw.startsWith(`${unacc} `)
-          );
-        });
-
-      // Nếu thành viên tag người khác (UID khác hoặc @Tên khác bot)
-      const hasOtherMention =
-        isTaggedOtherUid ||
-        (/@[^\s,!?]+/g.test(rawText) &&
-          !lowerRaw.includes(`@${lowerBot}`) &&
-          !lowerRaw.includes(`@${unaccentedBot}`));
-
-      // Bot chỉ được gọi nếu:
-      // 1. Tag trực tiếp bằng UID của bot này (isTaggedByUid)
-      // 2. Hoặc người dùng gọi đích danh tên bot này trong văn bản (mentionsThisBotName) VÀ không tag đích danh người khác (!hasOtherMention)
-      // TUYỆT ĐỐI KHÔNG nhận từ chung chung "bot ơi", "@bot" nữa theo chỉ đạo của người dùng.
-      const isBotCalled = isTaggedByUid || (mentionsThisBotName && !hasOtherMention);
-
-      if (!isBotCalled) {
-        // Trong nhóm: yêu cầu tạo ảnh nhưng không gọi đích danh bot này -> bỏ qua hoàn toàn, KHÔNG để rơi xuống QA
-        return;
-      }
-
-      // Đủ điều kiện tạo ảnh bằng ngôn ngữ tự nhiên
-      await executeGroupImageGen();
-      return;
-    } else {
-      // Có lệnh rõ ràng (/taoanh, !veanh...)
-      await executeGroupImageGen();
-      return;
-    }
-  }
-
-  async function executeGroupImageGen(): Promise<void> {
-    const { prompt: imagePrompt, aspectRatio, isEdit } = imageReq!;
-    userCooldowns.set(sender, now);
-    void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.HEART);
-    void sendTyping(api, threadId);
-
-    const isCodex = config.imageProvider === "codex";
-
-    if (isCodex) {
-      if (!isCodexImageConfigured()) {
-        await sendGroupText(
-          api,
-          threadId,
-          `⚠️ @${displayName} Tính năng tạo/sửa ảnh AI (Codex) chưa được kích hoạt trên máy chủ (cần cấu hình NINE_ROUTER_API_KEY trong file .env). Vui lòng liên hệ Quản trị viên nhé!`,
-        );
-        return;
-      }
-    } else {
-      if (!isCloudflareConfigured()) {
-        await sendGroupText(
-          api,
-          threadId,
-          `⚠️ @${displayName} Tính năng vẽ ảnh AI (Cloudflare) chưa được cấu hình trên máy chủ. Vui lòng liên hệ Quản trị viên để kích hoạt nhé!`,
-        );
-        return;
-      }
-    }
-
-    // Tìm ảnh tham chiếu nếu có (từ quote, event media, file đính kèm, raw payload, database, hoặc ảnh gần nhất trong nhóm)
-    let targetImagePathOrUrl: string | undefined =
-      imageReq?.referenceImageUrl ||
-      event.mediaUrl ||
-      event.quote?.mediaUrl ||
-      (event.fileAttachment?.url && /\.(?:jpg|jpeg|png|webp|gif|bmp)$/i.test(event.fileAttachment.name || event.fileAttachment.url)
-        ? event.fileAttachment.url
-        : undefined) ||
-      undefined;
-
-    if (!targetImagePathOrUrl && event.rawMessage) {
-      const candidateUrls = collectCandidateUrls([event.rawMessage]);
-      const imageCandidate = candidateUrls.find((u) => /\.(?:jpe?g|png|webp|gif|bmp)(?:\?|$)/i.test(u) || /photo|image|zdn\.vn/i.test(u));
-      if (imageCandidate) {
-        targetImagePathOrUrl = imageCandidate;
-      }
-    }
-
-    if (!targetImagePathOrUrl && event.quote) {
-      const quoteId = event.quote.msgId || event.quote.cliMsgId || event.quote.globalMsgId;
-      if (quoteId) {
-        const media = getMediaByMessageId(threadId, quoteId);
-        if (media) {
-          targetImagePathOrUrl = media.local_path || media.media_url || undefined;
-        }
-      }
-    }
-
-    if (!targetImagePathOrUrl && isEdit) {
-      const recentImg = getRecentGroupImage(threadId, 10 * 60 * 1000);
-      if (recentImg) {
-        targetImagePathOrUrl = recentImg.local_path || recentImg.media_url || undefined;
-      }
-    }
-
-    let inputImageDataUrl: string | null = null;
-    if (targetImagePathOrUrl) {
-      if (fs.existsSync(targetImagePathOrUrl)) {
-        inputImageDataUrl = prepareImageDataUrl(targetImagePathOrUrl);
-      } else {
-        const fileRes = await downloadFileContent(targetImagePathOrUrl);
-        if (fileRes?.mediaPart?.data) {
-          inputImageDataUrl = `data:${fileRes.mediaPart.mimeType || "image/png"};base64,${fileRes.mediaPart.data}`;
-        }
-      }
-    }
-
-    // Nếu người dùng yêu cầu sửa ảnh mà hoàn toàn không tìm thấy ảnh nào
-    if (isEdit && !inputImageDataUrl) {
-      await sendGroupText(
-        api,
-        threadId,
-        `⚠️ @${displayName} Bác vui lòng trích dẫn (quote) một bức ảnh trong nhóm hoặc gửi kèm ảnh để em sửa nhé! ✨`,
-      );
-      return;
-    }
-
-    const isSuperAdmin = isUserAdmin(sender);
-    const ratioTag = aspectRatio !== "1:1" ? ` (${aspectRatio})` : "";
-    const promptPreview = imagePrompt.length > 50 ? `${imagePrompt.slice(0, 47)}...` : imagePrompt;
-    const actionVerb = isEdit ? "chỉnh sửa ảnh" : "vẽ ảnh";
-
-    await sendGroupText(
-      api,
-      threadId,
-      `🎨 ${isSuperAdmin ? `Em đang ${actionVerb} cho Sếp` : `${botName} đang ${actionVerb}`}: "${promptPreview}"${ratioTag}... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em xíu nhé! ✨`,
-    );
-
-    try {
-      const imgRes = isCodex
-        ? await generateCodexImage(imagePrompt, { aspectRatio, image: inputImageDataUrl, isEdit })
-        : await generateCloudflareImage(imagePrompt, { aspectRatio });
-
-      if (imgRes.success && imgRes.filePath) {
-        const shortNote = imagePrompt.length <= 35 ? ` ("${imagePrompt}"${ratioTag})` : "";
-        const resultLabel = isEdit ? "Ảnh sau khi chỉnh sửa của" : "Ảnh của";
-        const modelTag = imgRes.tierUsed ? `\n🤖 Model: ${imgRes.tierUsed}` : "";
-        await sendGroupFile(
-          api,
-          threadId,
-          imgRes.filePath,
-          `🎨 ${resultLabel} ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} đây ạ!${shortNote} ✨${modelTag}`,
-        );
-        console.log(`[member-assistant] ✅ Đã gửi ảnh thành công cho ${displayName} ("${imagePrompt}", ratio: ${aspectRatio}, isEdit: ${Boolean(isEdit)}, model: ${imgRes.tierUsed || "N/A"})`);
-      } else {
-        await sendGroupText(
-          api,
-          threadId,
-          `⚠️ Rất tiếc ${isSuperAdmin ? "Sếp ơi" : `@${displayName}`}, quá trình ${actionVerb} gặp sự cố: ${imgRes.error || "Lỗi máy chủ"}. ${isSuperAdmin ? "Sếp" : "Bác"} thử lại sau ít phút nhé!`,
-        );
-      }
-    } catch (imgErr: any) {
-      console.error(`[member-assistant] ❌ Lỗi sinh/sửa/gửi ảnh:`, imgErr);
-      await sendGroupText(
-        api,
-        threadId,
-        `⚠️ Rất tiếc @${displayName}, đã có lỗi xảy ra khi ${actionVerb}: ${imgErr?.message || String(imgErr)}`,
-      );
-    }
-    return;
-  }
-
   // 7. Lệnh /nhacnho, /hengio [thời gian] [nội dung]
   if (lower.startsWith("/nhacnho ") || lower.startsWith("!nhacnho ") || lower.startsWith("/hengio ") || lower.startsWith("!hengio ")) {
     userCooldowns.set(sender, now);
@@ -4030,8 +3864,13 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
 
   const hasGoogleDocUrl = /https?:\/\/docs\.google\.com\/(?:spreadsheets|document)\/d\/[a-zA-Z0-9-_]+/i.test(rawText);
 
+  const isImageGenSlash = /^[!/](?:taoanh|veanh|draw|imagine|image)\b/i.test(rawText);
+  const isImageEditSlash = /^[!/](?:suaanh|chinhanh|chinhsuaanh)\b/i.test(rawText);
+
   const isCommand =
     isDocCommand ||
+    isImageGenSlash ||
+    isImageEditSlash ||
     lower.startsWith("/hoi") ||
     lower.startsWith("!hoi") ||
     lower.startsWith("/dich") ||
@@ -4070,8 +3909,8 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
 
     // Làm sạch câu hỏi nhưng GIỮ NGUYÊN tên thành viên được tag (chỉ bỏ @ ở trước tên thành viên khác)
     let question = rawText
-      .replace(/^\/(?:doc-strict|doc|docs|tailieu|strict|hoi|dich|docanh|docfile|file|anh)\s*/i, "")
-      .replace(/^!(?:doc-strict|doc|docs|tailieu|strict|hoi|dich|docanh|docfile|file|anh)\s*/i, "")
+      .replace(/^\/(?:doc-strict|doc|docs|tailieu|strict|hoi|dich|docanh|docfile|file|anh|taoanh|veanh|suaanh|chinhanh|chinhsuaanh|draw|imagine|image)\s*/i, "")
+      .replace(/^!(?:doc-strict|doc|docs|tailieu|strict|hoi|dich|docanh|docfile|file|anh|taoanh|veanh|suaanh|chinhanh|chinhsuaanh|draw|imagine|image)\s*/i, "")
       .replace(botNamePattern, "")
       .replace(unaccBotNamePattern, "")
       .replace(/@bot\b/gi, "")
@@ -4080,6 +3919,12 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       .replace(/@([^\s,!?]+)/g, "$1")
       .replace(/^(?:ơi|oi)[,\s]*/i, "")
       .trim();
+
+    if (isImageGenSlash && !/^(?:vẽ|tạo|thiết kế)\s+ảnh/i.test(question)) {
+      question = `Tạo ảnh: ${question}`.trim();
+    } else if (isImageEditSlash && !/^(?:sửa|chỉnh\s*sửa)\s+ảnh/i.test(question)) {
+      question = `Chỉnh sửa ảnh: ${question}`.trim();
+    }
 
     // Loại bỏ tiền tố /doc hoặc doc: còn sót sau khi gọi bot (ví dụ: "bot /doc phương án...")
     question = question.replace(/^\/?(?:doc-strict|doc|docs|tailieu|strict)[:\s]*/i, "").trim();
@@ -4200,17 +4045,17 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         }
       }
 
-      // 2. Nếu vẫn chưa có targetImageUrl và câu hỏi có ý định xem/phân tích ảnh
-      const isImageAnalysisIntent =
+      // 2. Nếu vẫn chưa có targetImageUrl và câu hỏi có ý định xem/phân tích/chỉnh sửa ảnh
+      const isImageAnalysisOrEditIntent =
         event.quote?.mediaType === "image" ||
-        /(?:phân tích|xem|đọc|giải thích|soi|kiểm tra|review)\s+(?:cái\s+|bức\s+|tấm\s+|tệp\s+|file\s+)?(?:ảnh|hình|tool|giao diện|screenshot)/i.test(question) ||
+        /(?:phân tích|xem|đọc|giải thích|soi|kiểm tra|review|sửa|chỉnh\s*sửa|chỉnh|edit|thay|đổi|xoá|xóa|làm\s*nét|biến\s*đổi|phục\s*chế)\s+(?:cái\s+|bức\s+|tấm\s+|tệp\s+|file\s+)?(?:ảnh|hình|tool|giao diện|screenshot|background|phông|nền|màu|tóc|áo|quần|kính|người)/i.test(question) ||
         /(?:ảnh này|hình này|bức ảnh|tấm ảnh|tool này|giao diện này)/i.test(question);
 
-      if (!targetImageUrl && isImageAnalysisIntent) {
+      if (!targetImageUrl && isImageAnalysisOrEditIntent) {
         const recentImg = getRecentGroupImage(threadId, 10 * 60 * 1000);
         if (recentImg) {
           targetImageUrl = recentImg.local_path || recentImg.media_url || undefined;
-          console.log(`[member-assistant] 📸 Đã tự động bắt ảnh gần nhất trong nhóm (${recentImg.message_id}) để phân tích`);
+          console.log(`[member-assistant] 📸 Đã tự động bắt ảnh gần nhất trong nhóm (${recentImg.message_id}) để phân tích/chỉnh sửa`);
         }
       }
 

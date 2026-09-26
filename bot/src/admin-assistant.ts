@@ -22,11 +22,7 @@ import { sendDirectText, sendDirectFile, sendDirectVoice, sendGroupText } from "
 import { callGemini, callGeminiAgentLoop, downloadFileContent, executeAgentTool, type GeminiMediaPart } from "./gemini.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
 import { defaultBotName } from "./config.js";
-import fs from "node:fs";
-import { type MemberMessageEvent, parseImagePromptAndRatio } from "./member-assistant.js";
-import { generateCodexImage, isCodexImageConfigured, prepareImageDataUrl } from "./codex-image.js";
-import { generateCloudflareImage, isCloudflareConfigured } from "./cloudflare-ai.js";
-import { collectCandidateUrls } from "./message-extract.js";
+import { type MemberMessageEvent } from "./member-assistant.js";
 import { getWeatherReport } from "./weather.js";
 import { handleSetReminder, handleListReminders, handleCancelReminder } from "./reminder.js";
 import { getDailyAiNewsBriefing } from "./ai-news.js";
@@ -546,117 +542,8 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     }
   }
 
-  // =========================================================================
   // 2. TRỢ LÝ ĐIỀU KHIỂN & RA LỆNH 1:1
   // =========================================================================
-
-  // 2.0. TẠO HOẶC SỬA ẢNH BẰNG AI (Codex GPT-Image hoặc Cloudflare):
-  const imageReq = parseImagePromptAndRatio(rawText, defaultBotName, event.quote);
-  if (imageReq && (imageReq.prompt.length >= 2 || imageReq.isEdit)) {
-    const { prompt: imagePrompt, aspectRatio, isEdit } = imageReq;
-    const isCodex = config.imageProvider === "codex";
-    const ratioTag = aspectRatio !== "1:1" ? ` (${aspectRatio})` : "";
-
-    if (isCodex) {
-      if (!isCodexImageConfigured()) {
-        await sendDirectText(
-          api,
-          sender,
-          `⚠️ ${isAdmin ? "Sếp ơi, tính" : "Tính"} năng tạo/sửa ảnh AI (Codex) chưa được kích hoạt trên máy chủ (cần cấu hình NINE_ROUTER_API_KEY trong file .env). Vui lòng kiểm tra lại cấu hình nhé!`,
-        );
-        return;
-      }
-    } else {
-      if (!isCloudflareConfigured()) {
-        await sendDirectText(
-          api,
-          sender,
-          `⚠️ ${isAdmin ? "Sếp ơi, tính" : "Tính"} năng vẽ ảnh AI (Cloudflare) chưa được cấu hình trên máy chủ. Vui lòng liên hệ Quản trị viên để kích hoạt nhé!`,
-        );
-        return;
-      }
-    }
-
-    // Tìm ảnh tham chiếu nếu có (từ quote, event media, file attachment, raw payload)
-    let rawTargetUrl =
-      imageReq?.referenceImageUrl ||
-      event.mediaUrl ||
-      event.quote?.mediaUrl ||
-      (event.fileAttachment?.url && /\.(?:jpg|jpeg|png|webp|gif|bmp)$/i.test(event.fileAttachment.name || event.fileAttachment.url)
-        ? event.fileAttachment.url
-        : undefined);
-
-    if (!rawTargetUrl && (event as any)?.rawMessage) {
-      const candidateUrls = collectCandidateUrls([(event as any).rawMessage]);
-      const imageCandidate = candidateUrls.find((u) => /\.(?:jpe?g|png|webp|gif|bmp)(?:\?|$)/i.test(u) || /photo|image|zdn\.vn/i.test(u));
-      if (imageCandidate) {
-        rawTargetUrl = imageCandidate;
-      }
-    }
-
-    let inputImageDataUrl: string | null = null;
-    if (rawTargetUrl) {
-      if (fs.existsSync(rawTargetUrl)) {
-        inputImageDataUrl = prepareImageDataUrl(rawTargetUrl);
-      } else {
-        const fileRes = await downloadFileContent(rawTargetUrl);
-        if (fileRes?.mediaPart?.data) {
-          inputImageDataUrl = `data:${fileRes.mediaPart.mimeType || "image/png"};base64,${fileRes.mediaPart.data}`;
-        }
-      }
-    }
-
-    // Nếu yêu cầu sửa ảnh nhưng không có ảnh nào
-    if (isEdit && !inputImageDataUrl) {
-      await sendDirectText(
-        api,
-        sender,
-        `⚠️ ${isAdmin ? "Sếp ơi, Sếp" : "Bạn"} vui lòng trích dẫn (quote) một bức ảnh hoặc gửi kèm ảnh để em chỉnh sửa nhé! ✨`,
-      );
-      return;
-    }
-
-    const actionVerb = isEdit ? "chỉnh sửa ảnh" : "vẽ ảnh";
-    const promptPreview = imagePrompt.length > 50 ? `${imagePrompt.slice(0, 47)}...` : imagePrompt;
-    await sendDirectText(
-      api,
-      sender,
-      `🎨 ${isAdmin ? `Em đang ${actionVerb} cho Sếp` : `Em đang ${actionVerb}`}: "${promptPreview}"${ratioTag}... ${isAdmin ? "Sếp" : "Bạn"} chờ em xíu nhé! ✨`,
-    );
-
-    try {
-      const imgRes = isCodex
-        ? await generateCodexImage(imagePrompt, { aspectRatio, image: inputImageDataUrl, isEdit })
-        : await generateCloudflareImage(imagePrompt, { aspectRatio });
-
-      if (imgRes.success && imgRes.filePath) {
-        const shortNote = imagePrompt.length <= 35 ? ` ("${imagePrompt}"${ratioTag})` : "";
-        const resultLabel = isEdit ? "Ảnh sau khi chỉnh sửa của" : "Ảnh của";
-        const modelTag = imgRes.tierUsed ? `\n🤖 Model: ${imgRes.tierUsed}` : "";
-        await sendDirectFile(
-          api,
-          sender,
-          imgRes.filePath,
-          `🎨 ${resultLabel} ${isAdmin ? "Sếp" : displayName} đây ạ!${shortNote} ✨${modelTag}`,
-        );
-        console.log(`[admin-assistant] ✅ Đã gửi ảnh thành công cho ${displayName} ("${imagePrompt}", ratio: ${aspectRatio}, isEdit: ${Boolean(isEdit)}, model: ${imgRes.tierUsed || "N/A"})`);
-      } else {
-        await sendDirectText(
-          api,
-          sender,
-          `⚠️ Rất tiếc ${isAdmin ? "Sếp ơi" : displayName}, quá trình ${actionVerb} gặp sự cố: ${imgRes.error || "Lỗi máy chủ"}. ${isAdmin ? "Sếp" : "Bạn"} thử lại sau ít phút nhé!`,
-        );
-      }
-    } catch (imgErr: any) {
-      console.error(`[admin-assistant] ❌ Lỗi sinh/sửa/gửi ảnh 1:1:`, imgErr);
-      await sendDirectText(
-        api,
-        sender,
-        `⚠️ Rất tiếc ${isAdmin ? "Sếp ơi" : displayName}, đã có lỗi xảy ra khi ${actionVerb}: ${imgErr?.message || String(imgErr)}`,
-      );
-    }
-    return;
-  }
 
   // 2.1. Lệnh /help hoặc /menu
   if (lower === "/help" || lower === "help" || lower === "!help" || lower === "/menu" || lower === "menu") {
@@ -1785,11 +1672,20 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `    - Sử dụng công cụ 'python_interpreter' khi người dùng yêu cầu vẽ biểu đồ số liệu, infographic, poster lịch thi đấu, bảng xếp hạng, timeline, sơ đồ thuật toán, quy trình, mindmap hoặc yêu cầu làm lại/sửa lại ảnh/biểu đồ trước đó. TUYỆT ĐỐI CẤM in code Python ra chat!\n` +
     `    - VỚI LỊCH THI ĐẤU, BẢNG XẾP HẠNG, ROADMAP: Bắt buộc dùng PIL thiết kế INFOGRAPHIC POSTER dạng CARD LAYOUT nền tối sang trọng (burgundy/navy), thẻ bo góc (rounded_rectangle), huy hiệu trạng thái, tiêu đề vàng kim #FFD700, font Unicode get_font(size, bold) chuẩn tiếng Việt.\n` +
     `    - VỚI BIỂU ĐỒ SỐ LIỆU ĐỊNH LƯỢNG: Viết mã Python vẽ bằng matplotlib.pyplot với dark theme (plt.style.use('dark_background')), định dạng trực quan, tự lưu file .png.\n` +
-    `    - Hệ thống sẽ tự động bắt file ảnh biểu đồ được tạo ra và gửi trực tiếp vào Zalo cho Sếp/người dùng.\n`;
+    `    - Hệ thống sẽ tự động bắt file ảnh biểu đồ được tạo ra và gửi trực tiếp vào Zalo cho Sếp/người dùng.\n` +
+    `\n17. KỸ NĂNG TẠO VÀ CHỈNH SỬA HÌNH ẢNH NGHỆ THUẬT (generate_image):\n` +
+    `    - Khi người dùng yêu cầu vẽ ảnh, tạo ảnh, sinh ảnh, tạo tranh, vẽ chân dung, anime, đồ vật, phong cảnh, hoặc sửa ảnh, biến thể ảnh: BẮT BUỘC GỌI TOOL 'generate_image'.\n` +
+    `    - ĐẶC BIỆT KHI NGƯỜI DÙNG BẢO 'dựa vào prompt của...', 'theo prompt này', hoặc 'vẽ ảnh' (kèm quote/ảnh đính kèm): BẮT BUỘC ĐỌC KỸ LỊCH SỬ CHAT VÀ NỘI DUNG QUOTE, TRÍCH XUẤT ĐẦY ĐỦ Ý TƯỞNG/PROMPT ĐÓ ra và truyền vào tham số 'prompt' của tool generate_image. TUYỆT ĐỐI CẤM để prompt cộc lốc!\n` +
+    `    - NẾU là chỉnh sửa/thay đổi trên ảnh có sẵn: Đặt isEdit=true và truyền imageUrl nếu có.\n` +
+    `    - TUYỆT ĐỐI CẤM bịa đặt bằng chữ 'em đang vẽ ảnh / đã gửi ảnh' khi chưa thực sự gọi tool 'generate_image'!\n`;
+
+  const directImageRefHint = targetUrl
+    ? `\n[ẢNH THAM CHIẾU / ĐÍNH KÈM HIỆN TẠI]: "${targetUrl}". Khi người dùng yêu cầu chỉnh sửa, thay đổi chi tiết hoặc biến thể từ ảnh này, hãy gọi 'generate_image' với imageUrl="${targetUrl}" và isEdit=true.\n`
+    : "";
 
   const userPrompt =
     (historyText ? `LỊCH SỬ TRÒ CHUYỆN TRƯỚC ĐÓ:\n${historyText}\n\n` : "") +
-    `${quoteSection}${fileSection}${liveNewsSection}${groupActivitiesSection}${permanentKnowledgeSection}\n` +
+    `${quoteSection}${fileSection}${liveNewsSection}${groupActivitiesSection}${permanentKnowledgeSection}${directImageRefHint}\n` +
     `YÊU CẦU MỚI TỪ ${isAdmin ? `ADMIN (${displayName})` : `${pronouns.userTitle.toUpperCase()} (${displayName})`}: ${rawText || (mediaPart ? "Hãy phân tích hình ảnh này giúp tôi." : fileTextContent ? "Hãy đọc tài liệu này giúp tôi." : "Dạ em chào Sếp ạ! Em có thể hỗ trợ gì?")}\n\n` +
     (isAdmin ? `HÃY TRẢ LỜI SẾP THẬT CHUẨN XÁC, THÔNG MINH VÀ HỮU ÍCH:` : `HÃY TRẢ LỜI ${pronouns.userTitle.toUpperCase()} THẬT THÂN THIỆN, CHUẨN XÁC VÀ HỮU ÍCH:`);
 
@@ -1838,6 +1734,19 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       answer = await callGeminiAgentLoop(fullSystemPrompt, effectiveUserPrompt, {
         model: targetModel,
         mediaParts: mediaPart ? [mediaPart] : undefined,
+        targetImageUrl: targetUrl,
+        onToolCall: (toolName, args) => {
+          if (toolName === "generate_image") {
+            const promptPreview = String(args?.prompt || "").slice(0, 45);
+            const verb = args?.isEdit ? "chỉnh sửa ảnh" : "vẽ ảnh";
+            const userGreeting = isAdmin ? "Sếp" : pronouns.userTitle;
+            void sendDirectText(
+              api,
+              sender,
+              `🎨 ${isAdmin ? `Em đang ${verb} cho Sếp` : `Em đang ${verb}`}: "${promptPreview}..."... ${userGreeting} chờ em xíu nhé! ✨`,
+            );
+          }
+        },
         onFileGenerated: async (file) => {
           try {
             const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
