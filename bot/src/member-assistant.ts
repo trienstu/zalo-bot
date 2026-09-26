@@ -1061,7 +1061,7 @@ function isMediaOrDocUrl(url?: string | null): boolean {
   const mediaExts = [
     ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp",
     ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv",
-    ".mp3", ".wav", ".m4a", ".mp4",
+    ".mp3", ".wav", ".m4a", ".aac", ".mp4",
     ".txt", ".json", ".zip"
   ];
   if (mediaExts.some((ext) => clean.endsWith(ext))) return true;

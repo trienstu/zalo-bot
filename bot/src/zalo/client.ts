@@ -1324,11 +1324,16 @@ async function sendVoiceBubbleWithDuration(
     fileSize = fs.statSync(filePath).size;
   } catch {}
 
-  const m4aAudioUrl = voiceUrl.includes("?") ? `${voiceUrl}&ext=.m4a` : `${voiceUrl}?ext=.m4a`;
+  const ext = path.extname(filePath).toLowerCase() || ".aac";
+  const formattedAudioUrl = voiceUrl.toLowerCase().includes(ext)
+    ? voiceUrl
+    : voiceUrl.includes("?")
+      ? `${voiceUrl}&ext=${ext}`
+      : `${voiceUrl}?ext=${ext}`;
 
   const msgInfoObj = {
-    voiceUrl,
-    m4aUrl: m4aAudioUrl,
+    voiceUrl: formattedAudioUrl,
+    m4aUrl: formattedAudioUrl,
     fileSize: fileSize || 0,
     duration: durationMs,
     voiceLen: durationMs,
@@ -1417,7 +1422,13 @@ export async function sendGroupVoice(
         }
 
         if (!sent && typeof api.sendVoice === "function") {
-          await api.sendVoice({ voiceUrl }, threadIdStr, ThreadType.Group);
+          const ext = path.extname(filePath).toLowerCase() || ".aac";
+          const fallbackVoiceUrl = voiceUrl.toLowerCase().includes(ext)
+            ? voiceUrl
+            : voiceUrl.includes("?")
+              ? `${voiceUrl}&ext=${ext}`
+              : `${voiceUrl}?ext=${ext}`;
+          await api.sendVoice({ voiceUrl: fallbackVoiceUrl }, threadIdStr, ThreadType.Group);
           sent = true;
         }
 
@@ -1472,7 +1483,13 @@ export async function sendDirectVoice(
         }
 
         if (!sent && typeof api.sendVoice === "function") {
-          await api.sendVoice({ voiceUrl }, targetId, ThreadType.User);
+          const ext = path.extname(filePath).toLowerCase() || ".aac";
+          const fallbackVoiceUrl = voiceUrl.toLowerCase().includes(ext)
+            ? voiceUrl
+            : voiceUrl.includes("?")
+              ? `${voiceUrl}&ext=${ext}`
+              : `${voiceUrl}?ext=${ext}`;
+          await api.sendVoice({ voiceUrl: fallbackVoiceUrl }, targetId, ThreadType.User);
           sent = true;
         }
 

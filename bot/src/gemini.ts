@@ -94,6 +94,7 @@ function detectMimeType(buffer: Buffer, fileName = "", headerContentType = ""): 
   if (ext === "mp3") return "audio/mp3";
   if (ext === "wav") return "audio/wav";
   if (ext === "m4a") return "audio/mp4";
+  if (ext === "aac") return "audio/aac";
 
   return cleanHeader || "application/octet-stream";
 }

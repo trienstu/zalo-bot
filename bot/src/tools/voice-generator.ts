@@ -252,45 +252,45 @@ export function cleanOldVoiceFiles(maxAgeMinutes = 60): void {
 }
 
 /**
- * Chuyển đổi file audio sang chuẩn Zalo Voice Bubble (.m4a AAC-LC 24kHz Mono 64kbps)
- * Chuẩn âm thanh thoại tối ưu phổ quát nhất, tương thích 100% trên toàn bộ thiết bị (iOS, Android, Zalo PC, Web).
+ * Chuyển đổi file audio sang chuẩn Zalo Voice Bubble (.aac ADTS AAC-LC 24kHz Mono 64kbps)
+ * Chuẩn luồng âm thanh thoại ADTS tối ưu phổ quát nhất, tương thích 100% trên toàn bộ thiết bị (iOS iPhone/iPad, Android, Zalo PC, Web).
  * - Sử dụng profile aac_low (AAC-LC) để mọi thiết bị giải mã được không phụ thuộc codec mở rộng
+ * - Định dạng thô ADTS stream (-f adts) giúp Zalo iOS (AVAudioPlayer) đọc trực tiếp các khung âm thanh, khắc phục triệt để lỗi 00:00 (0s)
  * - Tần số 24000Hz (chuẩn thoại speech) giúp chip âm thanh Android không bị lỗi driver khi định tuyến qua loa trong/loa ngoài
  * - Bitrate 64kbps gọn nhẹ, streaming nhanh qua Zalo CDN mà vẫn giữ chất lượng giọng đọc trong trẻo
- * - Cờ +faststart đưa atom moov lên đầu để trình phát Zalo đọc được ngay lập tức
  * Xử lý được cả file audio chuẩn (MP3, WAV, AAC) lẫn raw PCM 24kHz/48kHz từ Gemini TTS.
  */
 async function convertToZaloVoiceBubble(inputPath: string, outputPath: string): Promise<void> {
-  // 1. Thử convert chuẩn tối ưu nhất: AAC-LC 24kHz 64kbps mono + faststart
+  // 1. Thử convert chuẩn tối ưu nhất: AAC-LC 24kHz 64kbps mono qua ADTS stream
   try {
-    const ffmpegCmd = `ffmpeg -y -v error -i "${inputPath}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 24000 -ac 1 -movflags +faststart "${outputPath}"`;
+    const ffmpegCmd = `ffmpeg -y -v error -i "${inputPath}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 24000 -ac 1 -f adts "${outputPath}"`;
     await execPromise(ffmpegCmd);
     if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) return;
   } catch {}
 
   // 2. Thử convert raw PCM 24kHz mono (chuẩn định dạng Gemini Flash TTS audio/L16)
   try {
-    const pcm24Cmd = `ffmpeg -y -v error -f s16le -ar 24000 -ac 1 -i "${inputPath}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 24000 -ac 1 -movflags +faststart "${outputPath}"`;
+    const pcm24Cmd = `ffmpeg -y -v error -f s16le -ar 24000 -ac 1 -i "${inputPath}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 24000 -ac 1 -f adts "${outputPath}"`;
     await execPromise(pcm24Cmd);
     if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) return;
   } catch {}
 
   // 3. Thử convert raw PCM 48kHz mono
   try {
-    const pcm48Cmd = `ffmpeg -y -v error -f s16le -ar 48000 -ac 1 -i "${inputPath}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 24000 -ac 1 -movflags +faststart "${outputPath}"`;
+    const pcm48Cmd = `ffmpeg -y -v error -f s16le -ar 48000 -ac 1 -i "${inputPath}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 24000 -ac 1 -f adts "${outputPath}"`;
     await execPromise(pcm48Cmd);
     if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) return;
   } catch {}
 
   // 4. Dự phòng: convert 44.1kHz nếu nguồn đặc thù
   try {
-    const fallbackCmd = `ffmpeg -y -v error -i "${inputPath}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 44100 -ac 1 -movflags +faststart "${outputPath}"`;
+    const fallbackCmd = `ffmpeg -y -v error -i "${inputPath}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 44100 -ac 1 -f adts "${outputPath}"`;
     await execPromise(fallbackCmd);
     if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) return;
   } catch {}
 
-  // 5. Nếu thất bại, cảnh báo và TUYỆT ĐỐI KHÔNG copy file raw vào .m4a để tránh sinh file rỗng 00:00 trên Zalo
-  console.warn(`[voice-generator] Không thể encode file audio sang .m4a AAC chuẩn từ: ${inputPath}`);
+  // 5. Nếu thất bại, cảnh báo và TUYỆT ĐỐI KHÔNG copy file raw vào file đích để tránh sinh file rỗng 00:00 trên Zalo
+  console.warn(`[voice-generator] Không thể encode file audio sang .aac ADTS chuẩn từ: ${inputPath}`);
 }
 
 /**
@@ -831,7 +831,7 @@ export function detectGenderFromName(name: string): "male" | "female" | null {
 /**
  * Sinh âm thanh đối thoại đa nhân vật (Podcast / Dialogue) qua Google AI Studio Native Multi-Speaker TTS.
  * Sử dụng cấu hình multiSpeakerVoiceConfig trong 1 request duy nhất, đảm bảo tính liền mạch cảm xúc,
- * nhịp điệu tương tác tự nhiên và tạo trực tiếp file Zalo Voice Bubble (.m4a) chuẩn không cần ghép nối.
+ * nhịp điệu tương tác tự nhiên và tạo trực tiếp file Zalo Voice Bubble (.aac) chuẩn không cần ghép nối.
  */
 async function synthesizeWithGoogleAIStudioMultiSpeaker(
   dialogueText: string,
@@ -1002,7 +1002,7 @@ async function synthesizeWithGoogleAIStudioMultiSpeaker(
           const buffer = Buffer.from(part.inlineData.data, "base64");
           if (buffer.length > 0) {
             fs.writeFileSync(tempAudioPath, buffer);
-            // Convert sang chuẩn Zalo Voice Bubble (.m4a AAC-LC 24kHz 64kbps Mono)
+            // Convert sang chuẩn Zalo Voice Bubble (.aac ADTS AAC-LC 24kHz 64kbps Mono)
             await convertToZaloVoiceBubble(tempAudioPath, outputPath);
             if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0) {
               console.log(
@@ -1085,7 +1085,7 @@ export async function synthesizeSpeech(options: SynthesizeOptions): Promise<Voic
 
   const timestamp = Date.now();
   const rawAudioPath = path.join(VOICE_CACHE_DIR, `raw_${timestamp}.mp3`);
-  const finalM4aPath = path.join(VOICE_CACHE_DIR, `voice_${timestamp}.m4a`);
+  const finalAacPath = path.join(VOICE_CACHE_DIR, `voice_${timestamp}.aac`);
 
   try {
     const stylePrompt = options.stylePrompt || options.style;
@@ -1095,19 +1095,19 @@ export async function synthesizeSpeech(options: SynthesizeOptions): Promise<Voic
       stylePrompt,
     });
 
-    // Convert sang định dạng Zalo Voice Bubble (.m4a AAC 44.1kHz 128kbps)
-    await convertToZaloVoiceBubble(rawAudioPath, finalM4aPath);
+    // Convert sang định dạng Zalo Voice Bubble (.aac ADTS AAC 24kHz 64kbps)
+    await convertToZaloVoiceBubble(rawAudioPath, finalAacPath);
 
     try {
       fs.unlinkSync(rawAudioPath);
     } catch { }
 
-    const finalStats = fs.statSync(finalM4aPath);
+    const finalStats = fs.statSync(finalAacPath);
 
     return {
       success: true,
-      filePath: finalM4aPath,
-      fileName: path.basename(finalM4aPath),
+      filePath: finalAacPath,
+      fileName: path.basename(finalAacPath),
       fileSize: finalStats.size,
       provider,
       caption: options.caption,
@@ -1206,7 +1206,7 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
 
   const lines = content.split("\n").filter((l) => l.trim().length > 0);
   const timestamp = Date.now();
-  const finalM4aPath = path.join(VOICE_CACHE_DIR, `podcast_${timestamp}.m4a`);
+  const finalAacPath = path.join(VOICE_CACHE_DIR, `podcast_${timestamp}.aac`);
 
   // 1. Trích xuất danh sách nhân vật đối thoại theo thứ tự xuất hiện
   const extractedSpeakers: { speaker: string; voiceName: string }[] = [];
@@ -1286,17 +1286,17 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
   if (extractedSpeakers.length >= 2) {
     const nativeOk = await synthesizeWithGoogleAIStudioMultiSpeaker(
       content,
-      finalM4aPath,
+      finalAacPath,
       extractedSpeakers,
       { stylePrompt: options.stylePrompt || options.style },
     );
 
-    if (nativeOk && fs.existsSync(finalM4aPath) && fs.statSync(finalM4aPath).size > 0) {
-      const finalStats = fs.statSync(finalM4aPath);
+    if (nativeOk && fs.existsSync(finalAacPath) && fs.statSync(finalAacPath).size > 0) {
+      const finalStats = fs.statSync(finalAacPath);
       return {
         success: true,
-        filePath: finalM4aPath,
-        fileName: path.basename(finalM4aPath),
+        filePath: finalAacPath,
+        fileName: path.basename(finalAacPath),
         fileSize: finalStats.size,
         provider: "aistudio",
         caption: options.caption,
@@ -1308,7 +1308,7 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
   // 3. TIER 2 & 3: Turn-by-turn fallback (Google Cloud TTS / Edge-TTS)
   const partFiles: string[] = [];
   const listFilePath = path.join(VOICE_CACHE_DIR, `list_${timestamp}.txt`);
-  const silencePath = path.join(VOICE_CACHE_DIR, `silence_${timestamp}.m4a`);
+  const silencePath = path.join(VOICE_CACHE_DIR, `silence_${timestamp}.aac`);
 
   const speakerToVoiceFallback: Record<string, string> = {};
   const defaultVoices = ["vi-VN-Wavenet-B", "vi-VN-Neural2-A"];
@@ -1373,7 +1373,7 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
       lastAssignedVoice = assignedVoice;
 
       const partRaw = path.join(VOICE_CACHE_DIR, `part_raw_${timestamp}_${i}.mp3`);
-      const partM4a = path.join(VOICE_CACHE_DIR, `part_${timestamp}_${i}.m4a`);
+      const partAac = path.join(VOICE_CACHE_DIR, `part_${timestamp}_${i}.aac`);
 
       if (i > 0) {
         await new Promise((r) => setTimeout(r, 150));
@@ -1389,11 +1389,11 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
       activeProvider = p;
 
       if (fs.existsSync(partRaw) && fs.statSync(partRaw).size > 0) {
-        // Chuẩn hóa ngay lập tức từng part sang .m4a AAC chuẩn để concat đồng bộ định dạng
-        await convertToZaloVoiceBubble(partRaw, partM4a);
+        // Chuẩn hóa ngay lập tức từng part sang .aac ADTS chuẩn để concat đồng bộ định dạng
+        await convertToZaloVoiceBubble(partRaw, partAac);
         try { fs.unlinkSync(partRaw); } catch {}
-        if (fs.existsSync(partM4a) && fs.statSync(partM4a).size > 0) {
-          partFiles.push(partM4a);
+        if (fs.existsSync(partAac) && fs.statSync(partAac).size > 0) {
+          partFiles.push(partAac);
         }
       }
     }
@@ -1402,10 +1402,10 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
       throw new Error("Không tạo được đoạn âm thanh nào cho podcast");
     }
 
-    // Tạo khoảng lặng 250ms giữa các câu thoại
+    // Tạo khoảng lặng 250ms giữa các câu thoại theo chuẩn ADTS AAC
     let hasSilence = false;
     try {
-      await execPromise(`ffmpeg -y -v error -f lavfi -i anullsrc=r=24000:cl=mono -t 0.25 -c:a aac -profile:a aac_low -b:a 64k "${silencePath}"`);
+      await execPromise(`ffmpeg -y -v error -f lavfi -i anullsrc=r=24000:cl=mono -t 0.25 -c:a aac -profile:a aac_low -b:a 64k -f adts "${silencePath}"`);
       hasSilence = fs.existsSync(silencePath) && fs.statSync(silencePath).size > 0;
     } catch {
       hasSilence = false;
@@ -1423,21 +1423,21 @@ export async function synthesizeDialogue(options: SynthesizeOptions): Promise<Vo
     fs.writeFileSync(listFilePath, concatLines.join("\n"), "utf8");
 
     try {
-      const concatCmd = `ffmpeg -y -v error -f concat -safe 0 -i "${listFilePath}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 24000 -ac 1 -movflags +faststart "${finalM4aPath}"`;
+      const concatCmd = `ffmpeg -y -v error -f concat -safe 0 -i "${listFilePath}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 24000 -ac 1 -f adts "${finalAacPath}"`;
       await execPromise(concatCmd);
     } catch (ffmpegErr) {
       console.warn("[voice-generator] FFmpeg concat dialogue không thành công, re-encode từ file part đầu tiên:", ffmpegErr);
       if (partFiles[0]) {
-        await execPromise(`ffmpeg -y -v error -i "${partFiles[0]}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 24000 -ac 1 -movflags +faststart "${finalM4aPath}"`);
+        await execPromise(`ffmpeg -y -v error -i "${partFiles[0]}" -vn -map_metadata -1 -c:a aac -profile:a aac_low -b:a 64k -ar 24000 -ac 1 -f adts "${finalAacPath}"`);
       }
     }
 
-    const finalStats = fs.statSync(finalM4aPath);
+    const finalStats = fs.statSync(finalAacPath);
 
     return {
       success: true,
-      filePath: finalM4aPath,
-      fileName: path.basename(finalM4aPath),
+      filePath: finalAacPath,
+      fileName: path.basename(finalAacPath),
       fileSize: finalStats.size,
       provider: activeProvider,
       caption: options.caption,
