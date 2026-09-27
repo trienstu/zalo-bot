@@ -113,14 +113,20 @@ export interface ConversationPronouns {
   instruction: string;
 }
 
-function matchesPronoun(text: string, words: string[]): boolean {
-  // Chuẩn hóa xóa dấu nhưng GIỮ NGUYÊN ký tự 'đ' (không đổi thành 'd' để tránh nhầm trợ từ 'đi' thành 'dì')
-  const norm = String(text || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-  const pattern = new RegExp(`\\b(?:${words.join("|")})\\b`, "i");
-  return pattern.test(norm);
+function matchesPronounWithContext(text: string, titlePattern: string, unaccentedWord: string): boolean {
+  // 1. Khớp dạng có dấu chính xác (NFC hoặc NFD) bằng Unicode Boundary (tránh lỗi ASCII \b với ký tự tiếng Việt)
+  const accentedRegex = new RegExp(`(?<![\\p{L}\\p{N}])(?:${titlePattern})(?![\\p{L}\\p{N}])`, "iu");
+  if (accentedRegex.test(text)) return true;
+
+  // 2. Với dạng không dấu, TUYỆT ĐỐI KHÔNG khớp từ đơn độc lập (tránh nhầm: có -> cô, chỉ -> chị, ảnh -> anh, đi -> dì, chứ -> chú).
+  // Chỉ chấp nhận khi đi kèm ngữ cảnh xưng hô rõ ràng:
+  // - Đứng trước: chào, chao, thưa, thua, kính, kinh, cháu, chau, gọi, goi, cho, gửi, gui, nhờ, nho
+  // - Đứng sau: ơi, oi, nhé, nhe, nha, ạ, a, bảo, bao, nhờ, nho
+  const contextualRegex = new RegExp(
+    `(?:(?<![\\p{L}\\p{N}])(?:chào|chao|thưa|thua|kính|kinh|cháu|chau|gọi|goi|cho|gửi|gui|nhờ|nho)\\s+${unaccentedWord}(?![\\p{L}\\p{N}])|(?<![\\p{L}\\p{N}])${unaccentedWord}\\s+(?:ơi|oi|nhé|nhe|nha|ạ|a|bảo|bao|nhờ|nho)(?![\\p{L}\\p{N}]))`,
+    "iu"
+  );
+  return contextualRegex.test(text);
 }
 
 export function deriveConversationPronouns(params: {
@@ -145,28 +151,28 @@ export function deriveConversationPronouns(params: {
   const currentTexts = `${rawText} ${quoteText}`;
 
   // 1. Kiểm tra ưu tiên từ trí nhớ dài hạn (đã được lưu chính xác trước đó)
-  if (matchesPronoun(memTexts, ["chu"])) {
+  if (matchesPronounWithContext(memTexts, "chú|chú", "chu")) {
     return {
       botPronoun: "cháu",
       userTitle: "Chú",
       instruction: `QUY TẮC XƯNG HÔ ĐỐI XỨNG & KÍNH TRỌNG: Người dùng là bề trên (Chú). BẮT BUỘC xưng 'cháu', gọi người dùng là 'Chú'. TUYỆT ĐỐI CẤM xưng cọc cạch như 'em' với 'Chú'! Lễ phép, tự nhiên, chuẩn mực thuần phong mỹ tục Việt Nam.`,
     };
   }
-  if (matchesPronoun(memTexts, ["bac"])) {
+  if (matchesPronounWithContext(memTexts, "bác|bác", "bac")) {
     return {
       botPronoun: "cháu",
       userTitle: "Bác",
       instruction: `QUY TẮC XƯNG HÔ ĐỐI XỨNG & KÍNH TRỌNG: Người dùng là bề trên (Bác). BẮT BUỘC xưng 'cháu', gọi người dùng là 'Bác'. Lễ phép, tự nhiên.`,
     };
   }
-  if (matchesPronoun(memTexts, ["co"])) {
+  if (matchesPronounWithContext(memTexts, "cô|cô", "co")) {
     return {
       botPronoun: "cháu",
       userTitle: "Cô",
       instruction: `QUY TẮC XƯNG HÔ ĐỐI XỨNG & KÍNH TRỌNG: Người dùng là bề trên (Cô). BẮT BUỘC xưng 'cháu', gọi người dùng là 'Cô'. Lễ phép, tự nhiên.`,
     };
   }
-  if (/\b(?:dì|thím|di|thim)\b/i.test(memTexts)) {
+  if (matchesPronounWithContext(memTexts, "dì|dì|thím|thím", "di|thim")) {
     return {
       botPronoun: "cháu",
       userTitle: "Dì",
@@ -209,18 +215,19 @@ export function deriveConversationPronouns(params: {
     };
   }
 
-  // 2.3. Nhận diện vai vế bề trên trong tin nhắn (loại trừ cụm "chú mày" và trợ từ "đi")
+  // 2.3. Nhận diện vai vế bề trên trong tin nhắn (loại trừ cụm "chú mày", trợ từ "đi" và các câu phản bác "dì nào", "cô nào")
   let foundElder: string | null = null;
-  const textWithoutChuMay = cleanForPronoun.replace(/\b(?:chú\s+mày|chu\s+may)\b/gi, " ");
+  const textWithoutChuMay = cleanForPronoun
+    .replace(/\b(?:chú\s+mày|chu\s+may)\b/gi, " ")
+    .replace(/(?<![\p{L}\p{N}])(?:chú|chú|bác|bác|cô|cô|dì|dì|thím|thím|anh|chị|chị|chu|bac|co|di|thim|chi)\s+nào(?![\p{L}\p{N}])/giu, " ");
 
-  if (matchesPronoun(textWithoutChuMay, ["chu"])) {
+  if (matchesPronounWithContext(textWithoutChuMay, "chú|chú", "chu")) {
     foundElder = "Chú";
-  } else if (matchesPronoun(textWithoutChuMay, ["bac"])) {
+  } else if (matchesPronounWithContext(textWithoutChuMay, "bác|bác", "bac")) {
     foundElder = "Bác";
-  } else if (matchesPronoun(textWithoutChuMay, ["co"])) {
+  } else if (matchesPronounWithContext(textWithoutChuMay, "cô|cô", "co")) {
     foundElder = "Cô";
-  } else if (/\b(?:dì|thím)\b/i.test(textWithoutChuMay) || /\b(?:chào|thưa|gọi|kính|cháu)\s+(?:dì|di)\b/i.test(textWithoutChuMay)) {
-    // Chỉ nhận diện "Dì" khi có dấu 'dì' rõ ràng hoặc có từ xưng hô tôn kính đi kèm, tránh hoàn toàn từ không dấu gây hiểu lầm
+  } else if (matchesPronounWithContext(textWithoutChuMay, "dì|dì|thím|thím", "di|thim")) {
     foundElder = "Dì";
   }
 
@@ -234,9 +241,9 @@ export function deriveConversationPronouns(params: {
 
   // 2.4. Nhận diện anh/chị thông thường
   let foundSibling: string | null = null;
-  if (matchesPronoun(cleanForPronoun, ["chi"])) {
+  if (matchesPronounWithContext(cleanForPronoun, "chị|chị", "chi")) {
     foundSibling = "Chị";
-  } else if (matchesPronoun(cleanForPronoun, ["anh"])) {
+  } else if (matchesPronounWithContext(cleanForPronoun, "anh", "anh")) {
     foundSibling = "Anh";
   }
 

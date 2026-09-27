@@ -1,6 +1,6 @@
-import fs from "node:fs";
-import path from "node:path";
-import { execSync } from "node:child_process";
+import fs from "fs";
+import path from "path";
+import { execSync } from "child_process";
 import {
   Document,
   Packer,
@@ -10,190 +10,30 @@ import {
   TableRow,
   TableCell,
   WidthType,
-  BorderStyle,
-  HeadingLevel,
   AlignmentType,
+  HeadingLevel,
+  BorderStyle,
 } from "docx";
-import { transcribeCloudflareAudio, isCloudflareConfigured } from "../dist/cloudflare-ai.js";
-import { callGemini } from "../dist/gemini.js";
 
-const BASE_AUDIO_DIR = "/tmp/movers_cd1/extracted/Get Ready for Movers_CD 1/Get Ready for Movers_CD 1";
-const CACHE_FILE = "/tmp/movers_cd1/movers_cd1_transcripts.json";
-const OUTPUT_DOCX = "/home/ubuntu/zalo-bot-2/bot/data/generated-files/Get_Ready_for_Movers_CD1_Full_35_Tracks.docx";
-const TARGET_USER_ID = "7562597848104391036"; // Anh Trần Văn Tuyến
+const CACHE_FILE = "/tmp/movers_cd1_transcripts.json";
+const OUTPUT_DIR = "/tmp/movers_out";
+fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
-async function main() {
-  console.log("=== BẮT ĐẦU XỬ LÝ TRỌN BỘ 35 TRACKS GET READY FOR MOVERS CD 1 ===");
+const OUTPUT_DOCX = path.join(OUTPUT_DIR, "Get_Ready_for_Movers_CD1_Full_35_Tracks.docx");
+const OUTPUT_HTML = path.join(OUTPUT_DIR, "Get_Ready_for_Movers_CD1_Full_35_Tracks.html");
+const OUTPUT_PDF = path.join(OUTPUT_DIR, "Get_Ready_for_Movers_CD1_Full_35_Tracks.pdf");
 
-  if (!fs.existsSync(BASE_AUDIO_DIR)) {
-    throw new Error(`Thư mục âm thanh không tồn tại: ${BASE_AUDIO_DIR}`);
-  }
+const cache = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
 
-  // Đọc danh sách file âm thanh wma và sắp xếp theo thứ tự
-  const files = fs
-    .readdirSync(BASE_AUDIO_DIR)
-    .filter((f) => f.endsWith(".wma"))
-    .sort((a, b) => {
-      const numA = parseInt(a.slice(0, 2), 10) || 0;
-      const numB = parseInt(b.slice(0, 2), 10) || 0;
-      return numA - numB;
-    });
-
-  console.log(`Tìm thấy ${files.length} tracks wma.`);
-
-  // Load cache nếu đã có
-  let cache = {};
-  if (fs.existsSync(CACHE_FILE)) {
-    try {
-      cache = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8"));
-      console.log(`Đã load cache: ${Object.keys(cache).length} tracks đã xử lý trước đó.`);
-    } catch {}
-  }
-
-  // Xử lý từng track
-  for (let i = 0; i < files.length; i++) {
-    const filename = files[i];
-    const trackNum = i + 1;
-    const trackKey = `track_${String(trackNum).padStart(2, "0")}`;
-
-    if (cache[trackKey] && cache[trackKey].dialogues && cache[trackKey].dialogues.length > 0) {
-      console.log(`[Track ${trackNum}/35] Đã có trong cache: "${cache[trackKey].title}" -> bỏ qua.`);
-      continue;
-    }
-
-    console.log(`\n--------------------------------------------------`);
-    console.log(`[Track ${trackNum}/35] 🎧 Đang xử lý file: ${filename}...`);
-
-    const wmaPath = path.join(BASE_AUDIO_DIR, filename);
-    const mp3Path = `/tmp/movers_cd1/track_${String(trackNum).padStart(2, "0")}.mp3`;
-
-    // 1. Chuyển đổi WMA sang MP3 bằng ffmpeg
-    if (!fs.existsSync(mp3Path)) {
-      try {
-        execSync(
-          `ffmpeg -y -i "${wmaPath}" -f mp3 -acodec libmp3lame -b:a 128k "${mp3Path}" 2>/dev/null`,
-          { timeout: 15_000 }
-        );
-      } catch (ffErr) {
-        console.warn(`Lỗi ffmpeg track ${trackNum}:`, ffErr);
-      }
-    }
-
-    const mp3Buf = fs.readFileSync(mp3Path);
-    console.log(`  File MP3: ${mp3Buf.length} bytes.`);
-
-    // 2. Bóc băng âm thanh qua Cloudflare Whisper
-    let whisperText = "";
-    if (isCloudflareConfigured()) {
-      try {
-        console.log(`  🎙️ Đang bóc băng qua Cloudflare Whisper...`);
-        const wRes = await transcribeCloudflareAudio(mp3Buf);
-        if (wRes?.success && wRes.text) {
-          whisperText = wRes.text.trim();
-          console.log(`  ✅ Whisper hoàn tất (${whisperText.length} ký tự).`);
-        }
-      } catch (wErr) {
-        console.warn(`  ⚠️ Whisper gặp sự cố:`, wErr);
-      }
-    }
-
-    // 3. Sử dụng Gemini để phân tích cấu trúc, dịch song ngữ và bổ sung từ vựng, mẹo làm bài
-    let structured = null;
-    const prompt =
-      `Bạn là giáo viên chuyên ngữ tiếng Anh luyện thi chứng chỉ Cambridge Young Learners English (Movers A1 - Oxford University Press).\n` +
-      `Dưới đây là thông tin bài nghe số ${trackNum} trích từ đĩa CD 1 của bộ sách "Get Ready for Movers":\n\n` +
-      `TRANSCRIPT ÂM THANH:\n"""\n${whisperText || "Audio track " + trackNum}\n"""\n\n` +
-      `Nhiệm vụ: Hãy phân tích đoạn nghe trên thành bảng hội thoại chuẩn mực, dịch nghĩa tiếng Việt sư phạm chuẩn xác từng câu, liệt kê từ vựng trọng tâm và hướng dẫn học sinh.\n` +
-      `BẮT BUỘC trả về định dạng JSON thuần túy (KHÔNG dùng markdown backticks, KHÔNG dùng \`\`\`json) với cấu trúc:\n` +
-      `{\n` +
-      `  "trackNumber": ${trackNum},\n` +
-      `  "title": "Tiêu đề bài nghe (ví dụ: Listening 1 - Jack's House & Address / Movers Practice Test - Listening Part 1)",\n` +
-      `  "topic": "Chủ đề bài học (ví dụ: My House, Numbers 10-100, At the Beach, Hobbies...)",\n` +
-      `  "dialogues": [\n` +
-      `    {"speaker": "Tên người nói (ví dụ: Narrator / Jack / Daisy / Teacher / Boy / Girl / Mum)", "en": "Câu thoại tiếng Anh đầy đủ", "vi": "Bản dịch tiếng Việt chuẩn nghĩa"}\n` +
-      `  ],\n` +
-      `  "vocabulary": ["Từ vựng hoặc cấu trúc 1", "Từ vựng 2", "Từ vựng 3"],\n` +
-      `  "notes": "Ghi chú sư phạm ngắn gọn về điểm ngữ pháp, phát âm hoặc dạng bài thi Movers"\n` +
-      `}`;
-
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        console.log(`  🤖 Đang phân tích và dịch song ngữ qua Gemini (lần ${attempt})...`);
-        const geminiRes = await callGemini(prompt, `Track ${trackNum}`, {
-          model: "gemini-3.1-flash-lite-preview",
-        });
-
-        if (geminiRes) {
-          const cleanJson = geminiRes.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
-          structured = JSON.parse(cleanJson);
-          console.log(`  ✅ Phân tích thành công: "${structured.title}" (${structured.dialogues?.length || 0} câu thoại)`);
-          break;
-        }
-      } catch (gErr) {
-        console.warn(`  ⚠️ Gemini lần ${attempt} thất bại:`, String(gErr).slice(0, 150));
-        await new Promise((r) => setTimeout(r, 2000 * attempt));
-      }
-    }
-
-    // Fallback nếu JSON parse lỗi
-    if (!structured) {
-      structured = {
-        trackNumber: trackNum,
-        title: `Listening ${trackNum}`,
-        topic: "General Listening Practice",
-        dialogues: [
-          {
-            speaker: "Audio",
-            en: whisperText || `Audio track ${trackNum}`,
-            vi: "Nội dung bài nghe track " + trackNum,
-          },
-        ],
-        vocabulary: [],
-        notes: "Luyện nghe bài tập Get Ready for Movers.",
-      };
-    }
-
-    cache[trackKey] = structured;
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2), "utf8");
-
-    // Nghỉ nhẹ 500ms giữa các track
-    await new Promise((r) => setTimeout(r, 500));
-  }
-
-  console.log("\n==================================================");
-  console.log("✅ ĐÃ HOÀN TẤT BÓC BĂNG & DỊCH NGHĨA TẤT CẢ 35 TRACKS!");
-  console.log("==================================================");
-
-  // 4. Tạo file Word .docx chuyên nghiệp
-  console.log(`\n📄 Đang biên soạn file Word tổng hợp: ${OUTPUT_DOCX}...`);
-  await buildConsolidatedWordDoc(cache, OUTPUT_DOCX);
-  console.log(`✅ File Word đã được tạo thành công: ${OUTPUT_DOCX}`);
-
-  // 5. Gửi file trực tiếp đến anh Trần Văn Tuyến qua zalo-bot-2
-  console.log(`\n📤 Đang gửi file trực tiếp đến Zalo của anh Trần Văn Tuyến (${TARGET_USER_ID})...`);
-  const reqPayload = {
-    requestId: `movers_cd1_${Date.now()}`,
-    userId: TARGET_USER_ID,
-    filePath: OUTPUT_DOCX,
-    caption:
-      "Dạ em gửi anh Tuyến bản Word tổng hợp trọn bộ 35 bài nghe Get Ready for Movers CD 1 đầy đủ transcript song ngữ Anh - Việt và ghi chú bài học chi tiết nhé ạ! ☘️📄",
-    requestedAt: Date.now(),
-    requestedBy: "batch_movers_processor",
-  };
-
-  const requestFile = "/home/ubuntu/zalo-bot-2/bot/data/direct-send-request.json";
-  fs.writeFileSync(requestFile, JSON.stringify(reqPayload, null, 2), "utf8");
-  console.log(`✅ Đã gửi lệnh DirectSendRequest thành công qua file: ${requestFile}`);
-  console.log(`Bot zalo-bot-2 sẽ tự động gửi file trong vài giây tới.`);
-}
-
-async function buildConsolidatedWordDoc(cache, outputPath) {
+// ==========================================
+// 1. TẠO FILE DOCX CHUẨN ĐẸP 100%
+// ==========================================
+async function buildDocx() {
   const docChildren = [];
-
   const thinBorder = { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" };
   const cellBorders = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder };
 
-  // --- TRANG BÌA & TIÊU ĐỀ CHÍNH ---
+  // Trang bìa & Header
   docChildren.push(
     new Paragraph({
       children: [
@@ -215,7 +55,7 @@ async function buildConsolidatedWordDoc(cache, outputPath) {
           font: "Times New Roman",
           size: 38,
           bold: true,
-          color: "1F497D", // Deep Navy Blue
+          color: "1F497D",
         }),
       ],
       alignment: AlignmentType.CENTER,
@@ -228,44 +68,30 @@ async function buildConsolidatedWordDoc(cache, outputPath) {
           font: "Times New Roman",
           size: 24,
           bold: true,
-          color: "595959",
+          color: "2E75B6",
         }),
       ],
       alignment: AlignmentType.CENTER,
-      spacing: { after: 200 },
+      spacing: { after: 100 },
     }),
     new Paragraph({
       children: [
         new TextRun({
-          text: "Tác giả: Kirstie Granger  |  Trình độ: Cambridge Movers (CEFR A1)  |  Biên tập phục vụ học tập",
+          text: "Biên soạn chi tiết từng câu thoại • Dịch nghĩa chuẩn sư phạm • Từ vựng & Mẹo thi",
           font: "Times New Roman",
           size: 20,
           italics: true,
-          color: "7F7F7F",
+          color: "666666",
         }),
       ],
       alignment: AlignmentType.CENTER,
-      spacing: { after: 400 },
+      spacing: { after: 350 },
     })
   );
 
-  // --- BẢNG TỔNG QUAN / MỤC LỤC 35 TRACKS ---
-  docChildren.push(
-    new Paragraph({
-      children: [
-        new TextRun({
-          text: "MỤC LỤC TRỌN BỘ 35 BÀI NGHE (CD 1)",
-          font: "Times New Roman",
-          size: 26,
-          bold: true,
-          color: "1F497D",
-        }),
-      ],
-      spacing: { before: 200, after: 150 },
-    })
-  );
-
-  const indexHeaders = ["Track", "Tiêu đề bài nghe", "Chủ đề / Kỹ năng"];
+  // Bảng mục lục
+  const indexHeaders = ["Mã bài", "Tên bài học", "Chủ đề / Dạng bài"];
+  const indexColWidths = [1800, 4200, 3000];
   const indexRows = [];
 
   for (let i = 1; i <= 35; i++) {
@@ -278,7 +104,6 @@ async function buildConsolidatedWordDoc(cache, outputPath) {
     ]);
   }
 
-  const indexColWidths = [1800, 4200, 3000];
   const indexTable = new Table({
     width: { size: 9000, type: WidthType.DXA },
     columnWidths: [1800, 4200, 3000],
@@ -348,7 +173,7 @@ async function buildConsolidatedWordDoc(cache, outputPath) {
   docChildren.push(indexTable);
   docChildren.push(new Paragraph({ spacing: { after: 400 } }));
 
-  // --- NỘI DUNG CHI TIẾT TỪNG TRACK ---
+  // Nội dung chi tiết 35 tracks
   for (let i = 1; i <= 35; i++) {
     const key = `track_${String(i).padStart(2, "0")}`;
     const item = cache[key] || {
@@ -360,7 +185,6 @@ async function buildConsolidatedWordDoc(cache, outputPath) {
       notes: "",
     };
 
-    // Header của Track
     docChildren.push(
       new Paragraph({
         children: [
@@ -401,7 +225,6 @@ async function buildConsolidatedWordDoc(cache, outputPath) {
       );
     }
 
-    // Bảng lời thoại song ngữ
     const dialogues = item.dialogues || [];
     if (dialogues.length > 0) {
       const dialogueHeaders = ["Người nói", "Lời thoại tiếng Anh (English)", "Bản dịch tiếng Việt (Vietnamese)"];
@@ -503,7 +326,6 @@ async function buildConsolidatedWordDoc(cache, outputPath) {
       docChildren.push(dTable);
     }
 
-    // Từ vựng trọng tâm
     if (item.vocabulary && item.vocabulary.length > 0) {
       docChildren.push(
         new Paragraph({
@@ -536,7 +358,6 @@ async function buildConsolidatedWordDoc(cache, outputPath) {
       }
     }
 
-    // Ghi chú sư phạm & Mẹo thi Movers
     if (item.notes) {
       docChildren.push(
         new Paragraph({
@@ -546,7 +367,7 @@ async function buildConsolidatedWordDoc(cache, outputPath) {
               bold: true,
               font: "Times New Roman",
               size: 21,
-              color: "70AD47", // Green
+              color: "70AD47",
             }),
             new TextRun({
               text: item.notes,
@@ -560,7 +381,6 @@ async function buildConsolidatedWordDoc(cache, outputPath) {
       );
     }
 
-    // Đường kẻ phân cách giữa các track
     docChildren.push(
       new Paragraph({
         children: [
@@ -595,11 +415,292 @@ async function buildConsolidatedWordDoc(cache, outputPath) {
   });
 
   const buffer = await Packer.toBuffer(doc);
-  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  fs.writeFileSync(outputPath, buffer);
+  fs.writeFileSync(OUTPUT_DOCX, buffer);
+  console.log(`✅ Đã tạo file DOCX: ${OUTPUT_DOCX} (${Math.round(buffer.length / 1024)} KB)`);
 }
 
-main().catch((err) => {
-  console.error("FATAL ERROR:", err);
+// ==========================================
+// 2. TẠO FILE HTML & PDF CHUẨN XUẤT BẢN
+// ==========================================
+function buildHtml() {
+  let trackSections = "";
+
+  for (let i = 1; i <= 35; i++) {
+    const key = `track_${String(i).padStart(2, "0")}`;
+    const item = cache[key] || {
+      trackNumber: i,
+      title: `Listening ${i}`,
+      topic: "Listening Practice",
+      dialogues: [],
+      vocabulary: [],
+      notes: "",
+    };
+
+    const dialoguesHtml = (item.dialogues || [])
+      .map(
+        (d, idx) => `
+        <tr class="${idx % 2 === 0 ? "even" : "odd"}">
+          <td class="col-speaker"><strong>${d.speaker || "Speaker"}</strong></td>
+          <td class="col-en">${d.en || ""}</td>
+          <td class="col-vi">${d.vi || ""}</td>
+        </tr>
+      `
+      )
+      .join("");
+
+    const vocabHtml =
+      item.vocabulary && item.vocabulary.length > 0
+        ? `
+        <div class="vocab-box">
+          <div class="vocab-title">🔑 Từ vựng & Ngữ pháp trọng tâm:</div>
+          <ul class="vocab-list">
+            ${item.vocabulary.map((v) => `<li>${v}</li>`).join("")}
+          </ul>
+        </div>
+      `
+        : "";
+
+    const notesHtml = item.notes
+      ? `
+        <div class="notes-box">
+          💡 <strong>Ghi chú sư phạm & Mẹo thi Movers:</strong> <em>${item.notes}</em>
+        </div>
+      `
+      : "";
+
+    trackSections += `
+      <section class="track-section">
+        <h2 class="track-title">TRACK ${String(i).padStart(2, "0")}: ${item.title.toUpperCase()}</h2>
+        ${item.topic ? `<div class="track-topic">📌 <strong>Chủ đề:</strong> <em>${item.topic}</em></div>` : ""}
+        <table class="dialogue-table">
+          <thead>
+            <tr>
+              <th style="width: 20%;">Người nói</th>
+              <th style="width: 42%;">Lời thoại tiếng Anh (English)</th>
+              <th style="width: 38%;">Bản dịch tiếng Việt (Vietnamese)</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${dialoguesHtml}
+          </tbody>
+        </table>
+        ${vocabHtml}
+        ${notesHtml}
+      </section>
+    `;
+  }
+
+  // Mục lục HTML
+  let indexRowsHtml = "";
+  for (let i = 1; i <= 35; i++) {
+    const key = `track_${String(i).padStart(2, "0")}`;
+    const data = cache[key] || { title: `Track ${i}`, topic: "Listening" };
+    indexRowsHtml += `
+      <tr class="${i % 2 === 0 ? "even" : "odd"}">
+        <td style="text-align: center; font-weight: bold;">Track ${String(i).padStart(2, "0")}</td>
+        <td>${data.title || `Listening ${i}`}</td>
+        <td>${data.topic || "Movers Listening"}</td>
+      </tr>
+    `;
+  }
+
+  const html = `<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Get Ready for Movers - CD 1 Full Transcript</title>
+  <style>
+    @page {
+      size: A4 portrait;
+      margin: 15mm 12mm 15mm 12mm;
+      @bottom-right {
+        content: counter(page);
+      }
+    }
+    body {
+      font-family: 'Times New Roman', Times, serif;
+      font-size: 11pt;
+      line-height: 1.45;
+      color: #222;
+      background: #fff;
+      margin: 0;
+      padding: 0;
+    }
+    .cover-header {
+      text-align: center;
+      margin-bottom: 25px;
+      padding-bottom: 15px;
+      border-bottom: 2px solid #1F497D;
+    }
+    .cover-sub {
+      font-size: 9.5pt;
+      letter-spacing: 1.5px;
+      color: #555;
+      font-weight: bold;
+      margin-bottom: 6px;
+    }
+    .cover-main-title {
+      font-size: 22pt;
+      font-weight: bold;
+      color: #1F497D;
+      margin: 4px 0;
+    }
+    .cover-doc-title {
+      font-size: 13pt;
+      font-weight: bold;
+      color: #2E75B6;
+      margin: 4px 0;
+    }
+    .cover-desc {
+      font-size: 10pt;
+      color: #666;
+      font-style: italic;
+      margin-top: 4px;
+    }
+    .index-title {
+      font-size: 13pt;
+      font-weight: bold;
+      color: #1F497D;
+      margin-top: 15px;
+      margin-bottom: 8px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 15px;
+      page-break-inside: auto;
+    }
+    tr {
+      page-break-inside: avoid;
+      page-break-after: auto;
+    }
+    th, td {
+      border: 1px solid #D0D7DE;
+      padding: 6px 8px;
+      font-size: 10pt;
+      vertical-align: top;
+    }
+    th {
+      background-color: #1F497D;
+      color: #fff;
+      font-weight: bold;
+      text-align: center;
+    }
+    .dialogue-table th {
+      background-color: #2E75B6;
+    }
+    tr.even {
+      background-color: #F8FAFC;
+    }
+    tr.odd {
+      background-color: #FFFFFF;
+    }
+    .col-speaker {
+      color: #1F497D;
+      font-weight: bold;
+      width: 20%;
+    }
+    .col-en {
+      color: #111;
+      width: 42%;
+    }
+    .col-vi {
+      color: #262626;
+      width: 38%;
+    }
+    .track-section {
+      margin-top: 25px;
+      padding-top: 15px;
+      border-top: 1px dashed #CCC;
+      page-break-inside: avoid;
+    }
+    .track-title {
+      font-size: 13pt;
+      font-weight: bold;
+      color: #1F497D;
+      margin: 0 0 6px 0;
+    }
+    .track-topic {
+      font-size: 10.5pt;
+      color: #444;
+      margin-bottom: 10px;
+    }
+    .vocab-box {
+      background: #F0F4F8;
+      border-left: 3px solid #1F497D;
+      padding: 6px 12px;
+      margin: 10px 0;
+      border-radius: 0 4px 4px 0;
+    }
+    .vocab-title {
+      font-weight: bold;
+      color: #1F497D;
+      font-size: 10pt;
+      margin-bottom: 4px;
+    }
+    .vocab-list {
+      margin: 0;
+      padding-left: 18px;
+      font-size: 9.5pt;
+    }
+    .vocab-list li {
+      margin-bottom: 2px;
+    }
+    .notes-box {
+      background: #F3FAF2;
+      border-left: 3px solid #70AD47;
+      padding: 6px 12px;
+      margin: 8px 0 15px 0;
+      font-size: 9.5pt;
+      color: #2E5618;
+      border-radius: 0 4px 4px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="cover-header">
+    <div class="cover-sub">OXFORD UNIVERSITY PRESS • CAMBRIDGE ENGLISH</div>
+    <div class="cover-main-title">GET READY FOR MOVERS - CD 1</div>
+    <div class="cover-doc-title">TOÀN BỘ TRANSCRIPT SONG NGỮ ANH - VIỆT & HƯỚNG DẪN BÀI HỌC (35 TRACKS)</div>
+    <div class="cover-desc">Biên soạn chi tiết từng câu thoại • Dịch nghĩa chuẩn sư phạm • Từ vựng & Mẹo làm bài thi</div>
+  </div>
+
+  <div class="index-title">📋 BẢNG MỤC LỤC 35 TRACKS</div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width: 18%;">Mã bài</th>
+        <th style="width: 48%;">Tên bài học</th>
+        <th style="width: 34%;">Chủ đề / Dạng bài</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${indexRowsHtml}
+    </tbody>
+  </table>
+
+  ${trackSections}
+</body>
+</html>`;
+
+  fs.writeFileSync(OUTPUT_HTML, html, "utf8");
+  console.log(`✅ Đã tạo file HTML: ${OUTPUT_HTML}`);
+
+  // Chuyển HTML sang PDF bằng Chrome Headless
+  const chromePath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  console.log(`🔄 Đang chuyển HTML sang PDF qua Chrome headless...`);
+  const cmd = `"${chromePath}" --headless --disable-gpu --no-pdf-header-footer --print-to-pdf="${OUTPUT_PDF}" "${OUTPUT_HTML}"`;
+  execSync(cmd, { stdio: "inherit" });
+  const pdfStats = fs.statSync(OUTPUT_PDF);
+  console.log(`✅ Đã tạo file PDF: ${OUTPUT_PDF} (${Math.round(pdfStats.size / 1024)} KB)`);
+}
+
+async function run() {
+  await buildDocx();
+  buildHtml();
+}
+
+run().catch((e) => {
+  console.error("Lỗi:", e);
   process.exit(1);
 });
