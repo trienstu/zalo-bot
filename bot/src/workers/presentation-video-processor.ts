@@ -51,21 +51,46 @@ export interface PresentationPlan {
  * Kiểm tra xem người dùng có yêu cầu tạo / xuất video bài thuyết trình / video slide / clip trình chiếu hay không.
  */
 export function isPresentationVideoRequest(text: string, quoteText = ""): boolean {
-  const combined = `${text || ""} ${quoteText || ""}`.toLowerCase();
-  const qLower = (text || "").toLowerCase();
+  const combined = `${text || ""} ${quoteText || ""}`.trim().toLowerCase();
+  const qLower = (text || "").trim().toLowerCase();
 
-  // Bỏ qua nếu chỉ là câu hỏi thăm dò năng lực hoặc hỏi ý kiến/lý thuyết thông thường
+  if (!qLower) return false;
+
+  // 1. Phủ định ngay các trường hợp phản hồi, đính chính, góp ý hoặc than phiền về bot
+  const isCorrectionOrFeedback =
+    /(?:tóm\s*tắt|dịch|nói|phân\s*loại)\s*(?:ko|không|chưa)\s*(?:chuẩn|đúng|chính\s*xác)|(?:sai|nhầm)\s*rồi|không\s*phải\s*(?:đâu|rồi)|(?:tóm\s*tắt|nói)\s*nhảm/i.test(
+      qLower,
+    );
+  if (isCorrectionOrFeedback) return false;
+
+  // 2. Phủ định các trường hợp miêu tả phần mềm tải video hoặc cào dữ liệu
+  const isDownloaderOrScraperDesc =
+    /(?:chuyên\s*tải|chỉ\s*tải|dùng\s*để\s*tải|tải\s*xuống|download|bắt\s*luồng)\s*(?:video|clip|nhạc|âm\s*thanh)/i.test(
+      qLower,
+    );
+  if (isDownloaderOrScraperDesc) return false;
+
+  // 3. Phủ định các yêu cầu tóm tắt / xem video có sẵn (Summarize an existing video)
+  const isVideoSummaryReq =
+    /(?:tóm\s*tắt|xem|đọc|hiểu)\s*(?:nội\s*dung\s*)?(?:video|clip|thước\s*phim)\s*(?:này|trên|ở|dưới)/i.test(
+      qLower,
+    );
+  if (isVideoSummaryReq) return false;
+
+  // 4. Bỏ qua nếu chỉ là câu hỏi thăm dò năng lực hoặc hỏi ý kiến/lý thuyết thông thường
   const isHypotheticalOrInquiry =
     /^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|xuất)?\s*(?:được|đc|duoc)?(?:\s+(?:tạo|làm|soạn|xuất))?\s+(?:video|clip)\s*(?:thuyết\s*trình|slide|trình\s*chiếu)?\s*(?:không|ko)?\s*(?:hả|nhỉ|hở|ạ|không|ko)\s*[?]?$/iu.test(
-      qLower.trim(),
+      qLower,
     ) ||
-    /(?:^|[^\p{L}\p{N}])(?:làm|tạo|dựng|quay|xuất)\s+(?:video|clip).*?(?:có\s+khó|như\s+thế\s+nào|kiếm\s+tiền|phần\s+mềm|bằng\s+app|app\s+gì|dễ\s+không|sao\s+nhỉ|ở\s+đâu|bằng\s+cách\s+nào)/iu.test(qLower);
+    /(?:^|[^\p{L}\p{N}])(?:làm|tạo|dựng|quay|xuất)\s+(?:video|clip).*?(?:có\s+khó|như\s+thế\s+nào|kiếm\s+tiền|phần\s+mềm|bằng\s+app|app\s+gì|dễ\s+không|sao\s+nhỉ|ở\s+đâu|bằng\s+cách\s+nào)/iu.test(
+      qLower,
+    );
 
   if (isHypotheticalOrInquiry) {
     return false;
   }
 
-  // 1. Cụm từ trực tiếp: "video thuyết trình", "video slide", "video trình chiếu", "video powerpoint", "video bài giảng"
+  // 5. Cụm từ trực tiếp: "video thuyết trình", "video slide", "video trình chiếu", "video powerpoint", "video bài giảng"
   const directMatch =
     /\b(?:video|clip)\s+(?:thuyết\s*trình|slide|trình\s*chiếu|powerpoint|pptx|bài\s*giảng)\b/i.test(combined) ||
     /\b(?:thuyết\s*trình|slide|trình\s*chiếu|powerpoint|pptx)\s+(?:thành|ra|sang)\s+(?:video|clip)\b/i.test(combined) ||
@@ -73,18 +98,20 @@ export function isPresentationVideoRequest(text: string, quoteText = ""): boolea
 
   if (directMatch) return true;
 
-  // 2. Kết hợp hành động tạo video + slide/thuyết trình/bài giảng hoặc giải thích/phân tích kiến thức
-  const hasAction = /\b(?:tạo|làm|xuất|dựng|sản\s*xuất|chuyển|biên\s*soạn|quay|hãy\s*làm|giúp\s*làm)\b/i.test(combined);
-  const mentionsVideo = /\b(?:video|clip|mp4|thước\s*phim)\b/i.test(combined);
+  // 6. Động từ hành động RÕ RÀNG hướng vào tạo video + chủ đề trình chiếu/thuyết minh/giải thích kiến thức
+  const hasDirectVideoCommand =
+    /(?:(?:hãy|giúp|nhờ)?\s*(?:làm|tạo|dựng|xuất|quay|sản\s*xuất|chuyển)\s+(?:cho\s*(?:anh|em|tôi|sếp|mình|nhóm)\s*)?(?:(?:1|một)?\s*(?:bản|file|bộ)?\s*)?(?:video|clip|mp4|thước\s*phim))/i.test(
+      combined,
+    );
   const mentionsPresentation = /\b(?:thuyết\s*trình|trình\s*chiếu|slide|powerpoint|bài\s*giảng)\b/i.test(combined);
   const mentionsNarration = /\b(?:thuyết\s*minh|lồng\s*tiếng|giọng\s*đọc|lời\s*thoại|speaker\s*notes?)\b/i.test(combined);
-  const mentionsExplaining = /\b(?:giải\s*thích|phân\s*tích|hướng\s*dẫn|tóm\s*tắt|kiến\s*trúc|vận\s*hành|khổ\s*dọc|khổ\s*ngang|9:16|16:9|shorts|reels|tiktok)\b/i.test(combined);
+  const mentionsExplaining = /\b(?:giải\s*thích|phân\s*tích|hướng\s*dẫn|kiến\s*trúc|vận\s*hành|khổ\s*dọc|khổ\s*ngang|9:16|16:9|shorts|reels|tiktok)\b/i.test(combined);
 
-  if (hasAction && mentionsVideo && (mentionsPresentation || mentionsNarration || mentionsExplaining)) {
+  if (hasDirectVideoCommand && (mentionsPresentation || mentionsNarration || mentionsExplaining)) {
     return true;
   }
 
-  if (mentionsVideo && mentionsPresentation && mentionsNarration) {
+  if (/\b(?:video|clip)\b/i.test(combined) && mentionsPresentation && mentionsNarration) {
     return true;
   }
 
@@ -904,8 +931,7 @@ export async function runPresentationVideoJob(options: PresentationVideoJobOptio
   } catch (err: any) {
     console.error("[presentation-video] ❌ Lỗi xử lý job tạo video thuyết trình:", err);
     await sendReplyText(
-      `⚠️ Dạ ${userGreeting} ơi, trong quá trình sản xuất video thuyết trình, hệ thống gặp sự cố: ${err?.message || "Lỗi xử lý video"}.\n` +
-      `👉 Bot đã lưu log kỹ thuật để kiểm tra và sẵn sàng hỗ trợ ${userGreeting} ngay ạ!`,
+      `⚠️ Dạ ${userGreeting} ơi, quá trình dựng video gặp sự cố kỹ thuật với bộ mã hóa đa phương tiện. Bot đã ghi nhận lỗi vào hệ thống để kỹ thuật viên kiểm tra xử lý ngay ạ!`,
     );
   } finally {
     // Dọn dẹp thư mục tạm

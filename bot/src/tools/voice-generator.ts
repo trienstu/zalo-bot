@@ -765,7 +765,42 @@ async function synthesizeWithGoogleAIStudio(
         if (part?.inlineData?.data) {
           const buffer = Buffer.from(part.inlineData.data, "base64");
           if (buffer.length > 0) {
-            fs.writeFileSync(outputPath, buffer);
+            const b0 = buffer[0];
+            const b1 = buffer[1];
+            const b2 = buffer[2];
+            const isMp3 =
+              buffer.length >= 3 &&
+              b0 !== undefined &&
+              b1 !== undefined &&
+              b2 !== undefined &&
+              ((b0 === 0x49 && b1 === 0x44 && b2 === 0x33) ||
+                (b0 === 0xff && (b1 & 0xe0) === 0xe0));
+
+            if (isMp3 || !outputPath.endsWith(".mp3")) {
+              fs.writeFileSync(outputPath, buffer);
+            } else {
+              const tmpRaw = `${outputPath}.raw_${Date.now()}`;
+              fs.writeFileSync(tmpRaw, buffer);
+              let converted = false;
+              try {
+                await execPromise(`ffmpeg -y -v error -i "${tmpRaw}" -vn -c:a libmp3lame -q:a 2 "${outputPath}"`);
+                converted = fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0;
+              } catch {}
+              if (!converted) {
+                try {
+                  await execPromise(
+                    `ffmpeg -y -v error -f s16le -ar 24000 -ac 1 -i "${tmpRaw}" -vn -c:a libmp3lame -q:a 2 "${outputPath}"`,
+                  );
+                  converted = fs.existsSync(outputPath) && fs.statSync(outputPath).size > 0;
+                } catch {}
+              }
+              if (!converted) {
+                fs.writeFileSync(outputPath, buffer);
+              }
+              try {
+                fs.unlinkSync(tmpRaw);
+              } catch {}
+            }
             console.log(`[voice-generator] ✅ Sinh âm thanh thành công qua Google AI Studio (${model}, Key #${keyIdx + 1}, ${voiceName}, ${buffer.length} bytes)`);
             voiceKeyOffset = (keyIdx + 1) % numKeys;
             return true;

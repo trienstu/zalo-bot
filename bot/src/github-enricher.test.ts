@@ -4,6 +4,7 @@ import {
   extractGithubRepoUrls,
   formatZaloRepoCard,
   hasVietnameseDiacritics,
+  classifyAndSummarizeRepo,
 } from "./github-enricher.js";
 import {
   saveGroupRepo,
@@ -124,5 +125,22 @@ test("hasVietnameseDiacritics nhận diện chuẩn xác chuỗi tiếng Việt 
   assert.equal(hasVietnameseDiacritics("Cross-platform local MCP capabilities for ChatGPT"), false);
   assert.equal(hasVietnameseDiacritics("f.k.a. Awesome ChatGPT Prompts"), false);
   assert.equal(hasVietnameseDiacritics("Trợ lý ảo AI thông minh"), true);
+});
+
+test("classifyAndSummarizeRepo phân loại chính xác các tool cào/tải media và không bị nhầm sang AI dù topic có chữ kuaishou", async () => {
+  const res = await classifyAndSummarizeRepo({
+    owner: "putyy",
+    repo: "res-downloader",
+    fullName: "putyy/res-downloader",
+    description: "视频号、小程序、抖音、快手、小红书、直播流、m3u8、酷狗、QQ音乐等常见网络资源下载!",
+    stars: 20245,
+    forks: 2515,
+    language: "Go",
+    topics: ["douyin", "kuaishou", "res-downloader", "wechat", "wechat-video", "xiaohongshu"],
+    htmlUrl: "https://github.com/putyy/res-downloader",
+  });
+
+  assert.notEqual(res.category, "🤖 AI & Agents");
+  assert.equal(res.category, "🕷️ Automation & Scraping");
 });
 

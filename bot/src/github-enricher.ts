@@ -50,6 +50,7 @@ export interface GithubRepoMetadata {
   language: string;
   topics: string[];
   htmlUrl: string;
+  readmeSnippet?: string;
 }
 
 /**
@@ -214,6 +215,39 @@ export async function scrapeGithubRepoHtml(owner: string, repo: string): Promise
 }
 
 /**
+ * Tải đoạn trích README (khoảng 1200 ký tự đầu) từ GitHub API để hỗ trợ phân loại & tóm tắt chuẩn xác
+ */
+async function fetchGithubReadmeSnippet(owner: string, repo: string, token?: string): Promise<string> {
+  const readmeUrl = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/readme`;
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github.raw+json",
+    "User-Agent": "ZaloBot-RepoDiscovery/1.0",
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
+    const res = await fetch(readmeUrl, { headers, signal: controller.signal });
+    clearTimeout(timer);
+    if (res.ok) {
+      const text = await res.text();
+      const clean = text
+        .replace(/<!--[\s\S]*?-->/g, "")
+        .replace(/\[!\[.*?\]\(.*?\)\]\(.*?\)/g, "")
+        .replace(/!\[.*?\]\(.*?\)/g, "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\n\s*\n/g, "\n")
+        .trim();
+      return clean.slice(0, 1200);
+    }
+  } catch {}
+  return "";
+}
+
+/**
  * Lấy thông tin metadata của repo từ GitHub REST API công khai (tự động fallback HTML Scraper nếu bị rate limit 403)
  */
 export async function fetchGithubRepoMetadata(owner: string, repo: string): Promise<GithubRepoMetadata | null> {
@@ -240,6 +274,7 @@ export async function fetchGithubRepoMetadata(owner: string, repo: string): Prom
 
     if (res.ok) {
       const data: any = await res.json();
+      const readmeSnippet = await fetchGithubReadmeSnippet(owner, repo, token);
       return {
         owner: data.owner?.login || owner,
         repo: data.name || repo,
@@ -250,6 +285,7 @@ export async function fetchGithubRepoMetadata(owner: string, repo: string): Prom
         language: String(data.language || "").trim(),
         topics: Array.isArray(data.topics) ? data.topics : [],
         htmlUrl: data.html_url || `https://github.com/${owner}/${repo}`,
+        readmeSnippet,
       };
     }
 
@@ -263,19 +299,19 @@ export async function fetchGithubRepoMetadata(owner: string, repo: string): Prom
 }
 
 /**
- * Sử dụng Gemini Flash-Lite phân loại danh mục theo chuẩn FindARepo và tóm tắt tiếng Việt súc tích
+ * Sử dụng Gemini Flash phân loại danh mục theo chuẩn FindARepo và tóm tắt tiếng Việt súc tích
  */
 export async function classifyAndSummarizeRepo(
   metadata: GithubRepoMetadata,
 ): Promise<{ category: string; summary_vi: string; target_audience: string }> {
   const system = `Bạn là Chuyên gia Đánh giá & Tuyển chọn Mã Nguồn Mở (GitHub Open-Source Curator) theo tiêu chuẩn của FindARepo.
 NHIỆM VỤ:
-1. Đọc kỹ thông tin repo (Tên, Mô tả gốc, Ngôn ngữ lập trình, Topics gắn thẻ).
+1. Đọc kỹ thông tin repo (Tên, Mô tả gốc, Đoạn trích README nếu có, Ngôn ngữ lập trình, Topics gắn thẻ).
 2. Phân loại repo vào ĐÚNG 1 TRONG CÁC DANH MỤC SAU ĐÂY:
    - "🤖 AI & Agents" (LLM, Autonomous Agents, Prompting, Multi-Agent, RAG, AI Chatbots)
    - "🔌 MCP & Skills" (Model Context Protocol servers, Claude skills, Agent tools/plugins)
    - "🛠️ Dev Tools & CLI" (Terminal tools, IDE extensions, Git, Linters, Compilers, Debuggers)
-   - "🕷️ Automation & Scraping" (Web crawlers, Bots, Headless browser, Data extraction)
+   - "🕷️ Automation & Scraping" (Web crawlers, Bots, Headless browser, Data extraction, Video/Audio Downloaders, Media stream sniffers)
    - "🌐 Web & Fullstack" (React, Next.js, Vue, Node.js backend, REST APIs, Mobile apps)
    - "🏠 Self-Hosted & Infra" (Docker, Kubernetes, Databases, Self-hosted SaaS alternatives, Homelab)
    - "📦 Libraries & Core" (Algorithms, Data structures, Security, Cryptography, Math)
@@ -283,10 +319,10 @@ NHIỆM VỤ:
 3. Soạn TÓM TẮT CÔNG NĂNG TIẾNG VIỆT SIÊU TINH GỌN (1-2 CÂU):
    - BẮT BUỘC 100% TIẾNG VIỆT TỰ NHIÊN, LƯU LOÁT.
    - Nêu rõ: Repo này là gì, giải quyết bài toán gì, tính năng nổi bật nhất.
-   - TUYỆT ĐỐI CẤM GIỮ NGUYÊN TIẾNG ANH. Dù mô tả gốc là tiếng Anh hay ngôn ngữ khác, PHẢI DỊCH và TÓM LƯỢC sang tiếng Việt.
+   - TUYỆT ĐỐI CẤM GIỮ NGUYÊN TIẾNG ANH HOẶC TIẾNG TRUNG. Dù mô tả gốc là tiếng Trung, Anh hay ngôn ngữ khác, PHẢI DỊCH và TÓM LƯỢC sang tiếng Việt.
    - Không dùng câu chung chung như "Mã nguồn mở được chia sẻ...".
 
-4. Nêu ĐỐI TƯỢNG PHÙ HỢP (1 cụm từ tiếng Việt ngắn gọn, ví dụ: "AI Developers & Kỹ sư phần mềm", "Dân MMO & Auto", "Frontend Dev", "DevOps & Sysadmin", "Người dùng cá nhân").
+4. Nêu ĐỐI TƯỢNG PHÙ HỢP (1 cụm từ tiếng Việt ngắn gọn, ví dụ: "Người làm nội dung & Giáo viên", "Dân MMO & Auto", "AI Developers", "Frontend Dev", "DevOps & Sysadmin", "Lập trình viên").
 
 BẮT BUỘC trả về đúng định dạng JSON:
 {
@@ -295,18 +331,20 @@ BẮT BUỘC trả về đúng định dạng JSON:
   "target_audience": "string"
 }`;
 
+  const readmePart = metadata.readmeSnippet ? `\nĐoạn trích README:\n"""\n${metadata.readmeSnippet}\n"""` : "";
+
   const user = `REPO: ${metadata.fullName}
 Ngôn ngữ: ${metadata.language || "Không xác định"}
 Stars: ${metadata.stars} | Forks: ${metadata.forks}
 Topics: ${metadata.topics.join(", ") || "Không có"}
-Mô tả gốc: "${metadata.description || "No description provided."}"
+Mô tả gốc: "${metadata.description || "No description provided."}"${readmePart}
 
 HÃY XUẤT ĐÁNH GIÁ BẰNG TIẾNG VIỆT (JSON):`;
 
   try {
     const rawJson = await callGemini(system, user, {
       model: config.geminiModel || "gemini-3-flash-preview",
-      maxTokens: 800,
+      maxTokens: 1500,
       json: true,
     });
 
@@ -318,8 +356,26 @@ HÃY XUẤT ĐÁNH GIÁ BẰNG TIẾNG VIỆT (JSON):`;
       const firstBrace = cleanJson.indexOf("{");
       const lastBrace = cleanJson.lastIndexOf("}");
       if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-        parsed = JSON.parse(cleanJson.slice(firstBrace, lastBrace + 1));
-      } else {
+        try {
+          parsed = JSON.parse(cleanJson.slice(firstBrace, lastBrace + 1));
+        } catch {}
+      }
+
+      // JSON Salvage nếu chuỗi bị cắt cụt do token hoặc thiếu đóng ngoặc
+      if (!parsed) {
+        const catMatch = cleanJson.match(/"category"\s*:\s*"([^"]+)"/i);
+        const sumMatch = cleanJson.match(/"summary_vi"\s*:\s*"([^"\r\n]+)/i);
+        const audMatch = cleanJson.match(/"target_audience"\s*:\s*"([^"\r\n]+)/i);
+        if (catMatch || sumMatch) {
+          parsed = {
+            category: catMatch?.[1] || "",
+            summary_vi: sumMatch?.[1] ? sumMatch[1].replace(/["\\,]+$/, "").trim() : "",
+            target_audience: audMatch?.[1] ? audMatch[1].replace(/["\\,]+$/, "").trim() : "",
+          };
+        }
+      }
+
+      if (!parsed) {
         throw new Error(`Không thể bóc tách JSON từ phản hồi: ${rawJson.slice(0, 120)}`);
       }
     }
@@ -349,10 +405,13 @@ HÃY XUẤT ĐÁNH GIÁ BẰNG TIẾNG VIỆT (JSON):`;
     return { category, summary_vi, target_audience };
   } catch (err) {
     console.warn(`[github-enricher] Gemini phân loại fallback cho ${metadata.fullName}:`, err);
-    const isMcp = metadata.topics.some((t) => /mcp|model-context-protocol/i.test(t));
-    const isAi = metadata.topics.some((t) => /ai|llm|agent|rag|prompt/i.test(t));
-    const isAuto = metadata.topics.some((t) => /scrap|crawler|bot|auto/i.test(t));
-    const isInfra = metadata.topics.some((t) => /docker|k8s|infra|self-hosted/i.test(t));
+    // Dùng word boundaries để tránh bắt nhầm các từ chứa chuỗi con như "kuaishou" chứa "ai"
+    const isMcp = metadata.topics.some((t) => /\b(?:mcp|model-context-protocol)\b/i.test(t));
+    const isAi = metadata.topics.some((t) => /\b(?:ai|llm|agent|rag|prompt|gpt|claude|gemini)\b/i.test(t));
+    const isAuto =
+      metadata.topics.some((t) => /\b(?:scrap|scraper|crawler|crawling|bot|auto|download|downloader|douyin|kuaishou|wechat|video|audio)\b/i.test(t)) ||
+      /download|tải|crawler|scraper|bắt luồng|video|audio|douyin|kuaishou/i.test(metadata.description || "");
+    const isInfra = metadata.topics.some((t) => /\b(?:docker|k8s|infra|self-hosted|kubernetes|devops)\b/i.test(t));
 
     const category = isMcp
       ? "🔌 MCP & Skills"
@@ -378,7 +437,11 @@ HÃY XUẤT ĐÁNH GIÁ BẰNG TIẾNG VIỆT (JSON):`;
     return {
       category,
       summary_vi,
-      target_audience: isAi ? "AI Developers & Kỹ sư phần mềm" : "Lập trình viên & Cộng đồng công nghệ",
+      target_audience: isAi
+        ? "AI Developers & Kỹ sư phần mềm"
+        : isAuto
+          ? "Người làm nội dung & Kỹ sư tự động hóa"
+          : "Lập trình viên & Cộng đồng công nghệ",
     };
   }
 }

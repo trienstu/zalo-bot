@@ -720,8 +720,7 @@ export async function runBatchAudioJob(options: BatchAudioJobOptions): Promise<v
     console.error(`[batch-audio] ❌ Lỗi xử lý batch audio job:`, err);
     try {
       await sendReplyText(
-        `⚠️ Dạ ${userGreeting} ơi, trong quá trình xử lý bộ audio [${originalFileName}], hệ thống gặp sự cố: ${err?.message || "Lỗi xử lý file"}.\n` +
-        `👉 Bot đã lưu log kỹ thuật để rà soát và hỗ trợ ${userGreeting} ngay ạ!`,
+        `⚠️ Dạ ${userGreeting} ơi, trong quá trình xử lý bộ audio [${originalFileName}], hệ thống gặp sự cố kỹ thuật. Bot đã lưu log để rà soát và hỗ trợ ${userGreeting} ngay ạ!`,
       );
     } catch {}
   } finally {

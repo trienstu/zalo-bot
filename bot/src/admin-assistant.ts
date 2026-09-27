@@ -1563,23 +1563,6 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     }
   }
 
-  // 🎬 TỰ ĐỘNG NHẬN DIỆN VÀ KÍCH HOẠT TIẾN TRÌNH SẢN XUẤT VIDEO THUYẾT TRÌNH (AI STUDIO TTS)
-  if (isPresentationVideoRequest(rawText, event.quote?.text)) {
-    console.log(`[admin-assistant] 🎬 Phát hiện yêu cầu tạo Video thuyết trình: "${rawText.slice(0, 80)}", kích hoạt Presentation Video Processor...`);
-    void runPresentationVideoJob({
-      api,
-      sender,
-      isGroup: false,
-      userGreeting,
-      displayName,
-      userPrompt: rawText,
-      quoteText: event.quote?.text || fileTextContent || "",
-    }).catch((err) => {
-      console.error("[admin-assistant] Lỗi runPresentationVideoJob:", err);
-    });
-    return;
-  }
-
   // 💡 TỰ ĐỘNG KẾ THỪA FILE NÉN GẦN NHẤT NẾU NGƯỜI DÙNG RA LỆNH XỬ LÝ / CHUYỂN ĐỔI NGAY SAU KHI GỬI FILE
   if (!targetUrl && /(?:chuyển|làm|bóc|xử\s*lý|xuất|thành|sang)\s*(?:pdf|word|docx|toàn\s*bộ|tất\s*cả|audio|file)/i.test(rawText)) {
     const cachedZip = lastUploadedZipFiles.get(sender);

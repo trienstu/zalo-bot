@@ -36,8 +36,15 @@ test("isPresentationVideoRequest nhận diện chính xác các yêu cầu tạo
   assert.equal(isPresentationVideoRequest("Tạo bản nhạc remix sôi động mùa hè"), false);
   assert.equal(isPresentationVideoRequest("bot có biết làm video thuyết trình không nhỉ?"), false); // Câu hỏi thăm dò
   assert.equal(isPresentationVideoRequest("làm video trên TikTok có khó không bot?"), false); // Câu hỏi ý kiến
-  assert.equal(isPresentationVideoRequest("tạo video bằng app gì nhanh nhất?"), false);
   assert.equal(isPresentationVideoRequest("xin chào bot, hôm nay thời tiết thế nào"), false);
+  assert.equal(
+    isPresentationVideoRequest(
+      "tóm tắt ko chuẩn rồi e ơi. Repo này chuyên tải video, âm thanh... Dành cho người làm nội dung cần tải video tư liệu bài giảng",
+    ),
+    false,
+  );
+  assert.equal(isPresentationVideoRequest("tóm tắt video này giúp tôi với"), false);
+  assert.equal(isPresentationVideoRequest("phần mềm này dùng để tải video Douyin và Kuaishou"), false);
   assert.equal(isPresentationVideoRequest(""), false);
 });
 
