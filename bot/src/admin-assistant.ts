@@ -1855,7 +1855,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     });
     queryPlan = plan;
 
-    if (plan.taskType === "presentation_video") {
+    if (plan.taskType === "presentation_video" && isPresentationVideoRequest(rawText, event.quote?.text)) {
       console.log(`[admin-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Video 1:1: "${rawText.slice(0, 80)}"`);
       void runPresentationVideoJob({
         api,

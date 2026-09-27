@@ -37,7 +37,36 @@ export function extractSimulatedGenerateFile(text: string): ExtractedToolCall | 
   const funcMatch = text.match(/\[?\bgenerate_file\s*\(([\s\S]*?)\)\]?/i);
 
   const match = tagMatch || funcMatch;
-  if (!match) return null;
+  if (!match) {
+    // Bắt trường hợp LLM ảo giác in thẳng JSON ra text thay vì gọi Function Calling native
+    const jsonBlockRegex = /(?:```(?:json)?\s*)?(\{[\s\r\n]*"(?:fileType|fileName)"[\s\S]*?\})(?:\s*```)?/i;
+    const jsonMatch = text.match(jsonBlockRegex);
+    if (jsonMatch && jsonMatch[1]) {
+      try {
+        const parsed = JSON.parse(jsonMatch[1]);
+        if (parsed && typeof parsed === "object" && (parsed.fileType || parsed.fileName)) {
+          const rawFileType = String(parsed.fileType || "").toLowerCase().trim();
+          const validTypes = ["pptx", "docx", "xlsx", "csv", "html", "md", "txt", "code", "presentation_video"];
+          if (validTypes.includes(rawFileType) || parsed.slides || parsed.sheets || parsed.content) {
+            return {
+              toolName: "generate_file",
+              args: {
+                fileType: rawFileType || "pptx",
+                fileName: parsed.fileName ? String(parsed.fileName).trim() : "tai_lieu",
+                title: parsed.title ? String(parsed.title).trim() : (parsed.fileName ? String(parsed.fileName).replace(/\.[^.]+$/, "") : "Tài liệu"),
+                content: typeof parsed.content === "string" ? parsed.content.trim() : "",
+                slides: Array.isArray(parsed.slides) ? parsed.slides : undefined,
+                sheets: Array.isArray(parsed.sheets) ? parsed.sheets : undefined,
+                theme: parsed.theme || "navy",
+              },
+              rawMatch: jsonMatch[0],
+            };
+          }
+        }
+      } catch {}
+    }
+    return null;
+  }
 
   const inner = match[1] || "";
   const args: Record<string, string> = {};

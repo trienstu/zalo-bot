@@ -311,33 +311,115 @@ export async function planPresentationWithGemini(
     `  ]\n` +
     `}`;
 
+function cleanAndRepairPresentationJson(raw: string): any {
+  if (!raw) return null;
+  let s = raw.replace(/```(?:json)?/gi, "").replace(/```/g, "").trim();
+  const start = s.indexOf("{");
+  const end = s.lastIndexOf("}");
+  if (start !== -1 && end > start) {
+    s = s.slice(start, end + 1);
+  }
+
+  try {
+    return JSON.parse(s);
+  } catch {}
+
+  try {
+    let repaired = s
+      .replace(/\/\/.*$/gm, "")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/,(\s*[}\]])/g, "$1")
+      .replace(/([{,]\s*)([a-zA-Z0-9_$]+)\s*:/g, '$1"$2":')
+      .replace(/,(\s*[}\]])/g, "$1");
+
+    return JSON.parse(repaired);
+  } catch {}
+
+  return null;
+}
+
+function generateTopicSlideDeck(topic: string, title: string): SlideContent[] {
+  const cleanTopic = topic.replace(/^(?:yêu cầu của người dùng:\s*|sen chúa\s*|tạo\s+file\s+|làm\s+video\s+)+/iu, "").trim();
+  const effectiveTitle = title || cleanTopic || "Bài Thuyết Trình Chuyên Nghiệp";
+  return [
+    {
+      layout: "title",
+      title: effectiveTitle,
+      subtitle: "Báo cáo tổng quan chi tiết và phương án thực thi",
+      kicker: "TỔNG QUAN CHI TIẾT",
+      speakerNotes: `Kính chào quý vị, hôm nay tôi xin trân trọng trình bày chi tiết về ${effectiveTitle}. Chúng ta sẽ cùng điểm qua các trọng tâm chiến lược và lộ trình thực thi ngay sau đây.`,
+    },
+    {
+      layout: "three_column",
+      title: "Trọng Tâm & Giá Trị Cốt Lõi",
+      kicker: "GIÁ TRỊ NỀN TẢNG",
+      takeaway: "Nắm vững 3 trụ cột để tối ưu hóa hiệu quả thực thi",
+      col1Title: "Mục Tiêu",
+      col1Bullets: ["Định vị phương hướng rõ ràng", "Đo lường theo cột mốc cụ thể"],
+      col2Title: "Giải Pháp",
+      col2Bullets: ["Quy trình chuẩn hóa", "Công nghệ tự động hiện đại"],
+      col3Title: "Hiệu Quả",
+      col3Bullets: ["Tối ưu hóa nguồn lực", "Tăng tốc độ triển khai"],
+      speakerNotes: "Ở slide này, chúng ta phân tích 3 trụ cột giá trị then chốt: mục tiêu chuẩn xác, giải pháp thực thi bài bản và hiệu quả đo lường cụ thể cho toàn bộ kế hoạch.",
+    },
+    {
+      layout: "timeline",
+      title: "Lộ Trình Triển Khai Thực Hiện",
+      kicker: "LỘ TRÌNH CHIẾN LƯỢC",
+      takeaway: "Từng bước triển khai bài bản đảm bảo tiến độ và chất lượng",
+      steps: [
+        { number: 1, title: "Khảo Sát & Chuẩn Bị", desc: "Đánh giá hiện trạng, thu thập số liệu và hoàn thiện phương án sơ bộ." },
+        { number: 2, title: "Triển Khai Cốt Lõi", desc: "Đẩy mạnh các hạng mục then chốt theo đúng tiến độ và tiêu chuẩn." },
+        { number: 3, title: "Đo Lường & Hoàn Thiện", desc: "Nghiệm thu, đối soát các chỉ số cam kết và chuẩn hóa quy trình chuyển giao." },
+      ],
+      speakerNotes: "Về lộ trình thực hiện, dự án được chia làm 3 giai đoạn rõ rệt từ khâu chuẩn bị, triển khai cốt lõi đến giai đoạn đo lường nghiệm thu và bàn giao kết quả.",
+    },
+    {
+      layout: "bullets",
+      title: "Cam Kết & Định Hướng Tương Lai",
+      kicker: "ĐỊNH HƯỚNG TƯƠNG LAI",
+      takeaway: "Duy trì chất lượng cao nhất và sẵn sàng bứt phá",
+      bullets: [
+        "Kiểm soát chặt chẽ chất lượng và an toàn trên từng khâu thực thi.",
+        "Đồng bộ hóa nguồn dữ liệu và báo cáo minh bạch theo thời gian thực.",
+        "Tiếp tục mở rộng và nhân rộng mô hình trong các giai đoạn tiếp theo.",
+      ],
+      speakerNotes: "Để kết luận, việc bám sát các cam kết chất lượng và định hướng tương lai sẽ là chìa khóa giúp chúng ta bứt phá thành công rực rỡ.",
+    },
+  ];
+}
+
   try {
     const rawJson = await callGeminiJson(systemPrompt, combinedInput, 4000);
-    const cleaned = rawJson.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
-    const parsed = JSON.parse(cleaned);
+    const parsed = cleanAndRepairPresentationJson(rawJson);
 
-    const title = parsed.title || preferredTitle || "Bài Thuyết Trình Chuyên Nghiệp";
-    const theme = (preferredTheme || parsed.theme || "navy") as ThemeName;
-    const slides: SlideContent[] = Array.isArray(parsed.slides) && parsed.slides.length > 0
-      ? parsed.slides
-      : parseMarkdownToSlides(combinedInput, title);
+    if (parsed) {
+      const title = parsed.title || preferredTitle || "Bài Thuyết Trình Chuyên Nghiệp";
+      const theme = (preferredTheme || parsed.theme || "navy") as ThemeName;
+      const parsedMd = parseMarkdownToSlides(combinedInput, title);
+      const slides: SlideContent[] = Array.isArray(parsed.slides) && parsed.slides.length > 0
+        ? parsed.slides
+        : (parsedMd.length > 1 ? parsedMd : generateTopicSlideDeck(combinedInput, title));
 
-    return {
-      title,
-      theme,
-      voiceStyle: parsed.voiceStyle || "Phong cách thuyết trình tự tin, rõ ràng, truyền cảm hứng",
-      slides,
-    };
+      return {
+        title,
+        theme,
+        voiceStyle: parsed.voiceStyle || "Phong cách thuyết trình tự tin, rõ ràng, truyền cảm hứng",
+        slides,
+      };
+    }
   } catch (err) {
     console.warn("[presentation-video] Lỗi callGeminiJson, dùng bộ phân tích slide mặc định:", err);
-    const slides = parseMarkdownToSlides(combinedInput, preferredTitle || "Bài Thuyết Trình");
-    return {
-      title: preferredTitle || "Bài Thuyết Trình Chuyên Nghiệp",
-      theme: preferredTheme || "navy",
-      voiceStyle: "Phong cách thuyết trình tự tin, rõ ràng",
-      slides,
-    };
   }
+
+  const defaultTitle = preferredTitle || "Bài Thuyết Trình Chuyên Nghiệp";
+  const slides = generateTopicSlideDeck(combinedInput, defaultTitle);
+  return {
+    title: defaultTitle,
+    theme: preferredTheme || "navy",
+    voiceStyle: "Phong cách thuyết trình tự tin, rõ ràng",
+    slides,
+  };
 }
 
 /**

@@ -71,8 +71,20 @@ export function applyExecutionSignals(
     merged.toolIntent = "none";
     merged.responseMode = "fast";
   } else if (merged.taskType === "presentation_video") {
-    merged.toolIntent = "create";
-    merged.responseMode = "action";
+    // Chống nhận nhầm: chỉ khi có từ khóa VIDEO rõ ràng mới gán presentation_video
+    const combinedText = `${question} ${quoteText || ""}`;
+    const hasExplicitVideoKeyword = /\b(?:video|clip|mp4|thước\s*phim|quay\s*video|dựng\s*video)\b/iu.test(combinedText);
+    const hasExplicitFileOrPresentationKeyword = /\b(?:file|tập\s*tin|tài\s*liệu|powerpoint|pptx|slide|thuyết\s*trình)\b/iu.test(combinedText);
+
+    if (!hasExplicitVideoKeyword && hasExplicitFileOrPresentationKeyword) {
+      merged.taskType = "file_generation";
+      merged.mediaFormat = { ...(merged.mediaFormat || {}), fileType: "pptx" };
+      merged.toolIntent = "create";
+      merged.responseMode = "action";
+    } else {
+      merged.toolIntent = "create";
+      merged.responseMode = "action";
+    }
   }
 
   return merged;
@@ -433,7 +445,8 @@ export async function planSearchQueries(params: {
 
   const executionPlannerContract =
     `4. Phân loại tác vụ hành động (taskType) & Đề xuất thực thi chuẩn mực (ANTI-OVERTHINKING):\n` +
-    `   - taskType: "presentation_video" (Làm video bài giảng/thuyết trình/giải thích kiến trúc/quy trình khổ dọc 9:16 hoặc 16:9) | "file_generation" (Word, Excel, PowerPoint, HTML, CSV) | "voice_generation" (Đọc giọng, podcast) | "music_generation" (Suno AI) | "python_diagram" (Vẽ biểu đồ/poster) | "none" (Hỏi đáp bình thường).\n` +
+    `   - taskType: "presentation_video" (CHỈ KHI người dùng yêu cầu rõ ràng làm VIDEO/CLIP/MP4/thước phim thuyết trình hoặc bài giảng khổ dọc 9:16 hoặc 16:9) | "file_generation" (Tạo file Word, Excel, PowerPoint slide pptx, HTML, CSV) | "voice_generation" (Đọc giọng, podcast) | "music_generation" (Suno AI) | "python_diagram" (Vẽ biểu đồ/poster) | "none" (Hỏi đáp bình thường).\n` +
+    `     * NGUYÊN TẮC PHÂN BIỆT FILE SLIDE vs VIDEO (QUAN TRỌNG): Các yêu cầu như "tạo file thuyết trình", "tạo slide", "xuất file powerpoint", "làm pptx", "soạn slide dự án" mà KHÔNG có từ khóa video/clip thì BẮT BUỘC gán taskType: "file_generation", mediaFormat: { fileType: "pptx" }! TUYỆT ĐỐI KHÔNG gán "presentation_video" khi không yêu cầu video!\n` +
     `     * NGUYÊN TẮC CHỐNG ẢO GIÁC (ANTI-OVERTHINKING): CHỈ gán taskType khi người dùng có MỆNH LỆNH THỰC THI RÕ RÀNG ("hãy làm...", "tạo cho anh...", "xuất video...", "dựng clip..."). Nếu người dùng chỉ hỏi han, hỏi ý kiến ("làm video có khó không?", "bot biết làm slide không?", "SQLite là gì?"), BẮT BUỘC gán taskType: "none"!\n` +
     `   - mediaFormat: { aspectRatio: "9:16" (nếu có từ "khổ dọc", "shorts", "reels", "tiktok") hoặc "16:9" (nếu có từ "khổ ngang", "youtube", "bài giảng"), fileType?: "docx"|"pptx"|"xlsx"|"csv"|"html" }\n` +
     `   - responseMode: "fast" cho câu đơn giản/ổn định; "grounded" khi cần dữ liệu kiểm chứng; "deep" cho phân tích nhiều bước; "action" chỉ khi người dùng yêu cầu rõ việc đọc/tạo/chạy công cụ.\n` +

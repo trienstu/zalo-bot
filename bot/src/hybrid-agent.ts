@@ -8,6 +8,7 @@ export interface NineRouterSettings {
   enabled: boolean;
   baseUrl: string;
   apiKey: string;
+  chatModel?: string;
   groundedModel: string;
   deepModel: string;
   timeoutMs: number;

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { config } from "./config.js";
+import { config, hybridAgentSettings } from "./config.js";
 import {
   webSearch,
   fetchUrl,
@@ -549,6 +549,100 @@ export async function downloadFileContent(
 import { isJunkOrBettingDomain, extractPublisherName } from "./publisher-utils.js";
 export { isJunkOrBettingDomain, extractPublisherName };
 
+/**
+ * Gọi mô hình qua cổng 9Router (OpenAI-compatible endpoint).
+ * Hỗ trợ các dòng mô hình Antigravity (ag/) như ag/gemini-3.7-flash-medium, ag/gemini-3.8-flash,
+ * các dòng Codex (cx/) như cx/gpt-5.6-sol, có hỗ trợ text, JSON, và Vision (ảnh base64).
+ */
+export async function call9Router(
+  system: string,
+  user: string,
+  options?: {
+    model?: string;
+    maxTokens?: number;
+    temperature?: number;
+    json?: boolean;
+    images?: GeminiImagePart[];
+    mediaParts?: GeminiMediaPart[];
+    timeoutMs?: number;
+  },
+): Promise<string | null> {
+  const router = hybridAgentSettings?.nineRouter;
+  if (!router?.enabled || !router.apiKey) return null;
+
+  const baseUrl = (router.baseUrl || "http://127.0.0.1:20128/v1").replace(/\/+$/, "");
+  const targetModel = options?.model || router.chatModel || "ag/gemini-3.7-flash-medium";
+  const timeoutMs = options?.timeoutMs || router.timeoutMs || 45_000;
+
+  const allMedia = [...(options?.images || []), ...(options?.mediaParts || [])];
+  const userContent: Array<Record<string, unknown>> = [];
+
+  if (allMedia.length > 0) {
+    userContent.push({ type: "text", text: user });
+    for (const media of allMedia) {
+      const mime = media.mimeType || "image/jpeg";
+      const dataUrl = `data:${mime};base64,${media.data}`;
+      userContent.push({
+        type: "image_url",
+        image_url: { url: dataUrl },
+      });
+    }
+  }
+
+  const messages: Array<{ role: string; content: any }> = [];
+  if (system) {
+    messages.push({ role: "system", content: system });
+  }
+  messages.push({
+    role: "user",
+    content: allMedia.length > 0 ? userContent : user,
+  });
+
+  const requestBody: Record<string, unknown> = {
+    model: targetModel,
+    messages,
+    stream: false,
+    temperature: options?.temperature ?? 0.3,
+    ...(options?.maxTokens ? { max_tokens: options.maxTokens } : {}),
+    ...(options?.json ? { response_format: { type: "json_object" } } : {}),
+  };
+
+  try {
+    const resp = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${router.apiKey}`,
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      console.warn(`[9router] HTTP ${resp.status} (${targetModel}): ${errText.slice(0, 200)}`);
+      return null;
+    }
+
+    const data = (await resp.json()) as {
+      choices?: Array<{
+        message?: {
+          content?: string;
+        };
+      }>;
+    };
+
+    const content = data.choices?.[0]?.message?.content?.trim();
+    if (content) {
+      console.log(`[9router] ✅ Phản hồi thành công từ model ${targetModel}!`);
+      return content;
+    }
+  } catch (err) {
+    console.warn(`[9router] Exception khi gọi model ${targetModel}:`, err);
+  }
+
+  return null;
+}
 
 export async function callGemini(
   system: string,
@@ -577,10 +671,6 @@ export async function callGemini(
     apiKeys = [groundingKey, ...apiKeys.filter((k) => k !== groundingKey)];
   }
 
-  if (apiKeys.length === 0) {
-    throw new Error("Thiếu GEMINI_API_KEY trong .env");
-  }
-
   const allMedia = [...(options?.images || []), ...(options?.mediaParts || [])];
   const hasMedia = allMedia.length > 0;
 
@@ -588,29 +678,65 @@ export async function callGemini(
   if (isSearchEnabled) {
     primaryModel = "gemini-3-flash-preview";
   } else if (hasMedia && primaryModel.includes("lite")) {
-    // Với tác vụ thị giác (ảnh/tài liệu), BẮT BUỘC dùng model thị giác chất lượng cao, không dùng lite
     primaryModel = config.geminiModel || "gemini-3.7-flash";
   }
 
-  // Danh sách model cascading dự phòng khi model chính nghẽn mạng / 503 / 429 / Timeout:
-  // Loại bỏ gemini-3.8-flash đang gặp 503 từ Google; khi có media/ảnh BẢO ĐẢM KHÔNG dùng lite models
-  const candidateFallbacks = (hasMedia)
-    ? [
-        "gemini-3.7-flash",
-        "gemini-3.6-flash",
-        "gemini-3-flash-preview",
-        "gemini-flash-latest",
-      ].filter((m) => m !== primaryModel)
-    : [
-        "gemini-3.7-flash",
-        "gemini-3.6-flash",
-        "gemini-3-flash-preview",
-        "gemini-flash-lite-latest",
-        "gemini-3.1-flash-lite-preview",
-      ].filter((m) => m !== primaryModel);
+  const effectiveSystemBase = system?.includes("SYSTEM TEMPORAL ANCHOR")
+    ? system
+    : (system ? `${getSystemTemporalPrompt()}\n\n${system}` : getSystemTemporalPrompt());
 
+  const searchSystemGuard = isSearchEnabled
+    ? `\n\n=== CHỈ THỊ AN TOÀN NGUỒN TIN TÌM KIẾM (SEARCH GROUNDING HYGIENE) ===\n` +
+      `- CHỈ ĐƯỢC trích xuất dữ liệu từ các cơ quan báo chí chính thống, cổng thông tin chính thức của giải đấu/tổ chức, hoặc các nguồn uy tín (Bongdaplus, 24h, VnExpress, Tuổi Trẻ, LaLiga, UEFA, FIFA, Báo Đầu Tư, Dân Trí, v.v.).\n` +
+      `- TUYỆT ĐỐI BỎ QUA và KHÔNG sử dụng thông tin hay trích dẫn từ các website cá độ bóng đá, web xem bóng đá lậu (như Xoilac, Mitom, Thapcam, VeBo...), web spam SEO clickbait. Nếu dữ liệu chỉ xuất hiện từ các trang này, hãy xem như chưa có thông tin chính thức.\n`
+    : "";
+
+  const effectiveSystem = effectiveSystemBase + searchSystemGuard;
   const temperature = options?.temperature ?? 0.3;
   const maxTokens = options?.maxTokens;
+
+  // Nếu model chính là mô hình 9Router (tiền tố ag/ hoặc cx/): ưu tiên gọi 9Router trực tiếp
+  if (primaryModel.startsWith("ag/") || primaryModel.startsWith("cx/")) {
+    try {
+      console.log(`[gemini] 🧠 Sử dụng mô hình suy luận 9Router chính: ${primaryModel}`);
+      const routerRes = await call9Router(effectiveSystem, user, {
+        model: primaryModel,
+        maxTokens,
+        temperature,
+        json: options?.json,
+        images: options?.images,
+        mediaParts: options?.mediaParts,
+      });
+      if (routerRes) return routerRes;
+      console.warn(`[gemini] 9Router (${primaryModel}) không trả về kết quả, tiếp tục thử các tầng dự phòng tiếp theo...`);
+    } catch (rErr) {
+      console.warn(`[gemini] Lỗi gọi 9Router chính (${primaryModel}):`, rErr);
+    }
+  }
+
+  if (apiKeys.length === 0) {
+    if (hybridAgentSettings?.nineRouter?.enabled && hybridAgentSettings.nineRouter.apiKey) {
+      const fallbackRes = await call9Router(effectiveSystem, user, {
+        model: hybridAgentSettings.nineRouter.chatModel || "ag/gemini-3.7-flash-medium",
+        maxTokens,
+        temperature,
+        json: options?.json,
+        images: options?.images,
+        mediaParts: options?.mediaParts,
+      });
+      if (fallbackRes) return fallbackRes;
+    }
+    throw new Error("Thiếu GEMINI_API_KEY trong .env");
+  }
+
+  // Danh sách model cascading dự phòng khi model chính nghẽn mạng / 503 / 429 / Timeout:
+  // CHỈ dùng các dòng Flash chất lượng cao, LOẠI BỎ hoàn toàn lite models để tránh hallucination/lỗi JSON
+  const candidateFallbacks = [
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3-flash-preview",
+    "gemini-flash-latest",
+  ].filter((m) => m !== primaryModel);
 
   let lastError: unknown;
   const numKeys = apiKeys.length;
@@ -627,18 +753,6 @@ export async function callGemini(
     }
   }
   userParts.push({ text: user });
-
-  const effectiveSystemBase = system?.includes("SYSTEM TEMPORAL ANCHOR")
-    ? system
-    : (system ? `${getSystemTemporalPrompt()}\n\n${system}` : getSystemTemporalPrompt());
-
-  const searchSystemGuard = isSearchEnabled
-    ? `\n\n=== CHỈ THỊ AN TOÀN NGUỒN TIN TÌM KIẾM (SEARCH GROUNDING HYGIENE) ===\n` +
-      `- CHỈ ĐƯỢC trích xuất dữ liệu từ các cơ quan báo chí chính thống, cổng thông tin chính thức của giải đấu/tổ chức, hoặc các nguồn uy tín (Bongdaplus, 24h, VnExpress, Tuổi Trẻ, LaLiga, UEFA, FIFA, Báo Đầu Tư, Dân Trí, v.v.).\n` +
-      `- TUYỆT ĐỐI BỎ QUA và KHÔNG sử dụng thông tin hay trích dẫn từ các website cá độ bóng đá, web xem bóng đá lậu (như Xoilac, Mitom, Thapcam, VeBo...), web spam SEO clickbait. Nếu dữ liệu chỉ xuất hiện từ các trang này, hãy xem như chưa có thông tin chính thức.\n`
-    : "";
-
-  const effectiveSystem = effectiveSystemBase + searchSystemGuard;
 
   // 🌐 NẾU CẦN SEARCH GROUNDING & VERTEX AI ĐÃ CẤU HÌNH:
   // Chỉ dùng Vertex AI khi cần Google Search Grounding để hưởng 1.500 lượt search miễn phí/ngày và trừ vào $300 credit.
@@ -781,6 +895,28 @@ export async function callGemini(
       } catch (fbErr) {
         console.warn(`[gemini] Fallback ${fbModel} cũng gặp lỗi: ${String(fbErr)}`);
       }
+    }
+  }
+
+  // Fallback qua cổng 9Router (ag/gemini-3.7-flash-medium hoặc Codex)
+  if (hybridAgentSettings?.nineRouter?.enabled && hybridAgentSettings.nineRouter.apiKey) {
+    try {
+      const fallback9RouterModel = hybridAgentSettings.nineRouter.chatModel || "ag/gemini-3.7-flash-medium";
+      console.log(`[gemini] 🚀 Google API gặp sự cố, kích hoạt tầng dự phòng cao cấp qua 9Router (${fallback9RouterModel})...`);
+      const routerFallbackRes = await call9Router(effectiveSystem, user, {
+        model: fallback9RouterModel,
+        maxTokens,
+        temperature,
+        json: options?.json,
+        images: options?.images,
+        mediaParts: options?.mediaParts,
+      });
+      if (routerFallbackRes) {
+        console.log(`[gemini] ✅ Đã phản hồi thành công qua tầng dự phòng 9Router (${fallback9RouterModel})!`);
+        return routerFallbackRes;
+      }
+    } catch (rErr) {
+      console.warn("[gemini] Tầng dự phòng 9Router gặp sự cố:", rErr);
     }
   }
 

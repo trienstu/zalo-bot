@@ -1851,7 +1851,7 @@ QUY TẮC BẮT BUỘC:
       });
       quotePlan = plan;
 
-      if (options?.api && plan.taskType === "presentation_video") {
+      if (options?.api && plan.taskType === "presentation_video" && isPresentationVideoRequest(question, options?.quote?.text)) {
         console.log(`[member-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Video (Quote QA): "${question.slice(0, 80)}"`);
         void runPresentationVideoJob({
           api: options.api,
@@ -2688,7 +2688,7 @@ QUY TẮC BẮT BUỘC:
       });
       queryPlan = plan;
 
-      if (options?.api && plan.taskType === "presentation_video") {
+      if (options?.api && plan.taskType === "presentation_video" && isPresentationVideoRequest(question, options?.quote?.text)) {
         console.log(`[member-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Video: "${question.slice(0, 80)}"`);
         void runPresentationVideoJob({
           api: options.api,

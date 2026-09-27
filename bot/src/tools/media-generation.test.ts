@@ -810,3 +810,21 @@ Sếp xem biểu đồ nhé!`;
   assert.ok(res3?.code.includes("plt.bar"));
   assert.ok(!res3?.code.includes("```"));
 });
+
+test("extractSimulatedGenerateFile bóc tách chính xác raw JSON object khi LLM ảo giác in text", () => {
+  const rawTextWithJson = `@Trien Nguyen Dxs {
+  "fileType": "pptx",
+  "fileName": "thuyet_trinh_serena_riverside.pptx",
+  "content": "# TỔNG QUAN DỰ ÁN SERENA RIVERSIDE\\n## Vị trí đắc địa\\n- Ven sông Sài Gòn"
+}
+📊 Sen Chúa đã đóng gói đầy đủ nội dung chi tiết và xuất file thuyết trình PowerPoint [thuyet_trinh_serena_riverside.pptx] gửi lên nhóm rồi ạ!`;
+
+  const extracted = extractSimulatedGenerateFile(rawTextWithJson);
+  assert.ok(extracted, "Phải bóc tách được raw JSON file generation");
+  assert.equal(extracted?.toolName, "generate_file");
+  assert.equal(extracted?.args.fileType, "pptx");
+  assert.equal(extracted?.args.fileName, "thuyet_trinh_serena_riverside.pptx");
+  assert.ok(extracted?.args.content?.includes("SERENA RIVERSIDE"));
+  assert.ok(extracted?.rawMatch.includes("thuyet_trinh_serena_riverside.pptx"));
+});
+
