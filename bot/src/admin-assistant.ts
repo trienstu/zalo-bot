@@ -274,6 +274,7 @@ const MAX_HISTORY_TURNS = 12;
 // Lưu tài liệu/ảnh gần nhất vừa được phân tích trong đoạn chat 1:1 của mỗi người dùng (để kế thừa khi ra lệnh học)
 const lastAnalyzedDocuments = new Map<string, { name: string; text: string; timestamp: number }>();
 const lastUploadedZipFiles = new Map<string, { name: string; filePath: string; timestamp: number }>();
+const lastDirectMedia = new Map<string, { mediaPart: GeminiMediaPart; imageBuffer?: Buffer; url?: string; fileName?: string; timestamp: number }>();
 
 function getAdminHistory(userId: string) {
   if (!adminChatSessions.has(userId)) {
@@ -1600,11 +1601,29 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     }
   }
 
-  if (targetUrl) {
+  // 💡 TỰ ĐỘNG KẾ THỪA ẢNH / TÀI LIỆU GẦN NHẤT NẾU NGƯỜI DÙNG GỬI YÊU CẦU NỐI TIẾP (TRONG VÒNG 15 PHÚT)
+  if (!targetUrl && !mediaPart) {
+    const cachedMedia = lastDirectMedia.get(sender);
+    if (cachedMedia && Date.now() - cachedMedia.timestamp < 15 * 60 * 1000) {
+      mediaPart = cachedMedia.mediaPart;
+      targetUrl = cachedMedia.url || "";
+      fileName = cachedMedia.fileName || "Ảnh đính kèm";
+      console.log(`[admin-assistant] 🖼️ Tự động kế thừa hình ảnh/tài liệu gần nhất của [${displayName}] để trả lời liền mạch`);
+    }
+  }
+
+  if (targetUrl && !mediaPart) {
     console.log(`[admin-assistant] 📥 Đang tải tài liệu 1:1 từ: ${targetUrl.slice(0, 80)} (${fileName})...`);
     const fileRes = await downloadFileContent(targetUrl, fileName);
     if (fileRes?.mediaPart) {
       mediaPart = fileRes.mediaPart;
+      lastDirectMedia.set(sender, {
+        mediaPart: fileRes.mediaPart,
+        imageBuffer: fileRes.imageBuffer,
+        url: targetUrl,
+        fileName: fileName || "Ảnh đính kèm",
+        timestamp: Date.now(),
+      });
 
       // 🎙️ TỰ ĐỘNG BÓC BĂNG FILE ÂM THANH (STT): Đọc transcript vào fileTextContent để sẵn sàng xuất Word hoặc in chữ
       if (fileRes.mediaPart.mimeType?.startsWith("audio/") && fileRes.audioBuffer) {
@@ -1761,9 +1780,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `       • 💰 4. Giá bán & Chính sách tham khảo (Giá rumor/dự kiến đợt 1 từng loại hình, chính sách bán hàng hoặc vay vốn nếu có).\n` +
     `     + In đậm các số liệu quan trọng, trình bày gạch đầu dòng rõ ràng, mạch lạc, tối ưu hiển thị trên giao diện chat Zalo.\n` +
     `   - [CHỐNG BẺ LÁI SANG BẤT ĐỘNG SẢN]: Khi người dùng hỏi về địa lý, xã hội, khoa học, chính trị, thể thao, công nghệ, lịch sử: PHẢI TRẢ LỜI ĐÚNG TRỌNG TÂM, CẤM tự ý suy diễn người hỏi đi du lịch hay lôi chuyện bất động sản/mua bán đất vào câu trả lời nếu người dùng không hỏi về BĐS!\n` +
-    `10. NGUYÊN TẮC XỬ LÝ HÌNH ẢNH & ĐA PHƯƠNG TIỆN (MULTIMODAL & OCR FIRST):\n` +
-    `    - BẮT BUỘC ĐỌC VÀ TRÍCH XUẤT CHỮ TRONG ẢNH (OCR FIRST): Nếu Admin gửi ảnh có chữ (danh ngôn, triết lý, tài liệu, bảng biểu, hoá đơn, chụp màn hình...), BẮT BUỘC trích dẫn chính xác nguyên văn nội dung chữ quan trọng trong ngoặc kép "..." ngay đầu câu trả lời.\n` +
-    `    - PHÂN TÍCH Ý NGHĨA & NGUỒN GỐC: Nêu rõ nguồn gốc, tác giả, phân tích sâu sắc, tinh tế, đàm đạo hoặc đưa ra giải pháp/khuyến nghị thiết thực.\n` +
+    `10. NGUYÊN TẮC XỬ LÝ HÌNH ẢNH & ĐA PHƯƠNG TIỆN (MULTIMODAL & VERBATIM GROUNDING - ĐA LĨNH VỰC):\n` +
+    `    - BẮT BUỘC TRÍCH XUẤT ĐÚNG NGUYÊN VĂN (VERBATIM ACCURACY): Mọi dữ liệu chữ, số, công thức, mã code trên ảnh phải lấy chính xác 100% từ ảnh. TUYỆT ĐỐI CẤM tự ý bịa đặt, CẤM tự tạo bài toán ví dụ khác, CẤM sửa đổi số liệu của người dùng.\n` +
+    `    - NGUYÊN TẮC TOÀN VẸN (COMPLETENESS): Nếu ảnh là bài tập/đề thi có N mục (ví dụ từ câu 1 đến câu 9), phải giải hoặc bóc tách đầy đủ tất cả N mục, không được tự ý chỉ làm 3-4 câu rồi bỏ sót phần còn lại.\n` +
+    `    - VỚI BÀI TẬP / ĐỀ THI TOÁN, LÝ, HÓA, NGOẠI NGỮ: Đọc rõ từng đề mục, giải chi tiết từng bước, nêu rõ công thức/quy tắc và đáp số chuẩn xác.\n` +
+    `    - VỚI HÓA ĐƠN / CHỨNG TỪ / BẢNG BIỂU: Trích xuất chính xác các số liệu định lượng, tên mặt hàng, số tiền, ngày tháng.\n` +
+    `    - VỚI DANH NGÔN / TRIẾT LÝ / BÀI VIẾT: Nêu rõ tác giả/bối cảnh, phân tích thông điệp sâu sắc, tinh tế.\n` +
     `    - KHI GỬI ẢNH KHÔNG KÈM CHỮ: Tự động ưu tiên đọc và giải mã nội dung trong ảnh trước tiên.`
     : `Bạn là '${defaultBotName}' - Trợ lý AI thông minh, thân thiện, duyên dáng và hóm hỉnh của Zalo đang trò chuyện 1:1 với ${pronouns.userTitle} (${displayName}).\n` +
     `NHIỆM VỤ CỦA BẠN:\n` +
@@ -1780,11 +1802,13 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `7. KHI CÂU HỎI LÀ TỔNG QUAN DỰ ÁN BẤT ĐỘNG SẢN / CÔNG TRÌNH:\n` +
     `   - BẮT BUỘC cấu trúc câu trả lời chuyên nghiệp theo 4 phân mục: 🏢 TỔNG QUAN DỰ ÁN, 📍 1. Vị trí đắc địa, 📐 2. Quy mô & Cơ cấu sản phẩm, 🌿 3. Tiện ích, 💰 4. Giá bán & Chính sách tham khảo.\n` +
     `8. [CHỐNG BẺ LÁI SANG BẤT ĐỘNG SẢN]: Khi người dùng hỏi về chủ đề khác, tuyệt đối không tự ý lôi chuyện nhà đất/bất động sản vào.\n` +
-    `9. NGUYÊN TẮC XỬ LÝ HÌNH ẢNH & ĐA PHƯƠNG TIỆN (MULTIMODAL & OCR FIRST):\n` +
-    `   - BẮT BUỘC ĐỌC VÀ TRÍCH XUẤT CHỮ TRONG ẢNH (OCR FIRST): Nếu người dùng gửi ảnh có chữ (danh ngôn, triết lý, bài viết, đề bài, bảng biểu, hoá đơn, chụp màn hình...), BẮT BUỘC trích dẫn chính xác nguyên văn nội dung chữ quan trọng nhất trong ngoặc kép "..." ngay đầu câu trả lời.\n` +
-    `   - PHÂN TÍCH Ý NGHĨA & NGUỒN GỐC: Nêu rõ tác giả/bối cảnh (nếu là triết học/danh ngôn như Trang Tử, Khổng Tử, Lão Tử, văn học, Phật pháp...), phân tích thông điệp sâu sắc, tinh tế.\n` +
-    `   - TUYỆT ĐỐI KHÔNG PHỚT LỜ ẢNH hoặc chỉ chào hỏi xã giao qua loa. Luôn đặt 1 câu hỏi gợi mở hoặc chia sẻ góc nhìn đồng cảm ở cuối câu để đàm đạo cùng người dùng.\n` +
-    `   - KHI NGƯỜI DÙNG GỬI ẢNH KHÔNG KÈM CHỮ: Tự động hiểu người dùng muốn bạn đọc chữ, giải mã hoặc phân tích bức ảnh, ưu tiên hàng đầu là trích xuất chữ và phân tích sâu.`);
+    `9. NGUYÊN TẮC XỬ LÝ HÌNH ẢNH & ĐA PHƯƠNG TIỆN (MULTIMODAL & VERBATIM GROUNDING - ĐA LĨNH VỰC):\n` +
+    `   - BẮT BUỘC TRÍCH XUẤT ĐÚNG NGUYÊN VĂN (VERBATIM ACCURACY): Mọi dữ liệu chữ, số, công thức, mã code trên ảnh phải lấy chính xác 100% từ ảnh. TUYỆT ĐỐI CẤM tự ý bịa đặt, CẤM tự tạo bài toán ví dụ khác, CẤM sửa đổi số liệu của người dùng.\n` +
+    `   - NGUYÊN TẮC TOÀN VẸN (COMPLETENESS): Nếu ảnh là bài tập/đề thi có N mục (ví dụ từ câu 1 đến câu 9), phải giải hoặc bóc tách đầy đủ tất cả N mục, không được tự ý chỉ làm 3-4 câu rồi bỏ sót phần còn lại.\n` +
+    `   - VỚI BÀI TẬP / ĐỀ THI TOÁN, LÝ, HÓA, NGOẠI NGỮ: Đọc rõ từng đề mục, giải chi tiết từng bước, nêu rõ công thức/quy tắc và đáp số chuẩn xác.\n` +
+    `   - VỚI HÓA ĐƠN / CHỨNG TỪ / BẢNG BIỂU: Trích xuất chính xác các số liệu định lượng, tên mặt hàng, số tiền, ngày tháng.\n` +
+    `   - VỚI DANH NGÔN / TRIẾT LÝ / BÀI VIẾT: Nêu rõ tác giả/bối cảnh, phân tích thông điệp sâu sắc, tinh tế.\n` +
+    `   - KHI NGƯỜI DÙNG GỬI ẢNH KHÔNG KÈM CHỮ: Tự động hiểu người dùng muốn bạn đọc chữ, giải mã hoặc phân tích bức ảnh, ưu tiên hàng đầu là trích xuất chuẩn xác và giải quyết trọn vẹn.`);
 
   let fileSection = "";
   if (fileTextContent) {
@@ -2014,11 +2038,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     : "";
 
   const defaultImagePrompt =
-    `[NGƯỜI DÙNG GỬI HÌNH ẢNH / TÀI LIỆU]: Hãy quan sát kỹ bức ảnh này.\n` +
-    `- BẮT BUỘC ĐỌC VÀ TRÍCH XUẤT CHỮ (OCR FIRST): Nếu trong ảnh có chữ viết, danh ngôn, triết lý, bài viết, đề bài, hóa đơn, bảng biểu, thông báo... BẮT BUỘC trích dẫn nguyên văn mọi dòng chữ quan trọng đưa lên đầu câu trả lời trong dấu ngoặc kép "..." .\n` +
-    `- PHÂN TÍCH Ý NGHĨA & NGUỒN GỐC: Nêu rõ tác giả/bối cảnh (nếu là triết học/danh ngôn như Trang Tử, Khổng Tử, Lão Tử, văn học, Phật pháp...), phân tích thông điệp cốt lõi một cách sâu sắc, tinh tế.\n` +
-    `- GỢI MỞ ĐÀM ĐẠO: Luôn đưa ra một câu hỏi tương tác tinh tế hoặc góc nhìn gợi mở để đàm đạo cùng người dùng.\n` +
-    `- Nếu là ảnh phong cảnh, đồ họa, sự vật hoặc chân dung: Mô tả chi tiết các nét nổi bật và đưa ra lời bình hoặc nhận xét hữu ích.`;
+    `[NGƯỜI DÙNG GỬI HÌNH ẢNH / TÀI LIỆU]: Hãy quan sát kỹ toàn bộ bức ảnh này.\n` +
+    `- NGUYÊN TẮC BẢN SAO NGUYÊN VĂN & TOÀN VẸN (VERBATIM GROUNDING - CẤM TỰ TẠO VÍ DỤ):\n` +
+    `  + Nếu ảnh là ĐỀ BÀI / BÀI TẬP / ĐỀ THI: BẮT BUỘC đọc đúng 100% từng số liệu, từng câu, từng ý (1, 2, 3... hoặc a, b, c...) xuất hiện trong ảnh. Đếm đúng số lượng câu và giải đủ toàn bộ các câu trong ảnh. TUYỆT ĐỐI CẤM tự ý thay đổi số liệu, CẤM bịa ra bài toán ví dụ khác, CẤM bỏ sót câu nào!\n` +
+    `  + Nếu ảnh là HÓA ĐƠN, BẢNG BIỂU, THÔNG BÁO, TÀI LIỆU: Bóc tách chính xác từng trường thông tin, số tiền, ngày tháng, nội dung ghi chú.\n` +
+    `  + Nếu ảnh là DANH NGÔN, TRIẾT LÝ, BÀI VIẾT: Trích dẫn nguyên văn và phân tích sâu sắc thông điệp.\n` +
+    `  + Nếu người dùng chưa gửi kèm lời nhắn (gửi ảnh trống): Tự động nhận diện dạng tài liệu, trích xuất chính xác đề mục/nội dung và giải quyết trọn vẹn, đồng thời hỏi người dùng có cần giải thích thêm câu nào không.`;
 
   const effectiveRequestText = (rawText && rawText.length >= 3)
     ? rawText
@@ -2055,10 +2080,13 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     }
 
     const defaultFastModel = !isAdmin
-      ? (process.env.USER_DIRECT_GEMINI_MODEL?.trim() || "gemini-3.1-flash-lite-preview")
-      : (process.env.ADMIN_DIRECT_GEMINI_MODEL?.trim() || "gemini-3.1-flash-lite-preview");
+      ? (process.env.USER_DIRECT_GEMINI_MODEL?.trim() || config.geminiModel || "gemini-3.7-flash")
+      : (process.env.ADMIN_DIRECT_GEMINI_MODEL?.trim() || config.geminiModel || "gemini-3.7-flash");
 
-    const targetModel = (needsSearch && canUseGrounding()) ? "gemini-3-flash-preview" : defaultFastModel;
+    const hasMediaInput = Boolean(mediaPart || fileTextContent || hasFile || hasImage);
+    const targetModel = hasMediaInput
+      ? (config.geminiModel || "gemini-3.7-flash")
+      : ((needsSearch && canUseGrounding()) ? "gemini-3-flash-preview" : defaultFastModel);
 
     const fullSystemPrompt =
       systemPrompt +

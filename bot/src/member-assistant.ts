@@ -1977,7 +1977,7 @@ QUY TẮC BẮT BUỘC:
           explicitToolRequest: false,
           hasMedia: Boolean(mediaPart),
           fallback: async () => await callGemini(quoteSystemPrompt, quoteUserPrompt, {
-            model: "gemini-3.1-flash-lite-preview",
+            model: Boolean(mediaPart) ? (config.geminiModel || "gemini-3.7-flash") : "gemini-3.7-flash",
             mediaParts: mediaPart ? [mediaPart] : undefined,
             enableSearch: false,
           }),
@@ -2841,7 +2841,7 @@ QUY TẮC BẮT BUỘC:
     if (needsAgentLoop) {
       // 🚀 Chỉ khi người dùng thực sự yêu cầu gọi tool xuất file, voice hoặc đọc link cụ thể mới chạy Agent Loop
       answer = await callGeminiAgentLoop(systemPrompt, userPrompt, {
-        model: "gemini-3.1-flash-lite-preview",
+        model: Boolean(mediaPart) ? (config.geminiModel || "gemini-3.7-flash") : (config.geminiModel || "gemini-3.7-flash"),
         maxTurns: 3,
         mediaParts: mediaPart ? [mediaPart] : undefined,
         targetImageUrl: options?.imageUrl || targetUrl,
@@ -2921,7 +2921,9 @@ QUY TẮC BẮT BUỘC:
         }
       }
 
-      const chosenModel = (needsSearch && canUseGrounding()) ? "gemini-3-flash-preview" : "gemini-3.1-flash-lite-preview";
+      const chosenModel = Boolean(mediaPart)
+        ? (config.geminiModel || "gemini-3.7-flash")
+        : ((needsSearch && canUseGrounding()) ? "gemini-3-flash-preview" : (config.geminiModel || "gemini-3.7-flash"));
       const routingSignals = normalizeExecutionSignals(
         queryPlan ? { ...queryPlan } : null,
         {

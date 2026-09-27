@@ -525,22 +525,33 @@ export async function callGemini(
     throw new Error("Thiếu GEMINI_API_KEY trong .env");
   }
 
-  let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-3-flash-preview";
+  const allMedia = [...(options?.images || []), ...(options?.mediaParts || [])];
+  const hasMedia = allMedia.length > 0;
+
+  let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-3.7-flash";
   if (isSearchEnabled) {
     primaryModel = "gemini-3-flash-preview";
-  } else if (!primaryModel || primaryModel.includes("3.1-flash-lite")) {
-    primaryModel = "gemini-3-flash-preview";
+  } else if (hasMedia && primaryModel.includes("lite")) {
+    // Với tác vụ thị giác (ảnh/tài liệu), BẮT BUỘC dùng model thị giác chất lượng cao, không dùng lite
+    primaryModel = config.geminiModel || "gemini-3.7-flash";
   }
 
   // Danh sách model cascading dự phòng khi model chính nghẽn mạng / 503 / 429 / Timeout:
-  const candidateFallbacks = [
-    "gemini-3-flash-preview",
-    "gemini-3.8-flash",
-    "gemini-3.6-flash",
-    "gemini-3.7-flash",
-    "gemini-3.1-flash-lite-preview",
-    "gemini-flash-lite-latest",
-  ].filter((m) => m !== primaryModel);
+  // Loại bỏ gemini-3.8-flash đang gặp 503 từ Google; khi có media/ảnh BẢO ĐẢM KHÔNG dùng lite models
+  const candidateFallbacks = (hasMedia)
+    ? [
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3-flash-preview",
+        "gemini-flash-latest",
+      ].filter((m) => m !== primaryModel)
+    : [
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3-flash-preview",
+        "gemini-flash-lite-latest",
+        "gemini-3.1-flash-lite-preview",
+      ].filter((m) => m !== primaryModel);
 
   const temperature = options?.temperature ?? 0.3;
   const maxTokens = options?.maxTokens;
@@ -549,7 +560,6 @@ export async function callGemini(
   const numKeys = apiKeys.length;
 
   const userParts: Record<string, unknown>[] = [];
-  const allMedia = [...(options?.images || []), ...(options?.mediaParts || [])];
   if (allMedia.length > 0) {
     for (const img of allMedia) {
       userParts.push({
