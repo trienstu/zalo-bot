@@ -323,6 +323,41 @@ export async function downloadFileContent(
       }
     }
 
+    // 1.5 File Word (.docx): Bóc tách toàn bộ Text từ word/document.xml
+    if (ext === "docx" || detectedMime.includes("wordprocessingml") || (buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4b && ext === "docx")) {
+      try {
+        const tempDocxPath = path.join("/tmp", `docx_extract_${Date.now()}_${Math.random().toString(36).slice(2)}.docx`);
+        fs.writeFileSync(tempDocxPath, buffer);
+        const { execFile } = await import("child_process");
+        const { promisify } = await import("util");
+        const execFileAsync = promisify(execFile);
+        const { stdout } = await execFileAsync("unzip", ["-p", tempDocxPath, "word/document.xml"]);
+        try { fs.unlinkSync(tempDocxPath); } catch {}
+
+        if (stdout) {
+          const extractedDocx = stdout
+            .replace(/<w:p[^>]*>/g, "\n")
+            .replace(/<w:tab[^>]*\/>/g, "\t")
+            .replace(/<w:br[^>]*\/>/g, "\n")
+            .replace(/<[^>]+>/g, "")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&amp;/g, "&")
+            .replace(/&quot;/g, '"')
+            .replace(/&apos;/g, "'")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+
+          if (extractedDocx.length >= 20) {
+            console.log(`[gemini] 📄 Đã trích xuất ${extractedDocx.length.toLocaleString("vi-VN")} ký tự văn bản từ Word .docx "${fileName || "tài liệu"}"`);
+            return { textContent: extractedDocx };
+          }
+        }
+      } catch (docxErr) {
+        console.warn(`[gemini] Lỗi trích xuất text từ Word .docx:`, docxErr);
+      }
+    }
+
     // 2. File Hình ảnh (Gemini đọc Multimodal native)
     if (detectedMime.startsWith("image/")) {
       const geminiSupportedImageMimes = new Set([
