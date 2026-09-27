@@ -11,6 +11,8 @@ import {
   checkIsVoiceRequest,
   parseMarkdownToSlides,
   parseMarkdownRuns,
+  sanitizeSafeFileName,
+  sanitizeSlideList,
 } from "./file-generator.js";
 import {
   synthesizeSpeech,
@@ -97,6 +99,42 @@ test("generatePowerPointFile tạo file .pptx thành công với các slide bố
   try {
     fs.unlinkSync(res.filePath);
   } catch { }
+});
+
+test("sanitizeSafeFileName chuẩn hóa tiếng Việt có dấu thành không dấu an toàn và sạch sẽ", () => {
+  assert.equal(sanitizeSafeFileName("Ứng Dụng AI Trong Công Tác Dạy Và Học"), "Ung_Dung_AI_Trong_Cong_Tac_Day_Va_Hoc");
+  assert.equal(sanitizeSafeFileName("Thuyết trình Dự án Serena Riverside @#$!"), "Thuyet_trinh_Du_an_Serena_Riverside");
+  assert.equal(sanitizeSafeFileName("Đột Phá Kỷ Nguyên Số"), "Dot_Pha_Ky_Nguyen_So");
+  assert.equal(sanitizeSafeFileName(""), "tai_lieu");
+});
+
+test("sanitizeSlideList lọc bỏ slide rác và gom các stat/step mồ côi bị LLM làm phẳng", () => {
+  const malformedInput: any[] = [
+    { layout: "title", title: "Tổng Quan Dự Án", subtitle: "Giới thiệu" },
+    { layout: "bullets", title: "Điểm nhấn", bullets: ["Ý 1", "Ý 2"] },
+    // Các stat mồ côi do LLM bung ra
+    { value: "1.2 ha", label: "Diện tích" },
+    { value: "622 Căn", label: "Tổng sản phẩm" },
+    // Slide stats thực tế
+    { layout: "stats", title: "Quy mô", stats: [{ value: "2 Tháp", label: "Số tòa" }] },
+    // Slide rác không có tiêu đề, không có nội dung
+    { title: "Nội dung 4" },
+    { title: "" },
+    // Slide có tiêu đề nhưng không có bullets
+    { title: "Kế hoạch", desc: "Kế hoạch quý 4" },
+  ];
+
+  const cleaned = sanitizeSlideList(malformedInput, "Dự Án");
+  // Kiểm tra không có slide rỗng
+  assert.ok(cleaned.length >= 3);
+  assert.equal(cleaned[0]?.layout, "title");
+  assert.equal(cleaned[0]?.title, "Tổng Quan Dự Án");
+  // Không có slide nào tên là 'Nội dung 4' mà rỗng nội dung
+  assert.equal(cleaned.some((s) => s.title === "Nội dung 4"), false);
+  // Slide 'Kế hoạch' được bổ sung bullet từ desc
+  const keHoachSlide = cleaned.find((s) => s.title === "Kế hoạch");
+  assert.ok(keHoachSlide);
+  assert.ok(keHoachSlide?.bullets && keHoachSlide.bullets.length > 0);
 });
 
 test("parseMarkdownToSlides tự động phân loại layout thông minh từ văn bản", () => {

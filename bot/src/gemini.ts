@@ -695,12 +695,15 @@ export async function callGemini(
   const temperature = options?.temperature ?? 0.3;
   const maxTokens = options?.maxTokens;
 
-  // Nếu model chính là mô hình 9Router (tiền tố ag/ hoặc cx/): ưu tiên gọi 9Router trực tiếp
-  if (primaryModel.startsWith("ag/") || primaryModel.startsWith("cx/")) {
+  // Ưu tiên 9Router chạy trước tiên khi nineRouter được cấu hình (trừ khi có search grounding cần tool Google search trực tiếp)
+  if (hybridAgentSettings?.nineRouter?.enabled && hybridAgentSettings.nineRouter.apiKey && !isSearchEnabled) {
+    const routerModel = (primaryModel.startsWith("ag/") || primaryModel.startsWith("cx/"))
+      ? primaryModel
+      : (hybridAgentSettings.nineRouter.chatModel || "ag/gemini-3.8-flash-medium");
     try {
-      console.log(`[gemini] 🧠 Sử dụng mô hình suy luận 9Router chính: ${primaryModel}`);
+      console.log(`[gemini] 🧠 Ưu tiên sử dụng 9Router siêu tốc: ${routerModel}`);
       const routerRes = await call9Router(effectiveSystem, user, {
-        model: primaryModel,
+        model: routerModel,
         maxTokens,
         temperature,
         json: options?.json,
@@ -708,16 +711,16 @@ export async function callGemini(
         mediaParts: options?.mediaParts,
       });
       if (routerRes) return routerRes;
-      console.warn(`[gemini] 9Router (${primaryModel}) không trả về kết quả, tiếp tục thử các tầng dự phòng tiếp theo...`);
+      console.warn(`[gemini] 9Router (${routerModel}) không trả về kết quả, tiếp tục thử các tầng dự phòng tiếp theo...`);
     } catch (rErr) {
-      console.warn(`[gemini] Lỗi gọi 9Router chính (${primaryModel}):`, rErr);
+      console.warn(`[gemini] Lỗi gọi 9Router (${routerModel}):`, rErr);
     }
   }
 
   if (apiKeys.length === 0) {
     if (hybridAgentSettings?.nineRouter?.enabled && hybridAgentSettings.nineRouter.apiKey) {
       const fallbackRes = await call9Router(effectiveSystem, user, {
-        model: hybridAgentSettings.nineRouter.chatModel || "ag/gemini-3.7-flash-medium",
+        model: hybridAgentSettings.nineRouter.chatModel || "ag/gemini-3.8-flash-medium",
         maxTokens,
         temperature,
         json: options?.json,
@@ -732,10 +735,10 @@ export async function callGemini(
   // Danh sách model cascading dự phòng khi model chính nghẽn mạng / 503 / 429 / Timeout:
   // CHỈ dùng các dòng Flash chất lượng cao, LOẠI BỎ hoàn toàn lite models để tránh hallucination/lỗi JSON
   const candidateFallbacks = [
+    "gemini-3.8-flash",
+    "gemini-flash-latest",
     "gemini-3.7-flash",
     "gemini-3.6-flash",
-    "gemini-3-flash-preview",
-    "gemini-flash-latest",
   ].filter((m) => m !== primaryModel);
 
   let lastError: unknown;
@@ -1069,7 +1072,7 @@ const AGENT_TOOLS_DECLARATION = {
     },
     {
       name: "generate_file",
-      description: "Tạo và xuất file tài liệu thực tế (PowerPoint .pptx, Word .docx, Excel .xlsx, CSV .csv, HTML .html, Markdown .md, Text .txt, Code .py/.js/.sh) khi người dùng RA LỆNH VÀ CÓ NỘI DUNG CỤ THỂ để soạn thảo bài thuyết trình, văn bản hành chính, báo cáo, SOP, hợp đồng, bảng tính, báo giá. LƯU Ý: Không gọi khi người dùng chỉ hỏi thăm tính năng chung.",
+      description: "Tạo và xuất file tài liệu thực tế (PowerPoint .pptx, Word .docx, Excel .xlsx, CSV .csv, HTML .html, Markdown .md, Text .txt, Code .py/.js/.sh) khi người dùng RA LỆNH VÀ CÓ NỘI DUNG CỤ THỂ để soạn thảo bài thuyết trình, văn bản hành chính, báo cáo, SOP, hợp đồng, bảng tính, báo giá. LƯU Ý: Với pptx, mỗi phần tử trong mảng slides là MỘT SLIDE ĐẦY ĐỦ; TUYỆT ĐỐI KHÔNG tách lẻ các chỉ số stats hay các bước steps thành các slide riêng biệt mà phải lồng gọn vào trường stats hoặc steps của slide đó.",
       parameters: {
         type: "OBJECT",
         properties: {
@@ -1606,7 +1609,20 @@ async function call9RouterAgentLoop(
   if (!router?.enabled || !router.apiKey) return null;
 
   const baseUrl = (router.baseUrl || "http://127.0.0.1:20128/v1").replace(/\/+$/, "");
-  const targetModel = options?.model || router.chatModel || "ag/gemini-3.7-flash-medium";
+  let targetModel = options?.model || router.chatModel || "ag/gemini-3.8-flash-medium";
+  // Nếu model truyền vào không có prefix ag/ hoặc cx/ (ví dụ 'gemini-3.7-flash', 'gemini-3.8-flash'):
+  // Chuẩn hóa sang model 9Router tương ứng có prefix hợp lệ
+  if (!targetModel.startsWith("ag/") && !targetModel.startsWith("cx/")) {
+    if (targetModel.includes("3.8")) {
+      targetModel = "ag/gemini-3.8-flash-medium";
+    } else if (targetModel.includes("claude") || targetModel.includes("sonnet")) {
+      targetModel = "ag/claude-sonnet-4-6";
+    } else {
+      targetModel = (router.chatModel && (router.chatModel.startsWith("ag/") || router.chatModel.startsWith("cx/")))
+        ? router.chatModel
+        : "ag/gemini-3.8-flash-medium";
+    }
+  }
   const timeoutMs = (options as any)?.timeoutMs || router.timeoutMs || 45_000;
   const maxTurns = options?.maxTurns || 3;
   const temperature = options?.temperature ?? 0.2;

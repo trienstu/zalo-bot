@@ -567,6 +567,120 @@ export function parseMarkdownToSlides(content: string, defaultTitle = "Tài Li�
   return slides;
 }
 
+/**
+ * Chuẩn hóa tên file an toàn cho hệ thống file và Zalo download:
+ * Chuyển tiếng Việt có dấu thành không dấu thay vì biến thành dấu gạch dưới rác
+ */
+export function sanitizeSafeFileName(name: string, defaultName = "tai_lieu"): string {
+  if (!name || typeof name !== "string") return defaultName;
+  const unaccented = name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[đĐ]/g, (m) => (m === "Đ" ? "D" : "d"));
+  const safe = unaccented
+    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 100);
+  return safe || defaultName;
+}
+
+/**
+ * Slide Sanitizer: Lọc và gom các slide mồ côi (do LLM làm phẳng stats/steps)
+ * và loại bỏ các slide rác không có nội dung để đảm bảo slide deck sạch 100%.
+ */
+export function sanitizeSlideList(rawSlides: any[], defaultTitle: string): SlideContent[] {
+  if (!Array.isArray(rawSlides) || rawSlides.length === 0) return [];
+
+  const cleanedSlides: SlideContent[] = [];
+
+  for (let idx = 0; idx < rawSlides.length; idx++) {
+    const raw = rawSlides[idx];
+    if (!raw || typeof raw !== "object") continue;
+
+    // 1. Kiểm tra nếu đây là item 'stat' mồ côi (chứa value + label, không có title hoặc title rỗng)
+    if ((raw.value && raw.label) || (raw.value && !raw.title)) {
+      const lastSlide = cleanedSlides[cleanedSlides.length - 1];
+      if (lastSlide && lastSlide.layout === "stats") {
+        if (!Array.isArray(lastSlide.stats)) lastSlide.stats = [];
+        lastSlide.stats.push({
+          value: String(raw.value),
+          label: String(raw.label || raw.title || ""),
+          desc: raw.desc ? String(raw.desc) : undefined,
+        });
+        continue;
+      }
+      continue;
+    }
+
+    // 2. Kiểm tra nếu đây là item 'step' mồ côi (chứa number + desc, không có bullets/content)
+    if (raw.number && raw.desc && !raw.bullets && !raw.col1Bullets) {
+      const lastSlide = cleanedSlides[cleanedSlides.length - 1];
+      if (lastSlide && lastSlide.layout === "timeline") {
+        if (!Array.isArray(lastSlide.steps)) lastSlide.steps = [];
+        lastSlide.steps.push({
+          number: String(raw.number),
+          title: String(raw.title || `Bước ${lastSlide.steps.length + 1}`),
+          desc: String(raw.desc),
+        });
+        continue;
+      }
+      continue;
+    }
+
+    const slideTitle = String(raw.title || "").trim();
+    const hasBullets = Array.isArray(raw.bullets) && raw.bullets.some((b: any) => String(b).trim().length > 0);
+    const hasCol1 = Array.isArray(raw.col1Bullets) && raw.col1Bullets.length > 0;
+    const hasStats = Array.isArray(raw.stats) && raw.stats.length > 0;
+    const hasSteps = Array.isArray(raw.steps) && raw.steps.length > 0;
+    const hasTable = Array.isArray(raw.tableHeaders) && raw.tableHeaders.length > 0;
+    const isCover = raw.layout === "title" || idx === 0;
+
+    // Nếu không phải slide bìa, và không có bất kỳ content nào (hoặc chỉ có title mặc định "Nội dung X"):
+    const isDefaultOrEmptyTitle = !slideTitle || /^Nội\s*dung\s*\d+$/i.test(slideTitle) || /^Slide\s*\d+$/i.test(slideTitle);
+    if (!isCover && isDefaultOrEmptyTitle && !hasBullets && !hasCol1 && !hasStats && !hasSteps && !hasTable) {
+      continue;
+    }
+
+    // Nếu có tiêu đề nhưng không có nội dung, kiểm tra subtitle/desc
+    let finalBullets = Array.isArray(raw.bullets) ? raw.bullets : [];
+    if (!isCover && !hasBullets && !hasCol1 && !hasStats && !hasSteps && !hasTable) {
+      if (raw.subtitle || raw.desc || raw.description) {
+        finalBullets = [String(raw.subtitle || raw.desc || raw.description)];
+      } else {
+        continue; // Bỏ qua slide rỗng
+      }
+    }
+
+    let layout = raw.layout;
+    if (!layout) {
+      if (hasStats) layout = "stats";
+      else if (hasSteps) layout = "timeline";
+      else if (raw.col3Title || raw.col3Bullets) layout = "three_column";
+      else if (raw.col1Title || raw.col1Bullets) layout = "two_content";
+      else if (hasTable) layout = "table";
+      else if (isCover && idx === 0) layout = "title";
+      else layout = "bullets";
+    }
+
+    cleanedSlides.push({
+      ...raw,
+      title: slideTitle || (idx === 0 ? defaultTitle : `Nội Dung ${cleanedSlides.length + 1}`),
+      layout,
+      bullets: finalBullets.length > 0 ? finalBullets : raw.bullets,
+    });
+  }
+
+  if (cleanedSlides.length > 0 && cleanedSlides[0]?.layout !== "title") {
+    cleanedSlides.unshift({
+      layout: "title",
+      title: defaultTitle,
+      subtitle: "Tài liệu thuyết trình chiến lược",
+    });
+  }
+
+  return cleanedSlides;
+}
+
 export async function generatePowerPointFile(
   fileName: string,
   title: string,
@@ -577,7 +691,7 @@ export async function generatePowerPointFile(
     ensureOutputDir();
     cleanOldGeneratedFiles(24);
 
-    const safeName = fileName.replace(/[^a-zA-Z0-9_-]/g, "_").replace(/^_+|_+$/g, "") || "bai_thuyet_trinh";
+    const safeName = sanitizeSafeFileName(fileName, "bai_thuyet_trinh");
     const fullFileName = safeName.endsWith(".pptx") ? safeName : `${safeName}.pptx`;
     const targetPath = path.join(GENERATED_FILES_DIR, fullFileName);
 
@@ -587,9 +701,13 @@ export async function generatePowerPointFile(
     pres.layout = "LAYOUT_16x9";
     pres.title = title;
 
+    // Làm sạch và lọc các slide rác
+    const sanitizedSlides = sanitizeSlideList(slides, title);
+    const effectiveSlides = sanitizedSlides.length > 0 ? sanitizedSlides : slides;
+
     // Slide 1: Bìa (Title Slide) theo phong cách Modern PPTmaster
     let startIdx = 0;
-    const s0 = slides[0];
+    const s0 = effectiveSlides[0];
     const isCustomCover = s0 && s0.layout === "title";
     const coverTitle = isCustomCover ? (s0.title || title) : title;
     const coverSubtitle = isCustomCover ? (s0.subtitle || "Tài liệu thuyết trình chiến lược") : "Tài liệu trình chiếu AI Zalo Assistant";
@@ -690,8 +808,8 @@ export async function generatePowerPointFile(
     });
 
     // Render các slide nội dung
-    for (let i = startIdx; i < slides.length; i++) {
-      const s = slides[i];
+    for (let i = startIdx; i < effectiveSlides.length; i++) {
+      const s = effectiveSlides[i];
       if (!s) continue;
       const slide = pres.addSlide();
       slide.background = { color: theme.canvasBg };
@@ -1023,7 +1141,12 @@ export async function generatePowerPointFile(
         slide.addTable(tableData, { x: 0.8, y: 1.6, w: 8.4, colW: Array(s.tableHeaders.length).fill(8.4 / s.tableHeaders.length) });
       } else {
         // Layout: Bullets (Tối ưu hóa: Nếu <= 4 ý thì vẽ Card ngang; Nếu > 4 ý thì vẽ Container Card)
-        const bulletList = (s.bullets || []).slice(0, 8);
+        let bulletList = (s.bullets || []).filter((b: any) => typeof b === "string" && b.trim().length > 0).slice(0, 8);
+        if (bulletList.length === 0) {
+          if (s.subtitle) bulletList = [s.subtitle];
+          else if (s.takeaway) bulletList = [s.takeaway];
+        }
+
         if (bulletList.length <= 4 && bulletList.length > 0) {
           const cardH = 0.68;
           const gap = 0.16;
@@ -1073,7 +1196,7 @@ export async function generatePowerPointFile(
               fontFace: "Arial",
             });
           });
-        } else {
+        } else if (bulletList.length > 0) {
           // Nhiều hơn 4 ý: Khung card nền trắng bóng đổ
           slide.addShape(pres.ShapeType.roundRect, {
             x: 0.8,
@@ -1191,7 +1314,7 @@ export async function generateWordDoc(
     ensureOutputDir();
     cleanOldGeneratedFiles(24);
 
-    const safeName = fileName.replace(/[^a-zA-Z0-9_-]/g, "_").replace(/^_+|_+$/g, "") || "tai_lieu";
+    const safeName = sanitizeSafeFileName(fileName, "tai_lieu");
     const fullFileName = safeName.endsWith(".docx") ? safeName : `${safeName}.docx`;
     const targetPath = path.join(GENERATED_FILES_DIR, fullFileName);
 
@@ -1463,7 +1586,7 @@ export async function generateExcelFile(
     ensureOutputDir();
     cleanOldGeneratedFiles(24);
 
-    const safeName = fileName.replace(/[^a-zA-Z0-9_-]/g, "_").replace(/^_+|_+$/g, "") || "bang_tinh";
+    const safeName = sanitizeSafeFileName(fileName, "bang_tinh");
     const fullFileName = safeName.endsWith(".xlsx") ? safeName : `${safeName}.xlsx`;
     const targetPath = path.join(GENERATED_FILES_DIR, fullFileName);
 
@@ -1573,7 +1696,7 @@ export async function generateCsvFile(
     ensureOutputDir();
     cleanOldGeneratedFiles(24);
 
-    const safeName = fileName.replace(/[^a-zA-Z0-9_-]/g, "_").replace(/^_+|_+$/g, "") || "du_lieu";
+    const safeName = sanitizeSafeFileName(fileName, "du_lieu");
     const fullFileName = safeName.endsWith(".csv") ? safeName : `${safeName}.csv`;
     const targetPath = path.join(GENERATED_FILES_DIR, fullFileName);
 
@@ -1629,7 +1752,7 @@ export async function generateHtmlFile(
     ensureOutputDir();
     cleanOldGeneratedFiles(24);
 
-    const safeName = fileName.replace(/[^a-zA-Z0-9_-]/g, "_").replace(/^_+|_+$/g, "") || "trang_web";
+    const safeName = sanitizeSafeFileName(fileName, "trang_web");
     const fullFileName = safeName.endsWith(".html") ? safeName : `${safeName}.html`;
     const targetPath = path.join(GENERATED_FILES_DIR, fullFileName);
 
@@ -1697,7 +1820,8 @@ export async function generateTextFile(
     cleanOldGeneratedFiles(24);
 
     const cleanExt = ext.replace(/^\./, "") || "md";
-    const baseName = fileName.replace(/\.[a-zA-Z0-9]+$/, "").replace(/[^a-zA-Z0-9_-]/g, "_") || "tai_lieu";
+    const rawBase = fileName.replace(/\.[a-zA-Z0-9]+$/, "");
+    const baseName = sanitizeSafeFileName(rawBase, "tai_lieu");
     const fullFileName = `${baseName}.${cleanExt}`;
     const targetPath = path.join(GENERATED_FILES_DIR, fullFileName);
 
