@@ -48,6 +48,7 @@ import { cleanOutdatedVoicePromisesFromAnswer, cleanCoreSpeechText } from "./too
 import { generateMusic } from "./tools/music-generator.js";
 import { transcribeAudioBuffer } from "./audio-transcoder.js";
 import { runBatchAudioJob } from "./workers/batch-audio-processor.js";
+import { isPresentationVideoRequest, runPresentationVideoJob } from "./workers/presentation-video-processor.js";
 
 async function deliverGeneratedToolFileDirect(
   api: any,
@@ -1559,6 +1560,23 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     if (urlMatch) {
       targetUrl = urlMatch[0];
     }
+  }
+
+  // 🎬 TỰ ĐỘNG NHẬN DIỆN VÀ KÍCH HOẠT TIẾN TRÌNH SẢN XUẤT VIDEO THUYẾT TRÌNH (AI STUDIO TTS)
+  if (isPresentationVideoRequest(rawText, event.quote?.text)) {
+    console.log(`[admin-assistant] 🎬 Phát hiện yêu cầu tạo Video thuyết trình: "${rawText.slice(0, 80)}", kích hoạt Presentation Video Processor...`);
+    void runPresentationVideoJob({
+      api,
+      sender,
+      isGroup: false,
+      userGreeting,
+      displayName,
+      userPrompt: rawText,
+      quoteText: event.quote?.text || fileTextContent || "",
+    }).catch((err) => {
+      console.error("[admin-assistant] Lỗi runPresentationVideoJob:", err);
+    });
+    return;
   }
 
   // 💡 TỰ ĐỘNG KẾ THỪA FILE NÉN GẦN NHẤT NẾU NGƯỜI DÙNG RA LỆNH XỬ LÝ / CHUYỂN ĐỔI NGAY SAU KHI GỬI FILE

@@ -301,6 +301,7 @@ export interface SlideContent {
   subtitle?: string;
   kicker?: string;
   takeaway?: string;
+  speakerNotes?: string;
   bullets?: string[];
   tableHeaders?: string[];
   tableRows?: Array<Array<string | number>>;
@@ -353,9 +354,10 @@ export function parseMarkdownToSlides(content: string, defaultTitle = "Tài Li�
     let title = "";
     let kicker = "";
     let takeaway = "";
+    let speakerNotes = "";
     const remainingLines: string[] = [];
 
-    // Parse các dòng tiêu đề, badge, takeaway
+    // Parse các dòng tiêu đề, badge, takeaway, speaker notes
     for (const line of lines) {
       if (/^\[([\p{L}0-9\s/_-]{2,30})\]$/u.test(line)) {
         kicker = line.replace(/^\[|\]$/g, "").trim();
@@ -363,6 +365,10 @@ export function parseMarkdownToSlides(content: string, defaultTitle = "Tài Li�
       }
       if (/^(?:💡\s*)?(?:ghi chú|takeaway|lưu ý|chú ý|kết luận)[:.]\s*/iu.test(line)) {
         takeaway = line.replace(/^(?:💡\s*)?(?:ghi chú|takeaway|lưu ý|chú ý|kết luận)[:.]\s*/iu, "").trim();
+        continue;
+      }
+      if (/^(?:🎙️\s*|🗣️\s*)?(?:lời\s*thoại|speaker\s*notes?|thuyết\s*minh|diễn\s*thuyết|ghi\s*chú\s*thuyết\s*trình)[:.]\s*/iu.test(line)) {
+        speakerNotes = line.replace(/^(?:🎙️\s*|🗣️\s*)?(?:lời\s*thoại|speaker\s*notes?|thuyết\s*minh|diễn\s*thuyết|ghi\s*chú\s*thuyết\s*trình)[:.]\s*/iu, "").trim();
         continue;
       }
       if (!title && (/^#{1,3}\s/.test(line) || /^(?:[Ss]lide|[Tt]rang|[Pp]hần)\s*\d+[:.]/i.test(line))) {
@@ -387,6 +393,7 @@ export function parseMarkdownToSlides(content: string, defaultTitle = "Tài Li�
         title,
         subtitle: remainingLines.join(" - ") || "Tài liệu thuyết trình chiến lược",
         kicker: kicker || undefined,
+        speakerNotes: speakerNotes || undefined,
       });
       continue;
     }
@@ -401,6 +408,7 @@ export function parseMarkdownToSlides(content: string, defaultTitle = "Tài Li�
         title,
         kicker: kicker || undefined,
         takeaway: takeaway || undefined,
+        speakerNotes: speakerNotes || undefined,
         col1Title: col1Lines[0]?.replace(/^###\s*/, "") || "Mục 1",
         col1Bullets: col1Lines.slice(1).map((l) => l.replace(/^[-*•]\s*/, "")),
         col2Title: col2Lines[0]?.replace(/^###\s*/, "") || "Mục 2",
@@ -416,6 +424,7 @@ export function parseMarkdownToSlides(content: string, defaultTitle = "Tài Li�
         title,
         kicker: kicker || undefined,
         takeaway: takeaway || undefined,
+        speakerNotes: speakerNotes || undefined,
         col1Title: col1Lines[0]?.replace(/^###\s*/, "") || "Mục 1",
         col1Bullets: col1Lines.slice(1).map((l) => l.replace(/^[-*•]\s*/, "")),
         col2Title: col2Lines[0]?.replace(/^###\s*/, "") || "Mục 2",
@@ -439,6 +448,7 @@ export function parseMarkdownToSlides(content: string, defaultTitle = "Tài Li�
         title,
         kicker: kicker || undefined,
         takeaway: takeaway || undefined,
+        speakerNotes: speakerNotes || undefined,
         tableHeaders: headers,
         tableRows: dataRows,
       });
@@ -498,6 +508,7 @@ export function parseMarkdownToSlides(content: string, defaultTitle = "Tài Li�
         kicker: kicker || undefined,
         takeaway: takeaway || undefined,
         stats: statMatches.slice(0, 4),
+        speakerNotes: speakerNotes || undefined,
       });
     } else if (stepMatches.length >= 2 && bulletList.length <= 1) {
       slides.push({
@@ -505,6 +516,7 @@ export function parseMarkdownToSlides(content: string, defaultTitle = "Tài Li�
         title,
         kicker: kicker || undefined,
         takeaway: takeaway || undefined,
+        speakerNotes: speakerNotes || undefined,
         steps: stepMatches.slice(0, 4),
       });
     } else {
@@ -513,6 +525,7 @@ export function parseMarkdownToSlides(content: string, defaultTitle = "Tài Li�
         title,
         kicker: kicker || undefined,
         takeaway: takeaway || undefined,
+        speakerNotes: speakerNotes || undefined,
         bullets: bulletList.length > 0 ? bulletList : remainingLines,
       });
     }
@@ -562,6 +575,10 @@ export async function generatePowerPointFile(
 
     const coverSlide = pres.addSlide();
     coverSlide.background = { color: theme.canvasBg };
+    const coverNotes = isCustomCover ? s0?.speakerNotes : (slides[0]?.speakerNotes || "");
+    if (coverNotes && typeof (coverSlide as any).addNotes === "function") {
+      (coverSlide as any).addNotes(coverNotes);
+    }
 
     // Vạch nhấn dọc bên trái tiêu đề
     coverSlide.addShape(pres.ShapeType.rect, {
@@ -1074,6 +1091,11 @@ export async function generatePowerPointFile(
           valign: "middle",
           fontFace: "Arial",
         });
+      }
+
+      // 4. Speaker Notes (Lời thoại thuyết minh của diễn giả)
+      if (s.speakerNotes && typeof (slide as any).addNotes === "function") {
+        (slide as any).addNotes(s.speakerNotes);
       }
     }
 

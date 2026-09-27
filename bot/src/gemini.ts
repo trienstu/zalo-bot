@@ -873,8 +873,8 @@ const AGENT_TOOLS_DECLARATION = {
         properties: {
           fileType: {
             type: "STRING",
-            enum: ["pptx", "docx", "xlsx", "csv", "html", "md", "txt", "code"],
-            description: "Định dạng file: 'pptx' (PowerPoint slide), 'docx' (Word), 'xlsx' (Excel), 'csv' (CSV BOM tiếng Việt), 'html' (HTML web report), 'md' (Markdown/SOP), 'txt' (văn bản thuần), 'code' (mã nguồn)",
+            enum: ["pptx", "docx", "xlsx", "csv", "html", "md", "txt", "code", "presentation_video"],
+            description: "Định dạng file: 'pptx' (PowerPoint slide), 'docx' (Word), 'xlsx' (Excel), 'csv' (CSV BOM tiếng Việt), 'html' (HTML web report), 'md' (Markdown/SOP), 'txt' (văn bản thuần), 'code' (mã nguồn), 'presentation_video' (Video thuyết trình kèm giọng đọc AI Studio)",
           },
           fileName: {
             type: "STRING",
@@ -902,6 +902,7 @@ const AGENT_TOOLS_DECLARATION = {
                 subtitle: { type: "STRING", description: "Phụ đề slide (dành cho slide bìa title)" },
                 kicker: { type: "STRING", description: "Huy hiệu / Badge danh mục nhỏ phía trên tiêu đề (ví dụ: 'CHIẾN LƯỢC 2026', 'TỔNG QUAN')" },
                 takeaway: { type: "STRING", description: "Thông điệp đúc kết / Key takeaway hoặc lưu ý nổi bật ở chân trang slide" },
+                speakerNotes: { type: "STRING", description: "Lời thoại / bài thuyết minh chi tiết của diễn giả khi trình chiếu slide này (dùng để lồng tiếng video thuyết trình AI Studio)" },
                 layout: {
                   type: "STRING",
                   enum: ["title", "bullets", "table", "two_content", "three_column", "timeline", "stats"],

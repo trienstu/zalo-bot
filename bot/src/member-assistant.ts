@@ -49,6 +49,7 @@ import { interceptAndExecuteSimulatedTool, extractSpeechFallbackText } from "./t
 import { cleanOutdatedVoicePromisesFromAnswer, cleanCoreSpeechText } from "./tools/voice-generator.js";
 import { generateMusic } from "./tools/music-generator.js";
 import { runBatchAudioJob } from "./workers/batch-audio-processor.js";
+import { isPresentationVideoRequest, runPresentationVideoJob } from "./workers/presentation-video-processor.js";
 
 async function deliverGeneratedToolFile(
   api: any,
@@ -1361,6 +1362,23 @@ async function handleHistoryQA(
         return "";
       }
     }
+  }
+
+  // 🎬 TỰ ĐỘNG NHẬN DIỆN VÀ KÍCH HOẠT TIẾN TRÌNH SẢN XUẤT VIDEO THUYẾT TRÌNH (AI STUDIO TTS)
+  const groupQuoteText = options?.quote?.text || "";
+  if (options?.api && isPresentationVideoRequest(question, groupQuoteText)) {
+    console.log(`[member-assistant] 🎬 Phát hiện yêu cầu tạo Video thuyết trình trong nhóm: "${question.slice(0, 80)}", kích hoạt Presentation Video Processor...`);
+    void runPresentationVideoJob({
+      api: options.api,
+      sender: options.sender || "",
+      isGroup: true,
+      threadId,
+      userGreeting: isSuperAdmin ? "Sếp" : (displayName ? `bác ${displayName}` : "bác"),
+      displayName,
+      userPrompt: question,
+      quoteText: groupQuoteText || fileTextContent || "",
+    }).catch((err) => console.error("[member-assistant] Lỗi runPresentationVideoJob:", err));
+    return "";
   }
 
   // Nếu người dùng gửi kèm ảnh/file rõ ràng nhưng hệ thống không nạp được do mạng/CDN rỗng

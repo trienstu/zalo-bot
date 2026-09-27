@@ -1036,7 +1036,7 @@ async function synthesizeWithGoogleAIStudioMultiSpeaker(
  * Tier 2: Google Cloud Text-to-Speech (Neural2/Wavenet) - Chuẩn phát thanh viên
  * Tier 3: Microsoft Edge-TTS (Hoài My / Nam Minh) - Lưới an toàn miễn phí 100%
  */
-async function synthesizeSingleAudio(
+export async function synthesizeSingleAudio(
   text: string,
   outputPath: string,
   voiceHint?: string,
