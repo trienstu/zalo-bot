@@ -1229,8 +1229,62 @@ async function handleHistoryQA(
   let mediaPart: GeminiMediaPart | null = null;
   let fileTextContent: string | null = null;
   const rawTargetUrl = options?.fileAttachment?.url || options?.imageUrl || (options?.quote?.mediaType === "image" || options?.quote?.mediaType === "video" || isMediaOrDocUrl(options?.quote?.mediaUrl) ? options?.quote?.mediaUrl : undefined);
-  const targetUrl = (rawTargetUrl && (isMediaOrDocUrl(rawTargetUrl) || options?.fileAttachment?.url)) ? rawTargetUrl : undefined;
-  const fileName = options?.fileAttachment?.name || "";
+  let targetUrl = (rawTargetUrl && (isMediaOrDocUrl(rawTargetUrl) || options?.fileAttachment?.url)) ? rawTargetUrl : undefined;
+  let fileName = options?.fileAttachment?.name || "";
+
+  // 💡 TỰ ĐỘNG BẮT FILE/TÀI LIỆU GẦN NHẤT TRONG NHÓM: Nếu thành viên hỏi về file / chuyển đổi file nhưng không quote hoặc đính kèm lại
+  if (!targetUrl && /(?:file|tài\s*liệu|đọc\s*file|chuyển\s*(?:đổi)?|sang\s*(?:md|word|pdf|docx|xlsx|pptx)|trả\s*file|gửi\s*file|lấy\s*file)/i.test(question)) {
+    try {
+      const recentFileRows = db
+        .prepare(
+          `SELECT text, msg_type, created_at FROM group_messages
+           WHERE thread_id = ?
+             AND (zalo_user_id = ? OR ? = '')
+             AND (msg_type = 'share.file' OR text LIKE '%.docx — http%' OR text LIKE '%.pdf — http%' OR text LIKE '%.xlsx — http%' OR text LIKE '%.txt — http%' OR text LIKE '%.md — http%')
+             AND created_at >= ?
+           ORDER BY created_at DESC
+           LIMIT 5`,
+        )
+        .all(threadId, options?.sender || "", options?.sender || "", Date.now() - 7200 * 1000) as any[];
+
+      if (recentFileRows && recentFileRows.length > 0) {
+        const expectsMultiple = /(?:2\s*file|cả\s*2|hai\s*file|các\s*file|những\s*file|tất\s*cả\s*file)/i.test(question);
+        const filesToProcess = expectsMultiple ? recentFileRows : recentFileRows.slice(0, 1);
+        const extractedContents: string[] = [];
+
+        for (const row of filesToProcess) {
+          const urlMatch = row.text.match(/https?:\/\/[^\s]+/i);
+          if (urlMatch) {
+            const fUrl = urlMatch[0];
+            const nameMatch = row.text.match(/^([^—–\n]+?)\s*[—–]/);
+            const fName = nameMatch ? nameMatch[1].trim() : "tai_lieu";
+            if (!targetUrl) {
+              targetUrl = fUrl;
+              fileName = fName;
+            }
+            console.log(`[member-assistant] 💡 Tự động nạp tài liệu gần nhất trong nhóm của ${options?.sender}: "${fName}" (${fUrl.slice(0, 60)})`);
+            try {
+              const res = await downloadFileContent(fUrl, fName);
+              if (res?.textContent) {
+                extractedContents.push(`=== TÀI LIỆU: ${fName} ===\n${res.textContent}`);
+              } else if (res?.mediaPart && !mediaPart) {
+                mediaPart = res.mediaPart;
+              }
+            } catch (dlErr) {
+              console.warn(`[member-assistant] Lỗi nạp file ${fName}:`, dlErr);
+            }
+          }
+        }
+
+        if (extractedContents.length > 0) {
+          fileTextContent = extractedContents.join("\n\n---\n\n");
+          console.log(`[member-assistant] ✅ Đã nạp thành công ${extractedContents.length} tài liệu gần nhất (${fileTextContent.length} ký tự)`);
+        }
+      }
+    } catch (findErr) {
+      console.warn("[member-assistant] Lỗi tìm recent group file:", findErr);
+    }
+  }
 
   if (targetUrl) {
     console.log(`[member-assistant] 📥 Đang nạp tài liệu/file từ: ${targetUrl.slice(0, 80)} (${fileName})...`);
@@ -1345,10 +1399,11 @@ async function handleHistoryQA(
       `   - Hệ thống tự động cung cấp font tiếng Việt chuẩn Unicode qua hàm get_font(size, bold=True/False) và tự động bắt file ảnh PNG gửi trực tiếp lên Zalo cho ${isSuperAdmin ? "Sếp" : "người dùng"}.\n` +
       `   - TUYỆT ĐỐI KHÔNG dùng python_interpreter để tạo ảnh nghệ thuật/minh họa (phong cảnh, chân dung, đồ vật, bánh trái, anime...). TUYỆT ĐỐI CẤM tự ý hứa hẹn hoặc nói rằng 'em đang tạo ảnh / hệ thống đang gửi ảnh vào nhóm' khi phiên hỏi đáp này không có công cụ sinh ảnh nghệ thuật!\n` +
       `   - TUYỆT ĐỐI CẤM từ chối hoặc bảo người dùng nhờ designer vẽ lại!\n` +
-      `9. KỸ NĂNG XUẤT FILE TÀI LIỆU, SLIDE VÀ VOICE (generate_file & create_voice):\n` +
-      `   - Khi người dùng yêu cầu tạo bài thuyết trình / slide PowerPoint (.pptx), tài liệu Word (.docx), Excel (.xlsx), hoặc tạo giọng đọc / voice / podcast (.m4a), HOẶC giục 'soạn luôn đi', 'làm luôn đi':\n` +
-      `     * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_file' (fileType='pptx' cho slide, 'docx' cho word, 'xlsx' cho excel) HOẶC 'create_voice' để xuất file thực tế gửi lên Zalo!\n` +
-      `     * TUYỆT ĐỐI CẤM CHỈ GÕ DÀN Ý BẰNG CHỮ RỒI HỎI NGƯỢC LẠI NGƯỜI DÙNG có muốn soạn không. Hãy hành động và xuất file ngay lập tức!\n` +
+      `9. KỸ NĂNG XUẤT FILE TÀI LIỆU (.MD, .DOCX, .XLSX, .PPTX, .HTML, .CSV), SLIDE VÀ VOICE (generate_file & create_voice):\n` +
+      `   - Khi người dùng yêu cầu tạo bài thuyết trình / slide PowerPoint (.pptx), tài liệu Word (.docx), Excel (.xlsx), Markdown (.md), HTML (.html), Text (.txt), hoặc tạo giọng đọc / voice / podcast (.m4a), HOẶC giục 'soạn luôn đi', 'làm luôn đi', 'trả file cho mình đi', 'xuất file đi':\n` +
+      `     * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_file' (fileType='md' cho Markdown, 'docx' cho word, 'xlsx' cho excel, 'pptx' cho slide, 'html' cho html, 'csv' cho csv) HOẶC 'create_voice' để xuất file thực tế gửi lên Zalo!\n` +
+      `     * TUYỆT ĐỐI CẤM CHỈ GÕ DÀN Ý BẰNG CHỮ RỒI HỎI NGƯỢC LẠI NGƯỜI DÙNG có muốn soạn/đóng gói thành file không! Hãy hành động và xuất file ngay lập tức!\n` +
+      `     * [QUY TẮC TRẢ FILE THEO YÊU CẦU]: Khi người dùng yêu cầu 'trả file cho mình đi', 'trả file .md cho mình đi', 'xuất file đi', 'gửi file đi': NẾU NỘI DUNG ĐÃ ĐƯỢC BẠN SOẠN THẢO HOẶC ĐÃ THẢO LUẬN TRONG LỊCH SỬ CHAT HOẶC NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): BẮT BUỘC PHẢI LẤY CHÍNH NỘI DUNG ĐÓ ĐỂ GỌI 'generate_file' (fileType='md' hoặc file tương ứng) XUẤT FILE GỬI LÊN ZALO NGAY LẬP TỨC! TUYỆT ĐỐI CẤM TỪ CHỐI HAY BÁO LỖI KHÔNG TẢI ĐƯỢC LINK!\n` +
       `     * [QUY TẮC BẢO LƯU NGUYÊN VẸN TRI THỨC KHI ĐÓNG GÓI / XUẤT FILE ĐA LĨNH VỰC]:\n` +
       `       + Khi người dùng yêu cầu 'đóng gói', 'xuất file', 'lưu vào file', 'chuyển thành file' (Word/docx, Excel/xlsx, PowerPoint/pptx, PDF, CSV, TXT...) từ nội dung tin nhắn được trích dẫn (quote) hoặc nội dung đã bàn luận trước đó:\n` +
       `       + BẮT BUỘC PHẢI BẢO LƯU NGUYÊN VẸN 100% TOÀN BỘ NỘI DUNG CHI TIẾT GỐC VÀO THAM SỐ 'content' CỦA TOOL 'generate_file' (bao gồm đầy đủ căn cứ/điều khoản pháp luật, bảng biểu/số liệu tài chính - BĐS, toàn bộ lời thoại/phân cảnh kịch bản media, mã nguồn/kiến trúc kỹ thuật, quy chế doanh nghiệp...). TUYỆT ĐỐI CẤM tự ý tóm tắt thành dàn ý gạch đầu dòng sơ sài làm mất mát dữ liệu và tri thức chuyên sâu của người dùng!\n` +
@@ -2664,11 +2719,12 @@ QUY TẮC BẮT BUỘC:
     `- KHI CÂU HỎI LÀ TRA CỨU SỰ KIỆN / SỐ LIỆU / DỮ KIỆN THỰC TẾ: Đi thẳng vào câu trả lời và số liệu rõ ràng, không mở bài bằng các câu chào hỏi hay cảm thán sáo rỗng dài dòng làm loãng thông tin, KHÔNG chèn thông tin bổ trợ bên lề.\n` +
     `- CẬP NHẬT DỮ KIỆN THỜI GIAN THỰC & PHÁP LUẬT / HÀNH CHÍNH MỚI NHẤT: BẮT BUỘC ưu tiên dữ liệu mới nhất từ phần 'DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT'. Khi câu hỏi liên quan đến dữ kiện thực tế có tính biến động (chính sách, luật pháp, đơn vị hành chính, giá cả, số liệu): TUYỆT ĐỐI KHÔNG bám vào số liệu cũ trong trí nhớ đã lỗi thời nếu dữ liệu tra cứu cung cấp văn bản, nghị quyết hoặc số liệu mới hơn. Phải giải thích rõ ràng và cập nhật số liệu mới nhất cho người hỏi!\n` +
     `- KHI HỎI VỀ QUY TRÌNH, HƯỚNG DẪN HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Trích dẫn và diễn giải chi tiết từng bước (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến từ lịch sử chat. Không chỉ đưa mỗi link tài liệu.\n` +
-    `- QUY TẮC BẮT BUỘC KHI TẠO SLIDE THUYẾT TRÌNH, XUẤT FILE TÀI LIỆU HOẶC TẠO VOICE:\n` +
-    `  + Khi người dùng yêu cầu tạo bài thuyết trình / slide PowerPoint (.pptx), xuất file Word (.docx), Excel (.xlsx), hoặc tạo giọng đọc / voice (.m4a), HOẶC giục 'soạn luôn đi', 'làm luôn đi':\n` +
-    `    * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_file' (fileType='pptx' cho slide, 'docx' cho word, 'xlsx' cho excel) HOẶC 'create_voice' để xuất file thực tế gửi lên Zalo!\n` +
+    `- QUY TẮC BẮT BUỘC KHI TẠO SLIDE THUYẾT TRÌNH, XUẤT FILE TÀI LIỆU (.MD, .DOCX, .XLSX, .PPTX, .HTML, .CSV) HOẶC TẠO VOICE:\n` +
+    `  + Khi người dùng yêu cầu tạo bài thuyết trình / slide PowerPoint (.pptx), xuất file Word (.docx), Excel (.xlsx), Markdown (.md), HTML (.html), Text (.txt), hoặc tạo giọng đọc / voice (.m4a), HOẶC giục 'soạn luôn đi', 'làm luôn đi', 'trả file cho mình đi', 'xuất file đi':\n` +
+    `    * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_file' (fileType='md' cho Markdown, 'docx' cho word, 'xlsx' cho excel, 'pptx' cho slide, 'html' cho html, 'csv' cho csv) HOẶC 'create_voice' để xuất file thực tế gửi lên Zalo!\n` +
     `    * Với slide PowerPoint (.pptx): Phải chia nội dung thành các slide rõ ràng bằng các tiêu đề markdown '# Tiêu đề slide' và nội dung gạch đầu dòng chi tiết cho từng slide.\n` +
-    `    * TUYỆT ĐỐI CẤM CHỈ GÕ DÀN Ý BẰNG CHỮ RỒI HỎI NGƯỢC LẠI NGƯỜI DÙNG có muốn soạn không. Hãy hành động và xuất file ngay lập tức!\n` +
+    `    * TUYỆT ĐỐI CẤM CHỈ GÕ DÀN Ý BẰNG CHỮ RỒI HỎI NGƯỢC LẠI NGƯỜI DÙNG có muốn soạn/đóng gói thành file không! Hãy hành động và xuất file ngay lập tức!\n` +
+    `    * [QUY TẮC TRẢ FILE THEO YÊU CẦU]: Khi người dùng yêu cầu 'trả file cho mình đi', 'trả file .md cho mình đi', 'xuất file đi', 'gửi file đi': NẾU NỘI DUNG ĐÃ ĐƯỢC BẠN SOẠN THẢO HOẶC ĐÃ THẢO LUẬN TRONG LỊCH SỬ CHAT: BẮT BUỘC PHẢI LẤY CHÍNH NỘI DUNG ĐÓ ĐỂ GỌI 'generate_file' (fileType='md' hoặc file tương ứng) XUẤT FILE GỬI LÊN ZALO NGAY LẬP TỨC! TUYỆT ĐỐI CẤM TỪ CHỐI HAY BÁO LỖI KHÔNG TẢI ĐƯỢC LINK!\n` +
     `    * [QUY TẮC BẢO LƯU NGUYÊN VẸN TRI THỨC KHI ĐÓNG GÓI / XUẤT FILE ĐA LĨNH VỰC]: Khi người dùng yêu cầu 'đóng gói', 'xuất file', 'lưu vào file', 'chuyển thành file' (Word/docx, Excel/xlsx, PowerPoint/pptx, PDF, CSV, TXT...) từ nội dung tin nhắn được trích dẫn (quote) hoặc nội dung đã bàn luận trước đó: BẮT BUỘC PHẢI BẢO LƯU NGUYÊN VẸN 100% TOÀN BỘ NỘI DUNG CHI TIẾT GỐC VÀO THAM SỐ 'content' CỦA TOOL 'generate_file' (đầy đủ căn cứ/điều khoản pháp luật, bảng biểu/số liệu tài chính - BĐS, toàn bộ lời thoại/phân cảnh kịch bản media, mã nguồn/kiến trúc kỹ thuật...). TUYỆT ĐỐI CẤM tự ý tóm tắt thành dàn ý gạch đầu dòng sơ sài làm mất mát dữ liệu và tri thức chuyên sâu của người dùng!\n` +
     `    * [QUY TẮC NỘI DUNG VOICE / TTS CHO MỌI LĨNH VỰC (Thơ ca, Tin tức, Pháp luật, Tài chính, Kịch bản, Kể chuyện)]: Khi gọi 'create_voice', tham số 'text' CHỈ ĐƯỢC CHỨA NỘI DUNG CỐT LÕI CẦN ĐỌC THÀNH TIẾNG (Tên tác phẩm/bản tin/điều luật, Tác giả/Nguồn nếu có, và toàn bộ nội dung chi tiết bài thơ / tin tức / đối thoại / câu chuyện). TUYỆT ĐỐI CẤM đưa lời chào xưng hô (@mention, 'Dạ Sếp...', 'Em xin gửi...'), lời dẫn phiếm đàm ('Dưới đây là...'), thông báo tiến độ ('Hệ thống đang xử lý qua worker...'), câu hỏi kết thúc ('Sếp có muốn...', 'Chúc bạn nghe vui...'), ĐẶC BIỆT TUYỆT ĐỐI CẤM đưa các đoạn phân tích, bình luận, cảm nhận, ý nghĩa, bối cảnh sáng tác hay giải thích bên dưới vào tham số 'text' của giọng đọc (người dùng chỉ muốn nghe chính tác phẩm, không nghe phân tích ngoài lề)!\n` +
     `    * [KỊCH BẢN ĐỐI THOẠI / PODCAST 2 NGƯỜI]: Khi người dùng yêu cầu kịch bản 2 người nói chuyện, cuộc đối thoại, hoặc podcast 2 người: BẮT BUỘC tự động soạn kịch bản đối đáp sinh động, phân vai rõ ràng theo từng lượt nói (ví dụ: 'Nam: ...\nNữ: ...' hoặc 'MC Nam: ...\nKhách mời: ...', có thể thêm cảm xúc trong ngoặc như 'Nam (hào hứng): ...') và BẮT BUỘC GỌI 'create_voice' truyền toàn bộ kịch bản vào tham số 'text' để hệ thống tự động tổng hợp thành file Podcast .m4a 2 giọng gửi lên Zalo!\n` +

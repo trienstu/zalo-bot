@@ -361,6 +361,14 @@ test("checkIsFileOrVoiceGeneration nhận diện chính xác các ý định t�
   assert.equal(checkIsFileOrVoiceGeneration("in ra file excel bảng báo giá này"), true);
   assert.equal(checkIsFileOrVoiceGeneration("cho các kịch bản này vào file docx"), true);
   assert.equal(checkIsFileOrVoiceGeneration("lưu nội dung trên sang file docx giúp anh"), true);
+  assert.equal(checkIsFileOrVoiceGeneration("chuyển đổi 2 file tài liệu của mình sang định dạng .md"), true);
+  assert.equal(checkIsFileOrVoiceGeneration("xuất nội dung này sang file markdown"), true);
+
+  const quoteProposal = "Bác kiểm tra nội dung trên đã đúng ý bác chưa ạ? Nếu bác cần em đóng gói thành file .md để tải về máy, bác cho em tín hiệu nhé!";
+  assert.equal(checkIsFileOrVoiceGeneration("ok, trả file .md cho mình đi", quoteProposal), true);
+  assert.equal(checkIsFileOrVoiceGeneration("trả file cho mình đi", quoteProposal), true);
+  assert.equal(checkIsFileOrVoiceGeneration("triển đi em", quoteProposal), true);
+  assert.equal(checkIsFileOrVoiceGeneration("ok gửi file cho mình", quoteProposal), true);
 });
 
 test("parseMarkdownRuns chuyển đổi chuẩn xác in đậm và in nghiêng", () => {
