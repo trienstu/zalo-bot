@@ -2201,7 +2201,6 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         hasMedia: Boolean(mediaPart || fileTextContent || hasFile || hasImage),
         fallback: async () => await callGemini(fullSystemPrompt, effectiveUserPrompt, {
           model: targetModel,
-          maxTokens: !isAdmin ? 600 : undefined,
           mediaParts: mediaPart ? [mediaPart] : undefined,
           enableSearch: needsSearch,
         }),
