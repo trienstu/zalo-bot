@@ -39,6 +39,7 @@ import {
   refreshDynamicKnowledgeIfExpired,
 } from "./google-sync.js";
 import { config } from "./config.js";
+import { getSystemArchitectureProfile } from "./system-architecture.js";
 import type { QueryPlanResult } from "./query-planner.js";
 import { answerWithHybridRouting } from "./hybrid-agent.js";
 import { normalizeExecutionSignals, selectResponseMode } from "./hybrid-routing.js";
@@ -2101,6 +2102,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
     const fullSystemPrompt =
       systemPrompt +
+      `\n\n${getSystemArchitectureProfile({ botName: defaultBotName, isSuperAdmin: isAdmin })}\n\n` +
       userMemorySection +
       searchInstruction +
       groupInstruction +

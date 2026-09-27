@@ -688,7 +688,13 @@ export async function interceptAndExecuteSimulatedTool(
         !cleanedText ||
         /^(?:anh|chị|bác|sếp|bạn)?\s*(?:đã\s+)?(?:nhận|thấy)\s*(?:được\s+)?(?:ảnh|poster|biểu đồ|hình)\s*(?:chưa|chưa\s*ạ)?\s*[?]?$/i.test(cleanedText)
       ) {
-        cleanedText = "🎨 Em đã thiết kế hình ảnh/poster theo yêu cầu và gửi lên nhóm rồi nhé! ✨";
+        if (result?.success) {
+          cleanedText = "🎨 Em đã thiết kế hình ảnh/poster theo yêu cầu và gửi lên nhóm rồi nhé! ✨";
+        } else {
+          cleanedText = `⚠️ Dạ tiến trình thực thi mã Python để vẽ đồ họa/biểu đồ gặp sự cố: ${result?.error || "Không thể xuất biểu đồ"}. Em đã ghi nhận lại để tối ưu mã lệnh ạ!`;
+        }
+      } else if (!result?.success) {
+        cleanedText += `\n\n⚠️ *(Ghi chú kỹ thuật: Quá trình vẽ biểu đồ/poster bằng Python gặp lỗi: ${result?.error || "Lỗi runtime"}).*`;
       }
       return cleanedText;
     } catch (err) {
@@ -719,7 +725,13 @@ export async function interceptAndExecuteSimulatedTool(
         !cleanedText ||
         /^(?:anh|chị|bác|sếp|bạn)?\s*(?:đã\s+)?(?:nhận|thấy)\s*(?:được\s+)?(?:ảnh|bức ảnh|tấm ảnh|hình)\s*(?:chưa|chưa\s*ạ)?\s*[?]?$/i.test(cleanedText)
       ) {
-        cleanedText = "🎨 Em đã tạo ảnh theo yêu cầu và gửi lên rồi nhé! ✨";
+        if (result?.success) {
+          cleanedText = "🎨 Em đã tạo ảnh theo yêu cầu và gửi lên rồi nhé! ✨";
+        } else {
+          cleanedText = `⚠️ Dạ tiến trình tạo ảnh tạm thời gặp sự cố: ${result?.error || "Không thể kết nối dịch vụ tạo ảnh"}. Bác vui lòng thử lại sau giây lát nhé!`;
+        }
+      } else if (!result?.success) {
+        cleanedText += `\n\n⚠️ *(Ghi chú kỹ thuật: Quá trình tạo ảnh gặp lỗi: ${result?.error || "Lỗi dịch vụ tạo ảnh"}).*`;
       }
       return cleanedText;
     } catch (err) {
@@ -772,7 +784,13 @@ export async function interceptAndExecuteSimulatedTool(
       !cleanedText ||
       /^(?:anh|chị|bác|sếp|bạn)?\s*(?:đã\s+)?(?:tải|nhận|thấy)\s*(?:được\s+)?file\s*(?:chưa|chưa\s*ạ)?\s*[?]?$/i.test(cleanedText)
     ) {
-      cleanedText = `📄 Em đã đóng gói toàn bộ nội dung chi tiết vào file [${result?.fileName || fileName}] và gửi lên nhóm rồi nhé!`;
+      if (result?.success) {
+        cleanedText = `📄 Em đã đóng gói toàn bộ nội dung chi tiết vào file [${result?.fileName || fileName}] và gửi lên nhóm rồi nhé!`;
+      } else {
+        cleanedText = `⚠️ Dạ em vừa thử tạo file [${fileName}] nhưng gặp sự cố kỹ thuật: ${result?.error || "Không thể kết xuất dữ liệu"}. Em đã ghi nhận lại để khắc phục ạ!`;
+      }
+    } else if (!result?.success) {
+      cleanedText += `\n\n⚠️ *(Ghi chú kỹ thuật: Quá trình tạo file [${fileName}] gặp lỗi: ${result?.error || "Không thể hoàn tất"}).*`;
     }
 
     return cleanedText;

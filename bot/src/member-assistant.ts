@@ -35,6 +35,7 @@ import { handleSetReminder, handleListReminders, handleCancelReminder } from "./
 import { searchRealtimeNews } from "./realtime-search.js";
 import { refreshDynamicKnowledgeIfExpired, fetchGoogleContent, parseGoogleUrl } from "./google-sync.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
+import { getSystemArchitectureProfile } from "./system-architecture.js";
 import { planSearchQueries, type QueryPlanResult } from "./query-planner.js";
 import fs from "node:fs";
 import { config, defaultBotName } from "./config.js";
@@ -1422,6 +1423,7 @@ async function handleHistoryQA(
     const fastSystemPrompt =
       `${getSystemTemporalPrompt()}\n\n` +
       `${personaIntro}\n${customPromptSection}\n` +
+      `${getSystemArchitectureProfile({ botName, isSuperAdmin })}\n\n` +
       `NHIỆM VỤ:\n` +
       `1. Bạn vừa nhận được một hình ảnh hoặc tài liệu văn bản đính kèm từ ${isSuperAdmin ? `Sếp (${displayName}) - Super Admin / Quản trị viên tối cao của bạn` : "thành viên"}.\n` +
       `2. ĐỌC KỸ TOÀN BỘ NỘI DUNG trong hình ảnh / tài liệu đính kèm.\n` +
@@ -1764,6 +1766,7 @@ QUY TẮC BẮT BUỘC:
       `${getSystemTemporalPrompt()}\n\n` +
       `BẠN ĐANG TƯƠNG TÁC TRỰC TIẾP TRONG NHÓM: "${currentGroupName}" (ID: ${threadId}).\n` +
       `${personaIntro}\n${customPromptSection}\n` +
+      `${getSystemArchitectureProfile({ botName, isSuperAdmin })}\n\n` +
       `NHIỆM VỤ:\n` +
       `1. Thành viên đang trích dẫn (quote) một tin nhắn hoặc nội dung thảo luận trước đó và đặt câu hỏi tiếp theo.\n` +
       `2. ÁP DỤNG 5 NGUYÊN TẮC VÀNG HOẠT ĐỘNG TOÀN NĂNG:\n` +
@@ -2781,6 +2784,7 @@ QUY TẮC BẮT BUỘC:
     `${getSystemTemporalPrompt()}\n\n` +
     `BẠN ĐANG TƯƠNG TÁC TRỰC TIẾP TRONG NHÓM: "${currentGroupName}" (ID: ${threadId}).\n` +
     `${personaIntro}\n${customPromptSection}\n` +
+    `${getSystemArchitectureProfile({ botName, isSuperAdmin })}\n\n` +
     `=== 5 NGUYÊN TẮC VÀNG HOẠT ĐỘNG TOÀN NĂNG (UNIVERSAL GOLDEN RULES) ===\n\n` +
     `1. NGUYÊN TẮC 1: DUAL GROUNDING ĐA LĨNH VỰC (STRICT FACT VS OPEN KNOWLEDGE)\n` +
     `   - [A. DỮ LIỆU ĐÓNG NỘI BỘ (File đính kèm, Link Google Doc/Sheet, Hợp đồng, Chính sách, SOP, Bảng biểu)]:\n` +
