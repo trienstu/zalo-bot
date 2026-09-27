@@ -2804,7 +2804,7 @@ export function isUserAdmin(zaloUserId: string): boolean {
     if (!zaloUserId) return false;
 
     // Các tài khoản Super Admin mặc định
-    const defaultSuperAdminIds = ["3501936437672262924", "7946525001172739016", "6225260231248214251"];
+    const defaultSuperAdminIds = ["3501936437672262924", "7946525001172739016"];
     if (defaultSuperAdminIds.includes(zaloUserId)) return true;
 
     // Cấu hình qua biến môi trường ADMIN_USER_IDS hoặc ADMIN_ZALO_IDS
