@@ -20,6 +20,7 @@ import {
   stitchMultiChunkQuote,
 } from "./db/index.js";
 import { sendGroupText, sendGroupFile, sendGroupVoice, sendReaction, sendTyping, Reactions, sleep, cleanZaloText } from "./zalo/client.js";
+import { ocrImage } from "./jobs/ocr.js";
 import { formatAndChunkZaloMarkdown, pickSmartReaction } from "./zalo-formatter.js";
 import {
   callGemini,
@@ -1228,6 +1229,7 @@ async function handleHistoryQA(
   // 1. Tải và giải mã file đính kèm / ảnh / audio (CHỈ tải nếu thực sự là media/file, tuyệt đối không tải web link URL)
   let mediaPart: GeminiMediaPart | null = null;
   let fileTextContent: string | null = null;
+  let imageOcrText: string | null = null;
   const rawTargetUrl = options?.fileAttachment?.url || options?.imageUrl || (options?.quote?.mediaType === "image" || options?.quote?.mediaType === "video" || isMediaOrDocUrl(options?.quote?.mediaUrl) ? options?.quote?.mediaUrl : undefined);
   let targetUrl = (rawTargetUrl && (isMediaOrDocUrl(rawTargetUrl) || options?.fileAttachment?.url)) ? rawTargetUrl : undefined;
   let fileName = options?.fileAttachment?.name || "";
@@ -1298,6 +1300,21 @@ async function handleHistoryQA(
     if (fileRes?.mediaPart && fileRes.mediaPart.data && fileRes.mediaPart.data.length > 50) {
       mediaPart = fileRes.mediaPart;
       console.log(`[member-assistant] ✅ Đã nạp file đa phương tiện thành công (${mediaPart.mimeType}, size: ${Math.round(mediaPart.data.length / 1024)} KB)`);
+
+      // 🛡️ LƯỚI BẢO HIỂM LOCAL OCR: Bóc tách trước chữ từ ảnh đính kèm
+      if (fileRes.mediaPart.mimeType?.startsWith("image/") && fileRes.imageBuffer) {
+        try {
+          const ocrPromise = ocrImage(fileRes.imageBuffer);
+          const ocrTimeout = new Promise<string>((r) => setTimeout(() => r(""), 4500));
+          const extractedText = await Promise.race([ocrPromise, ocrTimeout]);
+          if (extractedText && extractedText.trim().length > 0) {
+            imageOcrText = extractedText.trim();
+            console.log(`[member-assistant] 📝 OCR Local bóc tách thành công ${imageOcrText.length} ký tự từ ảnh nhóm`);
+          }
+        } catch (e) {
+          console.warn("[member-assistant] Lỗi chạy OCR Local cho ảnh nhóm:", e);
+        }
+      }
     } else if (fileRes?.textContent) {
       fileTextContent = fileRes.textContent;
       console.log(`[member-assistant] ✅ Đã đọc file văn bản thành công (${fileTextContent.length} ký tự)`);
@@ -2492,6 +2509,9 @@ QUY TẮC BẮT BUỘC:
   if (fileTextContent) {
     fileContentSection = `\n=== NỘI DUNG TÀI LIỆU ĐÍNH KÈM (${fileName || "File"}): ===\n${fileTextContent.slice(0, 40000)}\n`;
   }
+  if (imageOcrText) {
+    fileContentSection = `\n=== VĂN BẢN TRÍCH XUẤT TỪ ẢNH (LOCAL OCR TRÍCH LỜI): ===\n"${imageOcrText}"\n\n` + fileContentSection;
+  }
 
   let personaIntro = "";
   switch (groupSettings.persona) {
@@ -2765,7 +2785,7 @@ QUY TẮC BẮT BUỘC:
     `DƯỚI ĐÂY LÀ DỮ LIỆU LỊCH SỬ CHAT NỘI BỘ CỦA CHÍNH NHÓM "${currentGroupName}" (ID: ${threadId}) ĐỂ THAM KHẢO:\n` +
     `<chat_history>\n${contextData}\n</chat_history>\n\n` +
     `${quotePromptSection ? `${quotePromptSection}\n` : ""}` +
-    `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${question || (mediaPart ? "Hãy phân tích chi tiết hình ảnh này giúp tôi." : fileTextContent ? "Hãy đọc và phân tích tài liệu này giúp tôi." : "Dạ em chào Sếp/bác ạ! Em có thể hỗ trợ gì?")}\n\n` +
+    `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${question || (mediaPart ? "[NGƯỜI DÙNG GỬI ẢNH]: Hãy quan sát kỹ bức ảnh này. Nếu có chữ (danh ngôn, triết lý, đề bài, thông báo, bảng biểu, hoá đơn...), BẮT BUỘC trích dẫn nguyên văn mọi dòng chữ quan trọng đưa lên đầu câu trả lời trong dấu ngoặc kép \"...\", sau đó phân tích ý nghĩa và gợi mở đàm đạo. Nếu là phong cảnh/sự vật: mô tả chi tiết và nhận xét hữu ích." : fileTextContent ? "Hãy đọc và phân tích tài liệu này giúp tôi." : "Dạ em chào Sếp/bác ạ! Em có thể hỗ trợ gì?")}\n\n` +
     `HÃY TRẢ LỜI THẬT ${isSuperAdmin ? "CHU ĐÁO, CHUẨN XÁC VÀ TÔN TRỌNG SẾP" : "DUYÊN DÁNG, CHUẨN XÁC VÀ HÓM HỈNH"}:`;
 
   try {

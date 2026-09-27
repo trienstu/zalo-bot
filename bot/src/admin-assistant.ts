@@ -19,7 +19,8 @@ import {
   getBotFriend,
   getUserMemories,
 } from "./db/index.js";
-import { sendDirectText, sendDirectFile, sendDirectVoice, sendGroupText } from "./zalo/client.js";
+import { sendDirectText, sendDirectFile, sendDirectVoice, sendGroupText, sendReaction, sendTyping, Reactions } from "./zalo/client.js";
+import { ocrImage } from "./jobs/ocr.js";
 import { callGemini, callGeminiAgentLoop, downloadFileContent, executeAgentTool, type GeminiMediaPart } from "./gemini.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
 import { defaultBotName } from "./config.js";
@@ -501,6 +502,17 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   const hasImage = Boolean(event.mediaUrl || event.quote?.mediaUrl);
 
   if (!rawText && !hasFile && !hasImage) return;
+
+  // ⚡ PHẢN HỒI THỊ GIÁC TỨC THÌ (IMMEDIATE UX FEEDBACK):
+  // Thả reaction ngay vào tin nhắn đính kèm ảnh/file và kích hoạt typing indicator
+  if (hasImage || hasFile) {
+    if (event.msgId && event.cliMsgId) {
+      void sendReaction(api, sender, event.msgId, event.cliMsgId, Reactions.LIKE, false).catch(() => {});
+    }
+    void sendTyping(api, sender, false).catch(() => {});
+  } else if (rawText && !rawText.startsWith("/") && !rawText.startsWith("!")) {
+    void sendTyping(api, sender, false).catch(() => {});
+  }
 
   // TUYỆT ĐỐI BỎ QUA MỌI TIN NHẮN TỰ PHÁT HOẶC ECHO CỦA CHÍNH TÀI KHOẢN BOT (CHỐNG LẶP VÔ TẬN)
   if (event.isSelf) {
@@ -1509,6 +1521,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   // Tải file hoặc hình ảnh nếu có
   let mediaPart: GeminiMediaPart | null = null;
   let fileTextContent: string | null = null;
+  let imageOcrText: string | null = null;
   const targetUrl =
     event.fileAttachment?.url ||
     event.quote?.fileAttachment?.url ||
@@ -1537,6 +1550,21 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
             timestamp: Date.now(),
           });
           saveRecentDirectDocument(sender, fileName || "File âm thanh", fileTextContent);
+        }
+      }
+
+      // 🛡️ LƯỚI BẢO HIỂM LOCAL OCR: Bóc tách trước chữ từ ảnh để tăng độ chính xác và cứu nguy khi AI Vision nghẽn
+      if (fileRes.mediaPart.mimeType?.startsWith("image/") && fileRes.imageBuffer) {
+        try {
+          const ocrPromise = ocrImage(fileRes.imageBuffer);
+          const ocrTimeout = new Promise<string>((r) => setTimeout(() => r(""), 4500));
+          const extractedText = await Promise.race([ocrPromise, ocrTimeout]);
+          if (extractedText && extractedText.trim().length > 0) {
+            imageOcrText = extractedText.trim();
+            console.log(`[admin-assistant] 📝 OCR Local bóc tách thành công ${imageOcrText.length} ký tự từ ảnh 1:1`);
+          }
+        } catch (e) {
+          console.warn("[admin-assistant] Lỗi chạy OCR Local cho ảnh 1:1:", e);
         }
       }
     } else if (fileRes?.textContent) {
@@ -1659,7 +1687,11 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `       • 🌿 3. Tiện ích & Phong cách sống (Phát triển theo phong cách gì, hồ bơi, gym, yoga, sauna, mảng xanh, tiện ích đặc quyền).\n` +
     `       • 💰 4. Giá bán & Chính sách tham khảo (Giá rumor/dự kiến đợt 1 từng loại hình, chính sách bán hàng hoặc vay vốn nếu có).\n` +
     `     + In đậm các số liệu quan trọng, trình bày gạch đầu dòng rõ ràng, mạch lạc, tối ưu hiển thị trên giao diện chat Zalo.\n` +
-    `   - [CHỐNG BẺ LÁI SANG BẤT ĐỘNG SẢN]: Khi người dùng hỏi về địa lý, xã hội, khoa học, chính trị, thể thao, công nghệ, lịch sử: PHẢI TRẢ LỜI ĐÚNG TRỌNG TÂM, CẤM tự ý suy diễn người hỏi đi du lịch hay lôi chuyện bất động sản/mua bán đất vào câu trả lời nếu người dùng không hỏi về BĐS!`
+    `   - [CHỐNG BẺ LÁI SANG BẤT ĐỘNG SẢN]: Khi người dùng hỏi về địa lý, xã hội, khoa học, chính trị, thể thao, công nghệ, lịch sử: PHẢI TRẢ LỜI ĐÚNG TRỌNG TÂM, CẤM tự ý suy diễn người hỏi đi du lịch hay lôi chuyện bất động sản/mua bán đất vào câu trả lời nếu người dùng không hỏi về BĐS!\n` +
+    `10. NGUYÊN TẮC XỬ LÝ HÌNH ẢNH & ĐA PHƯƠNG TIỆN (MULTIMODAL & OCR FIRST):\n` +
+    `    - BẮT BUỘC ĐỌC VÀ TRÍCH XUẤT CHỮ TRONG ẢNH (OCR FIRST): Nếu Admin gửi ảnh có chữ (danh ngôn, triết lý, tài liệu, bảng biểu, hoá đơn, chụp màn hình...), BẮT BUỘC trích dẫn chính xác nguyên văn nội dung chữ quan trọng trong ngoặc kép "..." ngay đầu câu trả lời.\n` +
+    `    - PHÂN TÍCH Ý NGHĨA & NGUỒN GỐC: Nêu rõ nguồn gốc, tác giả, phân tích sâu sắc, tinh tế, đàm đạo hoặc đưa ra giải pháp/khuyến nghị thiết thực.\n` +
+    `    - KHI GỬI ẢNH KHÔNG KÈM CHỮ: Tự động ưu tiên đọc và giải mã nội dung trong ảnh trước tiên.`
     : `Bạn là '${defaultBotName}' - Trợ lý AI thông minh, thân thiện, duyên dáng và hóm hỉnh của Zalo đang trò chuyện 1:1 với ${pronouns.userTitle} (${displayName}).\n` +
     `NHIỆM VỤ CỦA BẠN:\n` +
     `1. Trò chuyện tự nhiên, vui vẻ, giải đáp mọi câu hỏi, tư vấn học tập, công việc, tâm sự, dịch thuật, phân tích hình ảnh/tài liệu khi được gửi tới.\n` +
@@ -1674,11 +1706,21 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `6. NGUYÊN TẮC TRUNG THỰC: Nếu không có dữ liệu chi tiết, hãy nói rõ là không có thông tin, tuyệt đối không tự bịa đặt câu chuyện hay chi tiết không có thật.\n` +
     `7. KHI CÂU HỎI LÀ TỔNG QUAN DỰ ÁN BẤT ĐỘNG SẢN / CÔNG TRÌNH:\n` +
     `   - BẮT BUỘC cấu trúc câu trả lời chuyên nghiệp theo 4 phân mục: 🏢 TỔNG QUAN DỰ ÁN, 📍 1. Vị trí đắc địa, 📐 2. Quy mô & Cơ cấu sản phẩm, 🌿 3. Tiện ích, 💰 4. Giá bán & Chính sách tham khảo.\n` +
-    `8. [CHỐNG BẺ LÁI SANG BẤT ĐỘNG SẢN]: Khi người dùng hỏi về chủ đề khác, tuyệt đối không tự ý lôi chuyện nhà đất/bất động sản vào.`);
+    `8. [CHỐNG BẺ LÁI SANG BẤT ĐỘNG SẢN]: Khi người dùng hỏi về chủ đề khác, tuyệt đối không tự ý lôi chuyện nhà đất/bất động sản vào.\n` +
+    `9. NGUYÊN TẮC XỬ LÝ HÌNH ẢNH & ĐA PHƯƠNG TIỆN (MULTIMODAL & OCR FIRST):\n` +
+    `   - BẮT BUỘC ĐỌC VÀ TRÍCH XUẤT CHỮ TRONG ẢNH (OCR FIRST): Nếu người dùng gửi ảnh có chữ (danh ngôn, triết lý, bài viết, đề bài, bảng biểu, hoá đơn, chụp màn hình...), BẮT BUỘC trích dẫn chính xác nguyên văn nội dung chữ quan trọng nhất trong ngoặc kép "..." ngay đầu câu trả lời.\n` +
+    `   - PHÂN TÍCH Ý NGHĨA & NGUỒN GỐC: Nêu rõ tác giả/bối cảnh (nếu là triết học/danh ngôn như Trang Tử, Khổng Tử, Lão Tử, văn học, Phật pháp...), phân tích thông điệp sâu sắc, tinh tế.\n` +
+    `   - TUYỆT ĐỐI KHÔNG PHỚT LỜ ẢNH hoặc chỉ chào hỏi xã giao qua loa. Luôn đặt 1 câu hỏi gợi mở hoặc chia sẻ góc nhìn đồng cảm ở cuối câu để đàm đạo cùng người dùng.\n` +
+    `   - KHI NGƯỜI DÙNG GỬI ẢNH KHÔNG KÈM CHỮ: Tự động hiểu người dùng muốn bạn đọc chữ, giải mã hoặc phân tích bức ảnh, ưu tiên hàng đầu là trích xuất chữ và phân tích sâu.`);
 
   let fileSection = "";
   if (fileTextContent) {
     fileSection = `\n=== NỘI DUNG TÀI LIỆU ĐÍNH KÈM (${fileName}): ===\n${fileTextContent.slice(0, 40000)}\n`;
+  }
+
+  let imageOcrSection = "";
+  if (imageOcrText) {
+    imageOcrSection = `\n=== VĂN BẢN TRÍCH XUẤT TỪ HÌNH ẢNH (LOCAL OCR NHẬN DIỆN ĐƯỢC): ===\n"${imageOcrText}"\n`;
   }
 
   let quoteSection = "";
@@ -1898,10 +1940,25 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     ? `\n[ẢNH THAM CHIẾU / ĐÍNH KÈM HIỆN TẠI]: "${targetUrl}". Khi người dùng yêu cầu chỉnh sửa, thay đổi chi tiết hoặc biến thể từ ảnh này, hãy gọi 'generate_image' với imageUrl="${targetUrl}" và isEdit=true.\n`
     : "";
 
+  const defaultImagePrompt =
+    `[NGƯỜI DÙNG GỬI HÌNH ẢNH / TÀI LIỆU]: Hãy quan sát kỹ bức ảnh này.\n` +
+    `- BẮT BUỘC ĐỌC VÀ TRÍCH XUẤT CHỮ (OCR FIRST): Nếu trong ảnh có chữ viết, danh ngôn, triết lý, bài viết, đề bài, hóa đơn, bảng biểu, thông báo... BẮT BUỘC trích dẫn nguyên văn mọi dòng chữ quan trọng đưa lên đầu câu trả lời trong dấu ngoặc kép "..." .\n` +
+    `- PHÂN TÍCH Ý NGHĨA & NGUỒN GỐC: Nêu rõ tác giả/bối cảnh (nếu là triết học/danh ngôn như Trang Tử, Khổng Tử, Lão Tử, văn học, Phật pháp...), phân tích thông điệp cốt lõi một cách sâu sắc, tinh tế.\n` +
+    `- GỢI MỞ ĐÀM ĐẠO: Luôn đưa ra một câu hỏi tương tác tinh tế hoặc góc nhìn gợi mở để đàm đạo cùng người dùng.\n` +
+    `- Nếu là ảnh phong cảnh, đồ họa, sự vật hoặc chân dung: Mô tả chi tiết các nét nổi bật và đưa ra lời bình hoặc nhận xét hữu ích.`;
+
+  const effectiveRequestText = (rawText && rawText.length >= 3)
+    ? rawText
+    : (mediaPart
+        ? defaultImagePrompt
+        : fileTextContent
+          ? "Hãy đọc và phân tích tóm tắt tài liệu này giúp tôi."
+          : (isAdmin ? "Dạ em chào Sếp ạ! Em có thể hỗ trợ gì?" : `Dạ em chào ${pronouns.userTitle} ạ! Em có thể hỗ trợ gì?`));
+
   const userPrompt =
     (historyText ? `LỊCH SỬ TRÒ CHUYỆN TRƯỚC ĐÓ:\n${historyText}\n\n` : "") +
-    `${quoteSection}${fileSection}${liveNewsSection}${groupActivitiesSection}${permanentKnowledgeSection}${directImageRefHint}\n` +
-    `YÊU CẦU MỚI TỪ ${isAdmin ? `ADMIN (${displayName})` : `${pronouns.userTitle.toUpperCase()} (${displayName})`}: ${rawText || (mediaPart ? "Hãy phân tích hình ảnh này giúp tôi." : fileTextContent ? "Hãy đọc tài liệu này giúp tôi." : "Dạ em chào Sếp ạ! Em có thể hỗ trợ gì?")}\n\n` +
+    `${quoteSection}${fileSection}${imageOcrSection}${liveNewsSection}${groupActivitiesSection}${permanentKnowledgeSection}${directImageRefHint}\n` +
+    `YÊU CẦU MỚI TỪ ${isAdmin ? `ADMIN (${displayName})` : `${pronouns.userTitle.toUpperCase()} (${displayName})`}: ${effectiveRequestText}\n\n` +
     (isAdmin ? `HÃY TRẢ LỜI SẾP THẬT CHUẨN XÁC, THÔNG MINH VÀ HỮU ÍCH:` : `HÃY TRẢ LỜI ${pronouns.userTitle.toUpperCase()} THẬT THÂN THIỆN, CHUẨN XÁC VÀ HỮU ÍCH:`);
 
   try {

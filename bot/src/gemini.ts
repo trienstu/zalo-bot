@@ -179,6 +179,8 @@ export interface DownloadFileResult {
   textContent?: string;
   mediaPart?: GeminiMediaPart;
   audioBuffer?: Buffer;
+  imageBuffer?: Buffer;
+  ocrText?: string;
   error?: "FILE_TOO_LARGE" | "DOWNLOAD_TIMEOUT" | "DOWNLOAD_FAILED" | "UNSUPPORTED_IMAGE_FORMAT";
   fileSizeBytes?: number;
   unsupportedMime?: string;
@@ -374,6 +376,7 @@ export async function downloadFileContent(
             data: buffer.toString("base64"),
             mimeType: detectedMime,
           },
+          imageBuffer: buffer,
         };
       }
 
@@ -387,6 +390,7 @@ export async function downloadFileContent(
             data: converted.toString("base64"),
             mimeType: "image/jpeg",
           },
+          imageBuffer: converted,
         };
       } catch (convErr) {
         console.warn(`[gemini] Định dạng ảnh ${detectedMime} không hỗ trợ và không thể convert sang JPEG:`, convErr);
