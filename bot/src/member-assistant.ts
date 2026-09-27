@@ -1119,11 +1119,19 @@ function isMediaOrDocUrl(url?: string | null): boolean {
   const mediaExts = [
     ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp",
     ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv",
-    ".mp3", ".wav", ".m4a", ".aac", ".mp4",
-    ".txt", ".json", ".zip"
+    ".mp3", ".wav", ".m4a", ".aac", ".mp4", ".wma", ".flac", ".ogg",
+    ".txt", ".json", ".zip", ".rar", ".7z", ".tar.gz", ".tar"
   ];
   if (mediaExts.some((ext) => clean.endsWith(ext))) return true;
-  if (url.includes("zdn.vn") || url.includes("chat-photo") || url.includes("res-zalo") || url.includes("zaloapp")) return true;
+  if (
+    url.includes("zdn.vn") ||
+    url.includes("dlfl.vn") ||
+    url.includes("chat-photo") ||
+    url.includes("res-zalo") ||
+    url.includes("zaloapp") ||
+    url.includes("files-cdn.zalo.me") ||
+    url.includes("zalo.me")
+  ) return true;
   return false;
 }
 
@@ -1230,19 +1238,37 @@ async function handleHistoryQA(
   let mediaPart: GeminiMediaPart | null = null;
   let fileTextContent: string | null = null;
   let imageOcrText: string | null = null;
-  const rawTargetUrl = options?.fileAttachment?.url || options?.imageUrl || (options?.quote?.mediaType === "image" || options?.quote?.mediaType === "video" || isMediaOrDocUrl(options?.quote?.mediaUrl) ? options?.quote?.mediaUrl : undefined);
-  let targetUrl = (rawTargetUrl && (isMediaOrDocUrl(rawTargetUrl) || options?.fileAttachment?.url)) ? rawTargetUrl : undefined;
-  let fileName = options?.fileAttachment?.name || "";
+  const rawTargetUrl =
+    options?.fileAttachment?.url ||
+    options?.quote?.fileAttachment?.url ||
+    options?.imageUrl ||
+    (options?.quote?.mediaType === "image" || options?.quote?.mediaType === "video" || isMediaOrDocUrl(options?.quote?.mediaUrl) ? options?.quote?.mediaUrl : undefined);
+  let targetUrl = (rawTargetUrl && (isMediaOrDocUrl(rawTargetUrl) || options?.fileAttachment?.url || options?.quote?.fileAttachment?.url)) ? rawTargetUrl : undefined;
+  let fileName = options?.fileAttachment?.name || options?.quote?.fileAttachment?.name || "";
+
+  if (!fileName && options?.quote?.text) {
+    const fnMatch = options.quote.text.match(/^([^—–\n\r]+?\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar\.gz|tar|mp3|wma|wav|m4a))/i);
+    if (fnMatch && fnMatch[1]) {
+      fileName = fnMatch[1].trim();
+    }
+  }
+
+  if (!targetUrl && options?.quote?.text) {
+    const urlMatch = options.quote.text.match(/https?:\/\/[^\s]+/i);
+    if (urlMatch) {
+      targetUrl = urlMatch[0];
+    }
+  }
 
   // 💡 TỰ ĐỘNG BẮT FILE/TÀI LIỆU GẦN NHẤT TRONG NHÓM: Nếu thành viên hỏi về file / chuyển đổi file nhưng không quote hoặc đính kèm lại
-  if (!targetUrl && /(?:file|tài\s*liệu|đọc\s*file|chuyển\s*(?:đổi)?|sang\s*(?:md|word|pdf|docx|xlsx|pptx)|trả\s*file|gửi\s*file|lấy\s*file)/i.test(question)) {
+  if (!targetUrl && /(?:file|tài\s*liệu|đọc\s*file|chuyển\s*(?:đổi)?|sang\s*(?:md|word|pdf|docx|xlsx|pptx)|trả\s*file|gửi\s*file|lấy\s*file|bóc\s*băng|audio|bài\s*nghe|chép\s*lời)/i.test(question)) {
     try {
       const recentFileRows = db
         .prepare(
           `SELECT text, msg_type, created_at FROM group_messages
            WHERE thread_id = ?
              AND (zalo_user_id = ? OR ? = '')
-             AND (msg_type = 'share.file' OR text LIKE '%.docx — http%' OR text LIKE '%.pdf — http%' OR text LIKE '%.xlsx — http%' OR text LIKE '%.txt — http%' OR text LIKE '%.md — http%')
+             AND (msg_type = 'share.file' OR text LIKE '%.docx — http%' OR text LIKE '%.pdf — http%' OR text LIKE '%.xlsx — http%' OR text LIKE '%.txt — http%' OR text LIKE '%.md — http%' OR text LIKE '%.zip — http%' OR text LIKE '%.rar — http%' OR text LIKE '%.7z — http%' OR text LIKE '%.mp3 — http%' OR text LIKE '%.wma — http%')
              AND created_at >= ?
            ORDER BY created_at DESC
            LIMIT 5`,

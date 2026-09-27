@@ -272,6 +272,7 @@ const MAX_HISTORY_TURNS = 12;
 
 // Lưu tài liệu/ảnh gần nhất vừa được phân tích trong đoạn chat 1:1 của mỗi người dùng (để kế thừa khi ra lệnh học)
 const lastAnalyzedDocuments = new Map<string, { name: string; text: string; timestamp: number }>();
+const lastUploadedZipFiles = new Map<string, { name: string; filePath: string; timestamp: number }>();
 
 function getAdminHistory(userId: string) {
   if (!adminChatSessions.has(userId)) {
@@ -1522,15 +1523,64 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   let mediaPart: GeminiMediaPart | null = null;
   let fileTextContent: string | null = null;
   let imageOcrText: string | null = null;
-  const targetUrl =
+  let targetUrl =
     event.fileAttachment?.url ||
     event.quote?.fileAttachment?.url ||
     event.mediaUrl ||
     event.quote?.mediaUrl;
-  const fileName =
+  let fileName =
     event.fileAttachment?.name ||
     event.quote?.fileAttachment?.name ||
     "";
+
+  if (!fileName && event.quote?.text) {
+    const fnMatch = event.quote.text.match(/^([^—–\n\r]+?\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar\.gz|tar|mp3|wma|wav|m4a))/i);
+    if (fnMatch && fnMatch[1]) {
+      fileName = fnMatch[1].trim();
+    }
+  }
+
+  if (!targetUrl && event.quote?.text) {
+    const urlMatch = event.quote.text.match(/https?:\/\/[^\s]+/i);
+    if (urlMatch) {
+      targetUrl = urlMatch[0];
+    }
+  }
+
+  if (!fileName && rawText) {
+    const fnMatch = rawText.match(/^([^—–\n\r]+?\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar\.gz|tar|mp3|wma|wav|m4a))/i);
+    if (fnMatch && fnMatch[1]) {
+      fileName = fnMatch[1].trim();
+    }
+  }
+
+  if (!targetUrl && rawText) {
+    const urlMatch = rawText.match(/https?:\/\/[^\s]+/i);
+    if (urlMatch) {
+      targetUrl = urlMatch[0];
+    }
+  }
+
+  // 💡 TỰ ĐỘNG KẾ THỪA FILE NÉN GẦN NHẤT NẾU NGƯỜI DÙNG RA LỆNH XỬ LÝ / CHUYỂN ĐỔI NGAY SAU KHI GỬI FILE
+  if (!targetUrl && /(?:chuyển|làm|bóc|xử\s*lý|xuất|thành|sang)\s*(?:pdf|word|docx|toàn\s*bộ|tất\s*cả|audio|file)/i.test(rawText)) {
+    const cachedZip = lastUploadedZipFiles.get(sender);
+    if (cachedZip && Date.now() - cachedZip.timestamp < 30 * 60 * 1000 && fs.existsSync(cachedZip.filePath)) {
+      console.log(`[admin-assistant] 📦 Tự động kế thừa file nén vừa tải: "${cachedZip.name}", kích hoạt Batch Audio Processor...`);
+      void runBatchAudioJob({
+        api,
+        sender,
+        isGroup: false,
+        userGreeting,
+        displayName,
+        zipFilePath: cachedZip.filePath,
+        originalFileName: cachedZip.name,
+        userPrompt: rawText,
+      }).catch((err) => {
+        console.error("[admin-assistant] Lỗi runBatchAudioJob:", err);
+      });
+      return;
+    }
+  }
 
   if (targetUrl) {
     console.log(`[admin-assistant] 📥 Đang tải tài liệu 1:1 từ: ${targetUrl.slice(0, 80)} (${fileName})...`);
@@ -1576,6 +1626,11 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       });
     } else if (fileRes?.isZip && fileRes.zipFilePath) {
       console.log(`[admin-assistant] 📦 Phát hiện file nén [${fileName}], tự động kích hoạt Batch Audio Processor...`);
+      lastUploadedZipFiles.set(sender, {
+        name: fileName || "Tai_Lieu_Audio.zip",
+        filePath: fileRes.zipFilePath,
+        timestamp: Date.now(),
+      });
       void runBatchAudioJob({
         api,
         sender,

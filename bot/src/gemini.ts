@@ -360,6 +360,30 @@ export async function downloadFileContent(
       }
     }
 
+    // 1.6 File nén Archive (ZIP, RAR, 7Z, TAR...): Lưu tạm ra đĩa để batch worker xử lý
+    const isZip =
+      ext === "zip" ||
+      ext === "rar" ||
+      ext === "7z" ||
+      ext === "tar" ||
+      ext === "gz" ||
+      ext === "bz2" ||
+      (detectedMime.includes("zip") && ext !== "docx" && ext !== "xlsx" && ext !== "pptx") ||
+      (detectedMime.includes("compressed") || detectedMime.includes("tar") || detectedMime.includes("rar") || detectedMime.includes("7z")) ||
+      (buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4b && buffer[2] === 0x03 && buffer[3] === 0x04 && ext !== "docx" && ext !== "xlsx" && ext !== "pptx");
+
+    if (isZip) {
+      const cleanSafeName = (fileName || "archive.zip").replace(/[^a-zA-Z0-9._-]/g, "_");
+      const tempZipPath = path.join("/tmp", `zalo_upload_${Date.now()}_${cleanSafeName}`);
+      fs.writeFileSync(tempZipPath, buffer);
+      console.log(`[gemini] 📦 Đã tải và lưu file nén: ${tempZipPath} (${Math.round(buffer.length / 1024)} KB)`);
+      return {
+        isZip: true,
+        zipFilePath: tempZipPath,
+        fileSizeBytes: buffer.length,
+      };
+    }
+
     // 2. File Hình ảnh (Gemini đọc Multimodal native)
     if (detectedMime.startsWith("image/")) {
       const geminiSupportedImageMimes = new Set([
@@ -450,30 +474,13 @@ export async function downloadFileContent(
       }
     }
 
-    // Nếu vẫn là ảnh (ví dụ định dạng chưa phổ biến) thì trả về mediaPart
-    if (detectedMime && !detectedMime.includes("octet-stream")) {
+    // Nếu vẫn là ảnh/video/audio (định dạng chưa phổ biến) thì mới gửi mediaPart cho Gemini
+    if (detectedMime && (detectedMime.startsWith("image/") || detectedMime.startsWith("video/") || detectedMime.startsWith("audio/"))) {
       return {
         mediaPart: {
           data: buffer.toString("base64"),
           mimeType: detectedMime,
         },
-      };
-    }
-    // 4. File nén Archive (ZIP, RAR): Lưu tạm ra đĩa để batch worker xử lý
-    const isZip =
-      ext === "zip" ||
-      ext === "rar" ||
-      detectedMime === "application/zip" ||
-      (buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4b && buffer[2] === 0x03 && buffer[3] === 0x04);
-    if (isZip) {
-      const cleanSafeName = (fileName || "archive.zip").replace(/[^a-zA-Z0-9._-]/g, "_");
-      const tempZipPath = path.join("/tmp", `zalo_upload_${Date.now()}_${cleanSafeName}`);
-      fs.writeFileSync(tempZipPath, buffer);
-      console.log(`[gemini] 📦 Đã tải và lưu file nén: ${tempZipPath} (${Math.round(buffer.length / 1024)} KB)`);
-      return {
-        isZip: true,
-        zipFilePath: tempZipPath,
-        fileSizeBytes: buffer.length,
       };
     }
 

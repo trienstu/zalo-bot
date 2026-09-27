@@ -344,17 +344,6 @@ export function extractQuote(payload: any): QuotedMessage | null {
     text.includes("[Video]") ||
     Boolean(mediaUrl && /\.(?:mp4|mov|avi|mkv|webm)(?:\?|$)/i.test(mediaUrl));
 
-  const isDocOrFile =
-    rawType.includes("file") ||
-    text.startsWith("[File]") ||
-    Boolean(mediaUrl && /\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|rar)(?:\?|$)/i.test(mediaUrl));
-
-  if (isVideo) {
-    mediaType = "video";
-  } else if (!isDocOrFile && (isPhotoOrImage || (mediaUrl && !/\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|rar)(?:\?|$)/i.test(mediaUrl)))) {
-    mediaType = "image";
-  }
-
   // Trích xuất file đính kèm nếu quote là file tài liệu (PDF, Word, Excel, ZIP, etc.)
   let fileAttachment: FileAttachment | undefined;
   let quoteFileName = String(
@@ -370,16 +359,32 @@ export function extractQuote(payload: any): QuotedMessage | null {
 
   if (!quoteFileName) {
     const candidate = text || String(quote.msg || quote.text || "");
-    const fileMatch = candidate.match(/^(?:\[File\]|File\s*[·:\-–—]?)\s*(.+)$/i);
+    const fileMatch =
+      candidate.match(/^(?:\[File\]|File\s*[·:\-–—]?)\s*(.+)$/i) ||
+      candidate.match(/^([^—–\n\r]+?\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar\.gz|tar|mp3|wma|wav|m4a))/i);
     if (fileMatch && fileMatch[1]) {
       quoteFileName = fileMatch[1].trim();
     }
   }
 
+  const isDocOrFile =
+    rawType.includes("file") ||
+    text.startsWith("[File]") ||
+    Boolean(quoteFileName && /\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar\.gz|tar|mp3|wma|wav|m4a)(?:\?|$)/i.test(quoteFileName)) ||
+    Boolean(mediaUrl && /\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|rar|7z|tar|mp3|wma|wav|m4a)(?:\?|$)/i.test(mediaUrl)) ||
+    Boolean(mediaUrl && (mediaUrl.includes("dlfl.vn") || mediaUrl.includes("files-cdn.zalo.me")));
+
+  if (isVideo) {
+    mediaType = "video";
+  } else if (!isDocOrFile && (isPhotoOrImage || (mediaUrl && !/\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|rar|7z|tar|mp3|wma|wav|m4a)(?:\?|$)/i.test(mediaUrl)))) {
+    mediaType = "image";
+  }
+
   const isFilePayload =
     rawType.includes("file") ||
     /^(?:\[File\]|File\s*[·:\-–—]?)/i.test(text) ||
-    Boolean(quoteFileName && /\.(?:pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv|zip|rar)(?:\?|$)/i.test(quoteFileName));
+    Boolean(quoteFileName && /\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar|mp3|wma|wav|m4a)(?:\?|$)/i.test(quoteFileName)) ||
+    Boolean(mediaUrl && (mediaUrl.includes("dlfl.vn") || mediaUrl.includes("files-cdn.zalo.me")));
 
   if (isFilePayload && mediaUrl) {
     const ext = (quoteFileName.split(".").pop() || "").toLowerCase();
@@ -432,7 +437,7 @@ export function extractFileAttachment(payload: any): FileAttachment | null {
 
   // 1. Tìm file gửi trực tiếp trong tin nhắn
   const urls = collectCandidateUrls([content, params, attach, data]);
-  const url = urls.length > 0 ? urls[0] : undefined;
+  let url = urls.length > 0 ? urls[0] : undefined;
 
   let name = String(
     content?.title ||
@@ -444,6 +449,23 @@ export function extractFileAttachment(payload: any): FileAttachment | null {
     attach?.name ||
     ""
   ).trim();
+
+  // Nếu không có trong metadata, trích xuất từ nội dung text của tin nhắn: "Tên_File.zip — https://..."
+  const rawMsg = String(data?.msg || data?.text || payload?.message || payload?.text || "").trim();
+  if (!name && rawMsg) {
+    const nameMatch =
+      rawMsg.match(/^(?:\[File\]|File\s*[·:\-–—]?)\s*([^\n\r—–]+)/i) ||
+      rawMsg.match(/^([^—–\n\r]+?\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar\.gz|tar|mp3|wma|wav|m4a))/i);
+    if (nameMatch && nameMatch[1]) {
+      name = nameMatch[1].trim();
+    }
+  }
+  if (!url && rawMsg) {
+    const urlMatch = rawMsg.match(/https?:\/\/[^\s]+/i);
+    if (urlMatch) {
+      url = urlMatch[0];
+    }
+  }
 
   if (url) {
     const ext = (name.split(".").pop() || "").toLowerCase();
@@ -462,7 +484,7 @@ export function extractFileAttachment(payload: any): FileAttachment | null {
     const quote = (parseObjectMaybe(quoteObj) || (typeof quoteObj === "object" ? quoteObj : null)) as Record<string, any> | null;
     if (quote) {
       const quoteUrls = collectCandidateUrls([quote, quote.attach, quote.params, quote.propertyExt, quote.content]);
-      const quoteUrl = quoteUrls.length > 0 ? quoteUrls[0] : undefined;
+      let quoteUrl = quoteUrls.length > 0 ? quoteUrls[0] : undefined;
       let quoteFileName = String(
         quote.title ||
         quote.fileName ||
@@ -474,11 +496,20 @@ export function extractFileAttachment(payload: any): FileAttachment | null {
         ""
       ).trim();
 
-      if (!quoteFileName) {
-        const quoteMsg = String(quote.msg || quote.text || "").trim();
-        const fileMatch = quoteMsg.match(/^(?:\[File\]|File\s*[·:\-–—]?)\s*(.+)$/i);
+      const quoteMsg = String(quote.msg || quote.text || "").trim();
+      if (!quoteFileName && quoteMsg) {
+        const fileMatch =
+          quoteMsg.match(/^(?:\[File\]|File\s*[·:\-–—]?)\s*(.+)$/i) ||
+          quoteMsg.match(/^([^—–\n\r]+?\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar\.gz|tar|mp3|wma|wav|m4a))/i);
         if (fileMatch && fileMatch[1]) {
           quoteFileName = fileMatch[1].trim();
+        }
+      }
+
+      if (!quoteUrl && quoteMsg) {
+        const urlMatch = quoteMsg.match(/https?:\/\/[^\s]+/i);
+        if (urlMatch) {
+          quoteUrl = urlMatch[0];
         }
       }
 
