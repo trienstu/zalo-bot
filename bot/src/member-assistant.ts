@@ -1835,6 +1835,21 @@ QUY TẮC BẮT BUỘC:
       });
       quotePlan = plan;
 
+      if (options?.api && plan.taskType === "presentation_video") {
+        console.log(`[member-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Video (Quote QA): "${question.slice(0, 80)}"`);
+        void runPresentationVideoJob({
+          api: options.api,
+          sender: options.sender || "",
+          isGroup: true,
+          threadId,
+          userGreeting: isSuperAdmin ? "Sếp" : (displayName ? `bác ${displayName}` : "bác"),
+          displayName,
+          userPrompt: question,
+          quoteText: options.quote.text || fileTextContent || "",
+        }).catch((err) => console.error("[member-assistant] Lỗi runPresentationVideoJob từ Quote Planner:", err));
+        return "";
+      }
+
       if (!isFileOrVoiceReq && plan.needsSearch && plan.queries.length > 0) {
         quoteEvidenceRequired = plan.intent === "fact_check" && isStrictVerificationQuestion(question);
         const searchQueries = plan.queries.slice(0, 2);
@@ -1917,18 +1932,22 @@ QUY TẮC BẮT BUỘC:
           onFileGenerated: async (file) => {
             try {
               if (options?.api) {
+                const isVideo = Boolean(file.isVideo) || /\.(mp4|mov|mkv)$/i.test(file.filePath);
                 const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
                 const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
                 const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
                 if (isVoice) voiceGenerated = true;
+                const userGreeting = isSuperAdmin ? "Sếp" : (displayName ? `bác @${displayName}` : "bác");
                 const caption = file.caption || (
-                  isSlide
-                    ? `📊 ${botName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
-                    : isImg
-                      ? `📊 Biểu đồ / Hình ảnh đã hoàn tất cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
-                      : isVoice
-                        ? `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`
-                        : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+                  isVideo
+                    ? `🎬 ${botName} đã dựng xong Video thuyết trình [${file.fileName}] cho ${userGreeting}!`
+                    : isSlide
+                      ? `📊 ${botName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${userGreeting}!`
+                      : isImg
+                        ? `📊 Biểu đồ / Hình ảnh đã hoàn tất cho ${userGreeting}!`
+                        : isVoice
+                          ? `🎙️ ${botName} gửi voice cho ${userGreeting} nghe nhé!`
+                          : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${userGreeting}!`
                 );
                 if (isVoice) {
                   await sendGroupVoice(
@@ -1944,6 +1963,14 @@ QUY TẮC BẮT BUỘC:
                     file.filePath,
                     caption,
                   );
+                  if (file.pptxPath && fs.existsSync(file.pptxPath)) {
+                    await sendGroupFile(
+                      options.api,
+                      threadId,
+                      file.pptxPath,
+                      `📊 ${botName} gửi kèm file PowerPoint (.pptx) gốc có Speaker Notes cho ${userGreeting} nhé!`,
+                    );
+                  }
                 }
               }
             } catch (fileErr) {
@@ -2637,6 +2664,21 @@ QUY TẮC BẮT BUỘC:
       });
       queryPlan = plan;
 
+      if (options?.api && plan.taskType === "presentation_video") {
+        console.log(`[member-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Video: "${question.slice(0, 80)}"`);
+        void runPresentationVideoJob({
+          api: options.api,
+          sender: options.sender || "",
+          isGroup: true,
+          threadId,
+          userGreeting: isSuperAdmin ? "Sếp" : (displayName ? `bác ${displayName}` : "bác"),
+          displayName,
+          userPrompt: question,
+          quoteText: options?.quote?.text || fileTextContent || "",
+        }).catch((err) => console.error("[member-assistant] Lỗi runPresentationVideoJob từ Planner:", err));
+        return "";
+      }
+
       const isFileOrVoiceReq = checkIsFileOrVoiceGeneration(question, options?.quote?.text);
       planNeedsSearch = Boolean(plan.needsSearch) && !isFileOrVoiceReq;
 
@@ -2876,23 +2918,35 @@ QUY TẮC BẮT BUỘC:
                 await deliverGeneratedToolFile(options.api, threadId, file, botName, displayName, isSuperAdmin);
                 return;
               }
+              const isVideo = Boolean(file.isVideo) || /\.(mp4|mov|mkv)$/i.test(file.filePath);
               const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
               const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
               const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
               if (isVoice) voiceGenerated = true;
+              const userGreeting = isSuperAdmin ? "Sếp" : (displayName ? `bác @${displayName}` : "bác");
               const caption = file.caption || (
-                isSlide
-                  ? `📊 ${botName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
-                  : isImg
-                    ? `🎨 Ảnh của ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} đây ạ! ✨`
-                    : isVoice
-                      ? `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`
-                      : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+                isVideo
+                  ? `🎬 ${botName} đã dựng xong Video thuyết trình [${file.fileName}] cho ${userGreeting}!`
+                  : isSlide
+                    ? `📊 ${botName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${userGreeting}!`
+                    : isImg
+                      ? `🎨 Ảnh của ${userGreeting} đây ạ! ✨`
+                      : isVoice
+                        ? `🎙️ ${botName} gửi voice cho ${userGreeting} nghe nhé!`
+                        : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${userGreeting}!`
               );
               if (isVoice) {
                 await sendGroupVoice(options.api, threadId, file.filePath, caption);
               } else {
                 await sendGroupFile(options.api, threadId, file.filePath, caption);
+                if (file.pptxPath && fs.existsSync(file.pptxPath)) {
+                  await sendGroupFile(
+                    options.api,
+                    threadId,
+                    file.pptxPath,
+                    `📊 ${botName} gửi kèm file PowerPoint (.pptx) gốc có Speaker Notes cho ${userGreeting} nhé!`,
+                  );
+                }
               }
             }
           } catch (fileErr) {

@@ -37,9 +37,13 @@ function isOneOf<T extends readonly string[]>(value: unknown, values: T): value 
 }
 
 function detectToolIntent(text: string): ToolIntent {
+  // Bỏ qua nếu là câu hỏi thăm dò/lý thuyết thông thường không phải mệnh lệnh thực thi
+  const isHypothetical = /\b(?:co\s+kho|nhu\s+the\s+nao|kiem\s+tien|phan\s+mem|bang\s+app|app\s+gi|de\s+khong|sao\s+nhi|o\s+dau|bang\s+cach\s+nao)\b/i.test(text);
+  if (isHypothetical) return "none";
+
   const asksToCreate =
-    /\b(?:tao|xuat|lam|viet|thiet ke|ve|lap|dong goi|gom|cho vao|nhet vao|luu vao|in ra|chuyen|phoi|sang tac|hat)\b.{0,36}\b(?:file|tep|word|excel|docx|xlsx|pdf|bang|bieu do|do thi|so do|mindmap|infographic|anh|hinh|thiep|slide|powerpoint|pptx|nhac|bai hat|ca khuc|beat|track|voice|podcast|audio|am thanh)\b/i.test(text) ||
-    /\b(?:vao|ra|thanh|sang)\s+(?:file\s+)?(?:docx|word|excel|xlsx|pptx|slide|pdf|csv|txt)\b/i.test(text);
+    /\b(?:tao|xuat|lam|viet|thiet ke|ve|lap|dong goi|gom|cho vao|nhet vao|luu vao|in ra|chuyen|phoi|sang tac|hat|dung|quay)\b.{0,36}\b(?:file|tep|word|excel|docx|xlsx|pdf|bang|bieu do|do thi|so do|mindmap|infographic|anh|hinh|thiep|slide|powerpoint|pptx|video|clip|mp4|nhac|bai hat|ca khuc|beat|track|voice|podcast|audio|am thanh)\b/i.test(text) ||
+    /\b(?:vao|ra|thanh|sang)\s+(?:file\s+)?(?:docx|word|excel|xlsx|pptx|slide|video|clip|mp4|pdf|csv|txt)\b/i.test(text);
   if (asksToCreate) return "create";
 
   const asksToRead = /\b(?:doc|tai|cao|mo|kiem tra|check|phan tich)\b.{0,24}(?:https?:\/\/|\b(?:link|url|website|trang web|tep|file)\b)/i.test(text);

@@ -158,6 +158,8 @@ export interface GeneratedFileResult {
   listenUrl?: string;
   coverPath?: string;
   title?: string;
+  isVideo?: boolean;
+  pptxPath?: string;
 }
 
 export type ThemeName = "navy" | "blue" | "green" | "burgundy" | "slate" | "teal" | "emerald" | "luxury";

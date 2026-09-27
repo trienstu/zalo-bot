@@ -9,6 +9,7 @@ import {
   renderSlideToImageWithSharp,
   createSlideVideoSegment,
   concatenateVideoSegments,
+  renderPresentationVideoFromSlides,
 } from "./presentation-video-processor.js";
 import { getTheme } from "../tools/file-generator.js";
 
@@ -21,12 +22,21 @@ test("isPresentationVideoRequest nhận diện chính xác các yêu cầu tạo
   assert.equal(isPresentationVideoRequest("Làm clip thuyết trình kèm kịch bản thuyết minh"), true);
   assert.equal(isPresentationVideoRequest("chuyển bài viết này thành video thuyết trình nhé", "Dự án năng lượng mặt trời"), true);
   assert.equal(isPresentationVideoRequest("tạo video powerpoint kèm giọng đọc AI"), true);
+  assert.equal(
+    isPresentationVideoRequest(
+      "sen chúa hãy làm video giải thích kiến trúc SQLite đơn giản dễ hiểu và cách vận hành để xử lý lịch sử, ghi nhớ ngữ cảnh mượt mà cho multi-channel và multi-group, khổ dọc",
+    ),
+    true,
+  );
+  assert.equal(isPresentationVideoRequest("dựng cho anh 1 clip ngắn giải thích quy trình bóc băng âm thanh nhé"), true);
 
   // Các câu hỏi phủ định (Negative cases)
   assert.equal(isPresentationVideoRequest("Tạo slide powerpoint 5 trang về du lịch Đà Lạt"), false); // Chỉ tạo slide PPTX
   assert.equal(isPresentationVideoRequest("Làm file word hợp đồng mua bán nhà đất"), false);
   assert.equal(isPresentationVideoRequest("Tạo bản nhạc remix sôi động mùa hè"), false);
   assert.equal(isPresentationVideoRequest("bot có biết làm video thuyết trình không nhỉ?"), false); // Câu hỏi thăm dò
+  assert.equal(isPresentationVideoRequest("làm video trên TikTok có khó không bot?"), false); // Câu hỏi ý kiến
+  assert.equal(isPresentationVideoRequest("tạo video bằng app gì nhanh nhất?"), false);
   assert.equal(isPresentationVideoRequest("xin chào bot, hôm nay thời tiết thế nào"), false);
   assert.equal(isPresentationVideoRequest(""), false);
 });
@@ -127,3 +137,39 @@ test("createSlideVideoSegment và concatenateVideoSegments ghép video MP4 chu�
     } catch {}
   }
 });
+
+test("renderPresentationVideoFromSlides xuất bản file MP4 và PowerPoint từ slide data", async () => {
+  const result = await renderPresentationVideoFromSlides(
+    "test_pipeline_video",
+    "Test Video Kiến Trúc SQLite",
+    [
+      {
+        layout: "title",
+        title: "Kiến Trúc SQLite Đa Nhóm",
+        subtitle: "Phân tích hệ thống lưu trữ và đồng bộ",
+        speakerNotes: "Xin chào các bạn, hôm nay chúng ta cùng tìm hiểu kiến trúc SQLite trong bot Zalo.",
+      },
+      {
+        layout: "bullets",
+        title: "Ưu Điểm Cốt Lõi",
+        bullets: ["Hiệu năng cao", "Không phụ thuộc server ngoài", "WAL mode siêu tốc"],
+        speakerNotes: "SQLite hoạt động cực kỳ nhanh với WAL mode và đáp ứng tức thì.",
+      },
+    ],
+    "navy",
+  );
+
+  assert.equal(result.success, true);
+  assert.equal(result.isVideo, true);
+  assert.ok(result.filePath.endsWith(".mp4"));
+  assert.equal(fs.existsSync(result.filePath), true);
+  assert.ok(result.fileSize > 2000);
+  assert.ok(result.pptxPath && fs.existsSync(result.pptxPath));
+
+  // Clean up
+  try {
+    if (fs.existsSync(result.filePath)) fs.unlinkSync(result.filePath);
+    if (result.pptxPath && fs.existsSync(result.pptxPath)) fs.unlinkSync(result.pptxPath);
+  } catch {}
+});
+

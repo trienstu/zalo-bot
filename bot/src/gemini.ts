@@ -20,6 +20,7 @@ import {
   type GeneratedFileResult,
   type ThemeName,
 } from "./tools/file-generator.js";
+import { renderPresentationVideoFromSlides } from "./workers/presentation-video-processor.js";
 import {
   synthesizeSpeech,
   synthesizeDialogue,
@@ -1246,6 +1247,20 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
         return result;
       } else if (fileType === "html") {
         const result = await generateHtmlFile(fileName, title, content);
+        return result;
+      } else if (fileType === "presentation_video") {
+        let slides = Array.isArray(args?.slides) ? (args.slides as any) : [];
+        if (slides.length === 0 && content) {
+          slides = parseMarkdownToSlides(content, title);
+        }
+        const result = await renderPresentationVideoFromSlides(
+          fileName,
+          title,
+          slides,
+          theme,
+          args?.voiceHint,
+          args?.voiceStyle,
+        );
         return result;
       } else {
         const ext = fileType === "code" ? (args?.fileExt || "txt") : fileType;

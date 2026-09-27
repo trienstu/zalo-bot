@@ -54,12 +54,14 @@ export function isPresentationVideoRequest(text: string, quoteText = ""): boolea
   const combined = `${text || ""} ${quoteText || ""}`.toLowerCase();
   const qLower = (text || "").toLowerCase();
 
-  // Bỏ qua nếu chỉ là câu hỏi thăm dò năng lực thuần túy
-  if (
-    /^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|xuất)?\s*(?:được|đc|duoc)?(?:\s+(?:tạo|làm|soạn|xuất))?\s+(?:video|clip)\s+(?:thuyết\s*trình|slide|trình\s*chiếu)\s*(?:không|ko)?\s*(?:hả|nhỉ|hở|ạ|không|ko)\s*[?]?$/i.test(
+  // Bỏ qua nếu chỉ là câu hỏi thăm dò năng lực hoặc hỏi ý kiến/lý thuyết thông thường
+  const isHypotheticalOrInquiry =
+    /^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|xuất)?\s*(?:được|đc|duoc)?(?:\s+(?:tạo|làm|soạn|xuất))?\s+(?:video|clip)\s*(?:thuyết\s*trình|slide|trình\s*chiếu)?\s*(?:không|ko)?\s*(?:hả|nhỉ|hở|ạ|không|ko)\s*[?]?$/iu.test(
       qLower.trim(),
-    )
-  ) {
+    ) ||
+    /(?:^|[^\p{L}\p{N}])(?:làm|tạo|dựng|quay|xuất)\s+(?:video|clip).*?(?:có\s+khó|như\s+thế\s+nào|kiếm\s+tiền|phần\s+mềm|bằng\s+app|app\s+gì|dễ\s+không|sao\s+nhỉ|ở\s+đâu|bằng\s+cách\s+nào)/iu.test(qLower);
+
+  if (isHypotheticalOrInquiry) {
     return false;
   }
 
@@ -71,13 +73,14 @@ export function isPresentationVideoRequest(text: string, quoteText = ""): boolea
 
   if (directMatch) return true;
 
-  // 2. Kết hợp hành động tạo video + slide/thuyết trình/bài giảng
-  const hasAction = /\b(?:tạo|làm|xuất|dựng|sản\s*xuất|chuyển|biên\s*soạn|quay)\b/i.test(combined);
-  const mentionsVideo = /\b(?:video|clip|mp4)\b/i.test(combined);
+  // 2. Kết hợp hành động tạo video + slide/thuyết trình/bài giảng hoặc giải thích/phân tích kiến thức
+  const hasAction = /\b(?:tạo|làm|xuất|dựng|sản\s*xuất|chuyển|biên\s*soạn|quay|hãy\s*làm|giúp\s*làm)\b/i.test(combined);
+  const mentionsVideo = /\b(?:video|clip|mp4|thước\s*phim)\b/i.test(combined);
   const mentionsPresentation = /\b(?:thuyết\s*trình|trình\s*chiếu|slide|powerpoint|bài\s*giảng)\b/i.test(combined);
   const mentionsNarration = /\b(?:thuyết\s*minh|lồng\s*tiếng|giọng\s*đọc|lời\s*thoại|speaker\s*notes?)\b/i.test(combined);
+  const mentionsExplaining = /\b(?:giải\s*thích|phân\s*tích|hướng\s*dẫn|tóm\s*tắt|kiến\s*trúc|vận\s*hành|khổ\s*dọc|khổ\s*ngang|9:16|16:9|shorts|reels|tiktok)\b/i.test(combined);
 
-  if (hasAction && mentionsVideo && mentionsPresentation) {
+  if (hasAction && mentionsVideo && (mentionsPresentation || mentionsNarration || mentionsExplaining)) {
     return true;
   }
 
@@ -86,6 +89,139 @@ export function isPresentationVideoRequest(text: string, quoteText = ""): boolea
   }
 
   return false;
+}
+
+/**
+ * Render trực tiếp video bài thuyết trình từ danh sách slide & speaker notes đã được biên soạn sẵn
+ */
+export async function renderPresentationVideoFromSlides(
+  fileName: string,
+  title: string,
+  slides: SlideContent[],
+  themeName: ThemeName = "navy",
+  voiceHint?: string,
+  voiceStyle?: string,
+): Promise<{
+  success: boolean;
+  filePath: string;
+  fileName: string;
+  fileSize: number;
+  pptxPath?: string;
+  isVideo: boolean;
+  message?: string;
+}> {
+  const safeTitle = (fileName || title || "video_thuyet_trinh")
+    .replace(/[^a-zA-Z0-9_\u00C0-\u024F\u1EA0-\u1EF9]/giu, "_")
+    .slice(0, 60) || "video_thuyet_trinh";
+
+  const jobId = `pres_render_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const workDir = path.join("/tmp", jobId);
+  fs.mkdirSync(workDir, { recursive: true });
+
+  const ffmpegBin = findSystemBinary("ffmpeg", [
+    "/usr/bin/ffmpeg",
+    "/usr/local/bin/ffmpeg",
+    "/opt/homebrew/bin/ffmpeg",
+  ]);
+
+  if (!ffmpegBin) {
+    return {
+      success: false,
+      filePath: "",
+      fileName: `${safeTitle}.mp4`,
+      fileSize: 0,
+      isVideo: true,
+      message: "Hệ thống máy chủ chưa cài đặt công cụ FFmpeg để render video.",
+    };
+  }
+
+  try {
+    const theme = getTheme(themeName);
+    // 1. Tạo file PowerPoint (.pptx) có speaker notes
+    const pptxRes = await generatePowerPointFile(safeTitle, title, slides, themeName);
+
+    // 2. Chuyển đổi slide sang danh sách ảnh 1080p
+    const slideImages = await convertPptxToSlideImages(pptxRes.filePath, workDir, slides, theme);
+    if (slideImages.length === 0) {
+      throw new Error("Không thể trích xuất hình ảnh slide để làm video.");
+    }
+
+    // 3. Thu âm giọng đọc theo từng slide & dựng phân đoạn video
+    const segmentPaths: string[] = [];
+    for (let i = 0; i < slides.length; i++) {
+      const s = slides[i]!;
+      const slideImg = slideImages[i] || slideImages[slideImages.length - 1]!;
+      const slideAudioPath = path.join(workDir, `audio_slide_${i + 1}.mp3`);
+      const segmentVideoPath = path.join(workDir, `segment_${i + 1}.mp4`);
+
+      let spokenText = (s.speakerNotes || "").trim();
+      if (!spokenText) {
+        if (s.layout === "title" || i === 0) {
+          spokenText = `Kính chào quý vị, xin mời quý vị theo dõi bài thuyết trình: ${s.title}. ${s.subtitle || ""}`;
+        } else {
+          spokenText = `${s.title}. ${s.takeaway || ""}. ${s.bullets ? s.bullets.join(". ") : ""}`;
+        }
+      }
+
+      try {
+        await synthesizeSingleAudio(spokenText, slideAudioPath, voiceHint, {
+          stylePrompt: voiceStyle,
+        });
+      } catch (err) {
+        await execFileAsync(ffmpegBin, [
+          "-y",
+          "-f",
+          "lavfi",
+          "-i",
+          "anullsrc=r=44100:cl=stereo",
+          "-t",
+          "3",
+          "-q:a",
+          "9",
+          "-acodec",
+          "libmp3lame",
+          slideAudioPath,
+        ]);
+      }
+
+      await createSlideVideoSegment(ffmpegBin, slideImg, slideAudioPath, segmentVideoPath);
+      segmentPaths.push(segmentVideoPath);
+    }
+
+    // 4. Ghép toàn bộ phân đoạn thành file MP4 hoàn chỉnh
+    ensureOutputDir();
+    const finalVideoFileName = `${safeTitle}_${Date.now()}.mp4`;
+    const finalVideoPath = path.join(GENERATED_FILES_DIR, finalVideoFileName);
+    const concatListPath = path.join(workDir, "concat_list.txt");
+
+    await concatenateVideoSegments(ffmpegBin, segmentPaths, concatListPath, finalVideoPath);
+    const stats = fs.statSync(finalVideoPath);
+
+    return {
+      success: true,
+      filePath: finalVideoPath,
+      fileName: finalVideoFileName,
+      fileSize: stats.size,
+      pptxPath: pptxRes.filePath,
+      isVideo: true,
+    };
+  } catch (err: any) {
+    console.error("[presentation-video] renderPresentationVideoFromSlides error:", err);
+    return {
+      success: false,
+      filePath: "",
+      fileName: `${safeTitle}.mp4`,
+      fileSize: 0,
+      isVideo: true,
+      message: String(err?.message || err),
+    };
+  } finally {
+    try {
+      if (fs.existsSync(workDir)) {
+        fs.rmSync(workDir, { recursive: true, force: true });
+      }
+    } catch {}
+  }
 }
 
 /**

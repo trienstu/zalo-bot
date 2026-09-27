@@ -1845,6 +1845,20 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     });
     queryPlan = plan;
 
+    if (plan.taskType === "presentation_video") {
+      console.log(`[admin-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Video 1:1: "${rawText.slice(0, 80)}"`);
+      void runPresentationVideoJob({
+        api,
+        sender,
+        isGroup: false,
+        userGreeting,
+        displayName,
+        userPrompt: rawText,
+        quoteText: event.quote?.text || fileTextContent || "",
+      }).catch((err) => console.error("[admin-assistant] Lỗi runPresentationVideoJob từ Planner:", err));
+      return;
+    }
+
     const isFileOrVoiceReq = checkIsFileOrVoiceGeneration(rawText, event.quote?.text);
     if (!isFileOrVoiceReq && plan.needsSearch && plan.queries.length > 0) {
       planNeedsSearch = true;
@@ -2122,24 +2136,35 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         },
         onFileGenerated: async (file) => {
           try {
+            const isVideo = Boolean(file.isVideo) || /\.(mp4|mov|mkv)$/i.test(file.filePath);
             const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
             const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
             const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
             if (isVoice) voiceGenerated = true;
             const userGreeting = isAdmin ? "Sếp" : pronouns.userTitle;
             const caption = file.caption || (
-              isSlide
-                ? `📊 ${defaultBotName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${userGreeting}!`
-                : isImg
-                  ? `🎨 ${defaultBotName} đã tạo ảnh [${file.fileName}] thành công cho ${userGreeting}!`
-                  : isVoice
-                    ? `🎙️ ${defaultBotName} gửi voice cho ${userGreeting} nghe đây ạ!`
-                    : `📄 ${defaultBotName} đã tạo file [${file.fileName}] thành công cho ${userGreeting}!`
+              isVideo
+                ? `🎬 ${defaultBotName} đã dựng xong Video thuyết trình [${file.fileName}] cho ${userGreeting}!`
+                : isSlide
+                  ? `📊 ${defaultBotName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${userGreeting}!`
+                  : isImg
+                    ? `🎨 ${defaultBotName} đã tạo ảnh [${file.fileName}] thành công cho ${userGreeting}!`
+                    : isVoice
+                      ? `🎙️ ${defaultBotName} gửi voice cho ${userGreeting} nghe đây ạ!`
+                      : `📄 ${defaultBotName} đã tạo file [${file.fileName}] thành công cho ${userGreeting}!`
             );
             if (isVoice) {
               await sendDirectVoice(api, sender, file.filePath, caption);
             } else {
               await sendDirectFile(api, sender, file.filePath, caption);
+              if (file.pptxPath && fs.existsSync(file.pptxPath)) {
+                await sendDirectFile(
+                  api,
+                  sender,
+                  file.pptxPath,
+                  `📊 ${defaultBotName} gửi kèm file PowerPoint (.pptx) gốc có Speaker Notes cho ${userGreeting} nhé!`,
+                );
+              }
             }
           } catch (fileErr) {
             console.warn("[admin-assistant] sendDirectFile error:", fileErr);

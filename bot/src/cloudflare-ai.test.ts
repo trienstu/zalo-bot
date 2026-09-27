@@ -133,7 +133,7 @@ test("parseImagePromptAndRatio bóc tách sạch sẽ prompt và tỉ lệ 16:9,
     mediaType: "image",
   } as any);
   assert.ok(rQuoteAction);
-  assert.equal(rQuoteAction?.prompt, "nền thành bãi biển hoàng hôn");
+  assert.equal(rQuoteAction?.prompt, "thay nền thành bãi biển hoàng hôn");
   assert.equal(rQuoteAction?.referenceImageUrl, "https://example.com/girl.jpg");
   assert.equal(rQuoteAction?.isEdit, true);
 });

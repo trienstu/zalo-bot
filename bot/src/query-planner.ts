@@ -6,7 +6,6 @@
  */
 
 import { callGemini } from "./gemini.js";
-import { config } from "./config.js";
 import {
   normalizeExecutionSignals,
   type ResponseMode,
@@ -16,11 +15,27 @@ import {
 } from "./hybrid-routing.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
 
+export type PlannerTaskType =
+  | "presentation_video"
+  | "file_generation"
+  | "voice_generation"
+  | "music_generation"
+  | "python_diagram"
+  | "none";
+
+export interface PlannerMediaFormat {
+  fileType?: "pptx" | "docx" | "xlsx" | "csv" | "html" | "md" | "txt";
+  aspectRatio?: "9:16" | "16:9" | "1:1";
+  topic?: string;
+}
+
 export interface QueryPlanResult {
   needsSearch: boolean;
   intent: "fact_check" | "realtime_news" | "project_qa" | "knowledge" | "chat";
   queries: string[];
   summaryIntent?: string;
+  taskType?: PlannerTaskType;
+  mediaFormat?: PlannerMediaFormat;
   responseMode?: ResponseMode;
   complexity?: TaskComplexity;
   toolIntent?: ToolIntent;
@@ -43,7 +58,24 @@ export function applyExecutionSignals(
     needsSearch: plan.needsSearch,
     intent: plan.intent,
   });
-  return { ...plan, ...signals };
+
+  const merged: QueryPlanResult = { ...plan, ...signals };
+
+  // Anti-overthinking guardrail: nếu câu hỏi là câu hỏi thăm dò/lý thuyết/ẩn dụ, hạ taskType về "none"
+  const isHypotheticalOrInquiry =
+    /(?:^|[^\p{L}\p{N}])(?:làm|tạo|dựng|quay|xuất)\s+(?:video|clip|slide|file).*?(?:có\s+khó|như\s+thế\s+nào|kiếm\s+tiền|phần\s+mềm|bằng\s+app|app\s+gì|dễ\s+không|sao\s+nhỉ|ở\s+đâu|bằng\s+cách\s+nào)/iu.test(question) ||
+    /^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|xuất)?\s*(?:được|đc|duoc)?(?:\s+(?:tạo|làm|soạn|xuất))?\s+(?:video|clip|slide|file)\s*(?:không|ko)?\s*(?:hả|nhỉ|hở|ạ|không|ko)\s*[?]?$/iu.test(question.trim());
+
+  if (isHypotheticalOrInquiry) {
+    merged.taskType = "none";
+    merged.toolIntent = "none";
+    merged.responseMode = "fast";
+  } else if (merged.taskType === "presentation_video") {
+    merged.toolIntent = "create";
+    merged.responseMode = "action";
+  }
+
+  return merged;
 }
 
 /**
@@ -399,30 +431,28 @@ export async function planSearchQueries(params: {
     }, question, quoteText);
   }
 
-  const executionPlannerContract = config.hybridAgent.enabled
-    ? `4. Đề xuất cách thực thi theo bốn trục tổng quát, không phụ thuộc lĩnh vực:\n` +
-      `   - responseMode: "fast" cho câu đơn giản/ổn định; "grounded" khi cần dữ liệu kiểm chứng; "deep" cho phân tích nhiều bước; "action" chỉ khi người dùng yêu cầu rõ việc đọc/tạo/chạy công cụ.\n` +
-      `   - complexity: "low" | "medium" | "high" theo số bước suy luận và phạm vi tổng hợp.\n` +
-      `   - toolIntent: "none" | "read" | "create" | "execute". Không tự suy diễn quyền thao tác nếu người dùng chỉ hỏi giải thích.\n` +
-      `   - riskLevel: "normal" | "high"; high cho dữ kiện biến động hoặc nội dung y tế, pháp lý, tài chính, an toàn/an ninh cần kiểm chứng.\n\n` +
-      `5. Xuất định dạng JSON duy nhất:\n` +
-      `{\n` +
-      `  "needsSearch": boolean,\n` +
-      `  "intent": "realtime_news" | "fact_check" | "knowledge" | "chat",\n` +
-      `  "queries": string[],\n` +
-      `  "summaryIntent": string,\n` +
-      `  "responseMode": "fast" | "grounded" | "deep" | "action",\n` +
-      `  "complexity": "low" | "medium" | "high",\n` +
-      `  "toolIntent": "none" | "read" | "create" | "execute",\n` +
-      `  "riskLevel": "normal" | "high"\n` +
-      `}`
-    : `4. Xuất định dạng JSON duy nhất:\n` +
-      `{\n` +
-      `  "needsSearch": boolean,\n` +
-      `  "intent": "realtime_news" | "fact_check" | "knowledge" | "chat",\n` +
-      `  "queries": string[],\n` +
-      `  "summaryIntent": string\n` +
-      `}`;
+  const executionPlannerContract =
+    `4. Phân loại tác vụ hành động (taskType) & Đề xuất thực thi chuẩn mực (ANTI-OVERTHINKING):\n` +
+    `   - taskType: "presentation_video" (Làm video bài giảng/thuyết trình/giải thích kiến trúc/quy trình khổ dọc 9:16 hoặc 16:9) | "file_generation" (Word, Excel, PowerPoint, HTML, CSV) | "voice_generation" (Đọc giọng, podcast) | "music_generation" (Suno AI) | "python_diagram" (Vẽ biểu đồ/poster) | "none" (Hỏi đáp bình thường).\n` +
+    `     * NGUYÊN TẮC CHỐNG ẢO GIÁC (ANTI-OVERTHINKING): CHỈ gán taskType khi người dùng có MỆNH LỆNH THỰC THI RÕ RÀNG ("hãy làm...", "tạo cho anh...", "xuất video...", "dựng clip..."). Nếu người dùng chỉ hỏi han, hỏi ý kiến ("làm video có khó không?", "bot biết làm slide không?", "SQLite là gì?"), BẮT BUỘC gán taskType: "none"!\n` +
+    `   - mediaFormat: { aspectRatio: "9:16" (nếu có từ "khổ dọc", "shorts", "reels", "tiktok") hoặc "16:9" (nếu có từ "khổ ngang", "youtube", "bài giảng"), fileType?: "docx"|"pptx"|"xlsx"|"csv"|"html" }\n` +
+    `   - responseMode: "fast" cho câu đơn giản/ổn định; "grounded" khi cần dữ liệu kiểm chứng; "deep" cho phân tích nhiều bước; "action" chỉ khi người dùng yêu cầu rõ việc đọc/tạo/chạy công cụ.\n` +
+    `   - complexity: "low" | "medium" | "high" theo số bước suy luận và phạm vi tổng hợp.\n` +
+    `   - toolIntent: "none" | "read" | "create" | "execute".\n` +
+    `   - riskLevel: "normal" | "high".\n\n` +
+    `5. Xuất định dạng JSON duy nhất:\n` +
+    `{\n` +
+    `  "needsSearch": boolean,\n` +
+    `  "intent": "realtime_news" | "fact_check" | "knowledge" | "chat",\n` +
+    `  "queries": string[],\n` +
+    `  "summaryIntent": string,\n` +
+    `  "taskType": "presentation_video" | "file_generation" | "voice_generation" | "music_generation" | "python_diagram" | "none",\n` +
+    `  "mediaFormat": { "aspectRatio": "9:16" | "16:9" },\n` +
+    `  "responseMode": "fast" | "grounded" | "deep" | "action",\n` +
+    `  "complexity": "low" | "medium" | "high",\n` +
+    `  "toolIntent": "none" | "read" | "create" | "execute",\n` +
+    `  "riskLevel": "normal" | "high"\n` +
+    `}`;
 
   const system =
     `${getSystemTemporalPrompt()}\n\n` +
@@ -514,11 +544,28 @@ export async function planSearchQueries(params: {
         ? uniqQueries([rawClean, ...llmQueries])
         : llmQueries;
 
+      const taskType: PlannerTaskType = [
+        "presentation_video",
+        "file_generation",
+        "voice_generation",
+        "music_generation",
+        "python_diagram",
+        "none",
+      ].includes(raw.taskType)
+        ? raw.taskType
+        : "none";
+
+      const mediaFormat = raw.mediaFormat && typeof raw.mediaFormat === "object"
+        ? raw.mediaFormat
+        : undefined;
+
       const normalizedPlan = normalizeQueryPlanIntent({
         needsSearch: needsSearch || queries.length > 0,
         intent,
         queries,
         summaryIntent: String(raw.summaryIntent || ""),
+        taskType,
+        mediaFormat,
       }, question, quoteText);
       return applyExecutionSignals(normalizedPlan, question, quoteText, raw);
     }
