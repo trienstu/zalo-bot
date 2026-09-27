@@ -53,32 +53,27 @@ Dự án áp dụng quy trình kiểm tra chất lượng mã nguồn 2 tầng k
 
 # Quy Tắc Cập Nhật & Triển Khai (Deployment Rules)
 
-- **LUÔN CẬP NHẬT ĐỒNG THỜI CẢ 2 BOT**: Trên VPS Oracle Cloud (`140.245.107.184`, User `ubuntu`, cấu hình ARM 6GB RAM), hệ thống chạy mô hình 2 bot độc lập cùng gateway:
-  - Bot 1 (`zalo-bot-1`, `zalo-web-1`): thư mục `~/zalo-bot`
-  - Bot 2 (`zalo-bot-2`, `zalo-web-2`): thư mục `~/zalo-bot-2`
-  - Gateway & Router: `hermes-gateway`, `9router`
+- **QUY TẮC HIỆN TẠI (CHỈ CẬP NHẬT BOT 2, GIỮ NGUYÊN BOT 1)**:
+  - **Bot 2** (`~/zalo-bot-2`): Chạy tiến trình `zalo-bot-2` (Bot "Sen Chúa") và web `zalo-web-2` (Port 3001). **Mọi bản sửa lỗi, tính năng mới và deploy từ nay CHỈ áp dụng lên Bot 2**.
+  - **Bot 1** (`~/zalo-bot`): Chạy tiến trình `zalo-bot-1` và web `zalo-web-1` (Port 3000). **GIỮ NGUYÊN 100%, TUYỆT ĐỐI KHÔNG ĐỘNG TỚI**, chỉ cập nhật khi người dùng có lệnh rõ ràng yêu cầu đồng bộ sang Bot 1.
+  - Gateway & Router: `hermes-gateway`, `9router`.
 
 - **KẾT NỐI & TỰ ĐỘNG TRIỂN KHAI TRỰC TIẾP QUA SSH**:
   - SSH alias `zalo-oracle` đã được cấu hình trong `~/.ssh/config` (dùng key `~/Downloads/ssh-key-2026-09-19.key`, user `ubuntu`).
-  - Khi người dùng yêu cầu deploy/cập nhật lên VPS, Agent có thể trực tiếp thực thi lệnh qua SSH (`ssh zalo-oracle "..."`) để cập nhật cả 2 bot tự động.
+  - Khi triển khai, Agent thực thi lệnh qua SSH (`ssh zalo-oracle "..."`) chỉ cập nhật cho Bot 2.
 
-- **KHI CHỈ CẬP NHẬT BOT BACKEND (Không đổi web)**:
-  - Lệnh đồng bộ cả 2 bot:
+- **KHI CẬP NHẬT BOT BACKEND (CHỈ BOT 2)**:
+  - Lệnh cập nhật Bot 2:
     ```bash
-    (cd ~/zalo-bot && git pull origin main && npm run build --prefix bot) && (cd ~/zalo-bot-2 && git pull origin main && npm run build --prefix bot) && pm2 restart zalo-bot-1 zalo-bot-2
+    (cd ~/zalo-bot-2 && git pull origin main && npm run build --prefix bot) && pm2 restart zalo-bot-2
     ```
-    *(hoặc `pm2 restart all` nếu cần khởi động lại toàn bộ dịch vụ)*.
+  - *(Chỉ khi người dùng yêu cầu đồng bộ cả 2 bot thì mới chạy thêm cho `~/zalo-bot` và `pm2 restart zalo-bot-1`)*.
 
-- **KHI CẬP NHẬT PHẦN WEB (DASHBOARD & HUB)**:
-  - Trên VPS Oracle (6GB RAM dồi dào), có thể build trực tiếp trên VPS hoặc giải nén bản build siêu tốc:
-    - **Phương án Siêu tốc (Khuyên dùng)**: Build tại local máy Mac (`npm run build --prefix web`), nén `tar --exclude='.next/cache' -czf web/next-build.tar.gz -C web .next`, commit/push lên GitHub và giải nén trên VPS:
-      ```bash
-      (cd ~/zalo-bot && git pull origin main && tar -xzf web/next-build.tar.gz -C web) && (cd ~/zalo-bot-2 && git pull origin main && tar -xzf web/next-build.tar.gz -C web) && pm2 restart zalo-web-1 zalo-web-2
-      ```
-    - **Phương án Build trực tiếp trên VPS**:
-      ```bash
-      (cd ~/zalo-bot && git pull origin main && npm run build --prefix web) && (cd ~/zalo-bot-2 && git pull origin main && npm run build --prefix web) && pm2 restart zalo-web-1 zalo-web-2
-      ```
+- **KHI CẬP NHẬT PHẦN WEB (CHỈ BOT 2)**:
+  - Build hoặc giải nén chỉ cho `~/zalo-bot-2`:
+    ```bash
+    (cd ~/zalo-bot-2 && git pull origin main && npm run build --prefix web) && pm2 restart zalo-web-2
+    ```
 
 # Nguyên Tắc Thiết Kế & Sửa Lỗi Đa Lĩnh Vực (Universal Fix & Anti-Overfitting Rules)
 
