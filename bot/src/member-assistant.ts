@@ -47,6 +47,7 @@ import { checkIsFileOrVoiceGeneration, checkIsVoiceRequest } from "./tools/file-
 import { interceptAndExecuteSimulatedTool, extractSpeechFallbackText } from "./tools/simulated-tool-interceptor.js";
 import { cleanOutdatedVoicePromisesFromAnswer, cleanCoreSpeechText } from "./tools/voice-generator.js";
 import { generateMusic } from "./tools/music-generator.js";
+import { runBatchAudioJob } from "./workers/batch-audio-processor.js";
 
 async function deliverGeneratedToolFile(
   api: any,
@@ -1246,6 +1247,22 @@ async function handleHistoryQA(
     } else if (fileRes?.textContent) {
       fileTextContent = fileRes.textContent;
       console.log(`[member-assistant] ✅ Đã đọc file văn bản thành công (${fileTextContent.length} ký tự)`);
+    } else if (fileRes?.isZip && fileRes.zipFilePath) {
+      if (options?.api) {
+        console.log(`[member-assistant] 📦 Phát hiện file nén [${fileName}] trong nhóm, tự động kích hoạt Batch Audio Processor...`);
+        void runBatchAudioJob({
+          api: options.api,
+          sender: options.sender || "",
+          isGroup: true,
+          threadId,
+          userGreeting: isSuperAdmin ? "Sếp" : (displayName ? `bác ${displayName}` : "bác"),
+          displayName,
+          zipFilePath: fileRes.zipFilePath,
+          originalFileName: fileName || "Tai_Lieu_Audio.zip",
+          userPrompt: question,
+        }).catch((err) => console.error("[member-assistant] Lỗi runBatchAudioJob:", err));
+        return "";
+      }
     }
   }
 
@@ -4165,6 +4182,10 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         (lowerDisplay && lowerDisplay === botName.toLowerCase())
       ) {
         console.warn(`[member-assistant] ⛔ Chặn gửi phản hồi vì người nhận (${displayName} / ${sender}) là chính Bot (${botName})`);
+        return;
+      }
+
+      if (!answer || !answer.trim()) {
         return;
       }
 

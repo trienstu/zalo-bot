@@ -46,6 +46,7 @@ import { interceptAndExecuteSimulatedTool, extractSpeechFallbackText } from "./t
 import { cleanOutdatedVoicePromisesFromAnswer, cleanCoreSpeechText } from "./tools/voice-generator.js";
 import { generateMusic } from "./tools/music-generator.js";
 import { transcribeAudioBuffer } from "./audio-transcoder.js";
+import { runBatchAudioJob } from "./workers/batch-audio-processor.js";
 
 async function deliverGeneratedToolFileDirect(
   api: any,
@@ -1545,7 +1546,21 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         text: fileTextContent,
         timestamp: Date.now(),
       });
-      saveRecentDirectDocument(sender, fileName || "Tài liệu", fileTextContent);
+    } else if (fileRes?.isZip && fileRes.zipFilePath) {
+      console.log(`[admin-assistant] 📦 Phát hiện file nén [${fileName}], tự động kích hoạt Batch Audio Processor...`);
+      void runBatchAudioJob({
+        api,
+        sender,
+        isGroup: false,
+        userGreeting,
+        displayName,
+        zipFilePath: fileRes.zipFilePath,
+        originalFileName: fileName || "Tai_Lieu_Audio.zip",
+        userPrompt: rawText,
+      }).catch((err) => {
+        console.error("[admin-assistant] Lỗi runBatchAudioJob:", err);
+      });
+      return;
     } else {
       // Báo rõ lỗi tải file theo đúng danh xưng của người dùng
       if (fileRes?.error === "UNSUPPORTED_IMAGE_FORMAT") {

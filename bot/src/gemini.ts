@@ -182,6 +182,8 @@ export interface DownloadFileResult {
   error?: "FILE_TOO_LARGE" | "DOWNLOAD_TIMEOUT" | "DOWNLOAD_FAILED" | "UNSUPPORTED_IMAGE_FORMAT";
   fileSizeBytes?: number;
   unsupportedMime?: string;
+  zipFilePath?: string;
+  isZip?: boolean;
 }
 
 /**
@@ -416,6 +418,23 @@ export async function downloadFileContent(
           data: buffer.toString("base64"),
           mimeType: detectedMime,
         },
+      };
+    }
+    // 4. File nén Archive (ZIP, RAR): Lưu tạm ra đĩa để batch worker xử lý
+    const isZip =
+      ext === "zip" ||
+      ext === "rar" ||
+      detectedMime === "application/zip" ||
+      (buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4b && buffer[2] === 0x03 && buffer[3] === 0x04);
+    if (isZip) {
+      const cleanSafeName = (fileName || "archive.zip").replace(/[^a-zA-Z0-9._-]/g, "_");
+      const tempZipPath = path.join("/tmp", `zalo_upload_${Date.now()}_${cleanSafeName}`);
+      fs.writeFileSync(tempZipPath, buffer);
+      console.log(`[gemini] 📦 Đã tải và lưu file nén: ${tempZipPath} (${Math.round(buffer.length / 1024)} KB)`);
+      return {
+        isZip: true,
+        zipFilePath: tempZipPath,
+        fileSizeBytes: buffer.length,
       };
     }
 
