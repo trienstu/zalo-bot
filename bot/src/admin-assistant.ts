@@ -43,7 +43,7 @@ import type { QueryPlanResult } from "./query-planner.js";
 import { answerWithHybridRouting } from "./hybrid-agent.js";
 import { normalizeExecutionSignals, selectResponseMode } from "./hybrid-routing.js";
 import { checkIsFileOrVoiceGeneration, checkIsVoiceRequest } from "./tools/file-generator.js";
-import { interceptAndExecuteSimulatedTool, extractSpeechFallbackText } from "./tools/simulated-tool-interceptor.js";
+import { interceptAndExecuteSimulatedTool, extractSpeechFallbackText, sanitizeHallucinatedFileLinks } from "./tools/simulated-tool-interceptor.js";
 import { cleanOutdatedVoicePromisesFromAnswer, cleanCoreSpeechText } from "./tools/voice-generator.js";
 import { generateMusic } from "./tools/music-generator.js";
 import { transcribeAudioBuffer } from "./audio-transcoder.js";
@@ -1768,7 +1768,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `   - Dù ở lượt trước Sếp có nhắc nhở hay phàn nàn, lượt này PHẢI CUNG CẤP NGAY ĐÁP ÁN CHÍNH XÁC VÀ GỌN GÀNG, tuyệt đối không nhắc lại chuyện cũ hay phân trần.\n` +
     `   - ${pronouns.instruction}\n` +
     `8. ĐỘ DÀI & TỐC ĐỘ: Trả lời gãy gọn, đúng trọng tâm, súc tích (khoảng 300-800 ký tự). Tránh viết dài dòng lan man trừ khi được yêu cầu phân tích sâu.\n` +
-    `9. NGUYÊN TẮC TRUNG THỰC & CHỐNG BỊA ĐẶT (ANTI-HALLUCINATION):\n` +
+    `9. NGUYÊN TẮC TRUNG THỰC & CHỐNG BỊA ĐẶT (ZERO-HALLUCINATION & HONEST REPORTING):\n` +
+    `   - NGUYÊN TẮC TỐI THƯỢNG: NẾU KHÔNG THỰC HIỆN ĐƯỢC HOẶC KHÔNG HIỂU RÕ YÊU CẦU, BẮT BUỘC PHẢI BÁO CÁO TRUNG THỰC VÀ RÕ RÀNG CHO SẾP BIẾT LÝ DO, TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT HOẶC "NHẬN VƠ"!\n` +
+    `   - KHI KHÔNG HIỂU RÕ YÊU CẦU: Nếu câu hỏi/chỉ đạo quá vắn tắt, mơ hồ, tối nghĩa hoặc thiếu thông tin ngữ cảnh để xử lý, hãy lịch sự hỏi lại và nhờ Sếp làm rõ hoặc cung cấp thêm chi tiết. CẤM tự đoán mò và bịa ra thông tin sai lệch!\n` +
+    `   - KHI KHÔNG THỰC HIỆN ĐƯỢC: Nếu tác vụ vượt quá khả năng, thiếu công cụ hỗ trợ hoặc gặp lỗi hệ thống: Báo thẳng thắn, trung thực lý do chưa thể thực hiện và hướng dẫn thao tác phù hợp.\n` +
+    `   - TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT LINK TẢI FILE: CẤM TỰ GÕ BẤT KỲ ĐƯỜNG LINK TẢI NÀO (như link https://fg40.dlfl.vn/..., zdn.vn, zalo.me...). Link tải file chỉ do hệ thống máy chủ đính kèm tự động khi thực sự xuất file thành công qua tool!\n` +
+    `   - TUYỆT ĐỐI CẤM NÓI DỐI ĐÃ GỬI FILE: CẤM in vào tin nhắn chat rằng "em đã xuất xong file", "đã gửi file", "anh/chị bấm vào link tải" khi CHƯA THỰC SỰ GỌI CÔNG CỤ XUẤT FILE!\n` +
     `   - Nếu trong tài liệu, hình ảnh, trích dẫn hoặc dữ liệu không có thông tin chi tiết về điều Sếp hỏi, hãy thành thật trả lời là không có thông tin đó. Tuyệt đối cấm tự suy diễn hoặc bịa ra sự kiện, sản phẩm không có căn cứ.\n` +
     `   - KHI ADMIN YÊU CẦU KIỂM TRA / RÀ SOÁT / TÓM TẮT TÌNH HÌNH CÁC NHÓM: BẮT BUỘC chỉ được tổng hợp từ danh sách tin nhắn và tóm tắt thực tế được cung cấp trong mục [DỮ LIỆU HOẠT ĐỘNG THỰC TẾ TỪ CÁC NHÓM]. Nêu rõ tên nhóm và những ý chính CÓ THẬT. Nếu nhóm nào không có tin nhắn thảo luận mới, hãy báo trung thực là nhóm đó chưa có hoạt động mới. TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT chính sách, tài liệu hay sự kiện của nhóm!\n` +
     `   - KHI CÂU HỎI LÀ TỔNG QUAN DỰ ÁN BẤT ĐỘNG SẢN / CÔNG TRÌNH / HỒ SƠ THƯƠNG MẠI:\n` +
@@ -1798,7 +1803,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `   - Lễ phép, chu đáo, tôn trọng. Bắt buộc đi thẳng vào đáp án, cấm mở bài xin lỗi hoặc vòng vo.\n` +
     `4. Bạn là trợ lý trò chuyện cá nhân, không có quyền can thiệp vào các nhóm Zalo khác.\n` +
     `5. ĐỘ DÀI & TỐC ĐỘ: Trả lời gãy gọn, súc tích (khoảng 300-600 ký tự), dễ đọc trên điện thoại Zalo. Tránh viết dông dài trừ khi người dùng yêu cầu giải thích chi tiết hoặc phân tích sâu.\n` +
-    `6. NGUYÊN TẮC TRUNG THỰC: Nếu không có dữ liệu chi tiết, hãy nói rõ là không có thông tin, tuyệt đối không tự bịa đặt câu chuyện hay chi tiết không có thật.\n` +
+    `6. NGUYÊN TẮC TRUNG THỰC & CHỐNG TỰ BỊA ĐẶT (ZERO-HALLUCINATION & HONEST REPORTING):\n` +
+    `   - NGUYÊN TẮC TỐI THƯỢNG: NẾU KHÔNG THỰC HIỆN ĐƯỢC HOẶC KHÔNG HIỂU RÕ YÊU CẦU, BẮT BUỘC PHẢI BÁO CÁO TRUNG THỰC VÀ RÕ RÀNG CHO BẠN BIẾT LÝ DO, TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT HOẶC "NHẬN VƠ"!\n` +
+    `   - KHI KHÔNG HIỂU RÕ YÊU CẦU: Lịch sự hỏi lại để làm rõ, cấm tự đoán mò.\n` +
+    `   - KHI KHÔNG THỰC HIỆN ĐƯỢC: Báo thẳng thắn, trung thực lý do chưa thể thực hiện.\n` +
+    `   - TUYỆT ĐỐI CẤM tự bịa link tải file (như dlfl.vn, zdn.vn...) và CẤM nói dối đã gửi file khi chưa có file thực tế!\n` +
+    `   - Nếu không có dữ liệu chi tiết, hãy nói rõ là không có thông tin, tuyệt đối không tự bịa đặt câu chuyện hay chi tiết không có thật.\n` +
     `7. KHI CÂU HỎI LÀ TỔNG QUAN DỰ ÁN BẤT ĐỘNG SẢN / CÔNG TRÌNH:\n` +
     `   - BẮT BUỘC cấu trúc câu trả lời chuyên nghiệp theo 4 phân mục: 🏢 TỔNG QUAN DỰ ÁN, 📍 1. Vị trí đắc địa, 📐 2. Quy mô & Cơ cấu sản phẩm, 🌿 3. Tiện ích, 💰 4. Giá bán & Chính sách tham khảo.\n` +
     `8. [CHỐNG BẺ LÁI SANG BẤT ĐỘNG SẢN]: Khi người dùng hỏi về chủ đề khác, tuyệt đối không tự ý lôi chuyện nhà đất/bất động sản vào.\n` +
@@ -2024,9 +2034,13 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `    * [QUY ĐỊNH CÂU TRẢ LỜI BẰNG CHỮ KÈM THEO]:\n` +
     `      + Với Slide PowerPoint (.pptx), File Word (.docx), Excel (.xlsx): Câu trả lời bằng chữ chỉ cần ngắn gọn 1-3 dòng tóm tắt và thông báo file đã gửi, không xả hàng chục trang vào chat Zalo.\n` +
     `      + Với Yêu cầu Voice / Đọc bài thơ / Ngâm thơ / Đọc tin tức / Kịch bản / Kể chuyện: BẮT BUỘC PHẢI IN TOÀN BỘ NỘI DUNG BÀI THƠ / BÀI VIẾT / KỊCH BẢN ĐẦY ĐỦ RA TIN NHẮN CHAT (ghi rõ Tên bài thơ/tác phẩm, Tác giả nếu có, và toàn văn từng dòng từng khổ). TUYỆT ĐỐI KHÔNG được chỉ gửi mỗi câu thông báo 1 dòng nhận việc mà quên in nội dung!\n` +
-    `    * [TUYỆT ĐỐI CẤM BỊA ĐẶT / ẢO GIÁC VỀ GIỚI HẠN KỸ THUẬT]:\n` +
+    `    * [QUY TẮC CỐT LÕI: NẾU KHÔNG THỰC HIỆN ĐƯỢC HOẶC KHÔNG HIỂU RÕ THÌ PHẢI BÁO LẠI, TUYỆT ĐỐI KHÔNG TỰ BỊA ĐẶT (ZERO-HALLUCINATION & BÁO CÁO TRUNG THỰC)]:\n` +
+    `      + NGUYÊN TẮC TỐI THƯỢNG: NẾU KHÔNG THỰC HIỆN ĐƯỢC HOẶC KHÔNG HIỂU RÕ YÊU CẦU, BẮT BUỘC PHẢI BÁO CÁO TRUNG THỰC VÀ RÕ RÀNG CHO NGƯỜI DÙNG / SẾP BIẾT LÝ DO, TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT HOẶC "NHẬN VƠ"!\n` +
+    `      + KHI KHÔNG HIỂU RÕ YÊU CẦU: Nếu câu hỏi/chỉ đạo quá vắn tắt, mơ hồ, tối nghĩa hoặc thiếu thông tin ngữ cảnh để xử lý, hãy lịch sự hỏi lại và nhờ người dùng làm rõ hoặc cung cấp thêm chi tiết. CẤM tự đoán mò và bịa ra thông tin sai lệch!\n` +
+    `      + KHI KHÔNG THỰC HIỆN ĐƯỢC: Nếu tác vụ vượt quá khả năng, thiếu công cụ hỗ trợ hoặc gặp lỗi hệ thống: Báo thẳng thắn, trung thực lý do chưa thể thực hiện và hướng dẫn người dùng thao tác phù hợp.\n` +
+    `      + TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT LINK TẢI FILE: CẤM TỰ GÕ BẤT KỲ ĐƯỜNG LINK TẢI NÀO (như link https://fg40.dlfl.vn/..., zdn.vn, zalo.me...). Link tải file chỉ do hệ thống máy chủ đính kèm tự động khi thực sự xuất file thành công qua tool!\n` +
+    `      + TUYỆT ĐỐI CẤM NÓI DỐI ĐÃ GỬI FILE: CẤM in vào tin nhắn chat rằng "em đã xuất xong file", "đã gửi file", "anh/chị bấm vào link tải" khi CHƯA THỰC SỰ GỌI CÔNG CỤ XUẤT FILE!\n` +
     `      + TUYỆT ĐỐI CẤM bịa đặt các câu như 'hạn mức 2 tác vụ/giờ', 'đạt ngưỡng hệ thống', 'chỉ chủ nhân mới có quyền', 'lát nữa em mới thu âm', 'uống trà đợi em'. Khi người dùng yêu cầu, PHẢI THỰC HIỆN NGAY LẬP TỨC!\n` +
-    `      * Tuyệt đối cấm bịa đặt tin nhắn đã gửi file khi chưa gọi tool!\n` +
     `\n14b. KỸ NĂNG TẠO NHẠC & SÁNG TÁC CA KHÚC BẰNG SUNO AI (generate_music):\n` +
     `    - Khi người dùng yêu cầu tạo nhạc, sáng tác bài hát, viết ca khúc, phối beat, làm bài nhạc, tạo giai điệu (lofi, rap, ballad, pop, rock, acoustic, bolero...):\n` +
     `      * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_music' (với prompt, style, title, lyrics, instrumental) để AI Suno thực sự tạo bài hát và xuất thẻ bài hát kèm link nghe trực tiếp!\n` +
@@ -2116,6 +2130,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
     let answer = "";
     let voiceGenerated = false;
+    let fileGenerated = false;
     if (needsAgentLoop && !isSearchDisabled) {
       // 🚀 AGENT LOOP (Chỉ dùng khi cần tạo/xuất file, vẽ ảnh/biểu đồ, voice hoặc tải link)
       answer = await callGeminiAgentLoop(fullSystemPrompt, effectiveUserPrompt, {
@@ -2140,7 +2155,11 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
             const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
             const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
             const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
-            if (isVoice) voiceGenerated = true;
+            if (isVoice) {
+              voiceGenerated = true;
+            } else {
+              fileGenerated = true;
+            }
             const userGreeting = isAdmin ? "Sếp" : pronouns.userTitle;
             const caption = file.caption || (
               isVideo
@@ -2212,12 +2231,15 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
         if (isVoice) {
           voiceGenerated = true;
+        } else {
+          fileGenerated = true;
         }
         await deliverGeneratedToolFileDirect(api, sender, file, defaultBotName, userGreeting);
       } catch (fileErr) {
         console.warn("[admin-assistant] Interceptor sendDirectFile error:", fileErr);
       }
     });
+    answer = sanitizeHallucinatedFileLinks(answer, fileGenerated);
 
     // 🛡️ PHÒNG THỦ CHIỀU SÂU: Nếu người dùng yêu cầu Voice/Đọc thơ mà chưa có file voice nào được gửi
     if (checkIsVoiceRequest(rawText, event.quote?.text) && !voiceGenerated) {

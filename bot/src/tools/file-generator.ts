@@ -68,57 +68,78 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
 
   const combined = `${question || ""} ${quoteText || ""}`.toLowerCase();
   const qLower = (question || "").toLowerCase();
+  const quoteLower = (quoteText || "").toLowerCase();
+
+  // Bỏ qua nếu người dùng nói rõ là không cần / hủy / đừng làm file
+  if (/(?:đừng|không\s*cần|chưa\s*cần|thôi|hủy|bỏ\s*qua)\s+(?:tạo|làm|xuất|soạn|vẽ|sinh)/iu.test(qLower)) {
+    return false;
+  }
 
   // Bỏ qua nếu chỉ là câu hỏi thăm dò năng lực thuần túy không có chủ đề cụ thể (VD: "em có biết tạo file không?", "bot có tạo được slide không hả?")
   const isGenericCapabilityInquiry =
-    /^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|xuất|soạn)?\s*(?:được|đc|duoc)?(?:\s+(?:tạo|làm|soạn|xuất))?\s+(?:file|slide|voice|ảnh|nhạc|tài\s*liệu)\s*(?:không|ko)?\s*(?:hả|nhỉ|hở|ạ|không|ko)\s*[?]?$/i.test(
+    /^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|xuất|soạn)?\s*(?:được|đc|duoc)?(?:\s+(?:tạo|làm|soạn|xuất))?\s+(?:file|slide|voice|ảnh|nhạc|tài\s*liệu)\s*(?:không|ko)?\s*(?:hả|nhỉ|hở|ạ|không|ko)\s*[?]?$/iu.test(
       qLower.trim(),
     );
   if (isGenericCapabilityInquiry) return false;
 
+  // Bỏ qua nếu là câu hỏi hỏi ý kiến / thăm dò công cụ / hỏi cách làm mà không có ý định ra lệnh tạo file
+  const isHypotheticalOrInquiry =
+    /(?:có\s+(?:khó|dễ|nhanh|lâu|được|đc|tốn|mất)\s*(?:không|ko|chăng|hả|hở|nhỉ|ạ)|(?:^|[^\p{L}\p{N}])(?:bằng\s+cách\s+nào|như\s+thế\s+nào|làm\s+sao|app\s+gì|phần\s+mềm\s+gì|tool\s+gì|trang\s+web\s+nào|web\s+gì|công\s+cụ\s+gì|ở\s+đâu)(?=$|[^\p{L}\p{N}]))/iu.test(qLower);
+  if (isHypotheticalOrInquiry && !/(?:hãy|giúp|cho\s*mình|cho\s*anh|cho\s*em|ngay|luôn)\b/iu.test(qLower)) {
+    return false;
+  }
+
   const hasFileTarget =
-    /(?:powerpoint|slide|pptx|trình\s*chiếu|thuyết\s*trình|words?|docx|văn\s*bản\s*hành\s*chính|hợp\s*đồng|excel|xlsx|bảng\s*tính|báo\s*giá|csv|html|báo\s*cáo\s*web|pdf|markdown|\.md\b|file|tệp|voice|podcast|thu\s*âm|ghi\s*âm|audio|giọng\s*đọc|nhạc|bài\s*hát|ca\s*khúc|bản\s*nhạc|beat|track|poster|biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|hình\s*ảnh|ảnh|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/i.test(combined);
+    /(?:powerpoint|slide|pptx|trình\s*chiếu|thuyết\s*trình|words?|docx|văn\s*bản\s*hành\s*chính|hợp\s*đồng|excel|xlsx|bảng\s*tính|báo\s*giá|csv|html|báo\s*cáo\s*web|pdf|markdown|\.md\b|file|tệp|voice|podcast|thu\s*âm|ghi\s*âm|audio|giọng\s*đọc|nhạc|bài\s*hát|ca\s*khúc|bản\s*nhạc|beat|track|poster|biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|hình\s*ảnh|ảnh|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/iu.test(combined);
 
   // Nhận diện nếu đang trích dẫn một file/ảnh/biểu đồ/voice bot đã tạo trước đó
   const isQuotingGeneratedArtifact =
-    /(?:biểu\s*đồ|hình\s*ảnh|bài\s*thuyết\s*trình|slide|file|voice|poster|đã\s*hoàn\s*tất|đã\s*tạo\s*xong|đã\s*soạn\s*xong|\[hình\s*ảnh\])/i.test(quoteText);
+    /(?:biểu\s*đồ|hình\s*ảnh|bài\s*thuyết\s*trình|slide|file|voice|poster|đã\s*hoàn\s*tất|đã\s*tạo\s*xong|đã\s*soạn\s*xong|\[hình\s*ảnh\])/iu.test(quoteText);
 
   // Ý định làm lại, chỉnh sửa hoặc phàn nàn chất lượng để bot làm lại cẩn thận
   const isReworkOrCritique =
-    /(?:làm\s*lại|vẽ\s*lại|sửa\s*lại|chỉnh\s*lại|tạo\s*lại|soạn\s*lại|xuất\s*lại|cẩn\s*thận|đẹp\s*hơn|xấu|lỗi\s*font|font\s*lỗi|đồ\s*họa|chưa\s*đẹp|sơ\s*sài|chuyên\s*nghiệp|làm\s*ăn\s*thế\s*này|làm\s*đi)/i.test(qLower);
+    /(?:làm\s*lại|vẽ\s*lại|sửa\s*lại|chỉnh\s*lại|tạo\s*lại|soạn\s*lại|xuất\s*lại|cẩn\s*thận|đẹp\s*hơn|xấu|lỗi\s*font|font\s*lỗi|đồ\s*họa|chưa\s*đẹp|sơ\s*sài|chuyên\s*nghiệp|làm\s*ăn\s*thế\s*này|làm\s*đi)/iu.test(qLower);
 
   if (isQuotingGeneratedArtifact && isReworkOrCritique) return true;
 
   // Nhận diện nếu đang trích dẫn tin nhắn bot vừa soạn dàn ý hoặc hỏi tín hiệu xuất file
   const isQuotingProposalOrDraft =
-    /(?:đóng\s*gói\s*thành\s*file|tải\s*về\s*máy|cho\s*em\s*tín\s*hiệu|xuất\s*file|soạn\s*thành\s*file|chuyển\s*đổi\s*sang|tạo\s*file|\.md|\.docx|\.pptx|\.xlsx)/i.test(quoteText);
+    /(?:đóng\s*gói\s*thành\s*file|tải\s*về\s*máy|cho\s*em\s*tín\s*hiệu|xuất\s*file|soạn\s*thành\s*file|chuyển\s*đổi\s*sang|tạo\s*file|\.md|\.docx|\.pptx|\.xlsx)/iu.test(quoteText);
   if (
     isQuotingProposalOrDraft &&
-    /(?:ok|oke|ừ|uh|u|dạ|vâng|được|triển|làm|soạn|gửi|trả|cho\s*mình|cho\s*anh|cho\s*em|tín\s*hiệu|file)/i.test(qLower)
+    /(?:ok|oke|ừ|uh|u|dạ|vâng|được|triển|làm|soạn|gửi|trả|cho\s*mình|cho\s*anh|cho\s*em|tín\s*hiệu|file)/iu.test(qLower)
   ) {
     return true;
   }
 
   // Nhận diện cấu trúc ngữ pháp tự nhiên đưa nội dung vào/ra file hoặc voice
   const hasStructuralDirection =
-    /(?:vào|ra|thành|sang|qua|lên|bằng)\s+(?:thành\s+)?(?:file\s+)?(?:docx|words?|excel|xlsx|bảng\s*tính|pptx|powerpoint|slide|pdf|csv|txt|md|markdown|html|voice|audio)/i.test(qLower);
+    /(?:vào|ra|thành|sang|qua|lên|bằng)\s+(?:thành\s+)?(?:file\s+)?(?:docx|words?|excel|xlsx|bảng\s*tính|pptx|powerpoint|slide|pdf|csv|txt|md|markdown|html|voice|audio)/iu.test(combined);
 
-  const hasAction =
-    /(?:tạo|xuất|soạn|làm|viết|gửi|lưu|thiết\s*kế|chuyển\s*(?:thành|sang|qua|lên|ra)?|đổi\s*(?:thành|sang|qua)?|bật|convert|generate|export|triển\s*khai|đọc\s*(?:giúp|hộ|cho|bằng)?|ngâm(?:\s+thơ)?|thu\s*âm|ghi\s*âm|vẽ(?:\s+lại)?|làm(?:\s+lại)?|thiết\s*kế(?:\s+lại)?|sửa(?:\s+lại)?|chỉnh(?:\s+lại)?|đóng\s*gói|gom|cho\s*vào|bỏ\s*vào|lưu\s*vào|nhét\s*vào|in\s*ra|trả\s*(?:file|cho)|gửi\s*(?:file|cho)|đưa\s*(?:file|cho))/i.test(qLower);
+  const actionPattern =
+    /(?:tạo|xuất|soạn|làm|viết|gửi|lưu|thiết\s*kế|chuyển\s*(?:thành|sang|qua|lên|ra)?|đổi\s*(?:thành|sang|qua)?|bật|convert|generate|export|triển\s*khai|đọc\s*(?:giúp|hộ|cho|bằng)?|ngâm(?:\s+thơ)?|thu\s*âm|ghi\s*âm|vẽ(?:\s+lại)?|làm(?:\s+lại)?|thiết\s*kế(?:\s+lại)?|sửa(?:\s+lại)?|chỉnh(?:\s+lại)?|đóng\s*gói|gom|cho\s*vào|bỏ\s*vào|lưu\s*vào|nhét\s*vào|in\s*ra|trả\s*(?:file|cho)|gửi\s*(?:file|cho)|đưa\s*(?:file|cho))/iu;
 
   const isAffirmativeFollowUp =
-    /^(?:ok(?:ela|ay|e)?|ừ|uh|u|dạ|da|vâng|vang|dc|được|chốt|nhất trí|duyệt|tiến hành)?[\s,.:;!-]*(?:soạn|làm|tạo|xuất|viết|triển\s*khai|chốt|triển|lên|đóng\s*gói|gom|trả\s*file|gửi\s*file|lấy\s*file|trả|gửi|lấy)\s*(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|luôn\s*đi|luôn\s*đi\s*e|luôn\s*hộ\s*e|luôn\s*nhé|luôn\s*nha|tiếp\s*đi|cho\s*mình\s*đi|cho\s*anh\s*đi|cho\s*em\s*đi|cho\s*mình|cho\s*anh|cho\s*em)?\b/i.test(qLower.trim());
+    /^(?:ok(?:ela|ay|e)?|ừ|uh|u|dạ|da|vâng|vang|dc|được|chốt|nhất trí|duyệt|tiến hành)?[\s,.:;!-]*(?:soạn|làm|tạo|xuất|viết|triển\s*khai|chốt|triển|lên|đóng\s*gói|gom|trả\s*file|gửi\s*file|lấy\s*file|trả|gửi|lấy)\s*(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|luôn\s*đi|luôn\s*đi\s*e|luôn\s*hộ\s*e|luôn\s*nhé|luôn\s*nha|tiếp\s*đi|cho\s*mình\s*đi|cho\s*anh\s*đi|cho\s*em\s*đi|cho\s*mình|cho\s*anh|cho\s*em)?\b/iu.test(qLower.trim());
+
+  // Hành động nằm trong câu hỏi mới HOẶC nằm trong nội dung trích dẫn (khi câu hỏi mới là tag gọi bot hoặc xác nhận)
+  const isQuotingActionRequest =
+    actionPattern.test(quoteLower) &&
+    (qLower.length === 0 ||
+      /(?:ok|oke|ừ|uh|u|dạ|vâng|được|triển|làm|soạn|gửi|nhé|nha|đi|giúp|hộ|em|bot|sen chúa|mộc miên)/iu.test(qLower));
+
+  const hasAction = actionPattern.test(qLower) || isQuotingActionRequest;
 
   if (hasStructuralDirection) return true;
   if (hasFileTarget && (hasAction || isAffirmativeFollowUp)) return true;
 
   const isCodeOrChart =
-    /(?:vẽ|tạo|xuất|lập|thiết\s*kế|làm|soạn|sinh|render)(?:\s+lại)?\s*(?:cho\s*.*?\s*)?(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|poster|ảnh|hình|tranh|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/i.test(qLower) ||
-    /(?:biểu\s*đồ|đồ\s*họa|poster|infographic|hình\s*ảnh|bức\s*ảnh|tấm\s*ảnh).*?(?:làm\s*lại|sửa\s*lại|vẽ\s*lại|cẩn\s*thận|đẹp\s*hơn|chuyên\s*nghiệp)/i.test(qLower) ||
-    /^[/!](?:taoanh|veanh|draw|plot|chart|suaanh|chinhanh|chinhsuaanh|editanh|editimage|modifyimage|imagine|image)\b/i.test(qLower) ||
-    /(?:sửa|chỉnh\s*sửa|chỉnh|edit|thay|đổi|xoá|xóa|làm\s*nét|biến\s*đổi|phục\s*chế)\s+(?:ảnh|hình|bức\s*ảnh|tấm\s*ảnh|phông|nền|background|tóc|áo|quần|váy|kính|màu|người)/i.test(qLower) ||
-    /(?:dựa\s+(?:vào|theo)|theo)\s+(?:prompt|câu\s*lệnh|ý\s*tưởng|mô\s*tả)\b/i.test(qLower) ||
-    /(?:chạy|viết|run|execute)\s*(?:code|mã|script)\s*(?:python|py)/i.test(qLower);
+    /(?:vẽ|tạo|xuất|lập|thiết\s*kế|làm|soạn|sinh|render)(?:\s+lại)?\s*(?:cho\s*.*?\s*)?(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|poster|ảnh|hình|tranh|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/iu.test(combined) ||
+    /(?:biểu\s*đồ|đồ\s*họa|poster|infographic|hình\s*ảnh|bức\s*ảnh|tấm\s*ảnh).*?(?:làm\s*lại|sửa\s*lại|vẽ\s*lại|cẩn\s*thận|đẹp\s*hơn|chuyên\s*nghiệp)/iu.test(combined) ||
+    /^[/!](?:taoanh|veanh|draw|plot|chart|suaanh|chinhanh|chinhsuaanh|editanh|editimage|modifyimage|imagine|image)\b/iu.test(qLower) ||
+    /(?:sửa|chỉnh\s*sửa|chỉnh|edit|thay|đổi|xoá|xóa|làm\s*nét|biến\s*đổi|phục\s*chế)\s+(?:ảnh|hình|bức\s*ảnh|tấm\s*ảnh|phông|nền|background|tóc|áo|quần|váy|kính|màu|người)/iu.test(combined) ||
+    /(?:dựa\s+(?:vào|theo)|theo)\s+(?:prompt|câu\s*lệnh|ý\s*tưởng|mô\s*tả)\b/iu.test(qLower) ||
+    /(?:chạy|viết|run|execute)\s*(?:code|mã|script)\s*(?:python|py)/iu.test(qLower);
 
   return isCodeOrChart;
 }

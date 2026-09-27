@@ -658,3 +658,65 @@ export async function interceptAndExecuteSimulatedTool(
 export function extractSpeechFallbackText(answer: string): string {
   return cleanCoreSpeechText(answer);
 }
+
+/**
+ * Làm sạch và loại bỏ các link tải file giả mạo/ảo giác (hallucination) do AI tự bịa
+ * khi thực tế KHÔNG có file nào được tạo trên máy chủ (fileGenerated === false).
+ * Đồng thời chuyển đổi thông báo dối trá sang thông báo trung thực theo yêu cầu người dùng.
+ */
+export function sanitizeHallucinatedFileLinks(text: string, fileGenerated: boolean): string {
+  if (!text || fileGenerated) return text;
+
+  // Nhận diện các link download giả lập kiểu Zalo/file server
+  const fakeLinkPattern = /(?:https?:\/\/)?(?:[a-zA-Z0-9-]+\.)*(?:dlfl\.vn|zdn\.vn|zalo\.me)\/[^\s)>]+/i;
+  const fakeDownloadMarkdownPattern = /\[(?:tải|download|file|xem|bản)[^\]]*\]\((?:https?:\/\/)[^)]+\)/i;
+  const fakeBulletDownloadPattern = /[-*•]\s*(?:🔗\s*)?(?:link\s*tải|đường\s*link|tải\s*file|file\s*tải|tải\s*về)[^\n]+/i;
+
+  const hasFakeLinks = fakeLinkPattern.test(text) || fakeDownloadMarkdownPattern.test(text) || fakeBulletDownloadPattern.test(text);
+
+  // Nhận diện AI tự nhận vơ là đã xuất file / gửi file / gửi slide trong khi fileGenerated === false
+  const fakeClaimPattern = /(?:em|mình|bot)\s+(?:đã\s+)?(?:xuất|gửi|tạo|lưu|chuẩn\s*bị|đóng\s*gói)\s*(?:xong\s*)?(?:thành\s*)?(?:file|bài\s*thuyết\s*trình|slide|tài\s*liệu)[^\n.!?]*[.!?]?/i;
+  const hasFakeClaim = fakeClaimPattern.test(text);
+
+  if (!hasFakeLinks && !hasFakeClaim) return text;
+
+  console.warn("[simulated-tool-interceptor] 🛡️ Phát hiện AI bịa đặt link tải hoặc tự nhận đã gửi file khi chưa có file thực tế! Đang làm sạch...");
+
+  let cleaned = text;
+
+  // Xóa toàn bộ dòng chứa link giả mạo
+  cleaned = cleaned.replace(/^[^\n]*(?:dlfl\.vn|zdn\.vn|zalo\.me)\/[^\n]*\n?/gim, "");
+
+  // Xóa markdown link tải giả lập
+  cleaned = cleaned.replace(/\[(?:tải|download|file|xem|bản)[^\]]*\]\((?:https?:\/\/)[^)]+\)/gi, "");
+
+  // Xóa dòng gạch đầu dòng về link tải
+  cleaned = cleaned.replace(/[-*•]\s*(?:🔗\s*)?(?:link\s*tải|đường\s*link|tải\s*file|file\s*tải|tải\s*về)[^\n]*\n?/gi, "");
+
+  // Xóa câu AI tự nhận vơ đã xuất file
+  cleaned = cleaned.replace(/(?:em|mình|bot)\s+(?:đã\s+)?(?:xuất|gửi|tạo|lưu|chuẩn\s*bị|đóng\s*gói)\s*(?:xong\s*)?(?:thành\s*)?(?:file|bài\s*thuyết\s*trình|slide|tài\s*liệu)[^\n.!?]*[.!?]?/gi, "");
+
+  // Xóa câu dẫn mời tải file nếu không có file thật
+  cleaned = cleaned.replace(/(?:anh|chị|bác|sếp|bạn)?\s*(?:vui\s*lòng\s*)?(?:bấm\s*vào\s*link|tải\s*(?:tại|file|theo|ở\s*đây)|xem\s*file|nhận\s*file)[^\n.:!?]*[:.!?]?/gim, "");
+
+  // Thu dọn các dòng trống thừa
+  cleaned = cleaned.replace(/(\n\s*){3,}/g, "\n\n").trim();
+
+  // Kiểm tra nếu nội dung còn lại chỉ là lời chào, cảm thán hoặc xã giao mà không có tri thức/nội dung thực chất
+  const strippedCore = cleaned.replace(/(?:dạ|vâng|chào|chúc|cảm ơn|anh|chị|bác|sếp|bạn|một ngày tốt lành|nhé|nha|ạ|[.,!?\s])+/gi, "").trim();
+  const isPleasantryOnly = strippedCore.length < 15;
+
+  if (!cleaned || isPleasantryOnly) {
+    return "Dạ hiện tại em chưa thể hoàn tất việc đóng gói file này do hệ thống chưa kích hoạt được công cụ xuất file phù hợp. Bác/Sếp vui lòng thử lại hoặc gõ yêu cầu cụ thể hơn để em hỗ trợ nhé!";
+  }
+
+  // Nếu có nội dung trả lời thực chất nhưng AI đã bịa link tải và bị gỡ bỏ, thông báo rõ ràng cho người dùng
+  if (hasFakeLinks) {
+    cleaned += "\n\n*(Lưu ý: Hiện tại hệ thống chưa đóng gói được thành file đính kèm, em xin gửi toàn bộ nội dung chi tiết dạng văn bản ở trên để bác/Sếp tham khảo nhé!)*";
+  }
+
+  return cleaned;
+}
+
+
+

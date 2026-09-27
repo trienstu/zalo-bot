@@ -45,7 +45,7 @@ import { isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
 import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from "./grounding-quota.js";
 import { githubSearch } from "./tools/vertical-tools.js";
 import { checkIsFileOrVoiceGeneration, checkIsVoiceRequest } from "./tools/file-generator.js";
-import { interceptAndExecuteSimulatedTool, extractSpeechFallbackText } from "./tools/simulated-tool-interceptor.js";
+import { interceptAndExecuteSimulatedTool, extractSpeechFallbackText, sanitizeHallucinatedFileLinks } from "./tools/simulated-tool-interceptor.js";
 import { cleanOutdatedVoicePromisesFromAnswer, cleanCoreSpeechText } from "./tools/voice-generator.js";
 import { generateMusic } from "./tools/music-generator.js";
 import { runBatchAudioJob } from "./workers/batch-audio-processor.js";
@@ -1474,9 +1474,13 @@ async function handleHistoryQA(
       `     * [QUY ĐỊNH CÂU TRẢ LỜI BẰNG CHỮ KÈM THEO]:\n` +
       `       + Với Slide PowerPoint (.pptx), File Word (.docx), Excel (.xlsx): Câu trả lời bằng chữ chỉ cần ngắn gọn 1-3 dòng tóm tắt và thông báo file đã gửi, không xả hàng chục trang vào chat Zalo.\n` +
       `       + Với Yêu cầu Voice / Đọc bài thơ / Ngâm thơ / Đọc tin tức / Kịch bản / Kể chuyện: BẮT BUỘC PHẢI IN TOÀN BỘ NỘI DUNG BÀI THƠ / BÀI VIẾT / KỊCH BẢN ĐẦY ĐỦ RA TIN NHẮN CHAT (ghi rõ Tên bài thơ/tác phẩm, Tác giả nếu có, và toàn văn từng dòng từng khổ). TUYỆT ĐỐI KHÔNG được chỉ gửi mỗi câu thông báo 1 dòng nhận việc mà quên in nội dung!\n` +
-      `     * [TUYỆT ĐỐI CẤM BỊA ĐẶT / ẢO GIÁC VỀ GIỚI HẠN KỸ THUẬT]:\n` +
+      `     * [QUY TẮC CỐT LÕI: NẾU KHÔNG THỰC HIỆN ĐƯỢC HOẶC KHÔNG HIỂU RÕ THÌ PHẢI BÁO LẠI, TUYỆT ĐỐI KHÔNG TỰ BỊA ĐẶT (ZERO-HALLUCINATION & BÁO CÁO TRUNG THỰC)]:\n` +
+      `       + NGUYÊN TẮC TỐI THƯỢNG: NẾU KHÔNG THỰC HIỆN ĐƯỢC HOẶC KHÔNG HIỂU RÕ YÊU CẦU, BẮT BUỘC PHẢI BÁO CÁO TRUNG THỰC VÀ RÕ RÀNG CHO NGƯỜI DÙNG / SẾP BIẾT LÝ DO, TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT HOẶC "NHẬN VƠ"!\n` +
+      `       + KHI KHÔNG HIỂU RÕ YÊU CẦU: Nếu câu hỏi/chỉ đạo quá vắn tắt, mơ hồ, tối nghĩa hoặc thiếu thông tin ngữ cảnh để xử lý, hãy lịch sự hỏi lại và nhờ người dùng làm rõ hoặc cung cấp thêm chi tiết. CẤM tự đoán mò và bịa ra thông tin sai lệch!\n` +
+      `       + KHI KHÔNG THỰC HIỆN ĐƯỢC: Nếu tác vụ vượt quá khả năng, thiếu công cụ hỗ trợ hoặc gặp lỗi hệ thống: Báo thẳng thắn, trung thực lý do chưa thể thực hiện và hướng dẫn người dùng thao tác phù hợp.\n` +
+      `       + TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT LINK TẢI FILE: CẤM TỰ GÕ BẤT KỲ ĐƯỜNG LINK TẢI NÀO (như link https://fg40.dlfl.vn/..., zdn.vn, zalo.me...). Link tải file chỉ do hệ thống máy chủ đính kèm tự động khi thực sự xuất file thành công qua tool!\n` +
+      `       + TUYỆT ĐỐI CẤM NÓI DỐI ĐÃ GỬI FILE: CẤM in vào tin nhắn chat rằng "em đã xuất xong file", "đã gửi file", "anh/chị bấm vào link tải" khi CHƯA THỰC SỰ GỌI CÔNG CỤ XUẤT FILE!\n` +
       `       + TUYỆT ĐỐI CẤM bịa đặt các câu như 'hạn mức 2 tác vụ/giờ', 'đạt ngưỡng hệ thống', 'chỉ chủ nhân mới có quyền', 'lát nữa em mới thu âm', 'uống trà đợi em'. Khi người dùng yêu cầu, PHẢI THỰC HIỆN NGAY LẬP TỨC!\n` +
-      `     * Tuyệt đối cấm bịa đặt tin nhắn đã xuất file khi chưa gọi tool!\n` +
       `   - [KỸ NĂNG TẠO & CHỈNH SỬA ẢNH NGHỆ THUẬT (generate_image)]:\n` +
       `     + Khi người dùng yêu cầu vẽ ảnh, tạo ảnh, sinh ảnh, tạo tranh, vẽ chân dung, anime, đồ vật, phong cảnh, hoặc sửa ảnh, biến thể ảnh: BẮT BUỘC GỌI TOOL 'generate_image'.\n` +
       `     + ĐẶC BIỆT KHI NGƯỜI DÙNG BẢO 'dựa vào prompt của...', 'theo prompt này', hoặc 'vẽ ảnh' (kèm quote/ảnh đính kèm): BẮT BUỘC ĐỌC KỸ LỊCH SỬ CHAT VÀ NỘI DUNG QUOTE, TRÍCH XUẤT ĐẦY ĐỦ Ý TƯỞNG/PROMPT ĐÓ ra và truyền vào tham số 'prompt' của tool generate_image. TUYỆT ĐỐI CẤM để prompt cộc lốc!\n` +
@@ -1497,6 +1501,7 @@ async function handleHistoryQA(
     try {
       let answer = "";
       let voiceGenerated = false;
+      let fileGenerated = false;
       if (needsAgentLoop) {
         answer = await callGeminiAgentLoop(fastSystemPrompt, fastUserPrompt, {
           model: "gemini-3.1-flash-lite-preview",
@@ -1522,7 +1527,11 @@ async function handleHistoryQA(
                 const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
                 const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
                 const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
-                if (isVoice) voiceGenerated = true;
+                if (isVoice) {
+                  voiceGenerated = true;
+                } else {
+                  fileGenerated = true;
+                }
                 const caption = file.caption || (
                   isSlide
                     ? `📊 ${botName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
@@ -1565,10 +1574,13 @@ async function handleHistoryQA(
           const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
           if (isVoice) {
             voiceGenerated = true;
+          } else {
+            fileGenerated = true;
           }
           await deliverGeneratedToolFile(options.api, threadId, file, botName, displayName, isSuperAdmin);
         }
       });
+      answer = sanitizeHallucinatedFileLinks(answer, fileGenerated);
 
       // 🛡️ PHÒNG THỦ CHIỀU SÂU: Nếu người dùng yêu cầu Voice/Đọc thơ mà chưa có file voice nào được gửi
       if (checkIsVoiceRequest(question, options?.quote?.text) && !voiceGenerated && options?.api) {
@@ -1802,9 +1814,13 @@ QUY TẮC BẮT BUỘC:
       `     * [QUY ĐỊNH CÂU TRẢ LỜI BẰNG CHỮ KÈM THEO]:\n` +
       `       + Với Slide PowerPoint (.pptx), File Word (.docx), Excel (.xlsx): Câu trả lời bằng chữ chỉ cần ngắn gọn 1-3 dòng tóm tắt và thông báo file đã gửi, không xả hàng chục trang vào chat Zalo.\n` +
       `       + Với Yêu cầu Voice / Đọc bài thơ / Ngâm thơ / Đọc tin tức / Kịch bản / Kể chuyện: BẮT BUỘC PHẢI IN TOÀN BỘ NỘI DUNG BÀI THƠ / BÀI VIẾT / KỊCH BẢN ĐẦY ĐỦ RA TIN NHẮN CHAT (ghi rõ Tên bài thơ/tác phẩm, Tác giả nếu có, và toàn văn từng dòng từng khổ). TUYỆT ĐỐI KHÔNG được chỉ gửi mỗi câu thông báo 1 dòng nhận việc mà quên in nội dung!\n` +
-      `     * [TUYỆT ĐỐI CẤM BỊA ĐẶT / ẢO GIÁC VỀ GIỚI HẠN KỸ THUẬT]:\n` +
+      `     * [QUY TẮC CỐT LÕI: NẾU KHÔNG THỰC HIỆN ĐƯỢC HOẶC KHÔNG HIỂU RÕ THÌ PHẢI BÁO LẠI, TUYỆT ĐỐI KHÔNG TỰ BỊA ĐẶT (ZERO-HALLUCINATION & BÁO CÁO TRUNG THỰC)]:\n` +
+      `       + NGUYÊN TẮC TỐI THƯỢNG: NẾU KHÔNG THỰC HIỆN ĐƯỢC HOẶC KHÔNG HIỂU RÕ YÊU CẦU, BẮT BUỘC PHẢI BÁO CÁO TRUNG THỰC VÀ RÕ RÀNG CHO NGƯỜI DÙNG / SẾP BIẾT LÝ DO, TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT HOẶC "NHẬN VƠ"!\n` +
+      `       + KHI KHÔNG HIỂU RÕ YÊU CẦU: Nếu câu hỏi/chỉ đạo quá vắn tắt, mơ hồ, tối nghĩa hoặc thiếu thông tin ngữ cảnh để xử lý, hãy lịch sự hỏi lại và nhờ người dùng làm rõ hoặc cung cấp thêm chi tiết. CẤM tự đoán mò và bịa ra thông tin sai lệch!\n` +
+      `       + KHI KHÔNG THỰC HIỆN ĐƯỢC: Nếu tác vụ vượt quá khả năng, thiếu công cụ hỗ trợ hoặc gặp lỗi hệ thống: Báo thẳng thắn, trung thực lý do chưa thể thực hiện và hướng dẫn người dùng thao tác phù hợp.\n` +
+      `       + TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT LINK TẢI FILE: CẤM TỰ GÕ BẤT KỲ ĐƯỜNG LINK TẢI NÀO (như link https://fg40.dlfl.vn/..., zdn.vn, zalo.me...). Link tải file chỉ do hệ thống máy chủ đính kèm tự động khi thực sự xuất file thành công qua tool!\n` +
+      `       + TUYỆT ĐỐI CẤM NÓI DỐI ĐÃ GỬI FILE: CẤM in vào tin nhắn chat rằng "em đã xuất xong file", "đã gửi file", "anh/chị bấm vào link tải" khi CHƯA THỰC SỰ GỌI CÔNG CỤ XUẤT FILE!\n` +
       `       + TUYỆT ĐỐI CẤM bịa đặt các câu như 'hạn mức 2 tác vụ/giờ', 'đạt ngưỡng hệ thống', 'chỉ chủ nhân mới có quyền', 'lát nữa em mới thu âm', 'uống trà đợi em'. Khi người dùng yêu cầu, PHẢI THỰC HIỆN NGAY LẬP TỨC!\n` +
-      `       * TUYỆT ĐỐI CẤM TỰ Ý BỊA ĐẶT TIN NHẮN GIẢ MẠO rằng "em đã xuất xong file", "đã gửi file" khi CHƯA THỰC SỰ GỌI TOOL!\n` +
       `   - [KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ, POSTER & ĐỒ HỌA BẰNG PYTHON (python_interpreter)]:\n` +
       `     + Khi người dùng yêu cầu vẽ biểu đồ, sơ đồ quy trình, mindmap hoặc thiết kế đồ họa / poster / bảng lịch thi đấu / bảng xếp hạng, HOẶC khi người dùng chê ảnh xấu/lỗi font và yêu cầu làm lại cẩn thận:\n` +
       `       BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM gõ code Python bằng chữ vào tin nhắn chat Zalo!\n` +
@@ -1920,6 +1936,7 @@ QUY TẮC BẮT BUỘC:
 
     let answer = "";
     let voiceGenerated = false;
+    let fileGenerated = false;
     const isGreetingQuote =
       /^(?:chào|hi|hello|alo|ê|cảm ơn|thanks|ok)\b/i.test(question.trim()) && question.trim().length < 25;
     try {
@@ -1936,7 +1953,11 @@ QUY TẮC BẮT BUỘC:
                 const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
                 const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
                 const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
-                if (isVoice) voiceGenerated = true;
+                if (isVoice) {
+                  voiceGenerated = true;
+                } else {
+                  fileGenerated = true;
+                }
                 const userGreeting = isSuperAdmin ? "Sếp" : (displayName ? `bác @${displayName}` : "bác");
                 const caption = file.caption || (
                   isVideo
@@ -2015,10 +2036,13 @@ QUY TẮC BẮT BUỘC:
           const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
           if (isVoice) {
             voiceGenerated = true;
+          } else {
+            fileGenerated = true;
           }
           await deliverGeneratedToolFile(options.api, threadId, file, botName, displayName, isSuperAdmin);
         }
       });
+      answer = sanitizeHallucinatedFileLinks(answer, fileGenerated);
 
       // 🛡️ PHÒNG THỦ CHIỀU SÂU: Nếu người dùng yêu cầu Voice/Đọc thơ mà chưa có file voice nào được gửi
       if (checkIsVoiceRequest(question, options?.quote?.text) && !voiceGenerated && options?.api) {
@@ -2839,7 +2863,12 @@ QUY TẮC BẮT BUỘC:
     `    * [QUY ĐỊNH CÂU TRẢ LỜI BẰNG CHỮ KÈM THEO]:\n` +
     `      + Với Slide PowerPoint (.pptx), File Word (.docx), Excel (.xlsx): Câu trả lời bằng chữ chỉ cần ngắn gọn 1-3 dòng tóm tắt và thông báo file đã gửi, không xả hàng chục trang vào chat Zalo.\n` +
     `      + Với Yêu cầu Voice / Đọc bài thơ / Ngâm thơ / Đọc tin tức / Kịch bản / Kể chuyện: BẮT BUỘC PHẢI IN TOÀN BỘ NỘI DUNG BÀI THƠ / BÀI VIẾT / KỊCH BẢN ĐẦY ĐỦ RA TIN NHẮN CHAT (ghi rõ Tên bài thơ/tác phẩm, Tác giả nếu có, và toàn văn từng dòng từng khổ). TUYỆT ĐỐI KHÔNG được chỉ gửi mỗi câu thông báo 1 dòng nhận việc mà quên in nội dung!\n` +
-    `    * [TUYỆT ĐỐI CẤM BỊA ĐẶT / ẢO GIÁC VỀ GIỚI HẠN KỸ THUẬT]:\n` +
+    `    * [QUY TẮC CỐT LÕI: NẾU KHÔNG THỰC HIỆN ĐƯỢC HOẶC KHÔNG HIỂU RÕ THÌ PHẢI BÁO LẠI, TUYỆT ĐỐI KHÔNG TỰ BỊA ĐẶT (ZERO-HALLUCINATION & BÁO CÁO TRUNG THỰC)]:\n` +
+    `      + NGUYÊN TẮC TỐI THƯỢNG: NẾU KHÔNG THỰC HIỆN ĐƯỢC HOẶC KHÔNG HIỂU RÕ YÊU CẦU, BẮT BUỘC PHẢI BÁO CÁO TRUNG THỰC VÀ RÕ RÀNG CHO NGƯỜI DÙNG / SẾP BIẾT LÝ DO, TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT HOẶC "NHẬN VƠ"!\n` +
+    `      + KHI KHÔNG HIỂU RÕ YÊU CẦU: Nếu câu hỏi/chỉ đạo quá vắn tắt, mơ hồ, tối nghĩa hoặc thiếu thông tin ngữ cảnh để xử lý, hãy lịch sự hỏi lại và nhờ người dùng làm rõ hoặc cung cấp thêm chi tiết. CẤM tự đoán mò và bịa ra thông tin sai lệch!\n` +
+    `      + KHI KHÔNG THỰC HIỆN ĐƯỢC: Nếu tác vụ vượt quá khả năng, thiếu công cụ hỗ trợ hoặc gặp lỗi hệ thống: Báo thẳng thắn, trung thực lý do chưa thể thực hiện và hướng dẫn người dùng thao tác phù hợp.\n` +
+    `      + TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT LINK TẢI FILE: CẤM TỰ GÕ BẤT KỲ ĐƯỜNG LINK TẢI NÀO (như link https://fg40.dlfl.vn/..., zdn.vn, zalo.me...). Link tải file chỉ do hệ thống máy chủ đính kèm tự động khi thực sự xuất file thành công qua tool!\n` +
+    `      + TUYỆT ĐỐI CẤM NÓI DỐI ĐÃ GỬI FILE: CẤM in vào tin nhắn chat rằng "em đã xuất xong file", "đã gửi file", "anh/chị bấm vào link tải" khi CHƯA THỰC SỰ GỌI CÔNG CỤ XUẤT FILE!\n` +
     `      + TUYỆT ĐỐI CẤM bịa đặt các câu như 'hạn mức 2 tác vụ/giờ', 'đạt ngưỡng hệ thống', 'chỉ chủ nhân mới có quyền', 'lát nữa em mới thu âm', 'uống trà đợi em'. Khi người dùng yêu cầu, PHẢI THỰC HIỆN NGAY LẬP TỨC!\n` +
     `- KỸ NĂNG TẠO NHẠC & SÁNG TÁC CA KHÚC BẰNG SUNO AI (generate_music):\n` +
     `  + Khi người dùng yêu cầu tạo nhạc, sáng tác bài hát, viết ca khúc, phối beat, làm bài nhạc, tạo giai điệu (lofi, rap, ballad, pop, rock, acoustic, bolero...):\n` +
@@ -2880,6 +2909,7 @@ QUY TẮC BẮT BUỘC:
 
     let answer = "";
     let voiceGenerated = false;
+    let fileGenerated = false;
     if (needsAgentLoop) {
       // 🚀 Chỉ khi người dùng thực sự yêu cầu gọi tool xuất file, voice hoặc đọc link cụ thể mới chạy Agent Loop
       answer = await callGeminiAgentLoop(systemPrompt, userPrompt, {
@@ -2922,7 +2952,11 @@ QUY TẮC BẮT BUỘC:
               const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
               const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
               const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
-              if (isVoice) voiceGenerated = true;
+              if (isVoice) {
+                voiceGenerated = true;
+              } else {
+                fileGenerated = true;
+              }
               const userGreeting = isSuperAdmin ? "Sếp" : (displayName ? `bác @${displayName}` : "bác");
               const caption = file.caption || (
                 isVideo
@@ -3017,10 +3051,13 @@ QUY TẮC BẮT BUỘC:
         const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
         if (isVoice) {
           voiceGenerated = true;
+        } else {
+          fileGenerated = true;
         }
         await deliverGeneratedToolFile(options.api, threadId, file, botName, displayName, isSuperAdmin);
       }
     });
+    answer = sanitizeHallucinatedFileLinks(answer, fileGenerated);
 
     // 🛡️ PHÒNG THỦ CHIỀU SÂU: Nếu người dùng yêu cầu Voice/Đọc thơ/Podcast mà chưa có file voice nào được gửi
     if (checkIsVoiceRequest(question, options?.quote?.text) && !voiceGenerated && options?.api) {
