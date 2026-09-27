@@ -49,6 +49,8 @@ import {
   isAudioExtension,
   transcodeAudioWithFfmpeg,
 } from "./audio-utils.js";
+import { isJxlBuffer, transcodeImageWithFfmpeg } from "./image-utils.js";
+import { normalizeZaloMediaUrl } from "./message-extract.js";
 
 /**
  * Lớp gọi Google Gemini API dùng chung (Tóm tắt hội thoại Zalo, bóc tách dữ liệu).
@@ -82,6 +84,9 @@ function detectMimeType(buffer: Buffer, fileName = "", headerContentType = ""): 
   if (buffer.length >= 2 && buffer[0] === 0x42 && buffer[1] === 0x4d) {
     return "image/bmp";
   }
+  if (isJxlBuffer(buffer)) {
+    return "image/jxl";
+  }
 
   const cleanHeader = (headerContentType.split(";")[0] || "").trim().toLowerCase();
   if (cleanHeader && cleanHeader !== "application/octet-stream" && cleanHeader !== "binary/octet-stream") {
@@ -96,6 +101,7 @@ function detectMimeType(buffer: Buffer, fileName = "", headerContentType = ""): 
   if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
   if (ext === "webp") return "image/webp";
   if (ext === "gif") return "image/gif";
+  if (ext === "jxl") return "image/jxl";
   if (ext === "pdf") return "application/pdf";
   if (ext === "mp3") return "audio/mp3";
   if (ext === "wav") return "audio/wav";
@@ -107,12 +113,29 @@ function detectMimeType(buffer: Buffer, fileName = "", headerContentType = ""): 
 
 export async function downloadImageBase64(url: string): Promise<GeminiImagePart | null> {
   try {
-    if (fs.existsSync(url)) {
-      const buffer = fs.readFileSync(url);
+    const targetUrl = normalizeZaloMediaUrl(url);
+    if (fs.existsSync(targetUrl)) {
+      const buffer = fs.readFileSync(targetUrl);
       if (!buffer || buffer.length === 0) return null;
-      const mime = detectMimeType(buffer, url, "");
+      let mime = detectMimeType(buffer, targetUrl, "");
+      let finalBuffer = buffer;
+      if (mime === "image/jxl" || !["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"].includes(mime)) {
+        try {
+          const sharp = (await import("sharp")).default;
+          finalBuffer = await sharp(buffer).jpeg({ quality: 90 }).toBuffer();
+          mime = "image/jpeg";
+        } catch {
+          try {
+            const converted = await transcodeImageWithFfmpeg(buffer, "jpeg");
+            finalBuffer = Buffer.from(converted.buffer);
+            mime = "image/jpeg";
+          } catch {
+            return null;
+          }
+        }
+      }
       return {
-        data: buffer.toString("base64"),
+        data: finalBuffer.toString("base64"),
         mimeType: mime.startsWith("image/") ? mime : "image/jpeg",
       };
     }
@@ -123,7 +146,7 @@ export async function downloadImageBase64(url: string): Promise<GeminiImagePart 
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const res = await fetch(url, {
+        const res = await fetch(targetUrl, {
           signal: AbortSignal.timeout(20_000),
           headers: {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -161,9 +184,26 @@ export async function downloadImageBase64(url: string): Promise<GeminiImagePart 
 
     if (!buffer || buffer.length === 0) return null;
 
-    const mime = detectMimeType(buffer, url, contentType);
+    let mime = detectMimeType(buffer, targetUrl, contentType);
+    let finalBuffer = buffer;
+    if (mime === "image/jxl" || !["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"].includes(mime)) {
+      try {
+        const sharp = (await import("sharp")).default;
+        finalBuffer = await sharp(buffer).jpeg({ quality: 90 }).toBuffer();
+        mime = "image/jpeg";
+      } catch {
+        try {
+          const converted = await transcodeImageWithFfmpeg(buffer, "jpeg");
+          finalBuffer = Buffer.from(converted.buffer);
+          mime = "image/jpeg";
+        } catch {
+          return null;
+        }
+      }
+    }
+
     return {
-      data: buffer.toString("base64"),
+      data: finalBuffer.toString("base64"),
       mimeType: mime.startsWith("image/") ? mime : "image/jpeg",
     };
   } catch (e) {
@@ -197,18 +237,19 @@ export async function downloadFileContent(
   try {
     let buffer: Buffer = Buffer.alloc(0);
     let contentType = "";
+    const targetUrl = normalizeZaloMediaUrl(url);
 
-    if (fs.existsSync(url)) {
-      const stats = fs.statSync(url);
+    if (fs.existsSync(targetUrl)) {
+      const stats = fs.statSync(targetUrl);
       if (stats.size > 50 * 1024 * 1024) {
         return { error: "FILE_TOO_LARGE", fileSizeBytes: stats.size };
       }
-      buffer = fs.readFileSync(url);
+      buffer = fs.readFileSync(targetUrl);
     } else {
       const maxRetries = 3;
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-          const res = await fetch(url, {
+          const res = await fetch(targetUrl, {
             signal: AbortSignal.timeout(60_000), // 60s timeout cho file tài liệu nặng (20MB-50MB)
             headers: {
               "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -382,7 +423,7 @@ export async function downloadFileContent(
     }
 
     // 2. File Hình ảnh (Gemini đọc Multimodal native)
-    if (detectedMime.startsWith("image/")) {
+    if (detectedMime.startsWith("image/") || isJxlBuffer(buffer)) {
       const geminiSupportedImageMimes = new Set([
         "image/jpeg",
         "image/png",
@@ -391,7 +432,7 @@ export async function downloadFileContent(
         "image/heif",
       ]);
 
-      if (geminiSupportedImageMimes.has(detectedMime)) {
+      if (geminiSupportedImageMimes.has(detectedMime) && !isJxlBuffer(buffer)) {
         return {
           mediaPart: {
             data: buffer.toString("base64"),
@@ -414,12 +455,26 @@ export async function downloadFileContent(
           imageBuffer: converted,
         };
       } catch (convErr) {
-        console.warn(`[gemini] Định dạng ảnh ${detectedMime} không hỗ trợ và không thể convert sang JPEG:`, convErr);
-        return {
-          error: "UNSUPPORTED_IMAGE_FORMAT",
-          unsupportedMime: detectedMime,
-          textContent: `[Ảnh đính kèm có định dạng "${detectedMime}" hiện chưa được AI hỗ trợ giải mã. Vui lòng chụp lại màn hình hoặc lưu ảnh dạng JPG/PNG để bot phân tích nhé!]`,
-        };
+        // Fallback sang ffmpeg (đặc biệt giải mã chuẩn xác định dạng JPEG XL / image/jxl)
+        try {
+          console.log(`[gemini] 🔄 Sharp không hỗ trợ giải mã ${detectedMime}, thử giải mã qua ffmpeg...`);
+          const ffmpegRes = await transcodeImageWithFfmpeg(buffer, "jpeg");
+          console.log(`[gemini] ✅ Đã chuyển đổi thành công ảnh ${detectedMime} sang image/jpeg bằng ffmpeg (${Math.round(ffmpegRes.buffer.length / 1024)} KB)`);
+          return {
+            mediaPart: {
+              data: ffmpegRes.buffer.toString("base64"),
+              mimeType: "image/jpeg",
+            },
+            imageBuffer: ffmpegRes.buffer,
+          };
+        } catch (ffmpegErr) {
+          console.warn(`[gemini] Định dạng ảnh ${detectedMime} không hỗ trợ và không thể convert sang JPEG (sharp & ffmpeg):`, convErr, ffmpegErr);
+          return {
+            error: "UNSUPPORTED_IMAGE_FORMAT",
+            unsupportedMime: detectedMime,
+            textContent: `[Ảnh đính kèm có định dạng "${detectedMime}" hiện chưa được AI hỗ trợ giải mã. Vui lòng chụp lại màn hình hoặc lưu ảnh dạng JPG/PNG để bot phân tích nhé!]`,
+          };
+        }
       }
     }
 

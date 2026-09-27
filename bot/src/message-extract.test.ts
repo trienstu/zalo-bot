@@ -270,5 +270,33 @@ test("parseImagePromptAndRatio: KHÔNG nhầm lẫn câu hỏi văn bản thông
   assert.equal(parseImagePromptAndRatio("sửa đổi điều lệ công ty cổ phần có cần họp đại hội đồng cổ đông"), null);
 });
 
+test("normalizeZaloMediaUrl: tự động chuẩn hóa URL ảnh .jxl và /jxl/ sang .jpg và /jpg/ trên Zalo CDN", async () => {
+  const { normalizeZaloMediaUrl, extractMediaUrl, collectCandidateUrls } = await import("./message-extract.js");
+  const jxlUrl = "https://photo-stal-13.zdn.vn/gr/jxl/0ae0654576d2a98cf0c3/2aOboR1XpTRA0L0ja9Oev1IgLzv3yyshOKAe9WEa.jxl";
+  const expectedJpg = "https://photo-stal-13.zdn.vn/gr/jpg/0ae0654576d2a98cf0c3/2aOboR1XpTRA0L0ja9Oev1IgLzv3yyshOKAe9WEa.jpg";
+
+  assert.equal(normalizeZaloMediaUrl(jxlUrl), expectedJpg);
+
+  // Không đổi nếu không phải Zalo CDN
+  assert.equal(normalizeZaloMediaUrl("https://example.com/test.jxl"), "https://example.com/test.jxl");
+
+  // collectCandidateUrls ưu tiên URL chuẩn JPG lên đầu
+  const candidates = collectCandidateUrls([{ hdUrl: jxlUrl }]);
+  assert.equal(candidates[0], expectedJpg);
+  assert.ok(candidates.includes(jxlUrl));
+
+  // extractMediaUrl tự động trả về JPG chuẩn
+  const payload = {
+    data: {
+      msgType: "chat.photo",
+      content: {
+        href: jxlUrl,
+      },
+    },
+  };
+  assert.equal(extractMediaUrl(payload), expectedJpg);
+});
+
+
 
 

@@ -3,6 +3,8 @@ import sharp from "sharp";
 import { createWorker, type Worker } from "tesseract.js";
 import { fetch } from "undici";
 import { config } from "../config.js";
+import { isJxlBuffer, transcodeImageWithFfmpeg } from "../image-utils.js";
+import { normalizeZaloMediaUrl } from "../message-extract.js";
 
 /**
  * Đọc chữ trong ảnh tuyển dụng bằng Tesseract chạy ngay trên máy.
@@ -104,10 +106,20 @@ export function mergeOcrLines(chunks: string[]): string {
 /** Đọc chữ trong MỘT ảnh. Ảnh hỏng hoặc Tesseract lỗi thì trả chuỗi rỗng, không ném. */
 export async function ocrImage(buffer: Buffer): Promise<string> {
   try {
+    let inputBuf = buffer;
+    if (isJxlBuffer(inputBuf)) {
+      try {
+        const converted = await transcodeImageWithFfmpeg(inputBuf, "jpeg");
+        inputBuf = converted.buffer;
+      } catch (jxlErr) {
+        console.warn(`[ocr] không thể transcode ảnh JXL trước khi OCR: ${String(jxlErr)}`);
+      }
+    }
+
     const worker = await getWorker();
-    const meta = await sharp(buffer).metadata();
+    const meta = await sharp(inputBuf).metadata();
     const width = Math.min(meta.width ?? MAX_WIDTH, MAX_WIDTH);
-    const base = sharp(buffer).resize({ width, withoutEnlargement: true });
+    const base = sharp(inputBuf).resize({ width, withoutEnlargement: true });
     const height = Math.round(((meta.height ?? width) * width) / (meta.width ?? width));
 
     const chunks: string[] = [];
@@ -152,10 +164,11 @@ export async function downloadImage(
   url: string,
   headers: Record<string, string> = {},
 ): Promise<Buffer | null> {
+  const targetUrl = normalizeZaloMediaUrl(url);
   const maxRetries = 3;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const res = await fetch(url, {
+      const res = await fetch(targetUrl, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
           "Referer": "https://chat.zalo.me/",
@@ -185,6 +198,17 @@ export async function downloadImage(
         throw new Error("ảnh rỗng");
       }
       if (buffer.length > MAX_IMAGE_BYTES) throw new Error(`ảnh ${buffer.length} byte, quá nặng`);
+
+      if (isJxlBuffer(buffer)) {
+        try {
+          const converted = await transcodeImageWithFfmpeg(buffer, "jpeg");
+          return converted.buffer;
+        } catch (jxlErr) {
+          console.warn(`[ocr] không giải mã được ảnh JXL: ${String(jxlErr)}`);
+          return null;
+        }
+      }
+
       return buffer;
     } catch (e) {
       if (attempt >= maxRetries) {

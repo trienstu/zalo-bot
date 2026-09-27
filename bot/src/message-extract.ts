@@ -62,6 +62,23 @@ export function extractMediaSummary(payload: any): { type: "image" | "video" | "
 }
 
 /**
+ * Chuẩn hóa URL ảnh trên Zalo CDN:
+ * Tự động chuyển các URL ảnh định dạng JPEG XL (/jxl/ hoặc .jxl) sang chuẩn JPEG (/jpg/ và .jpg).
+ * Zalo CDN tự động transcode và phục vụ file ảnh JPEG chất lượng cao tương ứng,
+ * giúp các thư viện AI và Vision API đọc được ngay lập tức mà không gặp lỗi định dạng.
+ */
+export function normalizeZaloMediaUrl(url?: string | null): string {
+  if (!url || typeof url !== "string") return "";
+  const trimmed = url.trim();
+  if (/zdn\.vn|zadn\.vn|zalo/i.test(trimmed)) {
+    if (trimmed.includes("/jxl/") || /\.jxl(?=[\?#]|$)/i.test(trimmed)) {
+      return trimmed.replace(/\/jxl\//g, "/jpg/").replace(/\.jxl(?=[\?#]|$)/gi, ".jpg");
+    }
+  }
+  return trimmed;
+}
+
+/**
  * Quét sâu gom tất cả các candidate URL hợp lệ từ các object, array hoặc chuỗi JSON.
  */
 export function collectCandidateUrls(sources: unknown[]): string[] {
@@ -73,6 +90,10 @@ export function collectCandidateUrls(sources: unknown[]): string[] {
     if (typeof node === "string") {
       const trimmed = node.trim();
       if (/^https?:\/\//i.test(trimmed)) {
+        const normalized = normalizeZaloMediaUrl(trimmed);
+        if (normalized !== trimmed) {
+          urls.push(normalized);
+        }
         urls.push(trimmed);
         return;
       }
@@ -112,7 +133,12 @@ export function collectCandidateUrls(sources: unknown[]): string[] {
       for (const key of priorityKeys) {
         const val = record[key];
         if (typeof val === "string" && /^https?:\/\//i.test(val.trim())) {
-          urls.push(val.trim());
+          const trimmed = val.trim();
+          const normalized = normalizeZaloMediaUrl(trimmed);
+          if (normalized !== trimmed) {
+            urls.push(normalized);
+          }
+          urls.push(trimmed);
         }
       }
       for (const [k, v] of Object.entries(record)) {
@@ -142,16 +168,16 @@ export function extractMediaUrl(payload: any): string | null {
 
   // Nếu có media summary (ảnh/video/voice), trả về candidate URL đầu tiên
   if (extractMediaSummary(payload) !== null) {
-    return urls[0] || null;
+    return normalizeZaloMediaUrl(urls[0]) || null;
   }
 
   // Nếu không có media summary rõ ràng nhưng có URL media/ảnh thực thụ (Zalo CDN hoặc đuôi ảnh/video)
   const mediaCandidate = urls.find((u) =>
-    /\.(?:jpe?g|png|webp|gif|bmp|mp4|mov|m4a|mp3|wav)(?:\?|$)/i.test(u) ||
+    /\.(?:jpe?g|png|webp|gif|bmp|jxl|mp4|mov|m4a|mp3|wav)(?:\?|$)/i.test(u) ||
     /zdn\.vn|chat-photo|res-zalo|zaloapp/i.test(u)
   );
 
-  return mediaCandidate || null;
+  return mediaCandidate ? normalizeZaloMediaUrl(mediaCandidate) : null;
 }
 
 /**
@@ -328,7 +354,7 @@ export function extractQuote(payload: any): QuotedMessage | null {
   ]);
 
   if (urls.length > 0) {
-    mediaUrl = urls[0];
+    mediaUrl = normalizeZaloMediaUrl(urls[0]);
   }
 
   const rawType = String(quote.msgType || quote.type || "").toLowerCase();
@@ -337,7 +363,8 @@ export function extractQuote(payload: any): QuotedMessage | null {
     rawType.includes("image") ||
     text.includes("[Hình ảnh]") ||
     text.includes("[Ảnh]") ||
-    Boolean(mediaUrl && /\.(?:jpg|jpeg|png|webp|gif|bmp)(?:\?|$)/i.test(mediaUrl));
+    Boolean(mediaUrl && /\.(?:jpg|jpeg|png|webp|gif|bmp|jxl)(?:\?|$)/i.test(mediaUrl)) ||
+    Boolean(mediaUrl && /photo-stal|chat-photo/i.test(mediaUrl));
 
   const isVideo =
     rawType.includes("video") ||
@@ -437,7 +464,7 @@ export function extractFileAttachment(payload: any): FileAttachment | null {
 
   // 1. Tìm file gửi trực tiếp trong tin nhắn
   const urls = collectCandidateUrls([content, params, attach, data]);
-  let url = urls.length > 0 ? urls[0] : undefined;
+  let url = urls.length > 0 ? normalizeZaloMediaUrl(urls[0]) : undefined;
 
   let name = String(
     content?.title ||
@@ -463,7 +490,7 @@ export function extractFileAttachment(payload: any): FileAttachment | null {
   if (!url && rawMsg) {
     const urlMatch = rawMsg.match(/https?:\/\/[^\s]+/i);
     if (urlMatch) {
-      url = urlMatch[0];
+      url = normalizeZaloMediaUrl(urlMatch[0]);
     }
   }
 
@@ -484,7 +511,7 @@ export function extractFileAttachment(payload: any): FileAttachment | null {
     const quote = (parseObjectMaybe(quoteObj) || (typeof quoteObj === "object" ? quoteObj : null)) as Record<string, any> | null;
     if (quote) {
       const quoteUrls = collectCandidateUrls([quote, quote.attach, quote.params, quote.propertyExt, quote.content]);
-      let quoteUrl = quoteUrls.length > 0 ? quoteUrls[0] : undefined;
+      let quoteUrl = quoteUrls.length > 0 ? normalizeZaloMediaUrl(quoteUrls[0]) : undefined;
       let quoteFileName = String(
         quote.title ||
         quote.fileName ||
@@ -509,7 +536,7 @@ export function extractFileAttachment(payload: any): FileAttachment | null {
       if (!quoteUrl && quoteMsg) {
         const urlMatch = quoteMsg.match(/https?:\/\/[^\s]+/i);
         if (urlMatch) {
-          quoteUrl = urlMatch[0];
+          quoteUrl = normalizeZaloMediaUrl(urlMatch[0]);
         }
       }
 
