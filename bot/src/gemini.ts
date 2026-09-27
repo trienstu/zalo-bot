@@ -1328,6 +1328,39 @@ const AGENT_TOOLS_DECLARATION = {
   ],
 };
 
+function convertGeminiSchemaToOpenAISchema(schema: any): any {
+  if (!schema || typeof schema !== "object") return schema;
+  if (Array.isArray(schema)) return schema.map(convertGeminiSchemaToOpenAISchema);
+
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(schema)) {
+    if (k === "type" && typeof v === "string") {
+      out.type = v.toLowerCase();
+    } else if (k === "properties" && v && typeof v === "object") {
+      out.properties = {};
+      for (const [propK, propV] of Object.entries(v as Record<string, any>)) {
+        out.properties[propK] = convertGeminiSchemaToOpenAISchema(propV);
+      }
+    } else if (k === "items" && v && typeof v === "object") {
+      out.items = convertGeminiSchemaToOpenAISchema(v);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+export function getOpenAIAgentTools(): any[] {
+  return AGENT_TOOLS_DECLARATION.functionDeclarations.map((decl) => ({
+    type: "function",
+    function: {
+      name: decl.name,
+      description: decl.description,
+      parameters: convertGeminiSchemaToOpenAISchema(decl.parameters),
+    },
+  }));
+}
+
 export async function executeAgentTool(name: string, args: Record<string, any>): Promise<any> {
   switch (name) {
     case "weather_forecast": {
@@ -1564,15 +1597,212 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
   }
 }
 
+async function call9RouterAgentLoop(
+  effectiveSystem: string,
+  user: string,
+  options?: AgentLoopOptions,
+): Promise<string | null> {
+  const router = hybridAgentSettings?.nineRouter;
+  if (!router?.enabled || !router.apiKey) return null;
+
+  const baseUrl = (router.baseUrl || "http://127.0.0.1:20128/v1").replace(/\/+$/, "");
+  const targetModel = options?.model || router.chatModel || "ag/gemini-3.7-flash-medium";
+  const timeoutMs = (options as any)?.timeoutMs || router.timeoutMs || 45_000;
+  const maxTurns = options?.maxTurns || 3;
+  const temperature = options?.temperature ?? 0.2;
+
+  const allMedia = [...(options?.images || []), ...(options?.mediaParts || [])];
+  const userContent: Array<Record<string, unknown>> = [];
+
+  if (allMedia.length > 0) {
+    userContent.push({ type: "text", text: user });
+    for (const media of allMedia) {
+      const mime = media.mimeType || "image/jpeg";
+      const dataUrl = `data:${mime};base64,${media.data}`;
+      userContent.push({
+        type: "image_url",
+        image_url: { url: dataUrl },
+      });
+    }
+  }
+
+  const messages: Array<{ role: string; content?: any; tool_calls?: any[]; tool_call_id?: string; name?: string }> = [];
+  if (effectiveSystem) {
+    messages.push({ role: "system", content: effectiveSystem });
+  }
+  messages.push({
+    role: "user",
+    content: allMedia.length > 0 ? userContent : user,
+  });
+
+  const tools = getOpenAIAgentTools();
+
+  for (let turn = 0; turn < maxTurns; turn++) {
+    const requestBody: Record<string, unknown> = {
+      model: targetModel,
+      messages,
+      tools,
+      stream: false,
+      temperature,
+      ...(options?.maxTokens ? { max_tokens: options.maxTokens } : {}),
+    };
+
+    let resp: Response;
+    try {
+      resp = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${router.apiKey}`,
+        },
+        body: JSON.stringify(requestBody),
+      });
+    } catch (netErr) {
+      console.warn(`[9router-agent] Turn ${turn + 1} network error:`, netErr);
+      return null;
+    }
+
+    if (!resp.ok) {
+      const errText = await resp.text().catch(() => "");
+      console.warn(`[9router-agent] Turn ${turn + 1} HTTP ${resp.status}: ${errText.slice(0, 150)}`);
+      return null;
+    }
+
+    const data: any = await resp.json().catch(() => null);
+    const choice = data?.choices?.[0];
+    const message = choice?.message;
+    if (!message) return null;
+
+    const toolCalls = message.tool_calls;
+    if (!toolCalls || !Array.isArray(toolCalls) || toolCalls.length === 0) {
+      return String(message.content || "").trim();
+    }
+
+    messages.push({
+      role: "assistant",
+      content: message.content || null,
+      tool_calls: toolCalls,
+    });
+
+    console.log(
+      `[9router-agent] 🔄 Vòng ${turn + 1}/${maxTurns}: Model gọi ${toolCalls.length} tool(s): ` +
+        toolCalls.map((tc: any) => `${tc.function?.name}(${tc.function?.arguments || ""})`).join(", "),
+    );
+
+    for (const tc of toolCalls) {
+      const fnName = tc.function?.name;
+      let fnArgs: any = {};
+      try {
+        fnArgs = JSON.parse(tc.function?.arguments || "{}");
+      } catch {
+        fnArgs = {};
+      }
+
+      if (fnName === "generate_image") {
+        if (!fnArgs.imageUrl && options?.targetImageUrl) {
+          fnArgs.imageUrl = options.targetImageUrl;
+        }
+        if (options?.targetImageUrl && fnArgs.isEdit === undefined) {
+          fnArgs.isEdit = true;
+        }
+      }
+
+      options?.onToolCall?.(fnName, fnArgs);
+      const result = await executeAgentTool(fnName, fnArgs);
+
+      if (
+        (fnName === "generate_file" ||
+          fnName === "create_voice" ||
+          fnName === "generate_image" ||
+          fnName === "generate_music") &&
+        result?.success &&
+        options?.onFileGenerated
+      ) {
+        try {
+          await options.onFileGenerated({
+            ...result,
+            isMusic: fnName === "generate_music",
+          });
+        } catch (fileErr) {
+          console.warn(`[9router-agent] onFileGenerated for ${fnName} error:`, fileErr);
+        }
+      }
+
+      if (fnName === "python_interpreter" && result?.success && options?.onFileGenerated) {
+        const allFiles = [...(result.generatedImages || []), ...(result.generatedFiles || [])];
+        for (const itemPath of allFiles) {
+          try {
+            await options.onFileGenerated({
+              success: true,
+              filePath: itemPath,
+              fileName: path.basename(itemPath),
+              fileSize: fs.existsSync(itemPath) ? fs.statSync(itemPath).size : 0,
+            });
+          } catch (fileErr) {
+            console.warn("[9router-agent] onFileGenerated python runner error:", fileErr);
+          }
+        }
+      }
+
+      messages.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        name: fnName,
+        content: JSON.stringify(result || {}),
+      });
+    }
+  }
+
+  try {
+    const finalResp = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${router.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: targetModel,
+        messages,
+        stream: false,
+        temperature,
+      }),
+    });
+
+    if (finalResp.ok) {
+      const finalData: any = await finalResp.json().catch(() => null);
+      const finalContent = finalData?.choices?.[0]?.message?.content;
+      if (finalContent) return String(finalContent).trim();
+    }
+  } catch {}
+
+  return null;
+}
+
 /**
  * Agent Loop gọi Gemini với khả năng tự chọn tool (web_search, fetch_url, wiki_lookup, hn_search, arxiv_search, github_search).
- * Tối đa 3 vòng lặp. Tự động bảo lưu thoughtSignature và cascading fallback an toàn.
+ * Ưu tiên 9Router (ag/gemini-3.7-flash-medium); tự động fallback sang Google AI Studio keys nếu cần.
  */
 export async function callGeminiAgentLoop(
   system: string,
   user: string,
   options?: AgentLoopOptions,
 ): Promise<string> {
+  const effectiveSystem = system?.includes("SYSTEM TEMPORAL ANCHOR")
+    ? system
+    : (system ? `${getSystemTemporalPrompt()}\n\n${system}` : getSystemTemporalPrompt());
+
+  // 1. ƯU TIÊN 1: Chạy qua 9Router Agent Loop (ag/gemini-3.7-flash-medium) nếu đã cấu hình
+  try {
+    const routerResult = await call9RouterAgentLoop(effectiveSystem, user, options);
+    if (routerResult) {
+      return routerResult;
+    }
+  } catch (routerErr) {
+    console.warn("[gemini-agent] 9Router agent loop gặp sự cố, chuyển sang Google AI Studio fallback:", routerErr);
+  }
+
   const rawKey = (process.env.GEMINI_API_KEY || config.geminiApiKey || "").trim();
   const apiKeys = rawKey.split(",").map((k) => k.trim()).filter(Boolean);
 
@@ -1609,10 +1839,6 @@ export async function callGeminiAgentLoop(
   ];
 
   let apiKeyIdx = botKeyOffset % apiKeys.length;
-
-  const effectiveSystem = system?.includes("SYSTEM TEMPORAL ANCHOR")
-    ? system
-    : (system ? `${getSystemTemporalPrompt()}\n\n${system}` : getSystemTemporalPrompt());
 
   try {
     let currentModel = primaryModel;

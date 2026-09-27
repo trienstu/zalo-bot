@@ -24,6 +24,60 @@ export interface ExtractedToolCall {
 }
 
 /**
+ * Trích xuất bảng Markdown thành dữ liệu headers và rows cho Excel
+ */
+export function extractMarkdownTable(text: string): { headers: string[]; rows: string[][] } | null {
+  if (!text || !text.includes("|")) return null;
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  let headerIndex = -1;
+
+  for (let i = 0; i < lines.length - 1; i++) {
+    const line = lines[i] || "";
+    const nextLine = lines[i + 1] || "";
+    // Dòng ngăn cách Markdown: |:---:|---|:---| hoặc |---|---|
+    if (
+      line.includes("|") &&
+      nextLine.includes("|") &&
+      /^\|?[\s:-]+(?:\|[\s:-]+)+\|?$/.test(nextLine)
+    ) {
+      headerIndex = i;
+      break;
+    }
+  }
+
+  if (headerIndex === -1) return null;
+
+  const rawHeader = lines[headerIndex] || "";
+  const headers = rawHeader
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((h) => h.trim())
+    .filter(Boolean);
+
+  if (headers.length < 2) return null;
+
+  const rows: string[][] = [];
+  for (let i = headerIndex + 2; i < lines.length; i++) {
+    const line = lines[i] || "";
+    if (!line.includes("|")) break;
+    if (/^\|?[\s:-]+(?:\|[\s:-]+)+\|?$/.test(line)) continue;
+    const cells = line
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .split("|")
+      .map((c) => c.trim());
+    if (cells.length > 0 && cells.some((c) => c.length > 0)) {
+      while (cells.length < headers.length) cells.push("");
+      rows.push(cells.slice(0, headers.length));
+    }
+  }
+
+  if (rows.length < 1) return null;
+  return { headers, rows };
+}
+
+/**
  * Bóc tách lệnh generate_file từ text thô
  */
 export function extractSimulatedGenerateFile(text: string): ExtractedToolCall | null {
@@ -65,6 +119,50 @@ export function extractSimulatedGenerateFile(text: string): ExtractedToolCall | 
         }
       } catch {}
     }
+
+    // Auto Table-to-Excel Fallback: Nếu câu trả lời chứa bảng Markdown và có dữ liệu số liệu/bảng kê/hóa đơn
+    const table = extractMarkdownTable(text);
+    if (table && table.rows.length >= 1) {
+      const indicatesTableData =
+        /(?:bảng|hóa đơn|hoa don|chi tiêu|chi tieu|thu chi|doanh thu|báo giá|bao gia|lương|luong|danh sách|danh sach|kê khai|ke khai|số liệu|so lieu|thống kê|thong ke|chi tiết|chi tiet|stt|đơn vị|don vi|đơn giá|don gia|thành tiền|thanh tien|tổng cộng|tong cong|excel|xlsx)/i.test(
+          text,
+        );
+
+      if (indicatesTableData) {
+        const textBeforeTable = text.slice(0, text.indexOf(table.headers[0] || "")).trim();
+        const titleLines = textBeforeTable
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter((l) => l.length > 3 && !l.startsWith("|"));
+        const lastTitle = titleLines.length > 0 ? titleLines[titleLines.length - 1] : "";
+        const guessedTitle =
+          lastTitle
+            ? lastTitle.replace(/^[#*-\s]+/, "").slice(0, 50).trim()
+            : "Bang_du_lieu";
+        const fileName =
+          guessedTitle
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/đ/gi, "d")
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "_")
+            .replace(/^_+|_+$/g, "") || "bang_du_lieu";
+
+        return {
+          toolName: "generate_file",
+          args: {
+            fileType: "xlsx",
+            fileName: `${fileName}.xlsx`,
+            title: guessedTitle,
+            excelHeaders: table.headers,
+            excelRows: table.rows,
+            theme: "navy",
+          },
+          rawMatch: "",
+        };
+      }
+    }
+
     return null;
   }
 
@@ -631,13 +729,13 @@ export async function interceptAndExecuteSimulatedTool(
 
   // 4. Kiểm tra generate_file giả lập
   const extracted = extractSimulatedGenerateFile(text);
-  if (!extracted || !extracted.args.content) {
+  if (!extracted || (!extracted.args.content && !extracted.args.excelRows && !extracted.args.slides && !extracted.args.sheets)) {
     return text;
   }
 
   try {
     const fileType = extracted.args.fileType || "docx";
-    const content = extracted.args.content;
+    const content = extracted.args.content || "";
     const title = extracted.args.title || "Tài liệu";
     const fileName = extracted.args.fileName || (fileType === "docx" ? "tai_lieu.docx" : `tai_lieu.${fileType}`);
 
@@ -647,6 +745,7 @@ export async function interceptAndExecuteSimulatedTool(
     );
 
     const result = await executeAgentTool("generate_file", {
+      ...extracted.args,
       fileType,
       content,
       title,
@@ -661,8 +760,11 @@ export async function interceptAndExecuteSimulatedTool(
       }
     }
 
-    // Xóa đoạn gọi tool thô khỏi tin nhắn chat
-    let cleanedText = text.replace(extracted.rawMatch, "").trim();
+    // Xóa đoạn gọi tool thô khỏi tin nhắn chat nếu có rawMatch cụ thể
+    let cleanedText = text;
+    if (extracted.rawMatch) {
+      cleanedText = text.replace(extracted.rawMatch, "").trim();
+    }
 
     // Nếu sau khi xóa, tin nhắn chỉ còn câu hỏi dạng "Anh đã tải được file chưa?",
     // thay bằng câu xác nhận hoàn tất lịch sự, rõ ràng:

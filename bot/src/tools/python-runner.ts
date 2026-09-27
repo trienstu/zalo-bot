@@ -217,16 +217,22 @@ export async function runPythonCode(code: string, timeoutMs = 25000): Promise<Py
     const generatedImages: string[] = [];
     const generatedFiles: string[] = [];
 
+    const VALID_GENERATED_IMAGE_EXTENSIONS = /\.(png|jpg|jpeg|webp)$/i;
+    const VALID_GENERATED_FILE_EXTENSIONS = /\.(xlsx|xls|csv|docx|doc|pptx|ppt|pdf|html|json|zip)$/i;
+
     for (const f of files) {
-      if (f.startsWith(`temp_${runId}`)) continue;
+      if (f.startsWith(`temp_${runId}`) || f.endsWith(".py")) continue;
       const fullPath = path.join(GENERATED_FILES_DIR, f);
       try {
         const stats = fs.statSync(fullPath);
-        if (stats.mtimeMs >= startTime - 1000) {
-          if (/\.(png|jpg|jpeg|webp)$/i.test(f)) {
+        if (stats.mtimeMs >= startTime - 1000 && stats.size > 0) {
+          if (VALID_GENERATED_IMAGE_EXTENSIONS.test(f)) {
             generatedImages.push(fullPath);
-          } else if (!f.endsWith(".py")) {
-            generatedFiles.push(fullPath);
+          } else if (VALID_GENERATED_FILE_EXTENSIONS.test(f)) {
+            // Không nhận các file tải về tạm hoặc file test trung gian
+            if (!/^(?:test|temp|input|download|sample|debug|raw)[_.-]/i.test(f)) {
+              generatedFiles.push(fullPath);
+            }
           }
         }
       } catch {}

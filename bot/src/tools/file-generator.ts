@@ -90,7 +90,7 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
   }
 
   const hasFileTarget =
-    /(?:powerpoint|slide|pptx|trình\s*chiếu|thuyết\s*trình|words?|docx|văn\s*bản\s*hành\s*chính|hợp\s*đồng|excel|xlsx|bảng\s*tính|báo\s*giá|csv|html|báo\s*cáo\s*web|pdf|markdown|\.md\b|file|tệp|voice|podcast|thu\s*âm|ghi\s*âm|audio|giọng\s*đọc|nhạc|bài\s*hát|ca\s*khúc|bản\s*nhạc|beat|track|poster|biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|hình\s*ảnh|ảnh|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/iu.test(combined);
+    /(?:powerpoint|slide|pptx|ppt|trình\s*chiếu|thuyết\s*trình|words?|docx|văn\s*bản\s*hành\s*chính|hợp\s*đồng|excel|excell|exel|xlsx|bảng\s*tính|báo\s*giá|csv|html|báo\s*cáo\s*web|pdf|markdown|\.md\b|file|tệp|voice|podcast|thu\s*âm|ghi\s*âm|audio|giọng\s*đọc|nhạc|bài\s*hát|ca\s*khúc|bản\s*nhạc|beat|track|poster|biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|hình\s*ảnh|ảnh|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/iu.test(combined);
 
   // Nhận diện nếu đang trích dẫn một file/ảnh/biểu đồ/voice bot đã tạo trước đó
   const isQuotingGeneratedArtifact =
@@ -112,9 +112,9 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
     return true;
   }
 
-  // Nhận diện cấu trúc ngữ pháp tự nhiên đưa nội dung vào/ra file hoặc voice
+  // Nhận diện cấu trúc ngữ pháp tự nhiên đưa nội dung vào/ra file hoặc voice (VD: "chuyển nó về dạng excell", "xuất thành file word")
   const hasStructuralDirection =
-    /(?:vào|ra|thành|sang|qua|lên|bằng)\s+(?:thành\s+)?(?:file\s+)?(?:docx|words?|excel|xlsx|bảng\s*tính|pptx|powerpoint|slide|pdf|csv|txt|md|markdown|html|voice|audio)/iu.test(combined);
+    /(?:vào|ra|thành|sang|qua|lên|bằng|về|dưới|dạng)\s+(?:thành\s+)?(?:dạng\s+)?(?:file\s+)?(?:docx|words?|excel|excell|exel|xlsx|bảng\s*tính|pptx|ppt|powerpoint|slide|pdf|csv|txt|md|markdown|html|voice|audio)/iu.test(combined);
 
   const actionPattern =
     /(?:tạo|xuất|soạn|làm|viết|gửi|lưu|thiết\s*kế|chuyển\s*(?:thành|sang|qua|lên|ra)?|đổi\s*(?:thành|sang|qua)?|bật|convert|generate|export|triển\s*khai|đọc\s*(?:giúp|hộ|cho|bằng)?|ngâm(?:\s+thơ)?|thu\s*âm|ghi\s*âm|vẽ(?:\s+lại)?|làm(?:\s+lại)?|thiết\s*kế(?:\s+lại)?|sửa(?:\s+lại)?|chỉnh(?:\s+lại)?|đóng\s*gói|gom|cho\s*vào|bỏ\s*vào|lưu\s*vào|nhét\s*vào|in\s*ra|trả\s*(?:file|cho)|gửi\s*(?:file|cho)|đưa\s*(?:file|cho))/iu;

@@ -16,10 +16,21 @@ export function isBotStatusOrMetaQuestion(text: string): boolean {
     "chưa thấy ảnh", "chưa có ảnh", "xong chưa", "chưa xong à", "chưa xong hả",
     "sao lâu thế", "sao lâu vậy", "sao lâu quá", "chờ lâu quá", "chờ lâu thế",
     "đang làm gì đấy", "làm đến đâu rồi", "bot đâu rồi", "bot ngủ à", "bot đơ à",
-    "sao không trả lời", "sao im thế", "render xong chưa", "vẽ xong chưa"
+    "sao không trả lời", "sao im thế", "render xong chưa", "vẽ xong chưa",
+    "trình bày nhiều", "trình bày nhiều làm gì", "xuất kết quả nhanh", "kết quả nhanh là được",
+    "nói nhiều quá", "nói nhiều làm gì", "lắm lời", "làm nhanh lên", "làm nhanh đi",
+    "làm lẹ đi", "xuất nhanh đi", "gửi kết quả nhanh",
   ];
 
-  return statusPhrases.some((p) => clean.includes(p) || t.includes(p));
+  if (statusPhrases.some((p) => clean.includes(p) || t.includes(p))) {
+    return true;
+  }
+
+  const isUrgingOrComplaint =
+    /\b(?:trình\s*bày|giải\s*thích|nói|nói\s*làm\s*gì|nói\s*nhiều|lắm\s*lời|lan\s*man|dài\s*dòng|dài\s*dòng\s*làm\s*gì)\b.*?\b(?:nhanh|lẹ|gọn|luôn|nhanh\s*lên|lẹ\s*lên|được\s*rồi|kết\s*quả|xuất\s*kết\s*quả|xong\s*chưa)\b/iu.test(clean) ||
+    /\b(?:nhanh\s*lên|nhanh\s*đi|lẹ\s*lên|lẹ\s*đi|làm\s*nhanh|xuất\s*nhanh|gửi\s*nhanh|xuất\s*luôn|làm\s*luôn|mau\s*lên|gấp\s*lên|làm\s*lẹ)\b/iu.test(clean);
+
+  return isUrgingOrComplaint;
 }
 
 export type SearchIntent = "fact_check" | "realtime_news" | "project_qa" | "knowledge" | "chat";
