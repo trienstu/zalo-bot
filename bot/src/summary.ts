@@ -29,19 +29,23 @@ const VN_UTC_OFFSET_MS = 7 * 60 * 60 * 1000;
  */
 export const TRANSCRIPT_MAX_CHARS = 80_000;
 
-/** Trần ký tự CỨNG của MỖI tin gửi Zalo — tin quá dài dễ bị Zalo cắt/từ chối. */
-export const SUMMARY_MAX_CHARS = 3_000;
+/**
+ * Trần ký tự CỨNG của MỖI tin gửi Zalo — tin quá dài dễ bị Zalo cắt/từ chối.
+ * Zalo có trần cứng ~2.050 ký tự/tin (lỗi 118 nếu vượt). Đặt 1.950 để có biên độ
+ * an toàn 100 ký tự, tránh việc socket transport phải cắt vụn tin mất tiêu đề.
+ */
+export const SUMMARY_MAX_CHARS = 1_950;
 
 /** Trần số tin mặc định cho một bản tóm tắt (override qua SUMMARY_MAX_PARTS). */
 export const MAX_SUMMARY_PARTS = 3;
 
 /**
- * Độ dài mục tiêu dặn model theo trần số tin: ~1500 ký tự "ruột" mỗi tin —
- * nằm thoải mái dưới sức chứa thật (~2950/tin) để gần như không bao giờ phải
+ * Độ dài mục tiêu dặn model theo trần số tin: ~1200 ký tự "ruột" mỗi tin —
+ * nằm thoải mái dưới sức chứa thật (~1900/tin) để gần như không bao giờ phải
  * cắt gọn.
  */
 export function summaryTargetChars(maxParts: number): number {
-  return maxParts * 1_500;
+  return maxParts * 1_200;
 }
 
 /**

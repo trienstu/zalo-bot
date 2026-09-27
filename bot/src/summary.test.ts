@@ -185,8 +185,8 @@ test("composeSummaryMessages: nội dung ngắn → 1 tin, không đánh số ph
 });
 
 test("composeSummaryMessages: nội dung dài → chia nhiều tin đánh số, không mất ý, footer ở tin cuối", () => {
-  // 40 gạch đầu dòng ~190 ký tự → ~7.6K ký tự, phải chia 3 tin.
-  const bullets = Array.from({ length: 40 }, (_, i) => `- Chủ đề ${i + 1}: ${"nội dung ".repeat(20)}`);
+  // 24 gạch đầu dòng ~190 ký tự → ~4.5K ký tự, chia 3 tin (mỗi tin ≤ 1.950 ký tự).
+  const bullets = Array.from({ length: 24 }, (_, i) => `- Chủ đề ${i + 1}: ${"nội dung ".repeat(20)}`);
   const parts = composeSummaryMessages({
     dayLabel: "10/08/2026",
     summary: bullets.join("\n"),
@@ -203,7 +203,7 @@ test("composeSummaryMessages: nội dung dài → chia nhiều tin đánh số, 
     assert.ok(p.includes(`(${i + 1}/${parts.length})`), `tin ${i + 1} thiếu đánh số`);
   }
   const joined = parts.join("\n");
-  for (const b of ["Chủ đề 1:", "Chủ đề 20:", "Chủ đề 40:"]) {
+  for (const b of ["Chủ đề 1:", "Chủ đề 12:", "Chủ đề 24:"]) {
     assert.ok(joined.includes(b), `mất ý "${b}"`);
   }
   // Footer thống kê chỉ nằm ở tin cuối.
