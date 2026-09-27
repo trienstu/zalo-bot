@@ -14,6 +14,8 @@ import {
   type ToolIntent,
 } from "./hybrid-routing.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
+import { checkIsFileOrVoiceGeneration } from "./tools/file-generator.js";
+import { isPresentationVideoRequest } from "./workers/presentation-video-processor.js";
 
 export type PlannerTaskType =
   | "presentation_video"
@@ -438,6 +440,22 @@ export async function planSearchQueries(params: {
       intent: "knowledge",
       queries: [],
       summaryIntent: "Người dùng đồng ý / giục thực thi tác vụ tạo nội dung đã chốt",
+      responseMode: "action",
+      toolIntent: "create",
+    }, question, quoteText);
+  }
+
+  // Nhận diện câu lệnh tạo file, tạo/sửa ảnh, vẽ tranh, tạo voice hoặc video thuyết trình rõ ràng
+  // Bỏ qua bước gọi LLM tốn 6s của planner vì tác vụ tạo media/ảnh/file không dùng kết quả tìm kiếm RSS/Google
+  const isVideo = isPresentationVideoRequest(question, quoteText);
+  const isFileOrMedia = checkIsFileOrVoiceGeneration(question, quoteText);
+  if (isVideo || isFileOrMedia) {
+    return applyExecutionSignals({
+      needsSearch: false,
+      intent: "knowledge",
+      queries: [],
+      summaryIntent: isVideo ? "Người dùng yêu cầu dựng video thuyết trình" : "Người dùng yêu cầu tạo file / vẽ ảnh / âm thanh",
+      taskType: isVideo ? "presentation_video" : "file_generation",
       responseMode: "action",
       toolIntent: "create",
     }, question, quoteText);

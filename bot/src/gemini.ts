@@ -571,7 +571,7 @@ export async function call9Router(
   if (!router?.enabled || !router.apiKey) return null;
 
   const baseUrl = (router.baseUrl || "http://127.0.0.1:20128/v1").replace(/\/+$/, "");
-  const targetModel = options?.model || router.chatModel || "ag/gemini-3.7-flash-medium";
+  const targetModel = options?.model || router.chatModel || "ag/gemini-3.8-flash-medium";
   const timeoutMs = options?.timeoutMs || router.timeoutMs || 45_000;
 
   const allMedia = [...(options?.images || []), ...(options?.mediaParts || [])];
@@ -904,7 +904,7 @@ export async function callGemini(
   // Fallback qua cổng 9Router (ag/gemini-3.7-flash-medium hoặc Codex)
   if (hybridAgentSettings?.nineRouter?.enabled && hybridAgentSettings.nineRouter.apiKey) {
     try {
-      const fallback9RouterModel = hybridAgentSettings.nineRouter.chatModel || "ag/gemini-3.7-flash-medium";
+      const fallback9RouterModel = hybridAgentSettings.nineRouter.chatModel || "ag/gemini-3.8-flash-medium";
       console.log(`[gemini] 🚀 Google API gặp sự cố, kích hoạt tầng dự phòng cao cấp qua 9Router (${fallback9RouterModel})...`);
       const routerFallbackRes = await call9Router(effectiveSystem, user, {
         model: fallback9RouterModel,

@@ -42,7 +42,7 @@ function detectToolIntent(text: string): ToolIntent {
   if (isHypothetical) return "none";
 
   const asksToCreate =
-    /\b(?:tao|xuat|lam|viet|thiet ke|ve|lap|dong goi|gom|cho vao|nhet vao|luu vao|in ra|chuyen|phoi|sang tac|hat|dung|quay)\b.{0,36}\b(?:file|tep|word|excel|docx|xlsx|pdf|bang|bieu do|do thi|so do|mindmap|infographic|anh|hinh|thiep|slide|powerpoint|pptx|video|clip|mp4|nhac|bai hat|ca khuc|beat|track|voice|podcast|audio|am thanh)\b/i.test(text) ||
+    /\b(?:tao|xuat|lam|viet|soan|thiet ke|ve|lap|dong goi|gom|cho vao|nhet vao|luu vao|in ra|chuyen|phoi|sang tac|hat|dung|quay|doc|ngam)\b.{0,36}\b(?:file|tep|word|excel|docx|xlsx|pdf|bang|bieu do|do thi|so do|mindmap|infographic|anh|hinh|thiep|slide|powerpoint|pptx|video|clip|mp4|nhac|bai hat|ca khuc|beat|track|voice|podcast|audio|am thanh|tho|bai tho)\b/i.test(text) ||
     /\b(?:vao|ra|thanh|sang)\s+(?:file\s+)?(?:docx|word|excel|xlsx|pptx|slide|video|clip|mp4|pdf|csv|txt)\b/i.test(text);
   if (asksToCreate) return "create";
 

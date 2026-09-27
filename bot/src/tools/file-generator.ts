@@ -117,7 +117,7 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
     /(?:vào|ra|thành|sang|qua|lên|bằng|về|dưới|dạng)\s+(?:thành\s+)?(?:dạng\s+)?(?:file\s+)?(?:docx|words?|excel|excell|exel|xlsx|bảng\s*tính|pptx|ppt|powerpoint|slide|pdf|csv|txt|md|markdown|html|voice|audio)/iu.test(combined);
 
   const actionPattern =
-    /(?:tạo|xuất|soạn|làm|viết|gửi|lưu|thiết\s*kế|chuyển\s*(?:thành|sang|qua|lên|ra)?|đổi\s*(?:thành|sang|qua)?|bật|convert|generate|export|triển\s*khai|đọc\s*(?:giúp|hộ|cho|bằng)?|ngâm(?:\s+thơ)?|thu\s*âm|ghi\s*âm|vẽ(?:\s+lại)?|làm(?:\s+lại)?|thiết\s*kế(?:\s+lại)?|sửa(?:\s+lại)?|chỉnh(?:\s+lại)?|đóng\s*gói|gom|cho\s*vào|bỏ\s*vào|lưu\s*vào|nhét\s*vào|in\s*ra|trả\s*(?:file|cho)|gửi\s*(?:file|cho)|đưa\s*(?:file|cho))/iu;
+    /(?:tạo|xuất|soạn|làm|dựng|quay|viết|gửi|lưu|thiết\s*kế|chuyển\s*(?:thành|sang|qua|lên|ra)?|đổi\s*(?:thành|sang|qua)?|bật|convert|generate|export|triển\s*khai|đọc\s*(?:giúp|hộ|cho|bằng)?|ngâm(?:\s+thơ)?|thu\s*âm|ghi\s*âm|vẽ(?:\s+lại)?|làm(?:\s+lại)?|thiết\s*kế(?:\s+lại)?|sửa(?:\s+lại)?|chỉnh(?:\s+lại)?|đóng\s*gói|gom|cho\s*vào|bỏ\s*vào|lưu\s*vào|nhét\s*vào|in\s*ra|trả\s*(?:file|cho)|gửi\s*(?:file|cho)|đưa\s*(?:file|cho))/iu;
 
   const isAffirmativeFollowUp =
     /^(?:ok(?:ela|ay|e)?|ừ|uh|u|dạ|da|vâng|vang|dc|được|chốt|nhất trí|duyệt|tiến hành)?[\s,.:;!-]*(?:soạn|làm|tạo|xuất|viết|triển\s*khai|chốt|triển|lên|đóng\s*gói|gom|trả\s*file|gửi\s*file|lấy\s*file|trả|gửi|lấy)\s*(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|luôn\s*đi|luôn\s*đi\s*e|luôn\s*hộ\s*e|luôn\s*nhé|luôn\s*nha|tiếp\s*đi|cho\s*mình\s*đi|cho\s*anh\s*đi|cho\s*em\s*đi|cho\s*mình|cho\s*anh|cho\s*em)?\b/iu.test(qLower.trim());
