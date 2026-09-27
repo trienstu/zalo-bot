@@ -725,10 +725,19 @@ export async function runBatchAudioJob(options: BatchAudioJobOptions): Promise<v
       );
     } catch {}
   } finally {
-    // Dọn dẹp thư mục tạm
+    // Dọn dẹp thư mục tạm và file zip tạm nếu nằm trong thư mục tạm hệ thống
     try {
-      if (fs.existsSync(tempExtractDir)) {
+      if (tempExtractDir && fs.existsSync(tempExtractDir)) {
         fs.rmSync(tempExtractDir, { recursive: true, force: true });
+      }
+    } catch {}
+    try {
+      if (
+        zipFilePath &&
+        fs.existsSync(zipFilePath) &&
+        (zipFilePath.includes("/tmp/") || zipFilePath.includes("\\tmp\\") || zipFilePath.includes("zalo_upload"))
+      ) {
+        fs.unlinkSync(zipFilePath);
       }
     } catch {}
   }

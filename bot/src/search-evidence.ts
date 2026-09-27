@@ -1,4 +1,26 @@
-import { isBotStatusOrMetaQuestion } from "./query-planner.js";
+/**
+ * Nhận diện câu hỏi thăm trạng thái / tiến trình hoạt động của bot
+ * (ví dụ: giục ảnh, hỏi xong chưa, bot đâu rồi, sao lâu thế...)
+ */
+export function isBotStatusOrMetaQuestion(text: string): boolean {
+  if (!text || !text.trim()) return false;
+  const t = text.toLowerCase().trim();
+  const clean = t
+    .replace(/(?:@\s*)?(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot|admin)(?=[^\p{L}\p{N}]|$)/gui, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const statusPhrases = [
+    "ảnh đâu", "hình đâu", "file đâu", "bài đâu", "kết quả đâu",
+    "sao chưa có ảnh", "sao chưa thấy ảnh", "ảnh của anh đâu", "ảnh của em đâu",
+    "chưa thấy ảnh", "chưa có ảnh", "xong chưa", "chưa xong à", "chưa xong hả",
+    "sao lâu thế", "sao lâu vậy", "sao lâu quá", "chờ lâu quá", "chờ lâu thế",
+    "đang làm gì đấy", "làm đến đâu rồi", "bot đâu rồi", "bot ngủ à", "bot đơ à",
+    "sao không trả lời", "sao im thế", "render xong chưa", "vẽ xong chưa"
+  ];
+
+  return statusPhrases.some((p) => clean.includes(p) || t.includes(p));
+}
 
 export type SearchIntent = "fact_check" | "realtime_news" | "project_qa" | "knowledge" | "chat";
 

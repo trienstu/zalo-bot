@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 
 import type { HybridAgentSettings } from "./hybrid-agent.js";
 
@@ -21,7 +22,7 @@ for (const p of baseEnvPaths) {
 const initialBotId = process.env.BOT_ID || process.argv.find((a) => a.startsWith("--bot="))?.split("=")[1]?.trim() || "bot-1";
 
 if (initialBotId && initialBotId !== "bot-1") {
-  const home = process.env.HOME || "/home/congtrien125";
+  const home = process.env.HOME || os.homedir();
   const botEnvCandidates = [
     path.resolve(home, "zalo-bot", "data", "bots", initialBotId, ".env"),
     path.resolve(home, "zalo-bot", "bot", "data", "bots", initialBotId, ".env"),
@@ -97,7 +98,7 @@ function resolvePaths(bId: string) {
   }
 
   // Danh sách các thư mục gốc có thể chứa data
-  const home = process.env.HOME || "/home/congtrien125";
+  const home = process.env.HOME || os.homedir();
   const candidateRoots = [
     path.resolve(home, "zalo-bot", "data"),
     path.resolve(home, "zalo-bot", "bot", "data"),

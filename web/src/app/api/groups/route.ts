@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import Database from "better-sqlite3";
 import { getBotInfo } from "@/lib/bot-registry";
 import { resolveBotIdFromRequest, resolveRequestBotIdSync } from "@/lib/bot-id";
@@ -8,7 +9,7 @@ import { resolveBotIdFromRequest, resolveRequestBotIdSync } from "@/lib/bot-id";
 export const dynamic = "force-dynamic";
 
 function getBotDbPath(reqUrl?: string, hostHeader?: string): string {
-  const home = process.env.HOME || "/home/congtrien125";
+  const home = process.env.HOME || os.homedir();
   const port = String(process.env.PORT || process.env.WEB_PORT || "");
   const isPort3002 =
     port === "3002" ||
@@ -47,7 +48,7 @@ function getBotDbPath(reqUrl?: string, hostHeader?: string): string {
 }
 
 async function getActiveBotDbPath(overrideBotId?: string, reqUrl?: string, hostHeader?: string): Promise<string> {
-  const home = process.env.HOME || "/home/congtrien125";
+  const home = process.env.HOME || os.homedir();
   const port = String(process.env.PORT || process.env.WEB_PORT || "");
   const isPort3002 =
     port === "3002" ||

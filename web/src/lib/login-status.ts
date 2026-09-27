@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 
 /**
  * Đọc trạng thái đăng nhập Zalo do bot ghi ra (qr.png + login-status.json).
@@ -17,7 +18,7 @@ const QR_DIR =
 import { getBotInfo } from "./bot-registry";
 
 export function getBotDataDir(botId = "bot-1"): string {
-  const home = process.env.HOME || "/home/congtrien125";
+  const home = process.env.HOME || os.homedir();
   const port = String(process.env.PORT || process.env.WEB_PORT || "");
   const isBot2 = port === "3002" || port === "3001" || process.env.BOT_ID === "bot-2" || botId === "bot-2";
 

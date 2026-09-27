@@ -2,7 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { config } from "./config.js";
-import { extractPublisherName, type GeminiImagePart } from "./gemini.js";
+import type { GeminiImagePart } from "./gemini-types.js";
+import { extractPublisherName } from "./publisher-utils.js";
 import { incrementGroundingUsage } from "./grounding-quota.js";
 
 interface ServiceAccountCredentials {

@@ -11,7 +11,8 @@ const sessionDir = fromBotDir(process.env.SESSION_DIR, "data");
 const dbPath = fromBotDir(process.env.SQLITE_DB_PATH, "data/bot.db");
 const vipPath = fromBotDir(process.env.VIP_LIST_PATH, "data/vip-list.json");
 
-const home = process.env.HOME || "/home/congtrien125";
+const os = require("node:os");
+const home = process.env.HOME || os.homedir();
 const localBot2Dir = path.resolve(__dirname, "../data/bots/bot-2");
 const vpsBot2Dir = path.resolve(home, "zalo-bot", "data", "bots", "bot-2");
 const bot2Dir = fs.existsSync(localBot2Dir) ? localBot2Dir : vpsBot2Dir;

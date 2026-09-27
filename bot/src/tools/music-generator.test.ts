@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkIsMusicRequest, generateMusic, isMusicConfigured } from "./music-generator.js";
+import { checkIsMusicRequest, generateMusic } from "./music-generator.js";
 import { extractSimulatedGenerateMusic } from "./simulated-tool-interceptor.js";
 
 test("checkIsMusicRequest nhận diện chính xác các yêu cầu tạo/sáng tác nhạc", () => {

@@ -1325,7 +1325,7 @@ async function handleHistoryQA(
     }
     if (fileRes?.mediaPart && fileRes.mediaPart.data && fileRes.mediaPart.data.length > 50) {
       mediaPart = fileRes.mediaPart;
-      console.log(`[member-assistant] ✅ Đã nạp file đa phương tiện thành công (${mediaPart.mimeType}, size: ${Math.round(mediaPart.data.length / 1024)} KB)`);
+      console.log(`[member-assistant] ✅ Đã nạp file đa phương tiện thành công (${fileRes.mediaPart.mimeType}, size: ${Math.round(fileRes.mediaPart.data.length / 1024)} KB)`);
 
       // 🛡️ LƯỚI BẢO HIỂM LOCAL OCR: Bóc tách trước chữ từ ảnh đính kèm
       if (fileRes.mediaPart.mimeType?.startsWith("image/") && fileRes.imageBuffer) {

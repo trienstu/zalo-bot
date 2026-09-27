@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 
 export interface LogLine {
   id: number;
@@ -61,7 +62,7 @@ export interface LogStreamInfo {
  * Lấy thư mục PM2 logs trên hệ thống (ưu tiên HOME/ .pm2/logs)
  */
 export function getPm2LogsDir(): string {
-  const home = process.env.HOME || "/home/congtrien125";
+  const home = process.env.HOME || os.homedir();
   return path.resolve(home, ".pm2", "logs");
 }
 

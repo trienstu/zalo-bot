@@ -97,6 +97,7 @@ test("audio-transcoder - Nhận diện định dạng âm thanh mở rộng", ()
 
   const fakeFlacHeader = Buffer.from([0x66, 0x4c, 0x61, 0x43]);
   assert.equal(detectAudioMimeType(fakeFlacHeader, "music.flac"), "audio/flac");
+  assert.equal(typeof transcodeAudioWithFfmpeg, "function");
 });
 
 test("checkIsFileOrVoiceGeneration - Nhận diện yêu cầu chuyển file âm thanh sang Word", () => {

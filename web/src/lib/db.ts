@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 
 /**
  * Mở CHUNG file SQLite của bot (read + ghi config/vip). Panel KHÔNG gọi Zalo —
@@ -268,7 +269,7 @@ import { getBotInfo } from "./bot-registry";
 const dbConnections = new Map<string, Database.Database>();
 
 export function getDb(botId = "bot-1"): Database.Database {
-  const home = process.env.HOME || "/home/congtrien125";
+  const home = process.env.HOME || os.homedir();
   const port = String(process.env.PORT || process.env.WEB_PORT || "");
   const targetBotId = (botId || "").trim() || (port === "3001" || port === "3002" || process.env.BOT_ID === "bot-2" ? "bot-2" : "bot-1");
 
@@ -360,7 +361,7 @@ export function getDb(botId = "bot-1"): Database.Database {
 /** Kiểm tra DB có tồn tại không (cho trang hiển thị thông báo thân thiện). */
 export function dbExists(botId = "bot-1"): boolean {
   const targetBotId = botId || "bot-1";
-  const home = process.env.HOME || "/home/congtrien125";
+  const home = process.env.HOME || os.homedir();
   const botInfo = getBotInfo(targetBotId);
   if (botInfo?.dbPath && fs.existsSync(botInfo.dbPath)) return true;
   if (targetBotId !== "bot-1") {
