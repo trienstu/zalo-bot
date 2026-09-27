@@ -17,7 +17,6 @@ import {
   upsertBotFriend,
   setFriendAllowDirect,
   getBotFriend,
-  getUserMemories,
 } from "./db/index.js";
 import { sendDirectText, sendDirectFile, sendDirectVoice, sendGroupText, sendReaction, sendTyping, Reactions } from "./zalo/client.js";
 import { ocrImage } from "./jobs/ocr.js";
@@ -109,6 +108,7 @@ import {
   handleMemoryControlCommand,
   extractAndSaveUserMemories,
   formatUserMemoriesForPrompt,
+  getRelevantUserMemories,
 } from "./user-memory.js";
 
 export interface ConversationPronouns {
@@ -1505,12 +1505,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   let userMemories: any[] = [];
   let userMemorySection = "";
   try {
-    userMemories = getUserMemories(sender, 8);
+    userMemories = getRelevantUserMemories(sender, rawText, 8);
     if (userMemories.length > 0) {
       userMemorySection = `\n\n` + formatUserMemoriesForPrompt(userMemories, displayName);
     }
   } catch (e) {
-    console.warn("[admin-assistant] Lỗi getUserMemories:", e);
+    console.warn("[admin-assistant] Lỗi getRelevantUserMemories:", e);
   }
 
   const pronouns = deriveConversationPronouns({

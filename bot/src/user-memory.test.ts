@@ -9,6 +9,7 @@ import {
 import {
   upsertUserMemory,
   getUserMemories,
+  getRelevantUserMemories,
   searchUserMemories,
   deleteUserMemory,
   type UserMemoryItem,
@@ -44,6 +45,8 @@ test("detectPotentialMemorySignal lọc chính xác tín hiệu cần ghi nhớ"
   assert.ok(detectPotentialMemorySignal("tôi mê phong cách biểu đồ nền tối"));
   assert.ok(detectPotentialMemorySignal("nhớ giúp anh là anh thích tone màu đỏ burgundy"));
   assert.ok(detectPotentialMemorySignal("tôi đang theo dõi dự án Palm River"));
+  assert.ok(detectPotentialMemorySignal("mình chuyên code Python và React"));
+  assert.ok(detectPotentialMemorySignal("anh quen dùng hệ điều hành MacOS"));
 
   // Không có tín hiệu (câu hỏi thường, chào hỏi)
   assert.ok(!detectPotentialMemorySignal("chào bot"));
@@ -193,4 +196,47 @@ test("deriveConversationPronouns xác định đúng cặp xưng hô đối xứ
   assert.equal(defaultRes.userTitle, "Hoàng");
   assert.equal(defaultRes.botPronoun, "em");
 });
+
+test("getRelevantUserMemories ưu tiên đưa ký ức khớp ngữ nghĩa lên đầu", () => {
+  const testUserId = `test_relevant_${Date.now()}`;
+
+  upsertUserMemory({
+    userId: testUserId,
+    userName: "Triển Tech",
+    category: "preference",
+    memoryKey: "tech_stack",
+    memoryValue: "Chuyên sâu Python, FastAPI và PyTorch",
+  });
+
+  upsertUserMemory({
+    userId: testUserId,
+    userName: "Triển Tech",
+    category: "preference",
+    memoryKey: "favorite_club",
+    memoryValue: "Arsenal Football Club",
+  });
+
+  upsertUserMemory({
+    userId: testUserId,
+    userName: "Triển Tech",
+    category: "preference",
+    memoryKey: "design_style",
+    memoryValue: "Dark Theme Burgundy",
+  });
+
+  // 1. Khi hỏi về code Python -> ký ức tech_stack phải lên đầu
+  const codeResults = getRelevantUserMemories(testUserId, "viết giúp anh một script Python kết nối database", 3);
+  assert.ok(codeResults.length >= 2);
+  assert.equal(codeResults[0]?.memory_key, "tech_stack");
+
+  // 2. Khi hỏi về bóng đá / Arsenal -> ký ức favorite_club phải lên đầu
+  const footballResults = getRelevantUserMemories(testUserId, "tối nay Arsenal đá mấy giờ em nhỉ?", 3);
+  assert.ok(footballResults.length >= 2);
+  assert.equal(footballResults[0]?.memory_key, "favorite_club");
+
+  // 3. Khi không có query -> trả về danh sách gần đây bình thường
+  const defaultResults = getRelevantUserMemories(testUserId, "", 3);
+  assert.equal(defaultResults.length, 3);
+});
+
 

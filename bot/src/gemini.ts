@@ -13,6 +13,7 @@ import {
   generateWordDoc,
   generateExcelFile,
   generateTextFile,
+  generateMarkdownFile,
   generatePowerPointFile,
   generateCsvFile,
   generateHtmlFile,
@@ -1488,6 +1489,9 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
           args?.voiceHint,
           args?.voiceStyle,
         );
+        return result;
+      } else if (fileType === "md" || fileType === "markdown") {
+        const result = await generateMarkdownFile(fileName, title, content);
         return result;
       } else {
         const ext = fileType === "code" ? (args?.fileExt || "txt") : fileType;

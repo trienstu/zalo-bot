@@ -1,11 +1,14 @@
 import {
   upsertUserMemory,
   getUserMemories,
+  getRelevantUserMemories,
   clearUserMemories,
   type UserMemoryItem,
   type UserMemoryCategory,
 } from "./db/index.js";
 import { callGemini } from "./gemini.js";
+
+export { getRelevantUserMemories };
 
 /**
  * Kiểm tra nhanh xem tin nhắn có chứa ý định quản lý trí nhớ (xem/xóa) hay không.
@@ -93,14 +96,14 @@ export function detectPotentialMemorySignal(text: string): boolean {
   const identityDeclaration =
     /(?:tôi|mình|anh|em|tớ|chị)\s+(?:là|làm|chuyên|phụ trách|quản lý|kinh doanh|ở|sống tại|đang làm)\s+[\p{L}\p{N}\s]{2,}/iu.test(clean);
 
-  // Tín hiệu 3: Sở thích, thói quen, phong cách ưa chuộng
+  // Tín hiệu 3: Sở thích, thói quen, phong cách ưa chuộng, công nghệ/công cụ hay dùng
   const preferenceDeclaration =
-    /(?:tôi|mình|anh|em|tớ|chị)\s+(?:thích|mê|khoái|cuồng|chuộng|hay dùng|fan|ủng hộ)\s+[\p{L}\p{N}\s]{2,}/iu.test(clean) ||
-    /(?:sở thích|gu|phong cách|đội bóng|câu lạc bộ|màu sắc|tone màu)\s+(?:của\s+)?(?:tôi|mình|anh|em|tớ)/iu.test(clean);
+    /(?:tôi|mình|anh|em|tớ|chị)\s+(?:thích|mê|khoái|cuồng|chuộng|hay dùng|quen dùng|chuyên code|chuyên dùng|fan|ủng hộ)\s+[\p{L}\p{N}\s]{2,}/iu.test(clean) ||
+    /(?:sở thích|gu|phong cách|đội bóng|câu lạc bộ|màu sắc|tone màu|hệ điều hành|ngôn ngữ|framework)\s+(?:của\s+)?(?:tôi|mình|anh|em|tớ)/iu.test(clean);
 
   // Tín hiệu 4: Công việc, mục tiêu hoặc dự án đang theo dõi
   const taskDeclaration =
-    /(?:tôi|mình|anh|em|tớ|chị)\s+(?:đang làm|đang nghiên cứu|đang theo dõi|đang build|đang phát triển|đang đầu tư)\s+[\p{L}\p{N}\s]{2,}/iu.test(clean);
+    /(?:tôi|mình|anh|em|tớ|chị)\s+(?:đang làm|đang nghiên cứu|đang theo dõi|đang build|đang phát triển|đang đầu tư|đang học)\s+[\p{L}\p{N}\s]{2,}/iu.test(clean);
 
   return identityDeclaration || preferenceDeclaration || taskDeclaration;
 }
@@ -124,10 +127,10 @@ export async function extractAndSaveUserMemories(params: {
 
   try {
     const promptSystem = `Bạn là bộ máy trích xuất thông tin người dùng (User Profile & Memory Extractor) cho trợ lý AI Zalo.
-Nhiệm vụ: Phân tích tin nhắn của người dùng xem có chứa THÔNG TIN CÁ NHÂN DÀI HẠN ĐÁNG NHỚ không (Sở thích, Nghề nghiệp/Vai trò, Đội bóng yêu thích, Phong cách thiết kế ưa chuộng, Công việc/Dự án đang làm).
+Nhiệm vụ: Phân tích tin nhắn của người dùng xem có chứa THÔNG TIN CÁ NHÂN DÀI HẠN ĐÁNG NHỚ không (Sở thích, Nghề nghiệp/Vai trò, Đội bóng yêu thích, Công nghệ/Ngôn ngữ/Công cụ quen dùng, Phong cách giao diện/màu sắc ưa thích, Công việc/Dự án đang làm).
 
 NGUYÊN TẮC:
-1. CHỈ trích xuất thông tin có tính chất dài hạn, đặc trưng của cá nhân người nói (VD: "anh thích Arsenal", "tôi làm môi giới BĐS", "nhớ là mình thích biểu đồ nền tối").
+1. CHỈ trích xuất thông tin có tính chất dài hạn, đặc trưng của cá nhân người nói (VD: "anh thích Arsenal", "tôi làm môi giới BĐS", "mình chuyên code Python/React", "nhớ là mình thích biểu đồ nền tối").
 2. TUYỆT ĐỐI KHÔNG trích xuất các câu tán gẫu nhất thời, cảm thán vu vơ (VD: "hôm nay nóng quá", "tôi đang đói", "buồn ngủ ghê").
 3. Trả về đúng định dạng JSON chuẩn:
 {

@@ -117,7 +117,7 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
     /(?:vào|ra|thành|sang|qua|lên|bằng|về|dưới|dạng)\s+(?:thành\s+)?(?:dạng\s+)?(?:file\s+)?(?:docx|words?|excel|excell|exel|xlsx|bảng\s*tính|pptx|ppt|powerpoint|slide|pdf|csv|txt|md|markdown|html|voice|audio)/iu.test(combined);
 
   const actionPattern =
-    /(?:tạo|xuất|soạn|làm|dựng|quay|viết|gửi|lưu|thiết\s*kế|chuyển\s*(?:thành|sang|qua|lên|ra)?|đổi\s*(?:thành|sang|qua)?|bật|convert|generate|export|triển\s*khai|đọc\s*(?:giúp|hộ|cho|bằng)?|ngâm(?:\s+thơ)?|thu\s*âm|ghi\s*âm|vẽ(?:\s+lại)?|làm(?:\s+lại)?|thiết\s*kế(?:\s+lại)?|sửa(?:\s+lại)?|chỉnh(?:\s+lại)?|đóng\s*gói|gom|cho\s*vào|bỏ\s*vào|lưu\s*vào|nhét\s*vào|in\s*ra|trả\s*(?:file|cho)|gửi\s*(?:file|cho)|đưa\s*(?:file|cho))/iu;
+    /(?:tạo|xuất|soạn|làm|dựng|quay|viết|gửi|lưu|thiết\s*kế|chuyển\s*(?:thành|sang|qua|lên|ra)?|đổi\s*(?:thành|sang|qua)?|bật|convert|generate|export|triển\s*khai|đọc\s*(?:giúp|hộ|cho|bằng)?|ngâm(?:\s+thơ)?|thu\s*âm|ghi\s*âm|vẽ(?:\s+lại)?|làm(?:\s+lại)?|thiết\s*kế(?:\s+lại)?|sửa(?:\s+lại)?|chỉnh(?:\s+lại)?|đóng\s*gói|gom|cho\s*vào|bỏ\s*vào|lưu\s*vào|nhét\s*vào|in\s*ra|trả\s*(?:file|cho)?|gửi\s*(?:file|cho)?|đưa\s*(?:file|cho)?|xin\s*(?:file)?|lấy\s*(?:file)?|tải\s*(?:file)?)/iu;
 
   const isAffirmativeFollowUp =
     /^(?:ok(?:ela|ay|e)?|ừ|uh|u|dạ|da|vâng|vang|dc|được|chốt|nhất trí|duyệt|tiến hành)?[\s,.:;!-]*(?:soạn|làm|tạo|xuất|viết|triển\s*khai|chốt|triển|lên|đóng\s*gói|gom|trả\s*file|gửi\s*file|lấy\s*file|trả|gửi|lấy)\s*(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|luôn\s*đi|luôn\s*đi\s*e|luôn\s*hộ\s*e|luôn\s*nhé|luôn\s*nha|tiếp\s*đi|cho\s*mình\s*đi|cho\s*anh\s*đi|cho\s*em\s*đi|cho\s*mình|cho\s*anh|cho\s*em)?\b/iu.test(qLower.trim());
@@ -142,6 +142,24 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
     /(?:chạy|viết|run|execute)\s*(?:code|mã|script)\s*(?:python|py)/iu.test(qLower);
 
   return isCodeOrChart;
+}
+
+/**
+ * Kiểm tra xem người dùng có muốn xuất nhanh câu trả lời trước đó thành file Markdown (.md) hay không.
+ * Ví dụ: "gửi tôi file md để lưu", "xuất file md câu trả lời trên", "lưu lại thành file md"
+ */
+export function isQuickMarkdownExportRequest(question: string, quoteText = ""): boolean {
+  const combined = `${question || ""} ${quoteText || ""}`.toLowerCase();
+  const qLower = (question || "").toLowerCase();
+  const isMdTarget = /(?:\.md\b|markdown|file\s+md\b|tệp\s+md\b)/iu.test(combined);
+  if (!isMdTarget) return false;
+
+  const isExportOrSaveAction =
+    /(?:xuất|gửi|lưu|cho\s+xin|xin|tải|export|trả|lấy|đóng\s*gói|gom)\s+.*?(?:file\s+md|\.md|markdown)/iu.test(combined) ||
+    (/(?:file\s+md|\.md|markdown)/iu.test(combined) && /(?:để\s+lưu|lưu\s+lại|dễ\s+bị\s+trôi|lưu\s+trữ|về\s+máy|lưu\s+vào)/iu.test(combined)) ||
+    /^(?:cho\s+mình|cho\s+anh|cho\s+em|gửi|xuất|lưu)\s+(?:xin\s+)?(?:file\s+)?(?:md|\.md|markdown)\b/iu.test(qLower.trim());
+
+  return isExportOrSaveAction;
 }
 
 /**
@@ -1845,3 +1863,68 @@ export async function generateTextFile(
     };
   }
 }
+
+// ==========================================
+// 7. TẠO FILE MARKDOWN (.md) CHUẨN HOÁ
+// ==========================================
+
+export async function generateMarkdownFile(
+  fileName: string,
+  title: string,
+  content: string,
+): Promise<GeneratedFileResult> {
+  try {
+    ensureOutputDir();
+    cleanOldGeneratedFiles(24);
+
+    const rawBase = fileName.replace(/\.[a-zA-Z0-9]+$/, "");
+    const baseName = sanitizeSafeFileName(rawBase, "tai_lieu_markdown");
+    const fullFileName = `${baseName}.md`;
+    const targetPath = path.join(GENERATED_FILES_DIR, fullFileName);
+
+    let cleanContent = content.trim();
+    // Gỡ bỏ bọc code block markdown ngoài cùng nếu có
+    if (cleanContent.startsWith("```markdown") && cleanContent.endsWith("```")) {
+      cleanContent = cleanContent.slice(11, -3).trim();
+    } else if (cleanContent.startsWith("```md") && cleanContent.endsWith("```")) {
+      cleanContent = cleanContent.slice(5, -3).trim();
+    }
+
+    // Đảm bảo có tiêu đề H1 ở đầu nếu nội dung chưa có
+    if (title && !cleanContent.startsWith("# ")) {
+      cleanContent = `# ${title.trim()}\n\n${cleanContent}`;
+    }
+
+    // Thêm footer ghi chú ngày tạo
+    const nowStr = new Date().toLocaleDateString("vi-VN", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    const finalContent = `${cleanContent}\n\n---\n*Tài liệu được xuất tự động vào lúc ${nowStr}*`;
+
+    fs.writeFileSync(targetPath, finalContent, "utf8");
+    const stats = fs.statSync(targetPath);
+
+    return {
+      success: true,
+      filePath: targetPath,
+      fileName: fullFileName,
+      fileSize: stats.size,
+      caption: `📄 Đã xuất xong file Markdown [${fullFileName}]!`,
+    };
+  } catch (err: any) {
+    console.error("[file-generator] Lỗi tạo file markdown:", err);
+    return {
+      success: false,
+      filePath: "",
+      fileName: `${fileName}.md`,
+      fileSize: 0,
+      message: String(err?.message || err),
+    };
+  }
+}
+

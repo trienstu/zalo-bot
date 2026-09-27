@@ -7,8 +7,10 @@ import {
   generateExcelFile,
   generateCsvFile,
   generateHtmlFile,
+  generateMarkdownFile,
   checkIsFileOrVoiceGeneration,
   checkIsVoiceRequest,
+  isQuickMarkdownExportRequest,
   parseMarkdownToSlides,
   parseMarkdownRuns,
   sanitizeSafeFileName,
@@ -865,4 +867,34 @@ test("extractSimulatedGenerateFile bóc tách chính xác raw JSON object khi LL
   assert.ok(extracted?.args.content?.includes("SERENA RIVERSIDE"));
   assert.ok(extracted?.rawMatch.includes("thuyet_trinh_serena_riverside.pptx"));
 });
+
+test("generateMarkdownFile tạo file .md chuẩn chỉnh kèm tiêu đề và footer", async () => {
+  const res = await generateMarkdownFile(
+    "huong_dan_trien_khai",
+    "Hướng Dẫn Triển Khai Bot",
+    "## 1. Chuẩn bị VPS\nCài đặt Node.js và Git.\n## 2. Clone repo\nChạy lệnh git clone.",
+  );
+  assert.equal(res.success, true);
+  assert.ok(res.filePath.endsWith(".md"));
+  assert.ok(fs.existsSync(res.filePath));
+
+  const text = fs.readFileSync(res.filePath, "utf8");
+  assert.ok(text.startsWith("# Hướng Dẫn Triển Khai Bot"));
+  assert.ok(text.includes("## 1. Chuẩn bị VPS"));
+  assert.ok(text.includes("Tài liệu được xuất tự động"));
+});
+
+test("isQuickMarkdownExportRequest nhận diện chính xác các yêu cầu xuất file md", () => {
+  assert.equal(
+    isQuickMarkdownExportRequest("gửi tôi file MD trả lời để lưu, vì tin nhắn dễ bị trôi"),
+    true,
+  );
+  assert.equal(isQuickMarkdownExportRequest("xuất file md câu trả lời trên"), true);
+  assert.equal(isQuickMarkdownExportRequest("lưu câu trả lời trên thành file md giúp anh"), true);
+  assert.equal(isQuickMarkdownExportRequest("cho xin file md để lưu"), true);
+  assert.equal(isQuickMarkdownExportRequest("xuất file markdown"), true);
+  assert.equal(isQuickMarkdownExportRequest("thời tiết hôm nay thế nào"), false);
+  assert.equal(isQuickMarkdownExportRequest("vẽ biểu đồ tăng trưởng"), false);
+});
+
 

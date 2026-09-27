@@ -2554,6 +2554,30 @@ export function stitchMultiChunkQuote(threadId: string, quoteText: string): stri
 }
 
 /**
+ * Lấy N tin nhắn gần nhất của nhóm theo thứ tự mới nhất -> cũ hơn
+ */
+export function getRecentGroupMessages(
+  threadId: string,
+  limit = 20,
+): { id: number; display_name: string; text: string; ts: number; is_self: number }[] {
+  try {
+    const db = getDb();
+    return db
+      .prepare(`
+        SELECT id, display_name, text, ts, is_self
+        FROM group_messages
+        WHERE thread_id = ? AND text IS NOT NULL AND deleted_at IS NULL
+        ORDER BY id DESC
+        LIMIT ?
+      `)
+      .all(threadId, limit) as any[];
+  } catch (e) {
+    console.warn(`[db] getRecentGroupMessages error:`, e);
+    return [];
+  }
+}
+
+/**
  * Liệt kê danh sách tất cả tri thức trong kho vĩnh viễn.
  */
 export function listPermanentKnowledge(limit = 50): PermanentKnowledgeItem[] {
@@ -2761,6 +2785,88 @@ export function searchUserMemories(userId: string, query: string, limit = 5): Us
   } catch (e) {
     console.warn(`[db] searchUserMemories error:`, e);
     return [];
+  }
+}
+
+/**
+ * Lấy các ký ức dài hạn của người dùng có độ liên quan cao nhất tới câu hỏi/ngữ cảnh hiện tại.
+ * Kết hợp:
+ * 1. Tra cứu ngữ nghĩa/từ khóa (Relevance) theo các token có ý nghĩa trong câu hỏi.
+ * 2. Ký ức mới nhất của người dùng (Recency) để bảo toàn thói quen liên tục.
+ */
+export function getRelevantUserMemories(
+  userId: string,
+  query?: string,
+  limit = 8,
+): UserMemoryItem[] {
+  try {
+    if (!userId || !userId.trim()) return [];
+    const uid = userId.trim();
+    const db = getDb();
+
+    // 1. Lấy danh sách ký ức mới nhất
+    const recentMemories = db
+      .prepare(`
+        SELECT * FROM user_memories
+        WHERE user_id = ?
+        ORDER BY updated_at DESC
+        LIMIT ?
+      `)
+      .all(uid, limit) as UserMemoryItem[];
+
+    if (!query || !query.trim()) {
+      return recentMemories;
+    }
+
+    // 2. Tách từ khóa quan trọng từ query để tìm kiếm ngữ nghĩa
+    const cleanQuery = query.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ");
+    const stopWords = new Set([
+      "của", "và", "các", "những", "cho", "với", "được", "trong", "về",
+      "này", "đó", "thì", "là", "mà", "có", "không", "giúp", "hộ", "em", "anh",
+      "tôi", "bác", "sếp", "bot", "gì", "như", "thế", "nào", "hỏi", "biết",
+      "nhớ", "xem", "lại", "xin", "chào", "ạ", "nhé", "nha", "ơi", "đi",
+    ]);
+    const words = cleanQuery
+      .split(/\s+/)
+      .map((w) => w.trim())
+      .filter((w) => w.length >= 2 && !stopWords.has(w));
+
+    if (words.length === 0) {
+      return recentMemories;
+    }
+
+    // 3. Tìm các ký ức khớp từ khóa
+    const params: any[] = [uid];
+    const targetWords = words.slice(0, 5);
+    const wordClauses = targetWords.map((w) => {
+      params.push(`%${w}%`, `%${w}%`, `%${w}%`);
+      return `(LOWER(memory_key) LIKE ? OR LOWER(memory_value) LIKE ? OR LOWER(source_snippet) LIKE ?)`;
+    });
+
+    const relevantMemories = db
+      .prepare(`
+        SELECT * FROM user_memories
+        WHERE user_id = ? AND (${wordClauses.join(" OR ")})
+        ORDER BY updated_at DESC
+        LIMIT ?
+      `)
+      .all(...params, limit) as UserMemoryItem[];
+
+    // 4. Hợp nhất: Đưa ký ức liên quan lên đầu, sau đó chèn thêm ký ức mới nhất
+    const map = new Map<string, UserMemoryItem>();
+    for (const m of relevantMemories) {
+      map.set(m.memory_key, m);
+    }
+    for (const m of recentMemories) {
+      if (!map.has(m.memory_key)) {
+        map.set(m.memory_key, m);
+      }
+    }
+
+    return Array.from(map.values()).slice(0, limit);
+  } catch (e) {
+    console.warn(`[db] getRelevantUserMemories error:`, e);
+    return getUserMemories(userId, limit);
   }
 }
 

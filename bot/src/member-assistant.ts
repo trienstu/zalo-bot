@@ -16,7 +16,7 @@ import {
   isUserAdmin,
   getRecentGroupImage,
   getMediaByMessageId,
-  getUserMemories,
+  getRecentGroupMessages,
   stitchMultiChunkQuote,
 } from "./db/index.js";
 import { sendGroupText, sendGroupFile, sendGroupVoice, sendReaction, sendTyping, Reactions, sleep, cleanZaloText } from "./zalo/client.js";
@@ -45,7 +45,12 @@ import { normalizeExecutionSignals, selectResponseMode } from "./hybrid-routing.
 import { isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
 import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from "./grounding-quota.js";
 import { githubSearch } from "./tools/vertical-tools.js";
-import { checkIsFileOrVoiceGeneration, checkIsVoiceRequest } from "./tools/file-generator.js";
+import {
+  checkIsFileOrVoiceGeneration,
+  checkIsVoiceRequest,
+  generateMarkdownFile,
+  isQuickMarkdownExportRequest,
+} from "./tools/file-generator.js";
 import { interceptAndExecuteSimulatedTool, extractSpeechFallbackText, sanitizeHallucinatedFileLinks } from "./tools/simulated-tool-interceptor.js";
 import { cleanOutdatedVoicePromisesFromAnswer, cleanCoreSpeechText } from "./tools/voice-generator.js";
 import { generateMusic } from "./tools/music-generator.js";
@@ -102,7 +107,9 @@ async function deliverGeneratedToolFile(
     file.caption || (
       isImg
         ? `🎨 ${botName} gửi ảnh/poster cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
-        : `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+        : /\.(md|markdown)$/i.test(file.filePath)
+          ? `📄 ${botName} đã xuất xong file Markdown [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+          : `📄 ${botName} gửi file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
     ),
   );
 }
@@ -111,6 +118,7 @@ import {
   handleMemoryControlCommand,
   extractAndSaveUserMemories,
   formatUserMemoriesForPrompt,
+  getRelevantUserMemories,
 } from "./user-memory.js";
 import {
   processGithubReposInMessage,
@@ -1737,6 +1745,19 @@ QUY TẮC BẮT BUỘC:
         "Bạn BẮT BUỘC phải trích xuất và cung cấp đầy đủ các đường link, ghi rõ người chia sẻ và ngày gửi từ danh sách trên để trả lời cho thành viên!\n";
     }
 
+    // 1c. Hồ sơ & Trí nhớ dài hạn của thành viên đang hỏi (User Long-term Memory)
+    let quoteUserMemorySection = "";
+    if (options?.sender) {
+      try {
+        const userMemories = getRelevantUserMemories(options.sender, `${question} ${options.quote.text}`, 8);
+        if (userMemories.length > 0) {
+          quoteUserMemorySection = formatUserMemoriesForPrompt(userMemories, displayName);
+        }
+      } catch (e) {
+        console.warn("[member-assistant] Quote QA getRelevantUserMemories error:", e);
+      }
+    }
+
     let personaIntro = "";
     switch (groupSettings.persona) {
       case "professional":
@@ -1822,7 +1843,10 @@ QUY TẮC BẮT BUỘC:
       `       • 🌿 3. Tiện ích & Phong cách sống (Phát triển theo phong cách gì, hồ bơi, gym, yoga, sauna, mảng xanh, tiện ích đặc quyền).\n` +
       `       • 💰 4. Giá bán & Chính sách tham khảo (Giá rumor/dự kiến đợt 1 từng loại hình, chính sách bán hàng hoặc vay vốn nếu có).\n` +
       `     + In đậm các số liệu quan trọng, trình bày gạch đầu dòng rõ ràng, mạch lạc, tối ưu hiển thị trên giao diện chat Zalo.\n` +
-      `   - [CHỐNG BẺ LÁI SANG BẤT ĐỘNG SẢN]: Khi người dùng hỏi về địa lý, xã hội, khoa học, chính trị, thể thao, công nghệ, lịch sử: PHẢI TRẢ LỜI ĐÚNG TRỌNG TÂM, CẤM tự ý suy diễn người hỏi đi du lịch hay lôi chuyện bất động sản/mua bán đất vào câu trả lời nếu người dùng không hỏi về BĐS!`;
+      `   - [CHỐNG BẺ LÁI SANG BẤT ĐỘNG SẢN]: Khi người dùng hỏi về địa lý, xã hội, khoa học, chính trị, thể thao, công nghệ, lịch sử: PHẢI TRẢ LỜI ĐÚNG TRỌNG TÂM, CẤM tự ý suy diễn người hỏi đi du lịch hay lôi chuyện bất động sản/mua bán đất vào câu trả lời nếu người dùng không hỏi về BĐS!` +
+      (quoteUserMemorySection
+        ? `\n\n   - [HỒ SƠ & BỘ NHỚ VỀ THÀNH VIÊN ĐANG TRÒ CHUYỆN (@${displayName})]:\n${quoteUserMemorySection}`
+        : "");
 
     let quoteLiveNews = "";
     let quoteEvidenceRequired = false;
@@ -2489,12 +2513,12 @@ QUY TẮC BẮT BUỘC:
   let userMemorySection = "";
   if (options?.sender) {
     try {
-      const userMemories = getUserMemories(options.sender, 6);
+      const userMemories = getRelevantUserMemories(options.sender, question, 8);
       if (userMemories.length > 0) {
         userMemorySection = formatUserMemoriesForPrompt(userMemories, displayName);
       }
     } catch (e) {
-      console.warn("[handleHistoryQA] Lỗi getUserMemories:", e);
+      console.warn("[handleHistoryQA] Lỗi getRelevantUserMemories:", e);
     }
   }
 
@@ -2954,7 +2978,9 @@ QUY TẮC BẮT BUỘC:
                       ? `🎨 Ảnh của ${userGreeting} đây ạ! ✨`
                       : isVoice
                         ? `🎙️ ${botName} gửi voice cho ${userGreeting} nghe nhé!`
-                        : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${userGreeting}!`
+                        : /\.(md|markdown)$/i.test(file.filePath)
+                          ? `📄 ${botName} đã xuất xong file Markdown [${file.fileName}] cho ${userGreeting}!`
+                          : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${userGreeting}!`
               );
               if (isVoice) {
                 await sendGroupVoice(options.api, threadId, file.filePath, caption);
@@ -4311,6 +4337,58 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       );
       console.log(`[member-assistant] ✅ Đã gửi lời chào cho ${displayName} (isSuperAdmin=${isSuperAdmin})`);
       return;
+    }
+
+    // 0. XỬ LÝ NHANH YÊU CẦU XUẤT FILE MARKDOWN (.md) ĐỂ LƯU TRỮ
+    if (isQuickMarkdownExportRequest(question, event.quote?.text)) {
+      let exportContent = "";
+      if (event.quote?.text && event.quote.text.trim().length > 20) {
+        exportContent = stitchMultiChunkQuote(threadId, event.quote.text.trim());
+      } else {
+        // Tìm tin nhắn gần nhất có nội dung của bot trong thread
+        const recentMsgs = getRecentGroupMessages(threadId, 8);
+        const lastBotMsg = recentMsgs.find(
+          (m) =>
+            (m.is_self === 1 || m.display_name?.toLowerCase() === botName.toLowerCase()) &&
+            m.text &&
+            m.text.trim().length > 40 &&
+            !m.text.startsWith("Dạ em chào") &&
+            !m.text.startsWith("🎨") &&
+            !m.text.startsWith("🎵") &&
+            !m.text.startsWith("📄"),
+        );
+        if (lastBotMsg?.text) {
+          exportContent = stitchMultiChunkQuote(threadId, lastBotMsg.text.trim());
+        }
+      }
+
+      if (exportContent && exportContent.length > 30) {
+        console.log(`[member-assistant] ⚡ Kích hoạt Quick Markdown Export cho ${displayName} (${exportContent.length} ký tự)...`);
+        void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.OK);
+        void sendTyping(api, threadId);
+
+        const firstLine = exportContent.split("\n")[0]?.replace(/^[#*\s-]+/, "").trim() || "tai_lieu_huong_dan";
+        const cleanTitle = firstLine.slice(0, 50).trim();
+        const safeBaseName = cleanTitle.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "_").slice(0, 40) || "huong_dan_chi_tiet";
+
+        const mdResult = await generateMarkdownFile(safeBaseName, cleanTitle, exportContent);
+        if (mdResult.success && mdResult.filePath) {
+          const isSuperAdmin = isUserAdmin(sender);
+          await sendGroupFile(
+            api,
+            threadId,
+            mdResult.filePath,
+            `📄 ${botName} đã xuất xong file Markdown [${mdResult.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`,
+          );
+          const confirmMsg = isSuperAdmin
+            ? `Dạ Sếp ơi, em đã xuất toàn bộ nội dung hướng dẫn trên thành file Markdown [${mdResult.fileName}] đính kèm ở trên để Sếp lưu trữ rồi ạ! 📑✨`
+            : `Dạ bác @${displayName} ơi, ${botName} đã đóng gói toàn bộ nội dung trên thành file Markdown [${mdResult.fileName}] gửi đính kèm ở trên để bác lưu trữ không lo tin nhắn bị trôi nhé! 📑✨`;
+          await sendGroupReplyWithMention(api, threadId, botName, displayName, sender, confirmMsg, {
+            quote: buildQuoteObject(event),
+          });
+          return;
+        }
+      }
     }
 
     console.log(`[member-assistant] 🔍 Đang xử lý câu hỏi từ ${displayName} (${sender}): "${question}" (HasFile=${hasFile}, HasImage=${hasImage}, HasQuote=${hasQuote})...`);
