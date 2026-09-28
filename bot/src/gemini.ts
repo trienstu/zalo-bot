@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
+import { getDocumentOcrCache, saveDocumentOcrCache } from "./db/index.js";
 import { config, hybridAgentSettings } from "./config.js";
 import {
   webSearch,
@@ -242,6 +244,13 @@ export async function downloadFileContent(
     let contentType = "";
     const targetUrl = normalizeZaloMediaUrl(url);
 
+    // 0. KIỂM TRA BỘ NHỚ ĐỆM THEO URL (CACHE HIT SIÊU TỐC KHÔNG CẦN TẢI FILE)
+    const cachedByUrl = getDocumentOcrCache("", targetUrl);
+    if (cachedByUrl && cachedByUrl.textContent) {
+      console.log(`[gemini] ⚡ [Document Cache HIT - URL] Tìm thấy bản bóc tách văn bản có sẵn cho "${fileName || targetUrl.slice(0, 40)}" (${cachedByUrl.textContent.length.toLocaleString("vi-VN")} ký tự) -> Phản hồi tức thì 0.1s!`);
+      return { textContent: cachedByUrl.textContent };
+    }
+
     if (fs.existsSync(targetUrl)) {
       const stats = fs.statSync(targetUrl);
       if (stats.size > 50 * 1024 * 1024) {
@@ -315,6 +324,15 @@ export async function downloadFileContent(
       }
     }
 
+    const fileHash = crypto.createHash("sha256").update(buffer).digest("hex");
+
+    // 0.1 KIỂM TRA BỘ NHỚ ĐỆM THEO SHA-256 HASH NỘI DUNG FILE
+    const cachedByHash = getDocumentOcrCache(fileHash, targetUrl);
+    if (cachedByHash && cachedByHash.textContent) {
+      console.log(`[gemini] ⚡ [Document Cache HIT - HASH] Tìm thấy bản bóc tách văn bản có sẵn (${cachedByHash.textContent.length.toLocaleString("vi-VN")} ký tự, SHA256: ${fileHash.slice(0, 10)}...) -> Phản hồi tức thì 0.1s!`);
+      return { textContent: cachedByHash.textContent };
+    }
+
     const detectedMime = detectMimeType(buffer, fileName || url, contentType);
     const ext = (fileName.split(".").pop() || url.split(".").pop() || "").toLowerCase();
 
@@ -332,6 +350,7 @@ export async function downloadFileContent(
         totalPages = pdfResult?.totalPages || 1;
         extractedDigitalText = (pdfResult?.text || "").trim();
         if (extractedDigitalText.length >= 50) {
+          saveDocumentOcrCache(fileHash, targetUrl, fileName || "tai_lieu.pdf", extractedDigitalText, totalPages);
           console.log(`[gemini] 📄 [Tier 0 - Digital PDF] Đã trích xuất ${extractedDigitalText.length.toLocaleString("vi-VN")} ký tự văn bản từ PDF "${fileName || "tài liệu"}" (${totalPages} trang)`);
           return { textContent: extractedDigitalText };
         }
@@ -355,6 +374,7 @@ export async function downloadFileContent(
       try {
         const ocrText = await extractScannedPdfWithOcr(buffer, fileName || "tai_lieu.pdf", 25);
         if (ocrText && ocrText.trim().length >= 50) {
+          saveDocumentOcrCache(fileHash, targetUrl, fileName || "tai_lieu.pdf", ocrText, totalPages);
           console.log(`[gemini] 📄 [Tier 2 - Heavy PDF Scan] Đã OCR thành công ${ocrText.length.toLocaleString("vi-VN")} ký tự văn bản từ "${fileName || "tài liệu"}"`);
           return { textContent: ocrText };
         }
@@ -405,6 +425,7 @@ export async function downloadFileContent(
             .trim();
 
           if (extractedDocx.length >= 20) {
+            saveDocumentOcrCache(fileHash, targetUrl, fileName || "tai_lieu.docx", extractedDocx, 1);
             console.log(`[gemini] 📄 Đã trích xuất ${extractedDocx.length.toLocaleString("vi-VN")} ký tự văn bản từ Word .docx "${fileName || "tài liệu"}"`);
             return { textContent: extractedDocx };
           }

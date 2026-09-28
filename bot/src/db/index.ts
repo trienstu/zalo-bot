@@ -3727,3 +3727,69 @@ export function isRepoRecentlyShared(threadId: string, fullName: string, windowM
   }
 }
 
+export interface DocumentOcrCacheRow {
+  file_hash: string;
+  file_url: string;
+  file_name: string;
+  text_content: string;
+  total_pages: number;
+  char_count: number;
+  created_at: number;
+}
+
+export function getDocumentOcrCache(
+  fileHash: string,
+  fileUrl?: string,
+): { textContent: string; totalPages: number } | null {
+  try {
+    const db = getDb();
+    if (fileHash && fileHash.trim()) {
+      const row = db
+        .prepare(`SELECT text_content, total_pages FROM document_ocr_cache WHERE file_hash = ? LIMIT 1`)
+        .get(fileHash.trim()) as { text_content: string; total_pages: number } | undefined;
+      if (row && row.text_content) {
+        return { textContent: row.text_content, totalPages: row.total_pages || 1 };
+      }
+    }
+    if (fileUrl && fileUrl.trim()) {
+      const row = db
+        .prepare(`SELECT text_content, total_pages FROM document_ocr_cache WHERE file_url = ? LIMIT 1`)
+        .get(fileUrl.trim()) as { text_content: string; total_pages: number } | undefined;
+      if (row && row.text_content) {
+        return { textContent: row.text_content, totalPages: row.total_pages || 1 };
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveDocumentOcrCache(
+  fileHash: string,
+  fileUrl: string,
+  fileName: string,
+  textContent: string,
+  totalPages = 1,
+): void {
+  try {
+    if (!fileHash || !textContent || textContent.trim().length === 0) return;
+    const db = getDb();
+    db.prepare(
+      `INSERT OR REPLACE INTO document_ocr_cache (file_hash, file_url, file_name, text_content, total_pages, char_count, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      fileHash.trim(),
+      (fileUrl || "").trim(),
+      (fileName || "").trim(),
+      textContent,
+      totalPages || 1,
+      textContent.length,
+      Date.now(),
+    );
+  } catch (err) {
+    console.warn("[db] saveDocumentOcrCache error:", err);
+  }
+}
+
+

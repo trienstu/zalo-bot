@@ -610,3 +610,17 @@ CREATE TABLE IF NOT EXISTS group_repos (
 CREATE INDEX IF NOT EXISTS idx_group_repos_thread ON group_repos(thread_id);
 CREATE INDEX IF NOT EXISTS idx_group_repos_category ON group_repos(category);
 CREATE INDEX IF NOT EXISTS idx_group_repos_created ON group_repos(created_at DESC);
+
+-- Bộ nhớ đệm bóc tách tài liệu & OCR văn bản (tránh OCR lại tài liệu nặng qua 9Router/Vision)
+CREATE TABLE IF NOT EXISTS document_ocr_cache (
+  file_hash       TEXT PRIMARY KEY,
+  file_url        TEXT NOT NULL DEFAULT '',
+  file_name       TEXT NOT NULL DEFAULT '',
+  text_content    TEXT NOT NULL,
+  total_pages     INTEGER NOT NULL DEFAULT 1,
+  char_count      INTEGER NOT NULL DEFAULT 0,
+  created_at      INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_ocr_cache_url ON document_ocr_cache(file_url);
+

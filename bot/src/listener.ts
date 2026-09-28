@@ -60,6 +60,7 @@ import { saveZaloImage } from "./zalo-media.js";
 import { KICK_LOCK_KEY, KICK_LOCK_STALE_MS } from "./commands/monthly-cleanup.js";
 import { runDailySummarySafe } from "./commands/daily-summary.js";
 import { handleMemberInteraction } from "./member-assistant.js";
+import { threadMutex } from "./thread-mutex.js";
 import {
   compileBlacklist,
   findBlacklistedWord,
@@ -890,18 +891,22 @@ export async function runListener(): Promise<void> {
       console.log(`[listener] 💬 Nhận tin nhắn 1:1 từ [${displayName}] (${targetUserId}): "${text}" (isSelf=${Boolean(payload?.isSelf)})`);
 
       if (targetUserId) {
-        void handleAdminDirectInteraction(api, {
-          threadId: targetUserId,
-          sender: targetUserId,
-          displayName,
-          text,
-          isSelf: Boolean(payload?.isSelf),
-          mediaUrl,
-          mediaType: media?.type,
-          fileAttachment,
-          quote,
-          rawMessage: payload?.data,
-        }).catch((e) => console.warn(`[admin-assistant] lỗi: ${String(e)}`));
+        void threadMutex
+          .runExclusive(targetUserId, `dm_${targetUserId}`, async () => {
+            await handleAdminDirectInteraction(api, {
+              threadId: targetUserId,
+              sender: targetUserId,
+              displayName,
+              text,
+              isSelf: Boolean(payload?.isSelf),
+              mediaUrl,
+              mediaType: media?.type,
+              fileAttachment,
+              quote,
+              rawMessage: payload?.data,
+            });
+          })
+          .catch((e) => console.warn(`[admin-assistant] lỗi: ${String(e)}`));
       }
       return;
     }
@@ -987,21 +992,25 @@ export async function runListener(): Promise<void> {
 
         if (currentGroupMode === "interactive" && !isMsgSelf) {
           const mentions = Array.isArray(payload?.data?.mentions) ? payload.data.mentions : [];
-          void handleMemberInteraction(api, {
-            threadId,
-            sender,
-            displayName,
-            text,
-            isSelf: false,
-            mediaUrl,
-            mediaType: (media || effectiveMedia)?.type,
-            fileAttachment,
-            quote,
-            mentions,
-            msgId: String(payload?.data?.msgId ?? ""),
-            cliMsgId: String(payload?.data?.cliMsgId ?? ""),
-            rawMessage: payload?.data,
-          }).catch((e) => console.warn(`[member-assistant] lỗi: ${String(e)}`));
+          void threadMutex
+            .runExclusive(threadId, `group_${threadId}`, async () => {
+              await handleMemberInteraction(api, {
+                threadId,
+                sender,
+                displayName,
+                text,
+                isSelf: false,
+                mediaUrl,
+                mediaType: (media || effectiveMedia)?.type,
+                fileAttachment,
+                quote,
+                mentions,
+                msgId: String(payload?.data?.msgId ?? ""),
+                cliMsgId: String(payload?.data?.cliMsgId ?? ""),
+                rawMessage: payload?.data,
+              });
+            })
+            .catch((e) => console.warn(`[member-assistant] lỗi: ${String(e)}`));
         }
       }
       if (effectiveMedia && (effectiveMedia.type === "image" || effectiveMedia.type === "video")) {
