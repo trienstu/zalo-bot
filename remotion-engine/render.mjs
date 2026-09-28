@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
@@ -27,7 +28,7 @@ export async function renderRemotionVideo({
   compositionId = "VerticalShorts",
   inputProps = {},
   outputLocation = "./out/video.mp4",
-  concurrency = 2,
+  concurrency = 1,
   durationInFrames,
 } = {}) {
   const start = Date.now();
@@ -50,7 +51,10 @@ export async function renderRemotionVideo({
     composition.durationInFrames = Math.max(30, Math.round(durationInFrames));
   }
 
-  console.log(`📐 [Remotion] Thông số: ${composition.width}x${composition.height} | ${composition.fps}fps | ${composition.durationInFrames} frames (~${(composition.durationInFrames / composition.fps).toFixed(1)}s)`);
+  const cpuCount = os.cpus().length || 1;
+  const safeConcurrency = Math.max(1, Math.min(cpuCount, Number(concurrency) || 1));
+
+  console.log(`📐 [Remotion] Thông số: ${composition.width}x${composition.height} | ${composition.fps}fps | ${composition.durationInFrames} frames (~${(composition.durationInFrames / composition.fps).toFixed(1)}s) | Concurrency: ${safeConcurrency}/${cpuCount} core(s)`);
 
   console.log(`🚀 [Remotion] Đang render media ra file: ${resolvedOutput}...`);
   const renderStart = Date.now();
@@ -61,7 +65,7 @@ export async function renderRemotionVideo({
     codec: "h264",
     outputLocation: resolvedOutput,
     inputProps,
-    concurrency,
+    concurrency: safeConcurrency,
     onProgress: ({ renderedFrames, encodedFrames }) => {
       process.stdout.write(`\r   ⏳ Render: ${renderedFrames}/${composition.durationInFrames} frames | Encode: ${encodedFrames}/${composition.durationInFrames} frames`);
     },
