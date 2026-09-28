@@ -320,7 +320,8 @@ export async function downloadFileContent(
     if (detectedMime === "application/pdf" || ext === "pdf") {
       try {
         const { extractText } = await import("unpdf");
-        const uint8 = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+        // Dùng buffer.slice() để copy vì unpdf (pdfjs-dist) detach/transfer ArrayBuffer khi parse
+        const uint8 = new Uint8Array(buffer.slice());
         const pdfResult = await extractText(uint8, { mergePages: true });
         const extracted = (pdfResult?.text || "").trim();
         if (extracted.length >= 50) {
@@ -504,9 +505,9 @@ export async function downloadFileContent(
     }
 
     // Fallback file văn bản khác nếu không chứa byte nhị phân đặc biệt
-    if (buffer.length < 5 * 1024 * 1024) {
+    if (buffer.length > 0 && buffer.length < 5 * 1024 * 1024) {
       const text = buffer.toString("utf-8");
-      if (!/[\x00-\x08\x0E-\x1F]/.test(text.slice(0, 1000))) {
+      if (text.trim().length > 0 && !/[\x00-\x08\x0E-\x1F]/.test(text.slice(0, 1000))) {
         return { textContent: text };
       }
     }
