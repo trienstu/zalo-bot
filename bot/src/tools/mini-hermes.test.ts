@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { extractMarkdownTable, extractSimulatedGenerateFile } from "./simulated-tool-interceptor.js";
 import { isBotStatusOrMetaQuestion } from "../search-evidence.js";
-import { checkIsFileOrVoiceGeneration } from "./file-generator.js";
+import { checkIsFileOrVoiceGeneration, extractAllMarkdownTables } from "./file-generator.js";
 
 test("extractMarkdownTable: trích xuất đúng bảng Markdown thành headers và rows", () => {
   const markdown = `
@@ -56,3 +56,28 @@ test("checkIsFileOrVoiceGeneration: nhận diện đúng biến thể tự nhiê
   assert.equal(checkIsFileOrVoiceGeneration("Chuyển thành file exel giúp mình"), true);
   assert.equal(checkIsFileOrVoiceGeneration("Xuất sang dạng pptx cho sếp"), true);
 });
+
+test("extractAllMarkdownTables: trích xuất và gom toàn bộ bảng qua nhiều trang, loại bỏ header lặp", () => {
+  const multiPageDoc = `
+=== TRANG 1 ===
+| STT | Họ tên | Điểm Toán | Điểm Văn |
+|---|---|---|---|
+| 1 | Nguyễn Văn A | 9.0 | 8.5 |
+| 2 | Trần Thị B | 8.0 | 9.0 |
+
+=== TRANG 2 ===
+| STT | Họ tên | Điểm Toán | Điểm Văn |
+|:---:|:---|:---:|:---:|
+| 3 | Lê Văn C | 7.5 | 8.0 |
+| 4 | Phạm Thị D | 10.0 | 9.5 |
+`;
+
+  const result = extractAllMarkdownTables(multiPageDoc);
+  assert.ok(result);
+  assert.deepEqual(result.headers, ["STT", "Họ tên", "Điểm Toán", "Điểm Văn"]);
+  assert.equal(result.rows.length, 4);
+  assert.deepEqual(result.rows[0], ["1", "Nguyễn Văn A", "9.0", "8.5"]);
+  assert.deepEqual(result.rows[2], ["3", "Lê Văn C", "7.5", "8.0"]);
+  assert.deepEqual(result.rows[3], ["4", "Phạm Thị D", "10.0", "9.5"]);
+});
+

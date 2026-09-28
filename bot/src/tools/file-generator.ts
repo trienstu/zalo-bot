@@ -1530,6 +1530,53 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
   return blocks;
 }
 
+/**
+ * Trích xuất toàn bộ các bảng Markdown từ văn bản hoặc WordBlocks
+ * thành headers và rows tương thích cho bảng tính Excel hoặc file CSV
+ */
+export function extractAllMarkdownTables(
+  contentOrBlocks: string | WordBlock[],
+  title = "Tài liệu",
+): { headers: string[]; rows: Array<Array<string | number>> } | null {
+  if (!contentOrBlocks) return null;
+
+  const blocks: WordBlock[] = Array.isArray(contentOrBlocks)
+    ? contentOrBlocks
+    : parseMarkdownToWordBlocks(contentOrBlocks, title);
+
+  const tableBlocks = blocks.filter(
+    (b): b is WordBlock & { type: "table"; tableHeaders: string[]; tableRows: string[][] } =>
+      b.type === "table" && Array.isArray(b.tableHeaders) && b.tableHeaders.length > 0 && Array.isArray(b.tableRows),
+  );
+
+  if (tableBlocks.length === 0) return null;
+
+  let mainHeaders: string[] = [];
+  const allRows: Array<Array<string | number>> = [];
+
+  for (const tb of tableBlocks) {
+    if (mainHeaders.length === 0) {
+      mainHeaders = tb.tableHeaders.map((h) => h.replace(/\*\*/g, "").trim());
+    }
+
+    for (const row of tb.tableRows) {
+      // Bỏ qua dòng nếu là dòng lặp lại của tiêu đề giữa các trang
+      const isHeaderRepeat =
+        row.length === mainHeaders.length &&
+        row.every((cell, idx) => String(cell ?? "").replace(/\*\*/g, "").trim().toLowerCase() === mainHeaders[idx]?.toLowerCase());
+      if (isHeaderRepeat) continue;
+
+      const cleanedRow: string[] = row.map((cell) => String(cell ?? "").replace(/\*\*/g, "").trim());
+      while (cleanedRow.length < mainHeaders.length) {
+        cleanedRow.push("");
+      }
+      allRows.push(cleanedRow.slice(0, mainHeaders.length));
+    }
+  }
+
+  return mainHeaders.length > 0 && allRows.length > 0 ? { headers: mainHeaders, rows: allRows } : null;
+}
+
 export async function generateWordDoc(
   fileName: string,
   title: string,

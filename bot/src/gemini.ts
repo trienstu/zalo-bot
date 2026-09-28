@@ -19,6 +19,7 @@ import {
   generateHtmlFile,
   parseMarkdownToSlides,
   parseMarkdownToWordBlocks,
+  extractAllMarkdownTables,
   type GeneratedFileResult,
   type ThemeName,
 } from "./tools/file-generator.js";
@@ -1637,8 +1638,16 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
           const result = await generateExcelFile(fileName, args.sheets as any, theme);
           return result;
         } else {
-          const headers = Array.isArray(args?.excelHeaders) ? args.excelHeaders.map(String) : ["STT", "Nội dung", "Ghi chú"];
-          const rows = Array.isArray(args?.excelRows) ? (args.excelRows as any) : [];
+          let headers = Array.isArray(args?.excelHeaders) ? args.excelHeaders.map(String) : [];
+          let rows = Array.isArray(args?.excelRows) ? (args.excelRows as any) : [];
+          if (rows.length === 0 && content) {
+            const tableData = extractAllMarkdownTables(content, title);
+            if (tableData) {
+              headers = tableData.headers;
+              rows = tableData.rows;
+            }
+          }
+          if (headers.length === 0) headers = ["STT", "Nội dung", "Ghi chú"];
           const result = await generateExcelFile(fileName, title || "Sheet1", headers, rows, theme);
           return result;
         }
@@ -1647,8 +1656,16 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
         const result = await generateWordDoc(fileName, title, blocks);
         return result;
       } else if (fileType === "csv") {
-        const headers = Array.isArray(args?.excelHeaders) ? args.excelHeaders.map(String) : ["STT", "Nội dung", "Ghi chú"];
-        const rows = Array.isArray(args?.excelRows) ? (args.excelRows as any) : [];
+        let headers = Array.isArray(args?.excelHeaders) ? args.excelHeaders.map(String) : [];
+        let rows = Array.isArray(args?.excelRows) ? (args.excelRows as any) : [];
+        if (rows.length === 0 && content) {
+          const tableData = extractAllMarkdownTables(content, title);
+          if (tableData) {
+            headers = tableData.headers;
+            rows = tableData.rows;
+          }
+        }
+        if (headers.length === 0) headers = ["STT", "Nội dung", "Ghi chú"];
         const result = await generateCsvFile(fileName, headers, rows);
         return result;
       } else if (fileType === "html") {

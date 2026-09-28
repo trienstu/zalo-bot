@@ -1521,9 +1521,10 @@ async function handleHistoryQA(
             ? `📄 ${botName} đã xuất xong file Markdown [${fileRes.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
             : `📄 ${botName} đã chuyển đổi xong file Word [${fileRes.fileName}] đầy đủ bảng biểu cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`;
         await sendGroupFile(options.api, threadId, fileRes.filePath, caption);
+        const fileTypeLabel = isExcel ? "Excel (.xlsx)" : isMd ? "Markdown (.md)" : "Word (.docx)";
         return isSuperAdmin
-          ? `Dạ Sếp Trien Nguyen, em đã chuyển đổi toàn bộ nội dung tài liệu đính kèm (bảo lưu nguyên vẹn 100% tất cả các bảng biểu và dữ liệu) sang file Word (.docx) gửi lên nhóm cho Sếp rồi ạ! Sếp kiểm tra file đính kèm ở trên giúp em nhé! 🙏✨`
-          : `Dạ bác @${displayName} ơi, ${botName} đã chuyển đổi toàn bộ dữ liệu tài liệu đính kèm với đầy đủ bảng biểu sang file Word (.docx) gửi lên nhóm cho bác rồi nhé! 📄✨`;
+          ? `Dạ Sếp Trien Nguyen, em đã chuyển đổi toàn bộ nội dung tài liệu đính kèm (bảo lưu nguyên vẹn 100% tất cả các bảng biểu và dữ liệu) sang file ${fileTypeLabel} gửi lên nhóm cho Sếp rồi ạ! Sếp kiểm tra file đính kèm ở trên giúp em nhé! 🙏✨`
+          : `Dạ bác @${displayName} ơi, ${botName} đã chuyển đổi toàn bộ dữ liệu tài liệu đính kèm với đầy đủ bảng biểu sang file ${fileTypeLabel} gửi lên nhóm cho bác rồi nhé! 📄✨`;
       }
     }
 
