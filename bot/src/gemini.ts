@@ -618,8 +618,8 @@ export async function call9Router(
   }
 
   const baseUrl = (router.baseUrl || "http://127.0.0.1:20128/v1").replace(/\/+$/, "");
-  const targetModel = options?.model || router.chatModel || "ag/gemini-3.8-flash-medium";
-  const timeoutMs = options?.timeoutMs || router.timeoutMs || 45_000;
+  const targetModel = options?.model || router.chatModel || "ag/gemini-3.1-pro-low";
+  const timeoutMs = options?.timeoutMs || router.timeoutMs || 90_000;
 
   const allMedia = [...(options?.images || []), ...(options?.mediaParts || [])];
   const userContent: Array<Record<string, unknown>> = [];
@@ -747,15 +747,15 @@ export async function callGemini(
   const temperature = options?.temperature ?? 0.3;
   const maxTokens = options?.maxTokens;
 
-  // Ưu tiên 9Router chạy trước tiên khi nineRouter được cấu hình (trừ khi có search grounding hoặc có file PDF)
+  // Tầng 1 & 2: Ưu tiên 9Router (Tầng 1: ag/gemini-3.1-pro-low -> Tầng 2: ag/gemini-3.7-flash-high)
   if (hybridAgentSettings?.nineRouter?.enabled && hybridAgentSettings.nineRouter.apiKey && !isSearchEnabled && !hasPdfMedia) {
-    const routerModel = (primaryModel.startsWith("ag/") || primaryModel.startsWith("cx/"))
+    const primaryRouterModel = (primaryModel.startsWith("ag/") || primaryModel.startsWith("cx/"))
       ? primaryModel
-      : (hybridAgentSettings.nineRouter.chatModel || "ag/gemini-3.8-flash-medium");
+      : (hybridAgentSettings.nineRouter.chatModel || "ag/gemini-3.1-pro-low");
     try {
-      console.log(`[gemini] 🧠 Ưu tiên sử dụng 9Router siêu tốc: ${routerModel}`);
+      console.log(`[gemini] 🧠 Ưu tiên sử dụng 9Router siêu tốc (Tầng 1): ${primaryRouterModel}`);
       const routerRes = await call9Router(effectiveSystem, user, {
-        model: routerModel,
+        model: primaryRouterModel,
         maxTokens,
         temperature,
         json: options?.json,
@@ -763,16 +763,36 @@ export async function callGemini(
         mediaParts: options?.mediaParts,
       });
       if (routerRes) return routerRes;
-      console.warn(`[gemini] 9Router (${routerModel}) không trả về kết quả, tiếp tục thử các tầng dự phòng tiếp theo...`);
+      console.warn(`[gemini] 9Router Tầng 1 (${primaryRouterModel}) không trả về kết quả, chuyển sang Tầng 2 dự phòng...`);
     } catch (rErr) {
-      console.warn(`[gemini] Lỗi gọi 9Router (${routerModel}):`, rErr);
+      console.warn(`[gemini] Lỗi gọi 9Router Tầng 1 (${primaryRouterModel}):`, rErr);
+    }
+
+    // Tầng 2 dự phòng: ag/gemini-3.7-flash-high trên 9Router
+    const secondaryRouterModel = "ag/gemini-3.7-flash-high";
+    if (primaryRouterModel !== secondaryRouterModel) {
+      try {
+        console.log(`[gemini] 🔄 9Router kích hoạt model dự phòng Tầng 2: ${secondaryRouterModel}`);
+        const secRes = await call9Router(effectiveSystem, user, {
+          model: secondaryRouterModel,
+          maxTokens,
+          temperature,
+          json: options?.json,
+          images: options?.images,
+          mediaParts: options?.mediaParts,
+        });
+        if (secRes) return secRes;
+        console.warn(`[gemini] 9Router Tầng 2 (${secondaryRouterModel}) không trả về kết quả, tiếp tục chuyển sang Tầng 3...`);
+      } catch (secErr) {
+        console.warn(`[gemini] Lỗi gọi 9Router Tầng 2 (${secondaryRouterModel}):`, secErr);
+      }
     }
   }
 
   if (apiKeys.length === 0) {
     if (hybridAgentSettings?.nineRouter?.enabled && hybridAgentSettings.nineRouter.apiKey && !hasPdfMedia) {
       const fallbackRes = await call9Router(effectiveSystem, user, {
-        model: hybridAgentSettings.nineRouter.chatModel || "ag/gemini-3.8-flash-medium",
+        model: "ag/gemini-3.7-flash-high",
         maxTokens,
         temperature,
         json: options?.json,
@@ -784,14 +804,16 @@ export async function callGemini(
     throw new Error("Thiếu GEMINI_API_KEY trong .env");
   }
 
-  // Danh sách model cascading dự phòng khi model chính nghẽn mạng / 503 / 429 / Timeout:
-  // CHỈ dùng các dòng Flash chất lượng cao, LOẠI BỎ hoàn toàn lite models để tránh hallucination/lỗi JSON
+  // Tầng 3 (Google AI Studio Native): Ưu tiên số 1 là gemini-3.6-flash (model duy nhất hoạt động 100% không bị 503/429)
+  // Chuẩn hóa model gọi Google API: nếu là các model đang bị bão quá tải/404, đổi ngay sang gemini-3.6-flash
+  const effectiveGooglePrimary = (!primaryModel.startsWith("ag/") && !primaryModel.startsWith("cx/") && (primaryModel.includes("3.7") || primaryModel.includes("3.8") || primaryModel.includes("latest") || primaryModel.includes("2.5") || primaryModel.includes("2.0")))
+    ? "gemini-3.6-flash"
+    : primaryModel;
+
   const candidateFallbacks = [
-    "gemini-flash-latest",
-    "gemini-3.8-flash",
-    "gemini-3.7-flash",
     "gemini-3.6-flash",
-  ].filter((m) => m !== primaryModel);
+    "gemini-3.1-flash-lite-preview",
+  ].filter((m) => m !== effectiveGooglePrimary);
 
   let lastError: unknown;
   const numKeys = apiKeys.length;
@@ -925,17 +947,17 @@ export async function callGemini(
       return content;
     };
 
-    // 1. Thử model chính (primaryModel, 45s khi có file/media nặng, 20s khi có Search Grounding, 8s cho chat thường)
+    // 1. Thử model chính (primaryModel hoặc effectiveGooglePrimary, 45s khi có file/media nặng, 20s khi có Search Grounding, 8s cho chat thường)
     try {
       const primaryTimeout = isSearchEnabled ? 20_000 : (hasMedia ? 45_000 : 8_000);
-      const primaryRes = await executeModel(primaryModel, primaryTimeout);
+      const primaryRes = await executeModel(effectiveGooglePrimary, primaryTimeout);
       if (primaryRes) {
         botKeyOffset = (keyIdx + 1) % numKeys;
         return primaryRes;
       }
     } catch (err) {
       lastError = err;
-      console.warn(`[gemini] Lỗi gọi model chính ${primaryModel} (Key #${keyIdx + 1}): ${String(err)}`);
+      console.warn(`[gemini] Lỗi gọi model chính ${effectiveGooglePrimary} (Key #${keyIdx + 1}): ${String(err)}`);
     }
 
     // 2. Tự động cascading fallback nếu primaryModel nghẽn hoặc lỗi
@@ -954,12 +976,18 @@ export async function callGemini(
         console.warn(`[gemini] Fallback ${fbModel} cũng gặp lỗi: ${String(fbErr)}`);
       }
     }
+
+    // Circuit Breaker: nếu 2 key liên tiếp đều thất bại vì 503/429, ngắt ngay vòng lặp để rơi xuống tầng vệ tinh
+    if (attempt >= 1) {
+      console.warn(`[gemini] ⚡ Google AI Studio gặp bão 503/429 trên các key liên tiếp, kích hoạt Circuit Breaker chuyển ngay sang tầng vệ tinh...`);
+      break;
+    }
   }
 
   // Fallback qua cổng 9Router (trừ khi có file PDF vì 9Router không hỗ trợ application/pdf qua image_url)
   if (hybridAgentSettings?.nineRouter?.enabled && hybridAgentSettings.nineRouter.apiKey && !hasPdfMedia) {
     try {
-      const fallback9RouterModel = hybridAgentSettings.nineRouter.chatModel || "ag/gemini-3.8-flash-medium";
+      const fallback9RouterModel = "ag/gemini-3.7-flash-high";
       console.log(`[gemini] 🚀 Google API gặp sự cố, kích hoạt tầng dự phòng cao cấp qua 9Router (${fallback9RouterModel})...`);
       const routerFallbackRes = await call9Router(effectiveSystem, user, {
         model: fallback9RouterModel,
@@ -1057,15 +1085,15 @@ YÊU CẦU:
 2. Nếu có bảng biểu (table), chuyển thành định dạng Markdown Table chuẩn (| Cột 1 | Cột 2 |...).
 3. TUYỆT ĐỐI KHÔNG tóm tắt, KHÔNG thêm lời bình luận, KHÔNG thêm câu mở đầu/kết thúc, chỉ trả về nội dung văn bản đã bóc tách.`;
 
-  // 1. Ưu tiên qua 9Router Vision (ag/gemini-3.8-flash-medium hoặc cx/gpt-5.6-sol)
+  // 1. Ưu tiên qua 9Router Vision (ag/gemini-3.7-flash-high hoặc cx/gpt-5.6-sol)
   const router = hybridAgentSettings?.nineRouter;
   if (router?.enabled && router.apiKey) {
     try {
-      const routerModel = router.chatModel || "ag/gemini-3.8-flash-medium";
+      const routerModel = "ag/gemini-3.7-flash-high";
       const ocrRes = await call9Router("", prompt, {
         images: [{ data: base64, mimeType: "image/jpeg" }],
         model: routerModel,
-        timeoutMs: 40_000,
+        timeoutMs: 60_000,
         temperature: 0.1,
       });
       if (ocrRes && ocrRes.trim().length > 0) {
@@ -1830,18 +1858,20 @@ async function call9RouterAgentLoop(
   if (!router?.enabled || !router.apiKey) return null;
 
   const baseUrl = (router.baseUrl || "http://127.0.0.1:20128/v1").replace(/\/+$/, "");
-  let targetModel = options?.model || router.chatModel || "ag/gemini-3.8-flash-medium";
+  let targetModel = options?.model || router.chatModel || "ag/gemini-3.1-pro-low";
   // Nếu model truyền vào không có prefix ag/ hoặc cx/ (ví dụ 'gemini-3.7-flash', 'gemini-3.8-flash'):
   // Chuẩn hóa sang model 9Router tương ứng có prefix hợp lệ
   if (!targetModel.startsWith("ag/") && !targetModel.startsWith("cx/")) {
-    if (targetModel.includes("3.8")) {
-      targetModel = "ag/gemini-3.8-flash-medium";
+    if (targetModel.includes("3.1") && targetModel.includes("pro")) {
+      targetModel = "ag/gemini-3.1-pro-low";
+    } else if (targetModel.includes("3.7")) {
+      targetModel = "ag/gemini-3.7-flash-high";
     } else if (targetModel.includes("claude") || targetModel.includes("sonnet")) {
       targetModel = "ag/claude-sonnet-4-6";
     } else {
       targetModel = (router.chatModel && (router.chatModel.startsWith("ag/") || router.chatModel.startsWith("cx/")))
         ? router.chatModel
-        : "ag/gemini-3.8-flash-medium";
+        : "ag/gemini-3.1-pro-low";
     }
   }
   const configuredTimeout = options?.timeoutMs || (options as any)?.timeoutMs || router.timeoutMs || 45_000;

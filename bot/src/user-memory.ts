@@ -151,7 +151,7 @@ Nếu không có thông tin dài hạn đáng nhớ, trả về {"memories": []}
 Hãy trích xuất thông tin đáng nhớ:`;
 
     const rawResponse = await callGemini(promptSystem, promptUser, {
-      model: "gemini-3.1-flash-lite-preview",
+      model: "ag/gemini-3.1-pro-low",
       temperature: 0.1,
     });
 

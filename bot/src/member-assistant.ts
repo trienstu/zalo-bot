@@ -1541,7 +1541,7 @@ async function handleHistoryQA(
       if (needsAgentLoop) {
         const dynamicTimeout = (fileTextContent?.length || 0) > 10_000 ? 150_000 : undefined;
         answer = await callGeminiAgentLoop(fastSystemPrompt, fastUserPrompt, {
-          model: "gemini-3.1-flash-lite-preview",
+          model: "ag/gemini-3.1-pro-low",
           maxTurns: 3,
           timeoutMs: dynamicTimeout,
           mediaParts: mediaPart ? [mediaPart] : undefined,
@@ -1636,7 +1636,7 @@ QUY TẮC BẮT BUỘC:
 1. Chỉ in: Tên tác phẩm/bài thơ, Tác giả (nếu có), và TOÀN BỘ NỘI DUNG TỪNG DÒNG của bài thơ / văn bản / kịch bản.
 2. TUYỆT ĐỐI KHÔNG có lời chào (@mention, Dạ Sếp, Xin chào), KHÔNG có lời giải thích, KHÔNG có câu kết, KHÔNG bịa đặt giới hạn kỹ thuật.`,
               `Yêu cầu: "${question}". Trích dẫn nếu có: "${options?.quote?.text || ""}".`,
-              { model: "gemini-flash-latest" },
+              { model: "ag/gemini-3.1-pro-low" },
             ).catch(() => "");
             if (directContent && directContent.length >= 15) {
               const cleanedDirect = cleanCoreSpeechText(directContent);
@@ -2018,7 +2018,7 @@ QUY TẮC BẮT BUỘC:
       if (needsAgentLoop && !isGreetingQuote) {
         const dynamicTimeout = (options.quote.text?.length || 0) > 10_000 || (options.directDocContent?.length || 0) > 10_000 ? 150_000 : undefined;
         answer = await callGeminiAgentLoop(quoteSystemPrompt, quoteUserPrompt, {
-          model: "gemini-3.1-flash-lite-preview",
+          model: "ag/gemini-3.1-pro-low",
           maxTurns: 3,
           timeoutMs: dynamicTimeout,
           mediaParts: mediaPart ? [mediaPart] : undefined,
@@ -2101,7 +2101,7 @@ QUY TẮC BẮT BUỘC:
           explicitToolRequest: false,
           hasMedia: Boolean(mediaPart),
           fallback: async () => await callGemini(quoteSystemPrompt, quoteUserPrompt, {
-            model: Boolean(mediaPart) ? (config.geminiModel || "gemini-3.7-flash") : "gemini-3.7-flash",
+            model: Boolean(mediaPart) ? (config.geminiModel || "ag/gemini-3.7-flash-high") : (config.geminiModel || "ag/gemini-3.1-pro-low"),
             mediaParts: mediaPart ? [mediaPart] : undefined,
             enableSearch: false,
           }),
@@ -2136,7 +2136,7 @@ QUY TẮC BẮT BUỘC:
 1. Chỉ in: Tên tác phẩm/bài thơ, Tác giả (nếu có), và TOÀN BỘ NỘI DUNG TỪNG DÒNG của bài thơ / văn bản / kịch bản.
 2. TUYỆT ĐỐI KHÔNG có lời chào (@mention, Dạ Sếp, Xin chào), KHÔNG có lời giải thích, KHÔNG có câu kết, KHÔNG bịa đặt giới hạn kỹ thuật.`,
               `Yêu cầu: "${question}". Trích dẫn nếu có: "${options?.quote?.text || ""}".`,
-              { model: "gemini-flash-latest" },
+              { model: "ag/gemini-3.1-pro-low" },
             ).catch(() => "");
             if (directContent && directContent.length >= 15) {
               const cleanedDirect = cleanCoreSpeechText(directContent);
@@ -3011,7 +3011,7 @@ QUY TẮC BẮT BUỘC:
       // 🚀 Chỉ khi người dùng thực sự yêu cầu gọi tool xuất file, voice hoặc đọc link cụ thể mới chạy Agent Loop
       const dynamicTimeout = (fileTextContent?.length || 0) > 10_000 ? 150_000 : undefined;
       answer = await callGeminiAgentLoop(effectiveSystemPrompt, userPrompt, {
-        model: Boolean(mediaPart) ? (config.geminiModel || "gemini-3.7-flash") : (config.geminiModel || "gemini-3.7-flash"),
+        model: Boolean(mediaPart) ? (config.geminiModel || "ag/gemini-3.7-flash-high") : (config.geminiModel || "ag/gemini-3.1-pro-low"),
         maxTurns: 3,
         timeoutMs: dynamicTimeout,
         mediaParts: mediaPart ? [mediaPart] : undefined,
@@ -3176,7 +3176,7 @@ QUY TẮC BẮT BUỘC:
 1. Chỉ in: Tên tác phẩm/bài thơ, Tác giả (nếu có), và TOÀN BỘ NỘI DUNG TỪNG DÒNG của bài thơ / văn bản / kịch bản.
 2. TUYỆT ĐỐI KHÔNG có lời chào (@mention, Dạ Sếp, Xin chào), KHÔNG có lời giải thích, KHÔNG có câu kết, KHÔNG bịa đặt giới hạn kỹ thuật.`,
             `Yêu cầu: "${question}". Trích dẫn nếu có: "${options?.quote?.text || ""}".`,
-            { model: "gemini-flash-latest" },
+            { model: "ag/gemini-3.1-pro-low" },
           ).catch(() => "");
           if (directContent && directContent.length >= 15) {
             const cleanedDirect = cleanCoreSpeechText(directContent);

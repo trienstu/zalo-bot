@@ -214,11 +214,11 @@ export const hybridAgentSettings: HybridAgentSettings = {
     baseUrl: process.env.NINE_ROUTER_BASE_URL?.trim() || "http://127.0.0.1:20128/v1",
     apiKey: process.env.NINE_ROUTER_API_KEY?.trim() || "",
     // Model suy luận chat chính / fallback cao cấp qua 9Router
-    chatModel: process.env.NINE_ROUTER_CHAT_MODEL?.trim() || "ag/gemini-3.8-flash-medium",
+    chatModel: process.env.NINE_ROUTER_CHAT_MODEL?.trim() || "ag/gemini-3.1-pro-low",
     // Không đoán model/combo: để trống thì route tương ứng tự fallback Gemini.
     groundedModel: process.env.NINE_ROUTER_GROUNDED_MODEL?.trim() || "",
     deepModel: process.env.NINE_ROUTER_DEEP_MODEL?.trim() || "",
-    timeoutMs: Math.min(300_000, Math.max(1_000, readInt("NINE_ROUTER_TIMEOUT_MS", 45_000))),
+    timeoutMs: Math.min(300_000, Math.max(1_000, readInt("NINE_ROUTER_TIMEOUT_MS", 90_000))),
   },
   hermes: {
     enabled: readBool("HERMES_ENABLED", false),
