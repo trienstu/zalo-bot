@@ -442,7 +442,7 @@ export async function runMotionVideoJob(options: MotionVideoJobOptions): Promise
 
     await execFileAsync("nice", renderArgs, {
       cwd: remotionDir,
-      timeout: 120000, // 2 phút tối đa
+      timeout: 240000, // 4 phút tối đa cho VPS 1-core
     });
 
     // Xóa file tạm
