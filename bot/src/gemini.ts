@@ -316,25 +316,53 @@ export async function downloadFileContent(
     const detectedMime = detectMimeType(buffer, fileName || url, contentType);
     const ext = (fileName.split(".").pop() || url.split(".").pop() || "").toLowerCase();
 
-    // 1. File PDF: Ưu tiên bóc tách toàn bộ Text bằng unpdf siêu tốc, nhẹ RAM & xử lý file nặng không giới hạn MB
+    // 1. File PDF: 3-Tier Adaptive Document Pipeline
     if (detectedMime === "application/pdf" || ext === "pdf") {
+      let totalPages = 1;
+      let extractedDigitalText = "";
+
+      // TIER 0: Trích xuất Text kỹ thuật số siêu tốc bằng unpdf (0.1s, 0 token, 0 network)
       try {
         const { extractText } = await import("unpdf");
         // Dùng buffer.slice() để copy vì unpdf (pdfjs-dist) detach/transfer ArrayBuffer khi parse
         const uint8 = new Uint8Array(buffer.slice());
         const pdfResult = await extractText(uint8, { mergePages: true });
-        const extracted = (pdfResult?.text || "").trim();
-        if (extracted.length >= 50) {
-          console.log(`[gemini] 📄 Đã trích xuất ${extracted.length.toLocaleString("vi-VN")} ký tự văn bản từ PDF "${fileName || "tài liệu"}" (${pdfResult.totalPages} trang)`);
-          return { textContent: extracted };
+        totalPages = pdfResult?.totalPages || 1;
+        extractedDigitalText = (pdfResult?.text || "").trim();
+        if (extractedDigitalText.length >= 50) {
+          console.log(`[gemini] 📄 [Tier 0 - Digital PDF] Đã trích xuất ${extractedDigitalText.length.toLocaleString("vi-VN")} ký tự văn bản từ PDF "${fileName || "tài liệu"}" (${totalPages} trang)`);
+          return { textContent: extractedDigitalText };
         }
       } catch (pdfErr) {
-        console.warn(`[gemini] Không thể trích xuất text từ PDF bằng unpdf, thử multimodal:`, pdfErr);
+        console.warn(`[gemini] Không thể trích xuất text từ PDF bằng unpdf:`, pdfErr);
       }
 
-      // Nếu là PDF scan dạng ảnh thuần túy:
-      // Chỉ gửi Multimodal cho Gemini nếu file <= 15MB (để không vượt quá giới hạn 20MB payload API)
+      // TIER 1: File scan nhẹ (<= 3 trang VÀ <= 3MB) -> Gửi Multimodal trực tiếp sang Gemini Native API
+      if (buffer.length <= 3 * 1024 * 1024 && totalPages <= 3) {
+        console.log(`[gemini] 📄 [Tier 1 - Light PDF Scan] File nhẹ (${(buffer.length / 1024 / 1024).toFixed(1)}MB, ${totalPages} trang), gửi Multimodal sang Gemini Native API`);
+        return {
+          mediaPart: {
+            data: buffer.toString("base64"),
+            mimeType: "application/pdf",
+          },
+        };
+      }
+
+      // TIER 2: File scan nặng (> 3 trang HOẶC > 3MB, tối đa 50MB) -> Cắt trang pdftoppm + Song song OCR qua 9Router / Gemini Vision
+      console.log(`[gemini] 📄 [Tier 2 - Heavy PDF Scan] Phát hiện file scan ${totalPages} trang (${(buffer.length / 1024 / 1024).toFixed(1)}MB), kích hoạt pipeline cắt trang & OCR song song...`);
+      try {
+        const ocrText = await extractScannedPdfWithOcr(buffer, fileName || "tai_lieu.pdf", 25);
+        if (ocrText && ocrText.trim().length >= 50) {
+          console.log(`[gemini] 📄 [Tier 2 - Heavy PDF Scan] Đã OCR thành công ${ocrText.length.toLocaleString("vi-VN")} ký tự văn bản từ "${fileName || "tài liệu"}"`);
+          return { textContent: ocrText };
+        }
+      } catch (tier2Err) {
+        console.warn(`[gemini] Lỗi Tier 2 OCR cho PDF "${fileName}":`, tier2Err);
+      }
+
+      // Fallback cuối cùng nếu Tier 2 không khả dụng (ví dụ môi trường thiếu pdftoppm) và file <= 15MB:
       if (buffer.length > 50 && buffer.length <= 15 * 1024 * 1024) {
+        console.log(`[gemini] 📄 [Tier 2 Fallback] Gửi Multimodal native cho PDF "${fileName}" (${(buffer.length / 1024 / 1024).toFixed(1)}MB)`);
         return {
           mediaPart: {
             data: buffer.toString("base64"),
@@ -344,7 +372,7 @@ export async function downloadFileContent(
       } else if (buffer.length > 15 * 1024 * 1024) {
         console.warn(`[gemini] File PDF scan không có text layer và quá nặng (${(buffer.length / 1024 / 1024).toFixed(1)}MB > 15MB)`);
         return {
-          textContent: `[File PDF scan dạng ảnh "${fileName || "tài liệu"}" nặng ${(buffer.length / 1024 / 1024).toFixed(1)}MB, không chứa lớp văn bản và vượt quá giới hạn OCR 15MB của AI API. Vui lòng chuyển thành file PDF văn bản hoặc gửi ảnh từng trang để bot đọc.]`,
+          textContent: `[File PDF scan dạng ảnh "${fileName || "tài liệu"}" nặng ${(buffer.length / 1024 / 1024).toFixed(1)}MB, không chứa lớp văn bản và vượt quá giới hạn xử lý. Vui lòng gửi file nhẹ hơn hoặc gửi ảnh từng trang để bot đọc.]`,
         };
       }
     }
@@ -957,7 +985,9 @@ export async function callGemini(
   }
 
   // VỆ TINH 1: Fallback sang Cloudflare Workers AI sau khi đã xoay hết 100% key Gemini (và DeepSeek)
-  if (isCloudflareConfigured()) {
+  // 🛡️ ZERO-HALLUCINATION GUARD: TUYỆT ĐỐI KHÔNG fallback sang Cloudflare nếu request có ảnh/multimodal
+  // vì Cloudflare Workers AI là model thuần text, sẽ không thấy file và hallucinate (bịa đặt "đây là file ảnh...")!
+  if (isCloudflareConfigured() && !hasMedia) {
     try {
       console.log("[gemini] 🛰️ Toàn bộ key Gemini (và DeepSeek) đã xoay hết vòng hoặc lỗi, kích hoạt Vệ Tinh 1: Cloudflare Workers AI...");
       const cfReply = await callCloudflareLlm(
@@ -979,7 +1009,162 @@ export async function callGemini(
     }
   }
 
+  if (hasMedia) {
+    throw new Error(
+      "Dạ Sếp/bác ơi, cụm máy chủ Vision AI hiện đang gặp sự cố quá tải tạm thời (HTTP 503/429 hoặc timeout). Kính nhờ Sếp/bác đợi 1 - 2 phút rồi gửi lại giúp em nhé! 🙏"
+    );
+  }
+
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+/**
+ * Thực hiện OCR cho 1 trang ảnh tài liệu (ưu tiên 9Router Vision, fallback Google AI Studio).
+ */
+export async function ocrSingleDocumentPage(
+  imageBuffer: Buffer,
+  pageNum: number,
+  totalPages: number
+): Promise<string> {
+  const base64 = imageBuffer.toString("base64");
+  const prompt = `Trích xuất TOÀN BỘ nội dung văn bản và bảng biểu trong hình ảnh trang tài liệu này (Trang ${pageNum}/${totalPages}) một cách trung thực, đầy đủ và chuẩn xác 100%.
+YÊU CẦU:
+1. Giữ nguyên toàn bộ cấu trúc: Tiêu đề, số thứ tự, điều khoản, căn cứ, danh sách, họ tên, ngày tháng, chữ ký/con dấu nếu có.
+2. Nếu có bảng biểu (table), chuyển thành định dạng Markdown Table chuẩn (| Cột 1 | Cột 2 |...).
+3. TUYỆT ĐỐI KHÔNG tóm tắt, KHÔNG thêm lời bình luận, KHÔNG thêm câu mở đầu/kết thúc, chỉ trả về nội dung văn bản đã bóc tách.`;
+
+  // 1. Ưu tiên qua 9Router Vision (ag/gemini-3.8-flash-medium hoặc cx/gpt-5.6-sol)
+  const router = hybridAgentSettings?.nineRouter;
+  if (router?.enabled && router.apiKey) {
+    try {
+      const routerModel = router.chatModel || "ag/gemini-3.8-flash-medium";
+      const ocrRes = await call9Router("", prompt, {
+        images: [{ data: base64, mimeType: "image/jpeg" }],
+        model: routerModel,
+        timeoutMs: 40_000,
+        temperature: 0.1,
+      });
+      if (ocrRes && ocrRes.trim().length > 0) {
+        return ocrRes.trim();
+      }
+    } catch (rErr) {
+      console.warn(`[gemini-ocr] 9Router OCR trang ${pageNum} thất bại, thử Google AI Studio...`, rErr);
+    }
+  }
+
+  // 2. Fallback sang Google AI Studio Multimodal (1 trang JPEG nhẹ ~150KB)
+  try {
+    const aiStudioRes = await callGemini("", prompt, {
+      images: [{ data: base64, mimeType: "image/jpeg" }],
+      enableSearch: false,
+      temperature: 0.1,
+    });
+    if (aiStudioRes && aiStudioRes.trim().length > 0) {
+      return aiStudioRes.trim();
+    }
+  } catch (gErr) {
+    console.warn(`[gemini-ocr] Google AI Studio OCR trang ${pageNum} thất bại:`, gErr);
+  }
+
+  return "";
+}
+
+/**
+ * Trích xuất toàn bộ văn bản từ file PDF scan dạng ảnh bằng cách cắt từng trang và OCR song song.
+ */
+export async function extractScannedPdfWithOcr(
+  buffer: Buffer,
+  fileName = "document.pdf",
+  maxPages = 25
+): Promise<string | null> {
+  const tempDir = path.join("/tmp", `pdf_ocr_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+  fs.mkdirSync(tempDir, { recursive: true });
+  const tempPdf = path.join(tempDir, "input.pdf");
+  fs.writeFileSync(tempPdf, buffer);
+
+  try {
+    const { execFile } = await import("child_process");
+    const { promisify } = await import("util");
+    const execFileAsync = promisify(execFile);
+
+    // Kiểm tra pdftoppm có khả dụng không
+    try {
+      await execFileAsync("pdftoppm", ["-v"]);
+    } catch (checkErr: any) {
+      if (checkErr.code === "ENOENT" || (checkErr.message && checkErr.message.includes("not found"))) {
+        console.warn("[gemini-ocr] pdftoppm không có trên hệ thống, bỏ qua Tier 2 OCR");
+        return null;
+      }
+    }
+
+    // pdftoppm -jpeg -r 130 -scale-to 1100 input.pdf page
+    const prefix = path.join(tempDir, "page");
+    await execFileAsync("pdftoppm", ["-jpeg", "-r", "130", "-scale-to", "1100", tempPdf, prefix], {
+      timeout: 30_000,
+    });
+
+    const files = fs.readdirSync(tempDir);
+    const pageFiles = files
+      .filter((f) => f.startsWith("page-") && (f.endsWith(".jpg") || f.endsWith(".jpeg")))
+      .sort((a, b) => {
+        const numA = parseInt(a.match(/page-(\d+)/)?.[1] || "0", 10);
+        const numB = parseInt(b.match(/page-(\d+)/)?.[1] || "0", 10);
+        return numA - numB;
+      });
+
+    if (pageFiles.length === 0) {
+      console.warn("[gemini-ocr] pdftoppm không tạo ra trang ảnh nào.");
+      return null;
+    }
+
+    const totalPages = pageFiles.length;
+    const pagesToProcess = pageFiles.slice(0, maxPages);
+    console.log(`[gemini-ocr] 📄 Đã cắt ${totalPages} trang từ "${fileName}", đang OCR song song ${pagesToProcess.length} trang đầu...`);
+
+    const concurrency = 3;
+    const pageResults: Array<{ pageNum: number; text: string }> = new Array(pagesToProcess.length);
+
+    for (let i = 0; i < pagesToProcess.length; i += concurrency) {
+      const chunk = pagesToProcess.slice(i, i + concurrency);
+      await Promise.all(
+        chunk.map(async (pageFile, chunkIdx) => {
+          const pageIndex = i + chunkIdx;
+          const pageNum = parseInt(pageFile.match(/page-(\d+)/)?.[1] || String(pageIndex + 1), 10);
+          const pagePath = path.join(tempDir, pageFile);
+          try {
+            const pageBuf = fs.readFileSync(pagePath);
+            const text = await ocrSingleDocumentPage(pageBuf, pageNum, totalPages);
+            pageResults[pageIndex] = { pageNum, text: text || `[Trang ${pageNum}: Không phát hiện văn bản]` };
+          } catch (pErr) {
+            console.warn(`[gemini-ocr] Lỗi OCR trang ${pageNum}:`, pErr);
+            pageResults[pageIndex] = { pageNum, text: `[Trang ${pageNum}: Lỗi xử lý OCR]` };
+          }
+        })
+      );
+    }
+
+    const compiledPages: string[] = [];
+    for (const res of pageResults) {
+      if (res && res.text) {
+        compiledPages.push(`=== TRANG ${res.pageNum} ===\n${res.text.trim()}`);
+      }
+    }
+
+    if (totalPages > maxPages) {
+      compiledPages.push(`\n[Lưu ý: Tài liệu gồm ${totalPages} trang, hệ thống đã trích xuất toàn bộ ${maxPages} trang đầu tiên]`);
+    }
+
+    const fullResult = compiledPages.join("\n\n");
+    console.log(`[gemini-ocr] ✅ Hoàn tất OCR ${pagesToProcess.length}/${totalPages} trang, tổng cộng ${fullResult.length.toLocaleString("vi-VN")} ký tự!`);
+    return fullResult;
+  } catch (err) {
+    console.warn(`[gemini-ocr] Thất bại khi cắt và OCR file "${fileName}":`, err);
+    return null;
+  } finally {
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  }
 }
 
 /**
@@ -1843,14 +2028,9 @@ export async function callGeminiAgentLoop(
 
   const allMedia = [...(options?.images || []), ...(options?.mediaParts || [])];
   const hasMedia = allMedia.length > 0;
-  const hasPdfMedia = options?.mediaParts?.some(
-    (m) => m.mimeType === "application/pdf" || m.mimeType?.includes("pdf")
-  );
 
   let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-flash-latest";
-  if (hasPdfMedia) {
-    primaryModel = "gemini-3.8-flash";
-  } else if (!primaryModel || primaryModel.includes("2.5-flash") || primaryModel.includes("3.1-flash-lite")) {
+  if (!primaryModel || primaryModel.includes("2.5-flash") || primaryModel.includes("3.1-flash-lite")) {
     primaryModel = "gemini-flash-latest";
   }
   const maxTurns = options?.maxTurns || 2;
@@ -1885,7 +2065,8 @@ export async function callGeminiAgentLoop(
       let lastErrText = "";
 
       // Thử gọi model với cơ chế retry nhanh (đổi key hoặc fallback model nếu gặp 503/429/timeout)
-      for (let retry = 0; retry < 3; retry++) {
+      const maxRetries = Math.min(Math.max(apiKeys.length, 3), 6);
+      for (let retry = 0; retry < maxRetries; retry++) {
         const apiKey = apiKeys[apiKeyIdx];
         const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKey}`;
 
@@ -1896,7 +2077,7 @@ export async function callGeminiAgentLoop(
           generationConfig: {
             temperature,
             ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
-            ...(currentModel.includes("3.7") || currentModel.includes("3.8")
+            ...((currentModel.includes("3.7") || currentModel.includes("3.8")) && !hasMedia
               ? { thinkingConfig: { thinkingBudget: 256 } }
               : {}),
           },

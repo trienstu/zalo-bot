@@ -1807,7 +1807,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
   let fileSection = "";
   if (fileTextContent) {
-    fileSection = `\n=== NỘI DUNG TÀI LIỆU ĐÍNH KÈM (${fileName}): ===\n${fileTextContent.slice(0, 40000)}\n`;
+    fileSection = `\n=== NỘI DUNG TÀI LIỆU ĐÍNH KÈM (${fileName}): ===\n${fileTextContent.slice(0, 120000)}\n`;
   }
 
   let imageOcrSection = "";

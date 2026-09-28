@@ -1325,7 +1325,7 @@ async function handleHistoryQA(
     }
   }
 
-  if (targetUrl) {
+  if (targetUrl && !mediaPart && !fileTextContent) {
     console.log(`[member-assistant] 📥 Đang nạp tài liệu/file từ: ${targetUrl.slice(0, 80)} (${fileName})...`);
     const fileRes = await downloadFileContent(targetUrl, fileName);
     if (fileRes?.error === "UNSUPPORTED_IMAGE_FORMAT") {
@@ -1421,7 +1421,7 @@ async function handleHistoryQA(
 
     let fileContentSnippet = "";
     if (fileTextContent) {
-      fileContentSnippet = `\n=== TOÀN BỘ NỘI DUNG TÀI LIỆU (${fileName || "File đính kèm"}): ===\n${fileTextContent.slice(0, 40000)}\n`;
+      fileContentSnippet = `\n=== TOÀN BỘ NỘI DUNG TÀI LIỆU (${fileName || "File đính kèm"}): ===\n${fileTextContent.slice(0, 120000)}\n`;
     }
 
     let quoteTextSection = "";

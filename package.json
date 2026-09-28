@@ -7,7 +7,7 @@
     "review": "node scripts/dual-review.mjs",
     "review:preview": "node scripts/dual-review.mjs --preview",
     "review:graph": "node .gitnexus/run.cjs detect-changes --scope all --repo .",
-    "review:ocr": "npx -y @alibaba-group/open-code-review review",
+    "review:ocr": "npx -y @alibaba-group/open-code-review review --model gemini-3.5-flash",
     "review:scan": "npx -y @alibaba-group/open-code-review scan",
     "bot:typecheck": "npm run typecheck --prefix bot",
     "bot:test": "npm test --prefix bot",
