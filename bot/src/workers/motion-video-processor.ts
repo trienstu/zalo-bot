@@ -216,7 +216,7 @@ export async function planMotionVideoWithGemini(
     `5. "spotlight": Video dọc 9:16 điểm tin kiến thức tổng hợp (3-4 điểm nhấn súc tích, hiện đại).\n\n` +
     `YÊU CẦU ĐẶC BIỆT:\n` +
     `- "genre": Chọn chính xác thể loại phù hợp (thể loại đề xuất: "${detectedGenre}").\n` +
-    `- "narrationScript": Kịch bản đọc thuyết minh bằng tiếng Việt truyền cảm hứng, tự nhiên, nhịp nhàng (khoảng 35-70 từ, đọc trong 12-25 giây).\n` +
+    `- "narrationScript": Kịch bản đọc thuyết minh súc tích, cô đọng, cuốn hút bằng tiếng Việt (khoảng 20-40 từ, đọc gọn trong 8-15 giây để video nhanh, hấp dẫn).\n` +
     `- Tùy theo genre, hãy điền đầy đủ các trường dữ liệu tương ứng.\n` +
     `- Màu sắc ("primaryColor", "secondaryColor"): Chọn mã Hex hài hòa, hiện đại, rực rỡ (ví dụ #4f46e5, #ec4899, #10b981, #f59e0b, #3b82f6).\n` +
     `Cấu trúc JSON bắt buộc:\n` +
@@ -284,7 +284,7 @@ export async function runMotionVideoJob(options: MotionVideoJobOptions): Promise
   };
 
   const waitMsg =
-    `🎬 ${userGreeting} chờ em một chút nhé! Em đang lên kịch bản và dựng video thể loại **${genreNames[initialGenre]}** với đồ họa chuyển động Remotion Full HD, dự kiến khoảng 20-30 giây xong ạ... ✨`;
+    `🎬 ${userGreeting} chờ em một chút nhé! Em đang lên kịch bản và dựng video thể loại **${genreNames[initialGenre]}** với đồ họa chuyển động Remotion Full HD, dự kiến khoảng 1-3 phút em gửi ạ... ✨`;
 
   if (isGroup && threadId) {
     await sendGroupText(api, threadId, waitMsg);
@@ -442,7 +442,7 @@ export async function runMotionVideoJob(options: MotionVideoJobOptions): Promise
 
     await execFileAsync("nice", renderArgs, {
       cwd: remotionDir,
-      timeout: 240000, // 4 phút tối đa cho VPS 1-core
+      timeout: 600000, // 10 phút tối đa cho VPS 1-core
     });
 
     // Xóa file tạm
