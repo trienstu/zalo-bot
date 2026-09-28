@@ -73,16 +73,20 @@ export function applyExecutionSignals(
     merged.toolIntent = "none";
     merged.responseMode = "fast";
   } else if (merged.taskType === "presentation_video") {
-    // Chống nhận nhầm: chỉ khi có từ khóa VIDEO rõ ràng mới gán presentation_video
-    const combinedText = `${question} ${quoteText || ""}`;
-    const hasExplicitVideoKeyword = /\b(?:video|clip|mp4|thước\s*phim|quay\s*video|dựng\s*video)\b/iu.test(combinedText);
-    const hasExplicitFileOrPresentationKeyword = /\b(?:file|tập\s*tin|tài\s*liệu|powerpoint|pptx|slide|thuyết\s*trình)\b/iu.test(combinedText);
+    // Chống nhận nhầm: kiểm tra chặt chẽ bằng isPresentationVideoRequest
+    const hasExplicitFileOrPresentationKeyword = /\b(?:file|tập\s*tin|tài\s*liệu|powerpoint|pptx|slide|thuyết\s*trình)\b/iu.test(question);
 
-    if (!hasExplicitVideoKeyword && hasExplicitFileOrPresentationKeyword) {
-      merged.taskType = "file_generation";
-      merged.mediaFormat = { ...(merged.mediaFormat || {}), fileType: "pptx" };
-      merged.toolIntent = "create";
-      merged.responseMode = "action";
+    if (!isPresentationVideoRequest(question, quoteText)) {
+      if (hasExplicitFileOrPresentationKeyword) {
+        merged.taskType = "file_generation";
+        merged.mediaFormat = { ...(merged.mediaFormat || {}), fileType: "pptx" };
+        merged.toolIntent = "create";
+        merged.responseMode = "action";
+      } else {
+        merged.taskType = "none";
+        merged.toolIntent = "none";
+        merged.responseMode = "fast";
+      }
     } else {
       merged.toolIntent = "create";
       merged.responseMode = "action";

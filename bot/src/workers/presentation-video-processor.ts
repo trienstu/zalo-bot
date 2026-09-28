@@ -53,6 +53,7 @@ export interface PresentationPlan {
 export function isPresentationVideoRequest(text: string, quoteText = ""): boolean {
   const combined = `${text || ""} ${quoteText || ""}`.trim().toLowerCase();
   const qLower = (text || "").trim().toLowerCase();
+  const quoteLower = (quoteText || "").trim().toLowerCase();
 
   if (!qLower) return false;
 
@@ -77,9 +78,12 @@ export function isPresentationVideoRequest(text: string, quoteText = ""): boolea
     );
   if (isVideoSummaryReq) return false;
 
-  // 4. Bỏ qua nếu chỉ là câu hỏi thăm dò năng lực hoặc hỏi ý kiến/lý thuyết thông thường
+  // 4. Bỏ qua nếu chỉ là câu hỏi thăm dò năng lực, nghi vấn/hoài nghi hoặc hỏi ý kiến/lý thuyết thông thường
   const isHypotheticalOrInquiry =
     /^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|xuất)?\s*(?:được|đc|duoc)?(?:\s+(?:tạo|làm|soạn|xuất))?\s+(?:video|clip)\s*(?:thuyết\s*trình|slide|trình\s*chiếu)?\s*(?:không|ko)?\s*(?:hả|nhỉ|hở|ạ|không|ko)\s*[?]?$/iu.test(
+      qLower,
+    ) ||
+    /(?:có\s+(?:thật|thiệt)\s+.*?(?:được\s+không|được\s+ko|ko\s*đó|không\s*đó|hả|nhỉ|chăng)|tự\s+làm\s+(?:được|đc)\s+(?:không|ko|hả|sao)|chắc\s+làm\s+được|làm\s+sao\s+mà\s+làm\s+được)/iu.test(
       qLower,
     ) ||
     /(?:^|[^\p{L}\p{N}])(?:làm|tạo|dựng|quay|xuất)\s+(?:video|clip).*?(?:có\s+khó|như\s+thế\s+nào|kiếm\s+tiền|phần\s+mềm|bằng\s+app|app\s+gì|dễ\s+không|sao\s+nhỉ|ở\s+đâu|bằng\s+cách\s+nào)/iu.test(
@@ -90,29 +94,46 @@ export function isPresentationVideoRequest(text: string, quoteText = ""): boolea
     return false;
   }
 
-  // 5. Cụm từ trực tiếp: "video thuyết trình", "video slide", "video trình chiếu", "video powerpoint", "video bài giảng"
+  // 5. Cụm từ trực tiếp trong câu hỏi người dùng: "video thuyết trình", "video slide", "video trình chiếu", "video powerpoint", "video bài giảng"
   const directMatch =
-    /\b(?:video|clip)\s+(?:thuyết\s*trình|slide|trình\s*chiếu|powerpoint|pptx|bài\s*giảng)\b/i.test(combined) ||
-    /\b(?:thuyết\s*trình|slide|trình\s*chiếu|powerpoint|pptx)\s+(?:thành|ra|sang)\s+(?:video|clip)\b/i.test(combined) ||
-    /\b(?:slide|bài\s*thuyết\s*trình|bài\s*trình\s*chiếu)\s+(?:kèm|có)\s+(?:video|giọng\s*đọc|thuyết\s*minh|lồng\s*tiếng)\b/i.test(combined);
+    /\b(?:video|clip)\s+(?:thuyết\s*trình|slide|trình\s*chiếu|powerpoint|pptx|bài\s*giảng)\b/i.test(qLower) ||
+    /\b(?:thuyết\s*trình|slide|trình\s*chiếu|powerpoint|pptx)\s+(?:thành|ra|sang)\s+(?:video|clip)\b/i.test(qLower) ||
+    /\b(?:slide|bài\s*thuyết\s*trình|bài\s*trình\s*chiếu)\s+(?:kèm|có)\s+(?:video|giọng\s*đọc|thuyết\s*minh|lồng\s*tiếng)\b/i.test(qLower);
 
   if (directMatch) return true;
 
-  // 6. Động từ hành động RÕ RÀNG hướng vào tạo video + chủ đề trình chiếu/thuyết minh/giải thích kiến thức
-  const hasDirectVideoCommand =
-    /(?:(?:hãy|giúp|nhờ)?\s*(?:làm|tạo|dựng|xuất|quay|sản\s*xuất|chuyển)\s+(?:cho\s*(?:anh|em|tôi|sếp|mình|nhóm)\s*)?(?:(?:1|một)?\s*(?:bản|file|bộ)?\s*)?(?:video|clip|mp4|thước\s*phim))/i.test(
-      combined,
+  // 6. Động từ hành động RÕ RÀNG TRONG CÂU HỎI hướng vào tạo video + chủ đề trình chiếu/thuyết minh/giải thích kiến thức
+  const hasDirectVideoCommandInQuestion =
+    /(?:(?:hãy|giúp|nhờ|em)?\s*(?:làm|tạo|dựng|xuất|quay|sản\s*xuất|chuyển)\s+(?:cho\s*(?:anh|em|tôi|sếp|mình|nhóm)\s*)?(?:(?:1|một)?\s*(?:bản|file|bộ)?\s*)?(?:video|clip|mp4|thước\s*phim))/i.test(
+      qLower,
     );
   const mentionsPresentation = /\b(?:thuyết\s*trình|trình\s*chiếu|slide|powerpoint|bài\s*giảng)\b/i.test(combined);
   const mentionsNarration = /\b(?:thuyết\s*minh|lồng\s*tiếng|giọng\s*đọc|lời\s*thoại|speaker\s*notes?)\b/i.test(combined);
   const mentionsExplaining = /\b(?:giải\s*thích|phân\s*tích|hướng\s*dẫn|kiến\s*trúc|vận\s*hành|khổ\s*dọc|khổ\s*ngang|9:16|16:9|shorts|reels|tiktok)\b/i.test(combined);
 
-  if (hasDirectVideoCommand && (mentionsPresentation || mentionsNarration || mentionsExplaining)) {
+  if (hasDirectVideoCommandInQuestion && (mentionsPresentation || mentionsNarration || mentionsExplaining)) {
     return true;
   }
 
-  if (/\b(?:video|clip)\b/i.test(combined) && mentionsPresentation && mentionsNarration) {
+  if (/\b(?:video|clip)\b/i.test(qLower) && mentionsPresentation && mentionsNarration) {
     return true;
+  }
+
+  // 7. Nếu có tin nhắn trích dẫn (quoteText):
+  if (quoteLower) {
+    // 7A. Lệnh làm video rõ ràng hướng vào nội dung trích dẫn
+    const isCommandOnQuote =
+      /(?:dựng|làm|tạo|xuất|chuyển)\s+(?:thành\s+)?(?:video|clip)\s+(?:cho|từ)?\s*(?:bài|nội\s*dung|đoạn|kịch\s*bản|tài\s*liệu)?\s*(?:này|trên|đó|nhé|nha)/iu.test(
+        qLower,
+      );
+    if (isCommandOnQuote) return true;
+
+    // 7B. Trích dẫn một đề xuất làm video của bot VÀ người dùng đồng ý/xác nhận
+    const isQuotingVideoProposal =
+      /(?:video\s+thuyết\s*trình|xuất\s+bản\s+video|sản\s+xuất\s+video|dựng\s+clip)/iu.test(quoteLower);
+    const isAffirmation =
+      /(?:ok|oke|ừ|uh|u|dạ|vâng|được|triển|làm\s*đi|xuất\s*đi|làm\s*luôn)/iu.test(qLower);
+    if (isQuotingVideoProposal && isAffirmation) return true;
   }
 
   return false;

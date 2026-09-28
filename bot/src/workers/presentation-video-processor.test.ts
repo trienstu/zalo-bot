@@ -43,8 +43,17 @@ test("isPresentationVideoRequest nhận diện chính xác các yêu cầu tạo
     ),
     false,
   );
-  assert.equal(isPresentationVideoRequest("tóm tắt video này giúp tôi với"), false);
-  assert.equal(isPresentationVideoRequest("phần mềm này dùng để tải video Douyin và Kuaishou"), false);
+  // Chống kích hoạt nhầm khi quote có từ "làm video" nhưng câu hỏi là hoài nghi / hỏi thăm dò
+  const quoteRepoWithVideo =
+    "VỀ REPO EDITOR-AI-APP: Repo này thực chất là một dự án cá nhân còn rất mới, cơ chế chính chỉ là gọi API dịch vụ ngoài để ghép ảnh và audio làm video hoạt họa dạng Người Que.";
+  assert.equal(isPresentationVideoRequest("@Sen Chúa có thiệt e tự làm được ko đó", quoteRepoWithVideo), false);
+  assert.equal(isPresentationVideoRequest("có thật bot tự làm được không?", quoteRepoWithVideo), false);
+  assert.equal(isPresentationVideoRequest("Repo này viết bằng gì thế?", quoteRepoWithVideo), false);
+
+  // Hỗ trợ xác nhận đề xuất video từ bot
+  const quoteBotVideoProposal = "🎬 Sếp có muốn em xuất bản Video thuyết trình chuyên nghiệp kèm giọng đọc không ạ?";
+  assert.equal(isPresentationVideoRequest("ok triển đi em", quoteBotVideoProposal), true);
+  assert.equal(isPresentationVideoRequest("làm luôn đi", quoteBotVideoProposal), true);
   assert.equal(isPresentationVideoRequest(""), false);
 });
 
