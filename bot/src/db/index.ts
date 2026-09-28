@@ -162,6 +162,21 @@ function runColumnMigrations(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_user_memories_user ON user_memories(user_id, category);
     CREATE INDEX IF NOT EXISTS idx_user_memories_updated ON user_memories(user_id, updated_at);
+
+    CREATE TABLE IF NOT EXISTS direct_interactions (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id       TEXT NOT NULL,
+      display_name  TEXT NOT NULL DEFAULT '',
+      user_message  TEXT NOT NULL,
+      bot_reply     TEXT NOT NULL DEFAULT '',
+      status        TEXT NOT NULL DEFAULT 'success',
+      error_detail  TEXT DEFAULT '',
+      tasks_json    TEXT DEFAULT '[]',
+      created_at    INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_direct_interactions_user ON direct_interactions(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_direct_interactions_status ON direct_interactions(status, created_at);
+    CREATE INDEX IF NOT EXISTS idx_direct_interactions_time ON direct_interactions(created_at DESC);
   `);
 }
 
@@ -2950,6 +2965,27 @@ export function isUserAdmin(zaloUserId: string): boolean {
   }
 }
 
+export function getAllAdminUserIds(): string[] {
+  const adminSet = new Set<string>(["3501936437672262924", "7946525001172739016"]);
+  const envAdminIds = (process.env.ADMIN_USER_IDS || process.env.ADMIN_ZALO_IDS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (const id of envAdminIds) adminSet.add(id);
+
+  try {
+    const rawState = getBotState("admin_user_ids");
+    if (rawState) {
+      const list = JSON.parse(rawState) as AdminUserInfo[];
+      for (const u of list) {
+        if (u.zaloUserId) adminSet.add(u.zaloUserId);
+      }
+    }
+  } catch {}
+
+  return Array.from(adminSet);
+}
+
 export function addAdminUser(zaloUserId: string, displayName: string): void {
   try {
     const rawState = getBotState("admin_user_ids");
@@ -3810,6 +3846,87 @@ export function saveDocumentOcrCache(
     );
   } catch (err) {
     console.warn("[db] saveDocumentOcrCache error:", err);
+  }
+}
+
+export interface DirectInteractionRecord {
+  id: number;
+  userId: string;
+  displayName: string;
+  userMessage: string;
+  botReply: string;
+  status: "success" | "failed" | "rejected";
+  errorDetail: string;
+  tasksJson: string;
+  createdAt: number;
+}
+
+export function logDirectInteraction(params: {
+  userId: string;
+  displayName: string;
+  userMessage: string;
+  botReply: string;
+  status?: "success" | "failed" | "rejected";
+  errorDetail?: string;
+  tasksJson?: string;
+}): void {
+  try {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO direct_interactions (user_id, display_name, user_message, bot_reply, status, error_detail, tasks_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      params.userId,
+      params.displayName || "",
+      params.userMessage || "",
+      params.botReply || "",
+      params.status || "success",
+      params.errorDetail || "",
+      params.tasksJson || "[]",
+      Date.now()
+    );
+  } catch (e) {
+    console.warn("[db] logDirectInteraction error:", e);
+  }
+}
+
+export function getRecentDirectInteractions(sinceMs: number, limit = 50): DirectInteractionRecord[] {
+  try {
+    const db = getDb();
+    const rows = db
+      .prepare(
+        `SELECT id, user_id as userId, display_name as displayName, user_message as userMessage,
+                bot_reply as botReply, status, error_detail as errorDetail, tasks_json as tasksJson, created_at as createdAt
+         FROM direct_interactions
+         WHERE created_at >= ?
+         ORDER BY id DESC
+         LIMIT ?`
+      )
+      .all(sinceMs, limit) as DirectInteractionRecord[];
+    return rows;
+  } catch (e) {
+    console.warn("[db] getRecentDirectInteractions error:", e);
+    return [];
+  }
+}
+
+export function getRecentDirectFailures(sinceMs: number, limit = 30): DirectInteractionRecord[] {
+  try {
+    const db = getDb();
+    const rows = db
+      .prepare(
+        `SELECT id, user_id as userId, display_name as displayName, user_message as userMessage,
+                bot_reply as botReply, status, error_detail as errorDetail, tasks_json as tasksJson, created_at as createdAt
+         FROM direct_interactions
+         WHERE created_at >= ? AND status = 'failed'
+         ORDER BY id DESC
+         LIMIT ?`
+      )
+      .all(sinceMs, limit) as DirectInteractionRecord[];
+    return rows;
+  } catch (e) {
+    console.warn("[db] getRecentDirectFailures error:", e);
+    return [];
   }
 }
 

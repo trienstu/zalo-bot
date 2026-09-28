@@ -625,3 +625,19 @@ CREATE TABLE IF NOT EXISTS document_ocr_cache (
 
 CREATE INDEX IF NOT EXISTS idx_doc_ocr_cache_url ON document_ocr_cache(file_url);
 
+-- Nhật ký tương tác tin nhắn riêng 1:1 giữa khách và bot (hỗ trợ tóm tắt & giám sát chất lượng)
+CREATE TABLE IF NOT EXISTS direct_interactions (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id       TEXT NOT NULL,
+  display_name  TEXT NOT NULL DEFAULT '',
+  user_message  TEXT NOT NULL,
+  bot_reply     TEXT NOT NULL DEFAULT '',
+  status        TEXT NOT NULL DEFAULT 'success', -- 'success' | 'failed' | 'rejected'
+  error_detail  TEXT DEFAULT '',
+  tasks_json    TEXT DEFAULT '[]',
+  created_at    INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_direct_interactions_user ON direct_interactions(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_direct_interactions_status ON direct_interactions(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_direct_interactions_time ON direct_interactions(created_at DESC);

@@ -17,6 +17,10 @@ import {
   upsertBotFriend,
   setFriendAllowDirect,
   getBotFriend,
+  getAllAdminUserIds,
+  logDirectInteraction,
+  getRecentDirectInteractions,
+  getRecentDirectFailures,
 } from "./db/index.js";
 import { sendDirectText, sendDirectFile, sendDirectVoice, sendGroupText, sendReaction, sendTyping, Reactions } from "./zalo/client.js";
 import { ocrImage } from "./jobs/ocr.js";
@@ -496,6 +500,221 @@ function cleanDraftedPost(text: string): string {
   return cleaned.trim() || text.trim();
 }
 
+// =========================================================================
+// QUẢN LÝ & BÁO CÁO TƯƠNG TÁC 1:1 VỚI KHÁCH HÀNG (GIÁM SÁT CHẤT LƯỢNG)
+// =========================================================================
+
+const userLastDirectInteractionMap = new Map<string, number>();
+const DM_SESSION_GAP_MS = 10 * 60 * 1000; // 10 phút không tương tác được tính là phiên mới
+
+async function notifyAdmins(api: any, message: string, excludeUserId?: string): Promise<void> {
+  const adminIds = getAllAdminUserIds();
+  for (const adminId of adminIds) {
+    if (excludeUserId && adminId === excludeUserId) continue;
+    try {
+      await sendDirectText(api, adminId, message);
+    } catch (e) {
+      console.warn(`[admin-assistant] notifyAdmins error for admin ${adminId}:`, e);
+    }
+  }
+}
+
+async function checkAndNotifyAdminNewDm(
+  api: any,
+  sender: string,
+  displayName: string,
+  rawText: string,
+  hasFile: boolean,
+  fileName?: string
+): Promise<void> {
+  const now = Date.now();
+  const lastTime = userLastDirectInteractionMap.get(sender) || 0;
+  userLastDirectInteractionMap.set(sender, now);
+
+  if (now - lastTime > DM_SESSION_GAP_MS) {
+    const timeStr = new Date(now).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+    const dateStr = new Date(now).toLocaleDateString("vi-VN");
+    let contentSnippet = rawText;
+    if (!contentSnippet) {
+      contentSnippet = hasFile ? `[Gửi file: ${fileName || "Tài liệu"}]` : "[Gửi hình ảnh]";
+    } else if (contentSnippet.length > 200) {
+      contentSnippet = contentSnippet.slice(0, 200) + "...";
+    }
+
+    const alertMsg =
+      `🔔 [TIN NHẮN 1:1 MỚI TỪ KHÁCH]\n\n` +
+      `👤 Người gửi: ${displayName} (ID: ${sender})\n` +
+      `💬 Lời nhắn: "${contentSnippet}"\n` +
+      `⏰ Lúc: ${timeStr} - ${dateStr}`;
+
+    void notifyAdmins(api, alertMsg, sender).catch(() => {});
+  }
+}
+
+async function notifyAdminDmFailure(
+  api: any,
+  sender: string,
+  displayName: string,
+  userPrompt: string,
+  errorDetail: string
+): Promise<void> {
+  const now = Date.now();
+  const timeStr = new Date(now).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+  const dateStr = new Date(now).toLocaleDateString("vi-VN");
+  const promptSnippet = userPrompt.length > 150 ? userPrompt.slice(0, 150) + "..." : userPrompt;
+
+  const alertMsg =
+    `⚠️ [CẢNH BÁO TÁC VỤ 1:1 THẤT BẠI]\n\n` +
+    `👤 Khách hàng: ${displayName} (ID: ${sender})\n` +
+    `🎯 Yêu cầu: "${promptSnippet}"\n` +
+    `❌ Chi tiết lỗi: ${errorDetail}\n` +
+    `⏰ Lúc: ${timeStr} - ${dateStr}\n` +
+    `👉 Sếp kiểm tra và hỗ trợ khách nếu cần nhé!`;
+
+  void notifyAdmins(api, alertMsg, sender).catch(() => {});
+}
+
+export function isDmSummaryOrErrorQuery(text: string): { type: "summary" | "errors" | null; hours: number } {
+  const lower = text.toLowerCase().trim();
+
+  // Xác định khoảng thời gian nếu có (mặc định 24h)
+  let hours = 24;
+  const dayMatch = lower.match(/(\d+)\s*(?:ngày|day)/);
+  const hourMatch = lower.match(/(\d+)\s*(?:giờ|tiếng|h)/);
+  if (dayMatch && dayMatch[1]) {
+    hours = Math.min(168, Math.max(1, parseInt(dayMatch[1], 10) * 24));
+  } else if (hourMatch && hourMatch[1]) {
+    hours = Math.min(168, Math.max(1, parseInt(hourMatch[1], 10)));
+  }
+
+  // 1. Lệnh rõ ràng
+  if (/^[/!]?(?:loi11|dmerrors|dm_errors|loi_11)$/i.test(lower)) {
+    return { type: "errors", hours };
+  }
+  if (/^[/!]?(?:dm|dmsummary|dm_summary|tomtat11|tomtat_11)$/i.test(lower)) {
+    return { type: "summary", hours };
+  }
+
+  // 2. Tra cứu lỗi / thất bại tác vụ 1:1 tự nhiên
+  const hasErrorWord = /(?:lỗi|thất bại|fail|không làm được|hỏng|sự cố|trục trặc)/i.test(lower);
+  const hasDirectOrGuestContext = /(?:1:1|1-1|nhắn riêng|tin nhắn riêng|chat riêng|inbox|khách|ai nhờ|ai yêu cầu|người khác|người lạ)/i.test(lower);
+  if (hasErrorWord && hasDirectOrGuestContext) {
+    return { type: "errors", hours };
+  }
+
+  // 3. Tra cứu tóm tắt tương tác 1:1 tự nhiên
+  const hasSummaryWord = /(?:tóm tắt|báo cáo|tình hình|thống kê|danh sách|kiểm tra|xem)/i.test(lower);
+  const hasDirectTarget = /(?:1:1|1-1|nhắn riêng|tin nhắn riêng|chat riêng|inbox|tin nhắn của khách|khách nhắn)/i.test(lower);
+  if (hasSummaryWord && hasDirectTarget) {
+    return { type: "summary", hours };
+  }
+
+  const isWhoMessagedQuestion =
+    /(?:có ai|ai)\s+(?:nhắn|gửi tin|chat|inbox|hỏi|nhờ)/i.test(lower) &&
+    /(?:riêng|1:1|1-1|cho bot|với bot|hôm nay|gần đây)/i.test(lower);
+  if (isWhoMessagedQuestion) {
+    return { type: "summary", hours };
+  }
+
+  return { type: null, hours: 24 };
+}
+
+async function handleDmErrorReport(api: any, sender: string, hours = 24): Promise<void> {
+  const sinceMs = Date.now() - hours * 3600 * 1000;
+  const failures = getRecentDirectFailures(sinceMs, 30);
+
+  if (failures.length === 0) {
+    await sendDirectText(
+      api,
+      sender,
+      `✅ BÁO CÁO TÁC VỤ 1:1 (${hours}H QUA):\n\n` +
+      `Tuyệt vời Sếp ơi! Không có tác vụ hay tương tác 1:1 nào bị lỗi hoặc thất bại trong ${hours}h qua. Mọi yêu cầu của khách đều được bot phục vụ trơn tru! 🎉`
+    );
+    return;
+  }
+
+  let report = `⚠️ BÁO CÁO CÁC TÁC VỤ 1:1 BỊ LỖI (${hours}H QUA):\n` +
+               `Phát hiện ${failures.length} lượt tác vụ/tương tác gặp sự cố:\n\n`;
+
+  failures.forEach((f, idx) => {
+    const timeStr = new Date(f.createdAt).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+    const dateStr = new Date(f.createdAt).toLocaleDateString("vi-VN");
+    report += `${idx + 1}. 👤 ${f.displayName || "Khách"} (${f.userId}) - ${timeStr} ${dateStr}:\n`;
+    report += `   • Yêu cầu: "${f.userMessage.slice(0, 100)}${f.userMessage.length > 100 ? "..." : ""}"\n`;
+    report += `   • Lỗi: ${f.errorDetail || "Không xác định"}\n\n`;
+  });
+
+  report += `👉 Sếp có thể nhắn riêng cho các bạn trên để hỗ trợ thêm nhé!`;
+  await sendDirectText(api, sender, report);
+}
+
+async function handleDmSummaryReport(api: any, sender: string, hours = 24): Promise<void> {
+  const sinceMs = Date.now() - hours * 3600 * 1000;
+  const list = getRecentDirectInteractions(sinceMs, 100);
+
+  if (list.length === 0) {
+    await sendDirectText(
+      api,
+      sender,
+      `📊 BÁO CÁO TƯƠNG TÁC 1:1 (${hours}H QUA):\n\n` +
+      `Hiện chưa có người dùng nào nhắn tin riêng 1:1 cho bot trong ${hours}h qua Sếp nhé.`
+    );
+    return;
+  }
+
+  // Gom theo người dùng
+  const userMap = new Map<string, { displayName: string; messages: string[]; failures: number; count: number; lastTime: number }>();
+  for (const item of list) {
+    const existing = userMap.get(item.userId) || {
+      displayName: item.displayName || "Khách",
+      messages: [],
+      failures: 0,
+      count: 0,
+      lastTime: item.createdAt,
+    };
+    existing.count++;
+    if (existing.messages.length < 3 && item.userMessage) {
+      existing.messages.push(item.userMessage.slice(0, 80));
+    }
+    if (item.status === "failed") {
+      existing.failures++;
+    }
+    userMap.set(item.userId, existing);
+  }
+
+  let totalFailures = 0;
+  const userEntries = Array.from(userMap.entries());
+  for (const [_, u] of userEntries) {
+    totalFailures += u.failures;
+  }
+
+  let report =
+    `📊 BÁO CÁO TỔNG QUAN TƯƠNG TÁC 1:1 (${hours}H QUA):\n\n` +
+    `• Tổng số khách đã nhắn: ${userEntries.length} người\n` +
+    `• Tổng số tin nhắn tương tác: ${list.length} tin\n` +
+    `• Tác vụ gặp sự cố / lỗi: ${totalFailures > 0 ? `⚠️ ${totalFailures} ca` : `✅ 0 ca`}\n\n` +
+    `📋 CHI TIẾT THEO TỪNG KHÁCH HÀNG:\n`;
+
+  userEntries.forEach(([uid, u], idx) => {
+    const statusIcon = u.failures > 0 ? "⚠️ Có lỗi" : "✅ Tốt";
+    report += `\n${idx + 1}. 👤 ${u.displayName} (ID: ${uid}) - [${statusIcon}]:\n`;
+    report += `   • Số tin nhắn: ${u.count}\n`;
+    report += `   • Nội dung tiêu biểu:\n`;
+    u.messages.forEach((m) => {
+      report += `     - "${m}"\n`;
+    });
+    if (u.failures > 0) {
+      report += `   • ⚠️ Gặp ${u.failures} lỗi khi xử lý.\n`;
+    }
+  });
+
+  if (totalFailures > 0) {
+    report += `\n👉 Gõ /loi11 để xem chi tiết các ca lỗi và nội dung kỹ thuật nhé Sếp!`;
+  }
+
+  await sendDirectText(api, sender, report);
+}
+
 /**
  * Xử lý toàn bộ tương tác 1:1 giữa Admin và Bot qua Tin nhắn trực tiếp (Direct Message).
  */
@@ -528,11 +747,30 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   }
 
   const lower = rawText.toLowerCase();
+  let interactionStatus: "success" | "failed" | "rejected" = "success";
+  let failureReason = "";
 
   // =========================================================================
   // 1. KIỂM TRA QUYỀN ADMIN & XÁC THỰC MẬT KHẨU
   // =========================================================================
   const isAdmin = event.isSelf || isUserAdmin(sender);
+
+  // 🔔 THÔNG BÁO CHO ADMIN KHI CÓ TIN NHẮN 1:1 MỚI TỪ KHÁCH (CHỐNG SPAM THEO PHIÊN 10 PHÚT)
+  if (!isAdmin && !event.isSelf) {
+    void checkAndNotifyAdminNewDm(api, sender, displayName, rawText, hasFile, event.fileAttachment?.name).catch(() => {});
+  }
+
+  // 📊 BÁO CÁO TÓM TẮT & KIỂM TRA LỖI TƯƠNG TÁC 1:1 DÀNH RIÊNG CHO ADMIN
+  if (isAdmin) {
+    const dmQuery = isDmSummaryOrErrorQuery(rawText);
+    if (dmQuery.type === "errors") {
+      await handleDmErrorReport(api, sender, dmQuery.hours);
+      return;
+    } else if (dmQuery.type === "summary") {
+      await handleDmSummaryReport(api, sender, dmQuery.hours);
+      return;
+    }
+  }
 
   // Lệnh xác thực quyền Admin: /admin <password> hoặc /auth <password>
   if (lower.startsWith("/admin") || lower.startsWith("/auth") || lower.startsWith("!admin") || lower.startsWith("!auth")) {
@@ -589,6 +827,14 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       const isAllowedFriend = isUserAllowedDirectChat(sender);
       if (!isAllowedFriend) {
         // Giữ im lặng tuyệt đối — không phản hồi, không gửi tin nhắn hướng dẫn kết bạn
+        logDirectInteraction({
+          userId: sender,
+          displayName,
+          userMessage: rawText || (hasFile ? `[Gửi file: ${event.fileAttachment?.name || "Tài liệu"}]` : "[Gửi ảnh]"),
+          botReply: "[Bị chặn: Chưa bật 1:1 trên Dashboard]",
+          status: "rejected",
+          errorDetail: "Chưa được Admin bật chế độ 1:1 trên Dashboard",
+        });
         return;
       }
     } else {
@@ -666,10 +912,27 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         if (isZaloFriend || friendRecord) {
           // Bạn bè Zalo đã bị Admin chủ động gạt TẮT: Bot IM LẶNG, tuyệt đối không gửi tin đòi kết bạn
           console.log(`[admin-assistant] 🔇 Bạn bè Zalo ${displayName} (${sender}) đã bị Admin tắt quyền 1:1. Bot giữ im lặng.`);
+          logDirectInteraction({
+            userId: sender,
+            displayName,
+            userMessage: rawText || (hasFile ? `[Gửi file: ${event.fileAttachment?.name || "Tài liệu"}]` : "[Gửi ảnh]"),
+            botReply: "[Bị chặn: Tắt quyền 1:1]",
+            status: "rejected",
+            errorDetail: "Bạn bè Zalo đã bị Admin tắt quyền 1:1",
+          });
           return;
         }
 
         // Là NGƯỜI LẠ THỰC SỰ (chưa kết bạn Zalo với bot):
+        logDirectInteraction({
+          userId: sender,
+          displayName,
+          userMessage: rawText || (hasFile ? `[Gửi file: ${event.fileAttachment?.name || "Tài liệu"}]` : "[Gửi ảnh]"),
+          botReply: "[Gửi lời nhắc kết bạn]",
+          status: "rejected",
+          errorDetail: "Người lạ chưa kết bạn với bot",
+        });
+
         // Vì autoAccept đang BẬT, gửi tin nhắn hướng dẫn nhấn nút "Kết bạn" (giới hạn 1 lần / 24h)
         const strangerKey = `stranger_prompt_${sender}`;
         const lastPromptStr = getBotState(strangerKey);
@@ -700,6 +963,10 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     if (isAdmin) {
       const helpMsg =
         `👑 BẢNG LỆNH QUẢN TRỊ & ĐIỀU KHIỂN BOT (1:1 VỚI ADMIN):\n\n` +
+        `💬 GIÁM SÁT TƯƠNG TÁC 1:1 & BÁO CÁO:\n` +
+        `🔹 /dm hoặc /tomtat11 : Tóm tắt tình hình các bạn bè/khách nhắn tin 1:1 với bot\n` +
+        `🔹 /loi11 : Báo cáo chi tiết các tác vụ hoặc tương tác 1:1 bị lỗi/thất bại\n` +
+        `🔹 Hoặc hỏi tự nhiên: "Hôm nay có ai nhắn tin riêng không?", "Có ai nhờ bot làm gì bị lỗi không?"\n\n` +
         `⏰ ĐẶT HẸN & NHẮC VIỆC CÁ NHÂN:\n` +
         `🔹 /nhacnho [thời gian] [nội dung] : Đặt hẹn nhắc việc (VD: /nhacnho 20p Uống nước, /hengio 17:30 Đi đón con)\n` +
         `🔹 /dsnhac : Xem danh sách các lịch hẹn đang chờ của bạn\n` +
@@ -2286,6 +2553,24 @@ QUY TẮC BẮT BUỘC:
       question: rawText,
     });
 
+    const isGenerationRequest = checkIsFileOrVoiceGeneration(rawText, event.quote?.text);
+    if (isGenerationRequest && !fileGenerated && !voiceGenerated) {
+      interactionStatus = "failed";
+      failureReason = "Khách yêu cầu tạo file/voice nhưng hệ thống không xuất được file";
+      if (!isAdmin) {
+        void notifyAdminDmFailure(api, sender, displayName, rawText, failureReason).catch(() => {});
+      }
+    } else {
+      const isWebFetchRequest = /(?:đọc link|tải trang|cào web|check link|tóm tắt link)\s+https?:/i.test(rawText);
+      if (isWebFetchRequest && /(?:không thể truy cập|lỗi tải trang|không lấy được nội dung|lỗi kết nối)/i.test(answer)) {
+        interactionStatus = "failed";
+        failureReason = "Lỗi truy cập hoặc không cào được nội dung từ liên kết web";
+        if (!isAdmin) {
+          void notifyAdminDmFailure(api, sender, displayName, rawText, failureReason).catch(() => {});
+        }
+      }
+    }
+
     // Kiểm tra và thực thi thẻ hành động [ACTION:SEND_GROUP target="..."]...[/ACTION] CHỈ DÀNH CHO ADMIN
     let finalAnswer = answer;
     if (isAdmin) {
@@ -2313,6 +2598,18 @@ QUY TẮC BẮT BUỘC:
     appendAdminHistory(sender, "user", rawText || `[Gửi file: ${fileName || "hình ảnh"}]`);
     appendAdminHistory(sender, "model", finalAnswer);
 
+    // Ghi nhật ký tương tác 1:1 phục vụ báo cáo / tóm tắt cho Admin
+    if (!isAdmin) {
+      logDirectInteraction({
+        userId: sender,
+        displayName,
+        userMessage: rawText || (hasFile ? `[Gửi file: ${fileName || "Tài liệu"}]` : "[Gửi ảnh]"),
+        botReply: finalAnswer,
+        status: interactionStatus,
+        errorDetail: failureReason,
+      });
+    }
+
     await sendDirectText(api, sender, finalAnswer);
     console.log(`[admin-assistant] ✅ Đã phản hồi 1:1 cho ${isAdmin ? "Admin" : "User"} ${displayName}`);
 
@@ -2327,6 +2624,17 @@ QUY TẮC BẮT BUỘC:
     });
   } catch (err) {
     console.error(`[admin-assistant] ❌ Lỗi xử lý AI 1:1:`, err);
+    if (!isAdmin) {
+      logDirectInteraction({
+        userId: sender,
+        displayName,
+        userMessage: rawText || (hasFile ? `[Gửi file: ${event.fileAttachment?.name || "Tài liệu"}]` : "[Gửi ảnh]"),
+        botReply: "Lỗi hệ thống",
+        status: "failed",
+        errorDetail: String((err as any)?.message || err),
+      });
+      void notifyAdminDmFailure(api, sender, displayName, rawText || "[File/Ảnh]", String((err as any)?.message || err)).catch(() => {});
+    }
     await sendDirectText(
       api,
       sender,
