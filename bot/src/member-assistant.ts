@@ -1497,9 +1497,11 @@ async function handleHistoryQA(
       let voiceGenerated = false;
       let fileGenerated = false;
       if (needsAgentLoop) {
+        const dynamicTimeout = (fileTextContent?.length || 0) > 10_000 ? 150_000 : undefined;
         answer = await callGeminiAgentLoop(fastSystemPrompt, fastUserPrompt, {
           model: "gemini-3.1-flash-lite-preview",
           maxTurns: 3,
+          timeoutMs: dynamicTimeout,
           mediaParts: mediaPart ? [mediaPart] : undefined,
           targetImageUrl: targetUrl,
           onToolCall: (toolName, args) => {
@@ -1968,9 +1970,11 @@ QUY TẮC BẮT BUỘC:
     try {
       const needsAgentLoop = checkIsFileOrVoiceGeneration(question, options.quote.text) || /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(question);
       if (needsAgentLoop && !isGreetingQuote) {
+        const dynamicTimeout = (options.quote.text?.length || 0) > 10_000 || (options.directDocContent?.length || 0) > 10_000 ? 150_000 : undefined;
         answer = await callGeminiAgentLoop(quoteSystemPrompt, quoteUserPrompt, {
           model: "gemini-3.1-flash-lite-preview",
           maxTurns: 3,
+          timeoutMs: dynamicTimeout,
           mediaParts: mediaPart ? [mediaPart] : undefined,
           onFileGenerated: async (file) => {
             try {
@@ -2954,9 +2958,11 @@ QUY TẮC BẮT BUỘC:
     let fileGenerated = false;
     if (needsAgentLoop) {
       // 🚀 Chỉ khi người dùng thực sự yêu cầu gọi tool xuất file, voice hoặc đọc link cụ thể mới chạy Agent Loop
+      const dynamicTimeout = (fileTextContent?.length || 0) > 10_000 ? 150_000 : undefined;
       answer = await callGeminiAgentLoop(systemPrompt, userPrompt, {
         model: Boolean(mediaPart) ? (config.geminiModel || "gemini-3.7-flash") : (config.geminiModel || "gemini-3.7-flash"),
         maxTurns: 3,
+        timeoutMs: dynamicTimeout,
         mediaParts: mediaPart ? [mediaPart] : undefined,
         targetImageUrl: options?.imageUrl || targetUrl,
         onToolCall: (toolName, args) => {

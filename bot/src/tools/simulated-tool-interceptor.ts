@@ -83,14 +83,22 @@ export function extractMarkdownTable(text: string): { headers: string[]; rows: s
 export function extractSimulatedGenerateFile(text: string): ExtractedToolCall | null {
   if (!text) return null;
 
-  // Khớp cả cú pháp tag: [generate_file ... /] hoặc <generate_file ... /> lẫn cú pháp hàm: generate_file(...)
-  const tagMatch = text.match(/\[\s*generate_file\b([\s\S]*?)\/\s*\]/i) ||
-                   text.match(/<\s*generate_file\b([\s\S]*?)\/\s*>/i) ||
-                   text.match(/\[\s*generate_file\b([\s\S]*?)\]/i) ||
-                   text.match(/<\s*generate_file\b([\s\S]*?)>/i);
-  const funcMatch = text.match(/\[?\bgenerate_file\s*\(([\s\S]*?)\)\]?/i);
+  // 1. Kiểm tra cú pháp hàm trước: [generate_file(...) ] hoặc generate_file(...)
+  // Nhận diện kết thúc hàm an toàn qua dấu nháy kết thúc tham số content theo sau bởi ')' và có thể ']'
+  const funcMatch = text.match(/\[?\bgenerate_file\s*\(([\s\S]*?(?:'''|"""|['"]))\s*\)\s*\]?/i) ||
+                    text.match(/\[?\bgenerate_file\s*\(([\s\S]*?)\)\s*\]?/i);
 
-  const match = tagMatch || funcMatch;
+  // 2. Tag cú pháp XML / BBCode: [generate_file ... /] hoặc [generate_file ...]
+  const tagMatch = funcMatch ? null : (
+    text.match(/\[\s*generate_file\b([\s\S]*?)\/\s*\]/i) ||
+    text.match(/<\s*generate_file\b([\s\S]*?)\/\s*>/i) ||
+    text.match(/\[\s*generate_file\b([\s\S]*?(?:'''|"""|['"]))\s*\]/i) ||
+    text.match(/<\s*generate_file\b([\s\S]*?(?:'''|"""|['"]))\s*>/i) ||
+    text.match(/\[\s*generate_file\b([\s\S]*?)\]/i) ||
+    text.match(/<\s*generate_file\b([\s\S]*?)>/i)
+  );
+
+  const match = funcMatch || tagMatch;
   if (!match) {
     // Bắt trường hợp LLM ảo giác in thẳng JSON ra text thay vì gọi Function Calling native
     const jsonBlockRegex = /(?:```(?:json)?\s*)?(\{[\s\r\n]*"(?:fileType|fileName)"[\s\S]*?\})(?:\s*```)?/i;
@@ -180,9 +188,10 @@ export function extractSimulatedGenerateFile(text: string): ExtractedToolCall | 
   if (contentTripleMatch && contentTripleMatch[1]) {
     args.content = contentTripleMatch[1].trim();
   } else {
-    // Fallback nếu không dùng triple quotes, ưu tiên quote trước attribute khác hoặc cuối tag
-    const contentQuoteMatch = inner.match(/content\s*=\s*(['"])([\s\S]*?)\1(?=\s*(?:[a-zA-Z_]+\s*=|(?:\/\]|\]|>|$)))/i) ||
-                              inner.match(/content\s*=\s*(['"])([\s\S]*?)\1/i);
+    // Fallback nếu không dùng triple quotes, ưu tiên quote trước attribute khác hoặc cuối tag/hàm
+    const contentQuoteMatch = inner.match(/content\s*=\s*(['"])([\s\S]*?)\1(?=\s*(?:,\s*[a-zA-Z_]+\s*=|(?:\/\]|\]|\)|>|$)))/i) ||
+                              inner.match(/content\s*=\s*(['"])([\s\S]*?)\1/i) ||
+                              inner.match(/content\s*=\s*(['"])([\s\S]*)$/i);
     if (contentQuoteMatch && contentQuoteMatch[2]) {
       args.content = contentQuoteMatch[2].trim();
     }

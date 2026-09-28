@@ -1184,6 +1184,7 @@ export interface AgentLoopOptions {
   maxTurns?: number; // default 3
   temperature?: number;
   maxTokens?: number;
+  timeoutMs?: number;
   images?: GeminiImagePart[];
   mediaParts?: GeminiMediaPart[];
   targetImageUrl?: string;
@@ -1804,7 +1805,15 @@ async function call9RouterAgentLoop(
         : "ag/gemini-3.8-flash-medium";
     }
   }
-  const timeoutMs = (options as any)?.timeoutMs || router.timeoutMs || 45_000;
+  const configuredTimeout = options?.timeoutMs || (options as any)?.timeoutMs || router.timeoutMs || 45_000;
+  // Dynamic scaling: Nếu context lớn (> 15k ký tự), tự động tăng timeout lên tối thiểu 150_000ms (2.5 phút)
+  // để mô hình có đủ thời gian đọc hiểu tài liệu lớn và sinh đầy đủ bảng biểu/file đính kèm mà không bị timeout abort
+  const promptLen = (effectiveSystem?.length || 0) + (user?.length || 0);
+  const timeoutMs = promptLen > 20_000
+    ? Math.max(configuredTimeout, 150_000)
+    : promptLen > 8_000
+      ? Math.max(configuredTimeout, 90_000)
+      : configuredTimeout;
   const maxTurns = options?.maxTurns || 3;
   const temperature = options?.temperature ?? 0.2;
 
