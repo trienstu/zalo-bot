@@ -3930,4 +3930,310 @@ export function getRecentDirectFailures(sinceMs: number, limit = 30): DirectInte
   }
 }
 
+export interface DirectUserProfile {
+  userId: string;
+  displayName: string;
+  source: "friend" | "direct_interaction" | "memory";
+  lastActiveAt: number;
+  interactionCount: number;
+  pronoun?: string;
+  gender?: string;
+  memories: UserMemoryItem[];
+}
+
+export function findDirectUserByNameOrId(query: string): DirectUserProfile[] {
+  try {
+    const db = getDb();
+    const cleanQuery = query.trim();
+    if (!cleanQuery) return [];
+
+    const userMap = new Map<
+      string,
+      { displayName: string; source: "friend" | "direct_interaction" | "memory"; lastActiveAt: number; count: number }
+    >();
+
+    // 1. Tìm trong bot_friends
+    const friendRows = db
+      .prepare(
+        `SELECT user_id as userId, display_name as displayName, updated_at as updatedAt
+         FROM bot_friends
+         WHERE user_id = ? OR LOWER(display_name) LIKE ?
+         LIMIT 10`
+      )
+      .all(cleanQuery, `%${cleanQuery.toLowerCase()}%`) as any[];
+
+    for (const r of friendRows) {
+      userMap.set(r.userId, {
+        displayName: r.displayName || "",
+        source: "friend",
+        lastActiveAt: r.updatedAt || 0,
+        count: 0,
+      });
+    }
+
+    // 2. Tìm trong direct_interactions
+    const dmRows = db
+      .prepare(
+        `SELECT user_id as userId, display_name as displayName, MAX(created_at) as lastActiveAt, COUNT(id) as count
+         FROM direct_interactions
+         WHERE user_id = ? OR LOWER(display_name) LIKE ?
+         GROUP BY user_id
+         LIMIT 15`
+      )
+      .all(cleanQuery, `%${cleanQuery.toLowerCase()}%`) as any[];
+
+    for (const r of dmRows) {
+      const existing = userMap.get(r.userId);
+      if (existing) {
+        if (!existing.displayName && r.displayName) existing.displayName = r.displayName;
+        if (r.lastActiveAt > existing.lastActiveAt) existing.lastActiveAt = r.lastActiveAt;
+        existing.count = r.count;
+      } else {
+        userMap.set(r.userId, {
+          displayName: r.displayName || "",
+          source: "direct_interaction",
+          lastActiveAt: r.lastActiveAt || 0,
+          count: r.count,
+        });
+      }
+    }
+
+    // 3. Tìm trong user_memories
+    const memUsers = db
+      .prepare(
+        `SELECT user_id as userId, user_name as displayName, MAX(updated_at) as lastActiveAt
+         FROM user_memories
+         WHERE user_id = ? OR LOWER(user_name) LIKE ?
+         GROUP BY user_id
+         LIMIT 15`
+      )
+      .all(cleanQuery, `%${cleanQuery.toLowerCase()}%`) as any[];
+
+    for (const r of memUsers) {
+      const existing = userMap.get(r.userId);
+      if (existing) {
+        if (!existing.displayName && r.displayName) existing.displayName = r.displayName;
+        if (r.lastActiveAt > existing.lastActiveAt) existing.lastActiveAt = r.lastActiveAt;
+      } else {
+        userMap.set(r.userId, {
+          displayName: r.displayName || "",
+          source: "memory",
+          lastActiveAt: r.lastActiveAt || 0,
+          count: 0,
+        });
+      }
+    }
+
+    const profiles: DirectUserProfile[] = [];
+    for (const [uid, info] of userMap.entries()) {
+      const mems = getUserMemories(uid, 20);
+      let pronoun: string | undefined;
+      let gender: string | undefined;
+
+      for (const m of mems) {
+        const k = m.memory_key.toLowerCase();
+        if (k === "pronoun" || k === "xungho" || k === "danhxung") {
+          pronoun = m.memory_value;
+        } else if (k === "gender" || k === "gioitinh") {
+          gender = m.memory_value;
+        }
+      }
+
+      profiles.push({
+        userId: uid,
+        displayName: info.displayName || uid,
+        source: info.source,
+        lastActiveAt: info.lastActiveAt,
+        interactionCount: info.count,
+        pronoun,
+        gender,
+        memories: mems,
+      });
+    }
+
+    return profiles.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
+  } catch (e) {
+    console.warn("[db] findDirectUserByNameOrId error:", e);
+    return [];
+  }
+}
+
+export function getAllDirectUsersWithProfiles(limit = 50): DirectUserProfile[] {
+  try {
+    const db = getDb();
+    const userMap = new Map<
+      string,
+      { displayName: string; source: "friend" | "direct_interaction" | "memory"; lastActiveAt: number; count: number }
+    >();
+
+    // 1. Người dùng từ direct_interactions
+    const dmRows = db
+      .prepare(
+        `SELECT user_id as userId, display_name as displayName, MAX(created_at) as lastActiveAt, COUNT(id) as count
+         FROM direct_interactions
+         GROUP BY user_id
+         ORDER BY lastActiveAt DESC
+         LIMIT ?`
+      )
+      .all(limit) as any[];
+
+    for (const r of dmRows) {
+      userMap.set(r.userId, {
+        displayName: r.displayName || "",
+        source: "direct_interaction",
+        lastActiveAt: r.lastActiveAt,
+        count: r.count,
+      });
+    }
+
+    // 2. Bạn bè từ bot_friends (nếu chưa có trong list)
+    const friendRows = db
+      .prepare(
+        `SELECT user_id as userId, display_name as displayName, updated_at as updatedAt
+         FROM bot_friends
+         ORDER BY updated_at DESC
+         LIMIT ?`
+      )
+      .all(limit) as any[];
+
+    for (const r of friendRows) {
+      if (!userMap.has(r.userId)) {
+        userMap.set(r.userId, {
+          displayName: r.displayName || "",
+          source: "friend",
+          lastActiveAt: r.updatedAt || 0,
+          count: 0,
+        });
+      }
+    }
+
+    const profiles: DirectUserProfile[] = [];
+    for (const [uid, info] of userMap.entries()) {
+      const mems = getUserMemories(uid, 15);
+      let pronoun: string | undefined;
+      let gender: string | undefined;
+
+      for (const m of mems) {
+        const k = m.memory_key.toLowerCase();
+        if (k === "pronoun" || k === "xungho" || k === "danhxung") {
+          pronoun = m.memory_value;
+        } else if (k === "gender" || k === "gioitinh") {
+          gender = m.memory_value;
+        }
+      }
+
+      profiles.push({
+        userId: uid,
+        displayName: info.displayName || uid,
+        source: info.source,
+        lastActiveAt: info.lastActiveAt,
+        interactionCount: info.count,
+        pronoun,
+        gender,
+        memories: mems,
+      });
+    }
+
+    return profiles.sort((a, b) => b.lastActiveAt - a.lastActiveAt).slice(0, limit);
+  } catch (e) {
+    console.warn("[db] getAllDirectUsersWithProfiles error:", e);
+    return [];
+  }
+}
+
+export function setUserCustomProfile(params: {
+  userId: string;
+  userName?: string;
+  gender?: string;
+  pronoun?: string;
+  preferences?: string[];
+  facts?: string[];
+  customNotes?: string;
+}): { updatedCount: number; summary: string } {
+  const { userId, userName = "", gender, pronoun, preferences = [], facts = [], customNotes } = params;
+  if (!userId) return { updatedCount: 0, summary: "Thiếu userId" };
+
+  let count = 0;
+  const summaryParts: string[] = [];
+
+  if (gender) {
+    upsertUserMemory({
+      userId,
+      userName,
+      category: "fact",
+      memoryKey: "gender",
+      memoryValue: gender.toLowerCase(),
+      sourceSnippet: "Admin cập nhật qua lệnh quản trị 1:1",
+      confidence: 1.0,
+    });
+    count++;
+    summaryParts.push(`Giới tính: ${gender}`);
+  }
+
+  if (pronoun) {
+    upsertUserMemory({
+      userId,
+      userName,
+      category: "fact",
+      memoryKey: "pronoun",
+      memoryValue: pronoun,
+      sourceSnippet: "Admin cập nhật qua lệnh quản trị 1:1",
+      confidence: 1.0,
+    });
+    count++;
+    summaryParts.push(`Xưng hô: ${pronoun}`);
+  }
+
+  for (let i = 0; i < preferences.length; i++) {
+    const pref = preferences[i];
+    if (!pref) continue;
+    upsertUserMemory({
+      userId,
+      userName,
+      category: "preference",
+      memoryKey: `preference_${i + 1}`,
+      memoryValue: pref,
+      sourceSnippet: "Admin cập nhật qua lệnh quản trị 1:1",
+      confidence: 1.0,
+    });
+    count++;
+    summaryParts.push(`Sở thích: ${pref}`);
+  }
+
+  for (let i = 0; i < facts.length; i++) {
+    const fact = facts[i];
+    if (!fact) continue;
+    upsertUserMemory({
+      userId,
+      userName,
+      category: "fact",
+      memoryKey: `fact_${i + 1}`,
+      memoryValue: fact,
+      sourceSnippet: "Admin cập nhật qua lệnh quản trị 1:1",
+      confidence: 1.0,
+    });
+    count++;
+    summaryParts.push(`Thông tin: ${fact}`);
+  }
+
+  if (customNotes) {
+    upsertUserMemory({
+      userId,
+      userName,
+      category: "fact",
+      memoryKey: "admin_note",
+      memoryValue: customNotes,
+      sourceSnippet: "Admin cập nhật qua lệnh quản trị 1:1",
+      confidence: 1.0,
+    });
+    count++;
+    summaryParts.push(`Ghi chú: ${customNotes}`);
+  }
+
+  return {
+    updatedCount: count,
+    summary: summaryParts.join(", "),
+  };
+}
+
 

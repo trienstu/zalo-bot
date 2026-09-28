@@ -6,7 +6,12 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { fileURLToPath } from "node:url";
 
-import { isDmSummaryOrErrorQuery } from "./admin-assistant.js";
+import { isDmSummaryOrErrorQuery, deriveConversationPronouns } from "./admin-assistant.js";
+import {
+  isDirectUsersListQuery,
+  isSingleUserProfileQuery,
+  parseAdminProfileUpdateIntent,
+} from "./user-memory.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -44,6 +49,89 @@ test("isDmSummaryOrErrorQuery parses direct commands and natural questions", () 
   assert.equal(isDmSummaryOrErrorQuery("thời tiết hôm nay thế nào")?.type, null);
   assert.equal(isDmSummaryOrErrorQuery("chào bot buổi sáng")?.type, null);
   assert.equal(isDmSummaryOrErrorQuery("tạo cho tôi slide bài giảng")?.type, null);
+});
+
+test("deriveConversationPronouns ưu tiên tuyệt đối trí nhớ giới tính / xưng hô đã lưu", () => {
+  // 1. Trí nhớ lưu là Nữ -> Gọi bằng Chị dù tên là Minh (thường nhầm là Nam)
+  const femaleRes = deriveConversationPronouns({
+    isAdmin: false,
+    displayName: "Minh",
+    rawText: "Chào bot nhé",
+    memories: [{ memory_key: "gender", memory_value: "nữ" }],
+  });
+  assert.equal(femaleRes.userTitle, "Chị");
+  assert.equal(femaleRes.botPronoun, "em");
+
+  // 2. Trí nhớ lưu pronoun là Chị
+  const chiRes = deriveConversationPronouns({
+    isAdmin: false,
+    displayName: "Hải",
+    rawText: "Em làm giúp cái này",
+    memories: [{ memory_key: "pronoun", memory_value: "Chị" }],
+  });
+  assert.equal(chiRes.userTitle, "Chị");
+  assert.equal(chiRes.botPronoun, "em");
+
+  // 3. Trí nhớ lưu pronoun là Cô
+  const coRes = deriveConversationPronouns({
+    isAdmin: false,
+    displayName: "Thanh",
+    rawText: "Chào bot",
+    memories: [{ memory_key: "pronoun", memory_value: "Cô" }],
+  });
+  assert.equal(coRes.userTitle, "Cô");
+  assert.equal(coRes.botPronoun, "cháu");
+
+  // 4. Trí nhớ lưu pronoun là Anh
+  const anhRes = deriveConversationPronouns({
+    isAdmin: false,
+    displayName: "Tuấn",
+    rawText: "Giúp tôi việc này",
+    memories: [{ memory_key: "pronoun", memory_value: "Anh" }],
+  });
+  assert.equal(anhRes.userTitle, "Anh");
+  assert.equal(anhRes.botPronoun, "em");
+});
+
+test("isDirectUsersListQuery & isSingleUserProfileQuery nhận diện chính xác yêu cầu hồ sơ", () => {
+  assert.equal(isDirectUsersListQuery("/users11"), true);
+  assert.equal(isDirectUsersListQuery("/ds11"), true);
+  assert.equal(isDirectUsersListQuery("Cho anh xem danh sách người chat 1:1 với bot"), true);
+  assert.equal(isDirectUsersListQuery("Những ai đã từng nhắn tin riêng cho bot vậy em"), true);
+  assert.equal(isDirectUsersListQuery("Thời tiết hôm nay thế nào"), false);
+
+  assert.equal(isSingleUserProfileQuery("/userinfo Thao"), "Thao");
+  assert.equal(isSingleUserProfileQuery("/hoso 123456"), "123456");
+  assert.equal(isSingleUserProfileQuery("Bot nhớ gì về bạn Thảo?"), "Thảo");
+  assert.equal(isSingleUserProfileQuery("xem thông tin bạn Nguyễn Văn A"), "Nguyễn Văn A");
+  assert.equal(isSingleUserProfileQuery("chào bot buổi sáng"), null);
+});
+
+test("parseAdminProfileUpdateIntent trích xuất chuẩn xác lệnh cập nhật hồ sơ", async () => {
+  const update1 = await parseAdminProfileUpdateIntent("Lưu bạn Thảo là nữ, gọi bằng chị nhé");
+  assert.ok(update1);
+  assert.equal(update1.targetQuery, "Thảo");
+  assert.equal(update1.gender, "nữ");
+  assert.equal(update1.pronoun, "Chị");
+
+  const update2 = await parseAdminProfileUpdateIntent("Đổi bạn Minh thành nữ, xưng chị giúp anh");
+  assert.ok(update2);
+  assert.equal(update2.targetQuery, "Minh");
+  assert.equal(update2.gender, "nữ");
+  assert.equal(update2.pronoun, "Chị");
+
+  const update3 = await parseAdminProfileUpdateIntent("Bạn Tuấn thích xe phân khối lớn và làm nghề kiến trúc sư");
+  assert.ok(update3);
+  assert.equal(update3.targetQuery, "Tuấn");
+  assert.ok(update3.preferences?.some((p) => p.includes("xe phân khối lớn")));
+  assert.ok(update3.facts?.some((f) => f.includes("kiến trúc sư")));
+
+  const cmdUpdate = await parseAdminProfileUpdateIntent("/setuser 3501936 nữ, xưng chị, thích hoa lan");
+  assert.ok(cmdUpdate);
+  assert.equal(cmdUpdate.targetQuery, "3501936");
+  assert.equal(cmdUpdate.gender, "nữ");
+  assert.equal(cmdUpdate.pronoun, "Chị");
+  assert.ok(cmdUpdate.preferences?.some((p) => p.includes("hoa lan")));
 });
 
 test("direct_interactions DB operations work with fresh schema", () => {

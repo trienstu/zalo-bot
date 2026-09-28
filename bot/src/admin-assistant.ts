@@ -21,6 +21,9 @@ import {
   logDirectInteraction,
   getRecentDirectInteractions,
   getRecentDirectFailures,
+  findDirectUserByNameOrId,
+  getAllDirectUsersWithProfiles,
+  setUserCustomProfile,
 } from "./db/index.js";
 import { sendDirectText, sendDirectFile, sendDirectVoice, sendGroupText, sendReaction, sendTyping, Reactions } from "./zalo/client.js";
 import { ocrImage } from "./jobs/ocr.js";
@@ -114,6 +117,10 @@ import {
   extractAndSaveUserMemories,
   formatUserMemoriesForPrompt,
   getRelevantUserMemories,
+  isDirectUsersListQuery,
+  isSingleUserProfileQuery,
+  parseAdminProfileUpdateIntent,
+  type ParsedProfileUpdate,
 } from "./user-memory.js";
 
 export interface ConversationPronouns {
@@ -159,7 +166,87 @@ export function deriveConversationPronouns(params: {
   const memTexts = memories.map((m) => `${m.memory_key || ""} ${m.memory_value || ""}`).join(" ");
   const currentTexts = `${rawText} ${quoteText}`;
 
-  // 1. Kiểm tra ưu tiên từ trí nhớ dài hạn (đã được lưu chính xác trước đó)
+  // 1. KIỂM TRA ƯU TIÊN TUYỆT ĐỐI TỪ HỒ SƠ/TRÍ NHỚ ĐÃ LƯU (ADMIN THIẾT LẬP HOẶC ĐÃ XÁC THỰC)
+  const pronounMem = memories.find((m) => {
+    const k = (m.memory_key || "").toLowerCase();
+    return k === "pronoun" || k === "xungho" || k === "danhxung";
+  })?.memory_value?.trim();
+
+  const genderMem = memories.find((m) => {
+    const k = (m.memory_key || "").toLowerCase();
+    return k === "gender" || k === "gioitinh";
+  })?.memory_value?.trim().toLowerCase();
+
+  if (pronounMem) {
+    const pLower = pronounMem.toLowerCase();
+    if (pLower.includes("chị") || pLower === "c") {
+      return {
+        botPronoun: "em",
+        userTitle: "Chị",
+        instruction: `QUY TẮC XƯNG HÔ ĐÃ THIẾT LẬP: Người dùng là nữ (Chị). BẮT BUỘC xưng 'em', gọi người dùng là 'Chị'. Thân thiện, chu đáo, tôn trọng.`,
+      };
+    }
+    if (pLower.includes("anh") || pLower === "a") {
+      return {
+        botPronoun: "em",
+        userTitle: "Anh",
+        instruction: `QUY TẮC XƯNG HÔ ĐÃ THIẾT LẬP: Người dùng là nam (Anh). BẮT BUỘC xưng 'em', gọi người dùng là 'Anh'. Thân thiện, chu đáo, tôn trọng.`,
+      };
+    }
+    if (pLower.includes("em") || pLower === "e") {
+      return {
+        botPronoun: "em",
+        userTitle: "Em",
+        instruction: `QUY TẮC XƯNG HÔ ĐÃ THIẾT LẬP: Người dùng nhỏ tuổi hơn (Em). Gọi người dùng là 'Em', xưng 'em' hoặc 'mình'. Thân thiện, nhiệt tình.`,
+      };
+    }
+    if (pLower.includes("cô")) {
+      return {
+        botPronoun: "cháu",
+        userTitle: "Cô",
+        instruction: `QUY TẮC XƯNG HÔ ĐÃ THIẾT LẬP: Người dùng là bề trên (Cô). BẮT BUỘC xưng 'cháu', gọi người dùng là 'Cô'. Kính trọng, lễ phép.`,
+      };
+    }
+    if (pLower.includes("chú")) {
+      return {
+        botPronoun: "cháu",
+        userTitle: "Chú",
+        instruction: `QUY TẮC XƯNG HÔ ĐÃ THIẾT LẬP: Người dùng là bề trên (Chú). BẮT BUỘC xưng 'cháu', gọi người dùng là 'Chú'. Kính trọng, lễ phép.`,
+      };
+    }
+    if (pLower.includes("bác")) {
+      return {
+        botPronoun: "cháu",
+        userTitle: "Bác",
+        instruction: `QUY TẮC XƯNG HÔ ĐÃ THIẾT LẬP: Người dùng là bề trên (Bác). BẮT BUỘC xưng 'cháu', gọi người dùng là 'Bác'. Kính trọng, lễ phép.`,
+      };
+    }
+    if (pLower.includes("dì") || pLower.includes("thím")) {
+      return {
+        botPronoun: "cháu",
+        userTitle: "Dì",
+        instruction: `QUY TẮC XƯNG HÔ ĐÃ THIẾT LẬP: Người dùng là bề trên (Dì). BẮT BUỘC xưng 'cháu', gọi người dùng là 'Dì'. Kính trọng, lễ phép.`,
+      };
+    }
+  }
+
+  if (genderMem) {
+    if (genderMem.includes("nữ") || genderMem.includes("gái") || genderMem.includes("female")) {
+      return {
+        botPronoun: "em",
+        userTitle: "Chị",
+        instruction: `QUY TẮC XƯNG HÔ THEO GIỚI TÍNH ĐÃ LƯU: Người dùng là nữ giới. BẮT BUỘC xưng 'em', gọi người dùng là 'Chị'. Thân thiện, duyên dáng, chu đáo.`,
+      };
+    }
+    if (genderMem.includes("nam") || genderMem.includes("trai") || genderMem.includes("male")) {
+      return {
+        botPronoun: "em",
+        userTitle: "Anh",
+        instruction: `QUY TẮC XƯNG HÔ THEO GIỚI TÍNH ĐÃ LƯU: Người dùng là nam giới. BẮT BUỘC xưng 'em', gọi người dùng là 'Anh'. Lịch thiệp, chu đáo.`,
+      };
+    }
+  }
+
   if (matchesPronounWithContext(memTexts, "chú|chú", "chu")) {
     return {
       botPronoun: "cháu",
@@ -715,6 +802,135 @@ async function handleDmSummaryReport(api: any, sender: string, hours = 24): Prom
   await sendDirectText(api, sender, report);
 }
 
+async function handleDirectUsersListReport(api: any, sender: string): Promise<void> {
+  const profiles = getAllDirectUsersWithProfiles(25);
+  if (profiles.length === 0) {
+    await sendDirectText(
+      api,
+      sender,
+      `👥 BÁO CÁO DANH SÁCH KHÁCH HÀNG 1:1:\n\nHiện tại chưa có dữ liệu bạn bè hoặc khách hàng nào nhắn tin riêng 1:1 cho bot trong hệ thống Sếp nhé.`
+    );
+    return;
+  }
+
+  let report =
+    `👥 DANH SÁCH KHÁCH HÀNG 1:1 & HỒ SƠ ĐÃ LƯU (TỔNG ${profiles.length} NGƯỜI):\n\n`;
+
+  profiles.forEach((p, idx) => {
+    report += `${idx + 1}. 👤 ${p.displayName} (ID: ${p.userId}):\n`;
+    const meta: string[] = [];
+    if (p.gender) meta.push(`Giới tính: ${p.gender}`);
+    if (p.pronoun) meta.push(`Xưng hô: ${p.pronoun}`);
+    if (meta.length > 0) report += `   • ${meta.join(" | ")}\n`;
+
+    const prefs = p.memories.filter((m) => m.category === "preference").map((m) => m.memory_value);
+    if (prefs.length > 0) report += `   • Sở thích: ${prefs.join(", ")}\n`;
+
+    const facts = p.memories
+      .filter((m) => m.category === "fact" && m.memory_key !== "gender" && m.memory_key !== "pronoun")
+      .map((m) => m.memory_value);
+    if (facts.length > 0) report += `   • Thông tin: ${facts.slice(0, 2).join("; ")}\n`;
+
+    const timeStr = p.lastActiveAt ? new Date(p.lastActiveAt).toLocaleDateString("vi-VN") : "Chưa rõ";
+    report += `   • Lần tương tác gần nhất: ${timeStr} (${p.interactionCount} tin nhắn)\n\n`;
+  });
+
+  report += `💡 Sếp có thể chat: "Lưu bạn [Tên] là nữ xưng chị", hoặc gõ /userinfo <tên> để xem chi tiết nhé!`;
+  await sendDirectText(api, sender, report);
+}
+
+async function handleSingleUserProfileReport(api: any, sender: string, targetQuery: string): Promise<void> {
+  const candidates = findDirectUserByNameOrId(targetQuery);
+  if (candidates.length === 0) {
+    await sendDirectText(
+      api,
+      sender,
+      `🔍 KHÔNG TÌM THẤY HỒ SƠ:\n\nEm không tìm thấy người dùng nào có tên hoặc ID khớp với "${targetQuery}" trong danh bạ bạn bè hoặc lịch sử chat 1:1.\n\n👉 Sếp có thể gõ /users11 để xem danh sách hoặc dặn em lưu mới: "Lưu bạn ${targetQuery} là nữ, gọi bằng chị" nhé!`
+    );
+    return;
+  }
+
+  if (candidates.length > 1) {
+    let msg = `🔍 TÌM THẤY ${candidates.length} NGƯỜI DÙNG PHÙ HỢP VỚI "${targetQuery}":\n\n`;
+    candidates.slice(0, 5).forEach((c, i) => {
+      msg += `${i + 1}. 👤 ${c.displayName} (ID: ${c.userId})\n`;
+    });
+    msg += `\n👉 Sếp gõ: /userinfo <ID> để xem chính xác người cần tra cứu nhé!`;
+    await sendDirectText(api, sender, msg);
+    return;
+  }
+
+  const p = candidates[0];
+  if (!p) return;
+  let msg = `🧠 HỒ SƠ & BỘ NHỚ CHI TIẾT:\n👤 ${p.displayName} (ID: ${p.userId})\n\n`;
+
+  const meta: string[] = [];
+  if (p.gender) meta.push(`Giới tính: ${p.gender}`);
+  if (p.pronoun) meta.push(`Xưng hô: ${p.pronoun}`);
+  if (meta.length > 0) msg += `• ${meta.join(" | ")}\n`;
+
+  if (p.memories.length === 0) {
+    msg += `• Trí nhớ: Chưa có sở thích hay thông tin cá nhân nào được lưu.\n`;
+  } else {
+    msg += `• Danh sách trí nhớ đã lưu:\n`;
+    p.memories.forEach((m) => {
+      const tag = m.category === "preference" ? "Sở thích" : "Thông tin";
+      msg += `  - [${tag}] ${m.memory_key}: ${m.memory_value}\n`;
+    });
+  }
+
+  const timeStr = p.lastActiveAt ? new Date(p.lastActiveAt).toLocaleString("vi-VN") : "Chưa rõ";
+  msg += `\n• Hoạt động gần nhất: ${timeStr} (${p.interactionCount} tin nhắn)`;
+  msg += `\n\n💡 Sếp có thể dặn: "Lưu bạn ${p.displayName} thích hoa lan, làm nghề bác sĩ" để em cập nhật thêm!`;
+
+  await sendDirectText(api, sender, msg);
+}
+
+async function handleAdminUserProfileUpdate(api: any, sender: string, update: ParsedProfileUpdate): Promise<void> {
+  const candidates = findDirectUserByNameOrId(update.targetQuery);
+  if (candidates.length === 0) {
+    await sendDirectText(
+      api,
+      sender,
+      `⚠️ CHƯA TÌM THẤY NGƯỜI DÙNG:\n\nEm đã tìm trong danh bạ bạn bè và lịch sử chat 1:1 nhưng chưa thấy ai có tên hoặc ID là "${update.targetQuery}".\n\n👉 Sếp kiểm tra lại chính xác tên Zalo hoặc gửi kèm ID Zalo (VD: "/setuser 123456 nữ, xưng chị") để em lưu chính xác nhé!`
+    );
+    return;
+  }
+
+  if (candidates.length > 1) {
+    let msg = `🔍 TÌM THẤY ${candidates.length} NGƯỜI CÓ TÊN GẦN GIỐNG "${update.targetQuery}":\n\n`;
+    candidates.slice(0, 5).forEach((c, i) => {
+      msg += `${i + 1}. 👤 ${c.displayName} (ID: ${c.userId})\n`;
+    });
+    const firstId = candidates[0]?.userId || "";
+    msg += `\n👉 Sếp ghi kèm ID (VD: "/setuser ${firstId} ...") để em cập nhật chuẩn xác đúng người nhé!`;
+    await sendDirectText(api, sender, msg);
+    return;
+  }
+
+  const target = candidates[0];
+  if (!target) return;
+  const res = setUserCustomProfile({
+    userId: target.userId,
+    userName: target.displayName,
+    gender: update.gender,
+    pronoun: update.pronoun,
+    preferences: update.preferences,
+    facts: update.facts,
+    customNotes: update.customNotes,
+  });
+
+  const reply =
+    `✅ ĐÃ CẬP NHẬT HỒ SƠ & TRÍ NHỚ THÀNH CÔNG!\n\n` +
+    `👤 Khách hàng: ${target.displayName} (ID: ${target.userId})\n` +
+    `📋 Nội dung đã lưu:\n` +
+    (res.summary ? `• ${res.summary}\n` : "") +
+    (update.customNotes ? `• Ghi chú: ${update.customNotes}\n` : "") +
+    `\n👉 Từ nay khi bạn ${target.displayName} nhắn tin 1:1, Bot sẽ tự động xưng hô chuẩn xác là ${update.pronoun || (update.gender === "nữ" ? "Chị" : "Anh")} và vận dụng các thông tin này! ✨`;
+
+  await sendDirectText(api, sender, reply);
+}
+
 /**
  * Xử lý toàn bộ tương tác 1:1 giữa Admin và Bot qua Tin nhắn trực tiếp (Direct Message).
  */
@@ -768,6 +984,24 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       return;
     } else if (dmQuery.type === "summary") {
       await handleDmSummaryReport(api, sender, dmQuery.hours);
+      return;
+    }
+
+    // 👥 QUẢN LÝ HỒ SƠ & TRÍ NHỚ KHÁCH 1:1
+    if (isDirectUsersListQuery(rawText)) {
+      await handleDirectUsersListReport(api, sender);
+      return;
+    }
+
+    const singleUserQuery = isSingleUserProfileQuery(rawText);
+    if (singleUserQuery) {
+      await handleSingleUserProfileReport(api, sender, singleUserQuery);
+      return;
+    }
+
+    const updateIntent = await parseAdminProfileUpdateIntent(rawText);
+    if (updateIntent) {
+      await handleAdminUserProfileUpdate(api, sender, updateIntent);
       return;
     }
   }
@@ -967,6 +1201,11 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         `🔹 /dm hoặc /tomtat11 : Tóm tắt tình hình các bạn bè/khách nhắn tin 1:1 với bot\n` +
         `🔹 /loi11 : Báo cáo chi tiết các tác vụ hoặc tương tác 1:1 bị lỗi/thất bại\n` +
         `🔹 Hoặc hỏi tự nhiên: "Hôm nay có ai nhắn tin riêng không?", "Có ai nhờ bot làm gì bị lỗi không?"\n\n` +
+        `🧠 QUẢN LÝ HỒ SƠ & TRÍ NHỚ KHÁCH 1:1:\n` +
+        `🔹 /users11 hoặc /ds11 : Xem danh sách tất cả khách chat 1:1 và hồ sơ đã nhớ\n` +
+        `🔹 /userinfo [tên/id] : Xem chi tiết trí nhớ, sở thích, xưng hô của 1 khách\n` +
+        `🔹 /setuser [tên/id] [thông tin] : Sửa thông tin (VD: /setuser Thao nữ, xưng chị, thích du lịch)\n` +
+        `🔹 Hoặc chat tự nhiên: "Lưu bạn Thảo là nữ xưng chị", "Bạn Minh thích chơi đá bóng"\n\n` +
         `⏰ ĐẶT HẸN & NHẮC VIỆC CÁ NHÂN:\n` +
         `🔹 /nhacnho [thời gian] [nội dung] : Đặt hẹn nhắc việc (VD: /nhacnho 20p Uống nước, /hengio 17:30 Đi đón con)\n` +
         `🔹 /dsnhac : Xem danh sách các lịch hẹn đang chờ của bạn\n` +

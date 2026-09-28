@@ -215,3 +215,197 @@ export function formatUserMemoriesForPrompt(
     `\n(Hãy tinh tế vận dụng các thông tin trên khi phù hợp để cá nhân hóa câu trả lời, không nhắc lại máy móc nếu không liên quan).\n`
   );
 }
+
+export interface ParsedProfileUpdate {
+  targetQuery: string;
+  gender?: string;
+  pronoun?: string;
+  preferences?: string[];
+  facts?: string[];
+  customNotes?: string;
+}
+
+/**
+ * Kiểm tra xem tin nhắn có phải là yêu cầu xem danh sách khách hàng 1:1 không.
+ */
+export function isDirectUsersListQuery(text: string): boolean {
+  const clean = text.trim().toLowerCase();
+  if (/^[!/](?:users11|ds11|danhsach11|khach11|friends11)\b/i.test(clean)) return true;
+  return (
+    /(?:danh sách|những ai|ai|các bạn|khách).*(?:nhắn|chat|inbox|gửi tin).*(?:1:1|riêng|với bot|cho bot)/i.test(clean) ||
+    /(?:xem|cho xem|danh sách)\s+(?:khách|người dùng|bạn bè)\s+(?:1:1|nhắn riêng|chat riêng)/i.test(clean)
+  );
+}
+
+/**
+ * Kiểm tra xem tin nhắn có phải là yêu cầu tra cứu thông tin / trí nhớ của 1 người cụ thể không.
+ */
+export function isSingleUserProfileQuery(text: string): string | null {
+  const clean = text.trim();
+
+  const cmdMatch = clean.match(/^[!/](?:userinfo|hoso|trinho|thongtinkhach)\s+([^\s]+)/i);
+  if (cmdMatch && cmdMatch[1]) {
+    return cmdMatch[1].trim();
+  }
+
+  // Câu hỏi tự nhiên: "bot nhớ gì về bạn Thảo?", "xem thông tin bạn Thảo", "hồ sơ bạn Nguyễn Văn A"
+  const naturalMatch = clean.match(
+    /(?:bot\s+(?:nhớ|biết)\s+gì\s+về|xem\s+(?:thông tin|hồ sơ|trí nhớ|profile)\s+(?:của\s+)?|thông tin\s+(?:của\s+)?)(?:bạn|khách|thành viên|anh|chị|em|user)?\s+([^\n?,.:]+?)(?:\s+không|\s+vậy|\s+nhé|[?,.]|$)/iu
+  );
+  if (naturalMatch && naturalMatch[1]) {
+    let candidate = naturalMatch[1].trim();
+    candidate = candidate.replace(/^(?:bạn|khách|thành viên|anh|chị|em|user)\s+/iu, "").trim();
+    if (candidate.length >= 2 && !/^(?:tôi|mình|tất cả|ai|hôm nay)$/i.test(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Trích xuất ý định cập nhật trí nhớ/hồ sơ của Admin đối với 1 người dùng.
+ * Kết hợp Regex bóc tách nhanh và AI (Gemini) để hiểu trọn vẹn ngữ nghĩa tự nhiên.
+ */
+export async function parseAdminProfileUpdateIntent(
+  text: string
+): Promise<ParsedProfileUpdate | null> {
+  const clean = text.trim();
+  if (!clean || clean.length < 8) return null;
+  const lower = clean.toLowerCase();
+
+  // 1. Phân tích lệnh quản trị nhanh: /setuser <target> <content>
+  const cmdMatch = clean.match(/^[!/](?:setuser|suathongtin|doithongtin|ghinho)\s+([^\s,]+)\s+([\s\S]+)/i);
+  if (cmdMatch && cmdMatch[1] && cmdMatch[2]) {
+    const target = cmdMatch[1].trim();
+    const content = cmdMatch[2].trim();
+    return parseUpdateContentFast(target, content);
+  }
+
+  // 2. Nhận diện các mẫu câu tự nhiên phổ biến:
+  const isCandidateText =
+    /(?:lưu|sửa|cập nhật|đổi|chỉnh|note|ghi nhớ|dặn|bạn|thành viên|khách)\s+.*?(?:nữ|nam|chị|anh|em|cô|chú|bác|sở thích|thích|nghề|làm)/iu.test(lower);
+
+  if (!isCandidateText) return null;
+
+  // 2.1. Dạng dặn trực tiếp: "Bạn Tuấn thích ...", "Bạn Thảo là nữ xưng chị", "Bạn Nam làm nghề..."
+  const directUserMatch = clean.match(
+    /^(?:bạn|khách|thành viên|user|em|anh|chị)\s+([^\s,:]+)\s+(?:là|thích|mê|làm|chuyên|xưng|gọi)\s+([\s\S]+)/iu
+  );
+  if (directUserMatch && directUserMatch[1] && directUserMatch[2]) {
+    const target = directUserMatch[1].trim();
+    const content = clean.slice(clean.indexOf(target) + target.length).trim();
+    if (target.length >= 2 && !/^(?:tôi|mình|em|anh|chị|bot|ai)$/i.test(target)) {
+      return parseUpdateContentFast(target, content);
+    }
+  }
+
+  // 2.2. Dạng có từ khóa hành động: "Lưu / đổi / sửa bạn <target> là/thành/xưng/gọi..."
+  const actionRegex = clean.match(
+    /(?:lưu|sửa|cập nhật|đổi|chỉnh|dặn|ghi nhớ)\s+(?:trí nhớ|thông tin|hồ sơ)?\s*(?:của\s+)?(?:bạn|khách|thành viên|user|em|anh|chị)?\s+([^\s:,]+(?:(?!\s+là|\s+thành|\s+sang|\s+thích|\s+xưng|\s+gọi)[\s\S])*?)\s*(?:là|thành|sang|thích|xưng|gọi|:)\s*([\s\S]+)/iu
+  );
+  if (actionRegex && actionRegex[1] && actionRegex[2]) {
+    const target = actionRegex[1].trim();
+    const content = actionRegex[2].trim();
+    if (target.length >= 2 && !/^(?:tôi|mình|em|anh|chị|bot|ai)$/i.test(target)) {
+      return parseUpdateContentFast(target, content);
+    }
+  }
+
+  // 3. Fallback AI thông minh cho các câu văn nói tiếng Việt phức tạp
+  try {
+    const prompt = `Phân tích câu lệnh quản trị viên để cập nhật hồ sơ/trí nhớ của người dùng:
+"${clean}"
+
+Hãy bóc tách thành JSON chuẩn (nếu không phải câu yêu cầu cập nhật hồ sơ người dùng, trả về {"isUpdate": false}):
+{
+  "isUpdate": true,
+  "targetQuery": "Tên hoặc ID người dùng cần sửa",
+  "gender": "nữ" | "nam" | null,
+  "pronoun": "Chị" | "Anh" | "Em" | "Cô" | "Chú" | "Bác" | "Dì" | null,
+  "preferences": ["sở thích 1", ...],
+  "facts": ["thông tin/nghề nghiệp 1", ...],
+  "customNotes": "ghi chú khác nếu có"
+}
+QUY TẮC BẮT BUỘC:
+- Nếu bảo "là nữ" / "con gái" mà chưa nói xưng hô, tự suy ra pronoun là "Chị".
+- Nếu bảo "là nam" / "con trai" mà chưa nói xưng hô, tự suy ra pronoun là "Anh".
+- Trả về DUY NHẤT mã JSON, không có giải thích.`;
+
+    const rawResponse = await callGemini(
+      "Bạn là bộ trích xuất thông tin có cấu trúc cho trợ lý AI Zalo.",
+      prompt,
+      { model: "ag/gemini-3.1-pro-low", temperature: 0.1 }
+    );
+    if (!rawResponse) return null;
+    const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+    const json = JSON.parse(jsonMatch[0]);
+    if (!json.isUpdate || !json.targetQuery) return null;
+
+    return {
+      targetQuery: String(json.targetQuery).trim(),
+      gender: json.gender || undefined,
+      pronoun: json.pronoun || undefined,
+      preferences: Array.isArray(json.preferences) ? json.preferences.filter(Boolean) : [],
+      facts: Array.isArray(json.facts) ? json.facts.filter(Boolean) : [],
+      customNotes: json.customNotes || undefined,
+    };
+  } catch (e) {
+    console.warn("[user-memory] parseAdminProfileUpdateIntent AI error:", e);
+    return null;
+  }
+}
+
+function parseUpdateContentFast(target: string, content: string): ParsedProfileUpdate {
+  const lower = content.toLowerCase();
+  let gender: string | undefined;
+  let pronoun: string | undefined;
+  const preferences: string[] = [];
+  const facts: string[] = [];
+
+  if (/(?:nữ|con gái|phái nữ|bà|cô gái)/i.test(lower)) {
+    gender = "nữ";
+    if (!pronoun) pronoun = "Chị";
+  } else if (/(?:nam|con trai|phái nam|đàn ông)/i.test(lower)) {
+    gender = "nam";
+    if (!pronoun) pronoun = "Anh";
+  }
+
+  if (/(?:gọi bằng chị|xưng chị|là chị|gọi chị)/i.test(lower)) {
+    pronoun = "Chị";
+    if (!gender) gender = "nữ";
+  } else if (/(?:gọi bằng anh|xưng anh|là anh|gọi anh)/i.test(lower)) {
+    pronoun = "Anh";
+    if (!gender) gender = "nam";
+  } else if (/(?:gọi bằng em|xưng em|là em|gọi em)/i.test(lower)) {
+    pronoun = "Em";
+  } else if (/(?:gọi bằng cô|xưng cô|là cô|gọi cô)/i.test(lower)) {
+    pronoun = "Cô";
+    if (!gender) gender = "nữ";
+  } else if (/(?:gọi bằng chú|xưng chú|là chú|gọi chú)/i.test(lower)) {
+    pronoun = "Chú";
+    if (!gender) gender = "nam";
+  } else if (/(?:gọi bằng bác|xưng bác|là bác|gọi bác)/i.test(lower)) {
+    pronoun = "Bác";
+  }
+
+  const prefMatch = content.match(/(?:thích|sở thích|mê|khoái)\s+([^,.;]+)/i);
+  if (prefMatch && prefMatch[1]) {
+    preferences.push(prefMatch[1].trim());
+  }
+
+  const factMatch = content.match(/(?:làm nghề|làm|chuyên|nghề nghiệp|công việc)\s+([^,.;]+)/i);
+  if (factMatch && factMatch[1]) {
+    facts.push(factMatch[1].trim());
+  }
+
+  return {
+    targetQuery: target,
+    gender,
+    pronoun,
+    preferences,
+    facts,
+    customNotes: content,
+  };
+}
