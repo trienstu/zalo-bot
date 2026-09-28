@@ -277,30 +277,14 @@ export async function downloadFileContent(
             };
           }
 
-          if (res.body) {
-            const chunks: Uint8Array[] = [];
-            let totalBytes = 0;
-            const reader = res.body.getReader();
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              if (value) {
-                totalBytes += value.length;
-                if (totalBytes > 50 * 1024 * 1024) {
-                  await reader.cancel();
-                  console.warn(`[gemini] File stream vượt quá 50MB (${(totalBytes / 1024 / 1024).toFixed(1)}MB)`);
-                  return {
-                    error: "FILE_TOO_LARGE",
-                    fileSizeBytes: totalBytes,
-                  };
-                }
-                chunks.push(value);
-              }
-            }
-            buffer = Buffer.concat(chunks);
-          } else {
-            const arrayBuffer = await res.arrayBuffer();
-            buffer = Buffer.from(arrayBuffer);
+          const arrayBuffer = await res.arrayBuffer();
+          buffer = Buffer.from(arrayBuffer);
+          if (buffer.length > 50 * 1024 * 1024) {
+            console.warn(`[gemini] File tải về vượt quá 50MB (${(buffer.length / 1024 / 1024).toFixed(1)}MB)`);
+            return {
+              error: "FILE_TOO_LARGE",
+              fileSizeBytes: buffer.length,
+            };
           }
           contentType = (res.headers.get("content-type") || "").toLowerCase();
 
@@ -349,14 +333,14 @@ export async function downloadFileContent(
 
       // Nếu là PDF scan dạng ảnh thuần túy:
       // Chỉ gửi Multimodal cho Gemini nếu file <= 15MB (để không vượt quá giới hạn 20MB payload API)
-      if (buffer.length <= 15 * 1024 * 1024) {
+      if (buffer.length > 50 && buffer.length <= 15 * 1024 * 1024) {
         return {
           mediaPart: {
             data: buffer.toString("base64"),
             mimeType: "application/pdf",
           },
         };
-      } else {
+      } else if (buffer.length > 15 * 1024 * 1024) {
         console.warn(`[gemini] File PDF scan không có text layer và quá nặng (${(buffer.length / 1024 / 1024).toFixed(1)}MB > 15MB)`);
         return {
           textContent: `[File PDF scan dạng ảnh "${fileName || "tài liệu"}" nặng ${(buffer.length / 1024 / 1024).toFixed(1)}MB, không chứa lớp văn bản và vượt quá giới hạn OCR 15MB của AI API. Vui lòng chuyển thành file PDF văn bản hoặc gửi ảnh từng trang để bot đọc.]`,
@@ -691,7 +675,7 @@ export async function callGemini(
   if (isSearchEnabled) {
     primaryModel = "gemini-3-flash-preview";
   } else if (hasPdfMedia) {
-    primaryModel = "gemini-3.8-flash";
+    primaryModel = "gemini-flash-latest";
   } else if (hasMedia && primaryModel.includes("lite")) {
     primaryModel = config.geminiModel || "gemini-3.7-flash";
   }
@@ -750,8 +734,8 @@ export async function callGemini(
   // Danh sách model cascading dự phòng khi model chính nghẽn mạng / 503 / 429 / Timeout:
   // CHỈ dùng các dòng Flash chất lượng cao, LOẠI BỎ hoàn toàn lite models để tránh hallucination/lỗi JSON
   const candidateFallbacks = [
-    "gemini-3.8-flash",
     "gemini-flash-latest",
+    "gemini-3.8-flash",
     "gemini-3.7-flash",
     "gemini-3.6-flash",
   ].filter((m) => m !== primaryModel);
@@ -762,12 +746,14 @@ export async function callGemini(
   const userParts: Record<string, unknown>[] = [];
   if (allMedia.length > 0) {
     for (const img of allMedia) {
-      userParts.push({
-        inline_data: {
-          mime_type: img.mimeType || "image/jpeg",
-          data: img.data,
-        },
-      });
+      if (img.data && img.data.trim().length > 50) {
+        userParts.push({
+          inline_data: {
+            mime_type: img.mimeType || "image/jpeg",
+            data: img.data,
+          },
+        });
+      }
     }
   }
   userParts.push({ text: user });

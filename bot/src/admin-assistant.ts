@@ -1181,7 +1181,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
           timestamp: Date.now(),
         });
         saveRecentDirectDocument(sender, fileName || topicName, fullExtractedText);
-      } else if (fileRes?.mediaPart) {
+      } else if (fileRes?.mediaPart && fileRes.mediaPart.data && fileRes.mediaPart.data.length > 50) {
         mediaPart = fileRes.mediaPart;
         try {
           const ocrPrompt =
@@ -1600,7 +1600,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   if (targetUrl && !mediaPart) {
     console.log(`[admin-assistant] 📥 Đang tải tài liệu 1:1 từ: ${targetUrl.slice(0, 80)} (${fileName})...`);
     const fileRes = await downloadFileContent(targetUrl, fileName);
-    if (fileRes?.mediaPart) {
+    if (fileRes?.mediaPart && fileRes.mediaPart.data && fileRes.mediaPart.data.length > 50) {
       mediaPart = fileRes.mediaPart;
       lastDirectMedia.set(sender, {
         mediaPart: fileRes.mediaPart,

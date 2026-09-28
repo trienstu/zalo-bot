@@ -1306,7 +1306,7 @@ async function handleHistoryQA(
               const res = await downloadFileContent(fUrl, fName);
               if (res?.textContent) {
                 extractedContents.push(`=== TÀI LIỆU: ${fName} ===\n${res.textContent}`);
-              } else if (res?.mediaPart && !mediaPart) {
+              } else if (res?.mediaPart && res.mediaPart.data && res.mediaPart.data.length > 50 && !mediaPart) {
                 mediaPart = res.mediaPart;
               }
             } catch (dlErr) {
