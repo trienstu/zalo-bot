@@ -551,6 +551,7 @@ export function extractSimulatedGenerateMusic(text: string): {
 export async function interceptAndExecuteSimulatedTool(
   text: string,
   onFileGenerated?: (file: GeneratedFileResult | any) => Promise<void>,
+  contextOptions?: { fallbackSourceContent?: string },
 ): Promise<string> {
   // 0.5. Kiểm tra generate_music giả lập
   const musicExtracted = extractSimulatedGenerateMusic(text);
@@ -760,15 +761,28 @@ export async function interceptAndExecuteSimulatedTool(
     const title = extracted.args.title || "Tài liệu";
     const fileName = extracted.args.fileName || (fileType === "docx" ? "tai_lieu.docx" : `tai_lieu.${fileType}`);
 
+    let finalContent = content;
+    const hasPlaceholder = /(?:nội dung chi tiết|toàn bộ danh sách|chi tiết \d+ thí sinh|đã được (?:trích xuất|chuyển đổi|đóng gói))\b/i.test(finalContent);
+    if (
+      (hasPlaceholder || finalContent.length < 1000) &&
+      contextOptions?.fallbackSourceContent &&
+      contextOptions.fallbackSourceContent.length > 2000
+    ) {
+      console.log(
+        `[simulated-tool-interceptor] 🔄 Phát hiện placeholder hoặc nội dung bị tóm tắt (${finalContent.length} chars), tự động phục hồi toàn văn tài liệu gốc (${contextOptions.fallbackSourceContent.length} chars)...`,
+      );
+      finalContent = contextOptions.fallbackSourceContent;
+    }
+
     console.log(
       `[simulated-tool-interceptor] 🛡️ Phát hiện [generate_file] thô trong output text! ` +
-      `Kích hoạt thực thi ngầm: fileType=${fileType}, fileName=${fileName}, content=${content.length} chars`,
+      `Kích hoạt thực thi ngầm: fileType=${fileType}, fileName=${fileName}, content=${finalContent.length} chars`,
     );
 
     const result = await executeAgentTool("generate_file", {
       ...extracted.args,
       fileType,
-      content,
+      content: finalContent,
       title,
       fileName,
     });

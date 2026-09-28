@@ -1492,6 +1492,41 @@ async function handleHistoryQA(
 
     const needsAgentLoop = checkIsFileOrVoiceGeneration(question, options?.quote?.text);
 
+    // 🚀 DIRECT DOCUMENT CONVERSION: Nếu có tài liệu đính kèm (hoặc vừa OCR xong) và người dùng yêu cầu chuyển đổi sang Word/Excel/MD:
+    // Lấy TRỰC TIẾP 100% nội dung gốc từ fileTextContent đưa vào engine tạo file nội bộ (Node.js).
+    // Bỏ qua giới hạn Max Output Tokens (4k tokens) của AI, bảo lưu toàn vẹn 100% tất cả các bảng biểu và dữ liệu!
+    const isDocConversionRequest =
+      Boolean(fileTextContent && fileTextContent.length > 200) &&
+      /(?:chuyển|xuất|đổi|lưu|tạo|đóng\s*gói|convert)\s*(?:nó\s*|tài\s*liệu\s*|file\s*(?:này|gốc|đính\s*kèm)?\s*)?(?:qua|sang|thành|vào|ra|dưới\s*dạng)?\s*(?:file\s+)?(?:word|docx|excel|xlsx|bảng\s*biểu|bảng\s*tính|markdown|\.md\b)/i.test(question || "");
+
+    if (isDocConversionRequest && fileTextContent) {
+      const isExcel = /(?:excel|xlsx|bảng\s*tính)/i.test(question);
+      const isMd = /(?:markdown|\.md\b)/i.test(question);
+      const fileType = isExcel ? "xlsx" : isMd ? "md" : "docx";
+      const rawTitle = fileName ? fileName.replace(/\.[^.]+$/, "") : "tai_lieu";
+      const cleanDocTitle = rawTitle.slice(0, 50).trim() || "Tai_lieu";
+
+      console.log(`[member-assistant] ⚡ Kích hoạt Direct Document Conversion sang [${fileType}] từ fileTextContent (${fileTextContent.length} ký tự)...`);
+      const fileRes = await executeAgentTool("generate_file", {
+        fileType,
+        fileName: cleanDocTitle,
+        title: cleanDocTitle,
+        content: fileTextContent,
+      });
+
+      if (fileRes?.success && fileRes?.filePath && options?.api) {
+        const caption = isExcel
+          ? `📊 ${botName} đã xuất xong file Excel [${fileRes.fileName}] với đầy đủ bảng tính cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+          : isMd
+            ? `📄 ${botName} đã xuất xong file Markdown [${fileRes.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+            : `📄 ${botName} đã chuyển đổi xong file Word [${fileRes.fileName}] đầy đủ bảng biểu cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`;
+        await sendGroupFile(options.api, threadId, fileRes.filePath, caption);
+        return isSuperAdmin
+          ? `Dạ Sếp Trien Nguyen, em đã chuyển đổi toàn bộ nội dung tài liệu đính kèm (bảo lưu nguyên vẹn 100% tất cả các bảng biểu và dữ liệu) sang file Word (.docx) gửi lên nhóm cho Sếp rồi ạ! Sếp kiểm tra file đính kèm ở trên giúp em nhé! 🙏✨`
+          : `Dạ bác @${displayName} ơi, ${botName} đã chuyển đổi toàn bộ dữ liệu tài liệu đính kèm với đầy đủ bảng biểu sang file Word (.docx) gửi lên nhóm cho bác rồi nhé! 📄✨`;
+      }
+    }
+
     try {
       let answer = "";
       let voiceGenerated = false;
@@ -1565,17 +1600,21 @@ async function handleHistoryQA(
         });
       }
 
-      answer = await interceptAndExecuteSimulatedTool(answer, async (file) => {
-        if (options?.api) {
-          const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
-          if (isVoice) {
-            voiceGenerated = true;
-          } else {
-            fileGenerated = true;
+      answer = await interceptAndExecuteSimulatedTool(
+        answer,
+        async (file) => {
+          if (options?.api) {
+            const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+            if (isVoice) {
+              voiceGenerated = true;
+            } else {
+              fileGenerated = true;
+            }
+            await deliverGeneratedToolFile(options.api, threadId, file, botName, displayName, isSuperAdmin);
           }
-          await deliverGeneratedToolFile(options.api, threadId, file, botName, displayName, isSuperAdmin);
-        }
-      });
+        },
+        { fallbackSourceContent: fileTextContent || options?.quote?.text },
+      );
       answer = sanitizeHallucinatedFileLinks(answer, fileGenerated);
 
       // 🛡️ PHÒNG THỦ CHIỀU SÂU: Nếu người dùng yêu cầu Voice/Đọc thơ mà chưa có file voice nào được gửi
@@ -2061,17 +2100,21 @@ QUY TẮC BẮT BUỘC:
           }),
         });
       }
-      answer = await interceptAndExecuteSimulatedTool(answer, async (file) => {
-        if (options?.api) {
-          const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
-          if (isVoice) {
-            voiceGenerated = true;
-          } else {
-            fileGenerated = true;
+      answer = await interceptAndExecuteSimulatedTool(
+        answer,
+        async (file) => {
+          if (options?.api) {
+            const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+            if (isVoice) {
+              voiceGenerated = true;
+            } else {
+              fileGenerated = true;
+            }
+            await deliverGeneratedToolFile(options.api, threadId, file, botName, displayName, isSuperAdmin);
           }
-          await deliverGeneratedToolFile(options.api, threadId, file, botName, displayName, isSuperAdmin);
-        }
-      });
+        },
+        { fallbackSourceContent: options?.directDocContent || options?.quote?.text },
+      );
       answer = sanitizeHallucinatedFileLinks(answer, fileGenerated);
 
       // 🛡️ PHÒNG THỦ CHIỀU SÂU: Nếu người dùng yêu cầu Voice/Đọc thơ mà chưa có file voice nào được gửi
@@ -3096,17 +3139,21 @@ QUY TẮC BẮT BUỘC:
       console.log(`[member-assistant] ⚡ AI hoàn tất trong ${Date.now() - tAiStart}ms (kết quả: ${answer.length} ký tự)`);
     }
 
-    answer = await interceptAndExecuteSimulatedTool(answer, async (file) => {
-      if (options?.api) {
-        const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
-        if (isVoice) {
-          voiceGenerated = true;
-        } else {
-          fileGenerated = true;
+    answer = await interceptAndExecuteSimulatedTool(
+      answer,
+      async (file) => {
+        if (options?.api) {
+          const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+          if (isVoice) {
+            voiceGenerated = true;
+          } else {
+            fileGenerated = true;
+          }
+          await deliverGeneratedToolFile(options.api, threadId, file, botName, displayName, isSuperAdmin);
         }
-        await deliverGeneratedToolFile(options.api, threadId, file, botName, displayName, isSuperAdmin);
-      }
-    });
+      },
+      { fallbackSourceContent: fileTextContent || options?.quote?.text },
+    );
     answer = sanitizeHallucinatedFileLinks(answer, fileGenerated);
 
     // 🛡️ PHÒNG THỦ CHIỀU SÂU: Nếu người dùng yêu cầu Voice/Đọc thơ/Podcast mà chưa có file voice nào được gửi
@@ -4258,6 +4305,25 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     const smartReaction = pickSmartReaction(rawText);
     void sendReaction(api, threadId, event.msgId, event.cliMsgId, smartReaction);
     void sendTyping(api, threadId);
+
+    // 📢 Phản hồi tiếp nhận tức thì khi người dùng ra lệnh tạo/chuyển đổi file hoặc tác vụ xuất file:
+    const isDocOrFileOrder =
+      (/(?:chuyển|xuất|đổi|lưu|tạo|đóng\s*gói|soạn|viết)\s*(?:nó\s*|tài\s*liệu\s*|file\s*(?:này|gốc|đính\s*kèm)?\s*)?(?:qua|sang|thành|vào|ra|dưới\s*dạng)?\s*(?:file\s+)?(?:word|docx|excel|xlsx|bảng\s*biểu|bảng\s*tính|powerpoint|pptx|slide|markdown|\.md\b|pdf|csv)/i.test(rawText) ||
+       /(?:chuyển qua|xuất ra|đóng gói|soạn)\s+(?:file|word|excel|slide|powerpoint)/i.test(rawText)) &&
+      !/(?:vẽ\s+ảnh|tạo\s+ảnh|chỉnh\s+ảnh|sửa\s+ảnh)/i.test(rawText);
+
+    if (isDocOrFileOrder && api) {
+      const isWord = /(?:word|docx|văn\s*bản)/i.test(rawText);
+      const isExcel = /(?:excel|xlsx|bảng\s*tính)/i.test(rawText);
+      const isSlide = /(?:powerpoint|pptx|ppt|slide|thuyết\s*trình)/i.test(rawText);
+      const targetTypeLabel = isWord ? "Word (.docx)" : isExcel ? "Excel (.xlsx)" : isSlide ? "PowerPoint (.pptx)" : "tài liệu";
+      const isSuperAdminUser = isUserAdmin(sender);
+      const greeting = isSuperAdminUser ? "Sếp" : (displayName ? `bác @${displayName}` : "bác");
+      const ackMsg = isSuperAdminUser
+        ? `📄 Dạ Sếp, em đã tiếp nhận chỉ đạo! Em đang tiến hành xử lý dữ liệu và đóng gói sang file ${targetTypeLabel}... Sếp chờ em một lát nhé! ⏳✨`
+        : `📄 Dạ ${greeting}, ${botName} đã nhận lệnh và đang tiến hành xử lý dữ liệu để xuất file ${targetTypeLabel}... ${greeting} chờ em một lát nhé! ⏳✨`;
+      void sendGroupText(api, threadId, ackMsg);
+    }
 
     let isStrictDocQuery =
       isDocCommand ||
