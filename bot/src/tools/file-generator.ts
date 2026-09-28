@@ -35,32 +35,71 @@ export function ensureOutputDir(): string {
  * Kiểm tra xem người dùng có yêu cầu xuất giọng đọc / voice / podcast / ngâm thơ / đọc diễn cảm không
  */
 export function checkIsVoiceRequest(question: string, quoteText = ""): boolean {
-  const qLower = `${question || ""} ${quoteText || ""}`.toLowerCase();
+  const qLower = (question || "").toLowerCase().trim();
+  const quoteLower = (quoteText || "").toLowerCase().trim();
 
   // Bỏ qua nếu chỉ là câu hỏi thăm dò năng lực thuần túy
-  if (/^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|thu)?\s*(?:được|đc|duoc)?(?:\s+(?:thu|làm|tạo))?\s+(?:voice|âm\s*thanh|giọng\s*đọc)\s*(?:không|ko)?\s*(?:hả|nhỉ|hở|ạ|không|ko)\s*[?]?$/i.test(qLower.trim())) {
+  if (
+    /^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|thu)?\s*(?:được|đc|duoc)?(?:\s+(?:thu|làm|tạo))?\s+(?:voice|âm\s*thanh|giọng\s*đọc)\s*(?:không|ko)?\s*(?:hả|nhỉ|hở|ạ|không|ko)\s*[?]?$/i.test(
+      qLower,
+    )
+  ) {
     return false;
   }
 
-  const isSpeechOrVoiceRequest =
+  // Bỏ qua nếu câu hỏi của người dùng là câu hỏi thăm dò/kỹ thuật/thắc mắc về cấu hình, cách làm, địa điểm
+  const isHypotheticalOrInquiry =
+    /(?:có\s+(?:khó|dễ|nhanh|lâu|được|đc|tốn|mất)\s*(?:không|ko|chăng|hả|hở|nhỉ|ạ)|(?:^|[^\p{L}\p{N}])(?:bằng\s+cách\s+nào|như\s+thế\s+nào|làm\s+sao|app\s+gì|phần\s+mềm\s+gì|tool\s+gì|trang\s+web\s+nào|web\s+gì|công\s+cụ\s+gì|ở\s+đâu|cấu\s+hình)(?=$|[^\p{L}\p{N}]))/iu.test(
+      qLower,
+    );
+  if (
+    isHypotheticalOrInquiry &&
+    !/(?:hãy|giúp|cho\s*mình|cho\s*anh|cho\s*em|ngay|luôn|đọc\s+đi|phát\s+đi)\b/iu.test(qLower)
+  ) {
+    return false;
+  }
+
+  // 1. Ý định trực tiếp trong câu hỏi của người dùng (qLower)
+  const isDirectSpeechOrVoice =
     /(?:đọc|ngâm)\s+diễn\s*cảm/iu.test(qLower) ||
     /(?:đọc|ngâm)\s+(?:giúp|hộ|cho\s+[^\s,!?]+\s+)?(?:bài\s+)?thơ/iu.test(qLower) ||
-    /(?:thuyết\s*minh|lồng\s*tiếng)\b/iu.test(qLower) ||
     /(?:đọc|nói|phát|kể|ngâm)\s+(?:cho\s+)?(?:[\p{L}\s]+)?\s*nghe/iu.test(qLower) ||
     /(?:bận|đang\s+lái\s+xe|không\s+tiện\s+đọc)\s*[,.]*\s*(?:đọc|phát|nói|voice|audio)/iu.test(qLower) ||
     /(?:chuyển|phát|đọc|đổi|bật)\s+(?:thành|ra|sang|qua)?\s*(?:giọng|tiếng|âm\s*thanh|lời\s*nói|voice|audio|podcast)/iu.test(qLower) ||
     /(?:thu\s*âm|ghi\s*âm|ngâm\s*thơ)\s+(?:bài|thơ|văn|đoạn|kịch|nội\s*dung|cho)/iu.test(qLower) ||
-    /\b(?:thu\s*âm|ghi\s*âm)\b/iu.test(qLower) ||
-    /\b(?:voice\s*bubble|bong\s*bóng\s*thoại)\b/i.test(qLower);
+    /\b(?:thu\s*âm|ghi\s*âm)\s+(?:đi|giúp|hộ|cho|nào)/iu.test(qLower) ||
+    /^(?:thu\s*âm|ghi\s*âm)\b/iu.test(qLower) ||
+    /\b(?:voice\s*bubble|bong\s*bóng\s*thoại)\b/iu.test(qLower) ||
+    /(?:thuyết\s*minh|lồng\s*tiếng)\s+(?:cho|giúp|hộ|bài|video|đoạn|phim|clip|vào|đi)/iu.test(qLower) ||
+    /^(?:thuyết\s*minh|lồng\s*tiếng)\b/iu.test(qLower);
 
-  if (isSpeechOrVoiceRequest) return true;
-
-  const isDialogueOrPodcastRequest =
+  const isDirectDialogueOrPodcast =
     /(?:kịch\s*bản|đối\s*thoại|hội\s*thoại|trò\s*chuyện|cuộc\s*nói\s*chuyện|thảo\s*luận|podcast)\s+(?:giữa\s+)?2\s*(?:người|bạn|nhân\s*vật|mc)/iu.test(qLower) ||
     /2\s*(?:người|bạn|nhân\s*vật|mc)\s+(?:nói\s*chuyện|đối\s*thoại|trò\s*chuyện|thảo\s*luận|đối\s*đáp|tâm\s*sự)/iu.test(qLower) ||
     /(?:làm|tạo|soạn|phát|chuyển)\s+(?:thành\s+)?(?:podcast|đối\s*thoại|hội\s*thoại|talkshow)/iu.test(qLower);
 
-  return isDialogueOrPodcastRequest;
+  if (isDirectSpeechOrVoice || isDirectDialogueOrPodcast) return true;
+
+  // 2. Nếu có tin nhắn trích dẫn (quoteText):
+  if (quoteLower) {
+    // 2A. Người dùng ra lệnh đọc/thu âm/phát nội dung trong quote:
+    const isCommandOnQuote =
+      /(?:đọc|ngâm|phát|thu\s*âm|ghi\s*âm|lồng\s*tiếng|thuyết\s*minh)\s+(?:bài|đoạn|cái|nội\s*dung|file|video|clip)?\s*(?:này|trên|đó|hộ|giúp|cho|đi|nghe)/iu.test(qLower) ||
+      /(?:cho\s+)?(?:[\p{L}\s]+)?\s*nghe\s+(?:thử|với|nào|đi)/iu.test(qLower) ||
+      /^(?:đọc|ngâm|phát|thu\s*âm|lồng\s*tiếng)\s+(?:đi|hộ|giúp|nào)[!.]*$/iu.test(qLower);
+
+    if (isCommandOnQuote) return true;
+
+    // 2B. Tin nhắn quote là lời mời/gợi ý gửi voice từ bot VÀ người dùng đồng ý/xác nhận
+    const isQuotingVoiceProposal =
+      /(?:đọc\s+diễn\s*cảm|thu\s*âm\s+giọng\s*đọc|gửi\s+bản\s+đọc|phát\s+voice|nghe\s+thử\s+voice|ngâm\s+thơ)/iu.test(quoteLower);
+    const isAffirmation =
+      /(?:ok|oke|ừ|uh|u|dạ|vâng|được|triển|làm\s*đi|gửi\s*đi|cho\s*(?:mình|anh|em)\s*nghe|nghe\s*thử)/iu.test(qLower);
+
+    if (isQuotingVoiceProposal && isAffirmation) return true;
+  }
+
+  return false;
 }
 
 export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): boolean {

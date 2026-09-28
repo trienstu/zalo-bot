@@ -571,6 +571,25 @@ test("checkIsVoiceRequest nhận diện chuẩn xác các yêu cầu đọc di�
   assert.equal(checkIsVoiceRequest("đọc thơ Hàn Mặc Tử"), true);
   assert.equal(checkIsVoiceRequest("ngâm thơ bài Tây Tiến"), true);
   assert.equal(checkIsVoiceRequest("thuyết minh video này"), true);
+
+  // Chống kích hoạt nhầm khi quote có từ "lồng tiếng", "thu âm", "thuyết minh" nhưng câu hỏi là hỏi đáp kỹ thuật
+  const quoteRepoWithDubbing = "Tóm tắt: Nền tảng mã nguồn mở thay thế ElevenLabs chạy hoàn toàn cục bộ, hỗ trợ nhân bản giọng nói, lồng tiếng video, chuyển đổi văn bản sang âm thanh";
+  assert.equal(checkIsVoiceRequest("@Sen Chúa Cấu hình máy cần như thế nào để dùng được repo này?", quoteRepoWithDubbing), false);
+  assert.equal(checkIsFileOrVoiceGeneration("@Sen Chúa Cấu hình máy cần như thế nào để dùng được repo này?", quoteRepoWithDubbing), false);
+  assert.equal(checkIsVoiceRequest("Dự án này viết bằng ngôn ngữ gì?", quoteRepoWithDubbing), false);
+  assert.equal(checkIsVoiceRequest("Học lồng tiếng phim ở đâu?", ""), false);
+
+  // Hỗ trợ lệnh đọc/thu âm khi trích dẫn bài thơ / đoạn văn
+  const quotePoem = "Ao thu lạnh lẽo nước trong veo\nMột chiếc thuyền câu bé tẻo teo";
+  assert.equal(checkIsVoiceRequest("đọc bài này cho anh nghe", quotePoem), true);
+  assert.equal(checkIsVoiceRequest("đọc đi em", quotePoem), true);
+  assert.equal(checkIsVoiceRequest("thu âm đoạn này giúp mình", quotePoem), true);
+  assert.equal(checkIsVoiceRequest("cho mình nghe thử", quotePoem), true);
+
+  // Hỗ trợ xác nhận đề xuất gửi voice từ bot
+  const quoteBotVoiceProposal = "Sếp có muốn em gửi bản đọc diễn cảm bài thơ này không ạ? 🎙️";
+  assert.equal(checkIsVoiceRequest("ok triển đi em", quoteBotVoiceProposal), true);
+  assert.equal(checkIsVoiceRequest("làm đi em", quoteBotVoiceProposal), true);
 });
 
 test("extractSpeechFallbackText bóc tách trọn vẹn bài thơ và loại bỏ lời chào / thông báo kỹ thuật", () => {
