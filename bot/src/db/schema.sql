@@ -470,6 +470,7 @@ CREATE TABLE IF NOT EXISTS bot_groups (
   weather_auto   INTEGER NOT NULL DEFAULT 0,
   weather_time   TEXT NOT NULL DEFAULT '07:00',
   weather_city   TEXT NOT NULL DEFAULT 'Hồ Chí Minh',
+  caveman_mode   INTEGER NOT NULL DEFAULT 0,
   is_active      INTEGER NOT NULL DEFAULT 0,
   creator_id     TEXT,
   updated_at     INTEGER NOT NULL

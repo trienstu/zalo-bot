@@ -18,6 +18,7 @@ import {
   getMediaByMessageId,
   getRecentGroupMessages,
   stitchMultiChunkQuote,
+  setGroupCavemanMode,
 } from "./db/index.js";
 import { sendGroupText, sendGroupFile, sendGroupVoice, sendReaction, sendTyping, Reactions, sleep, cleanZaloText } from "./zalo/client.js";
 import { ocrImage } from "./jobs/ocr.js";
@@ -57,6 +58,10 @@ import { generateMusic } from "./tools/music-generator.js";
 import { runBatchAudioJob } from "./workers/batch-audio-processor.js";
 import { isPresentationVideoRequest, runPresentationVideoJob } from "./workers/presentation-video-processor.js";
 import { isMotionVideoRequest, runMotionVideoJob } from "./workers/motion-video-processor.js";
+import {
+  compressCaveman,
+  CAVEMAN_USER_FACING_DIRECTIVE,
+} from "./tools/caveman-compressor.js";
 
 async function deliverGeneratedToolFile(
   api: any,
@@ -1113,6 +1118,7 @@ function handleHelpCommand(botName = defaultBotName): string {
     `🔹 /taungam: Xem thống kê các thành viên nằm vùng / chưa từng gửi tin nhắn\n` +
     `🔹 /link [từ khóa]: Tổng hợp tất cả link/tài liệu/video đã chia sẻ trong nhóm\n` +
     `🔹 /hoi [câu hỏi] hoặc tag @${botName}: Hỏi đáp kiến thức tra cứu từ lịch sử chat của nhóm\n` +
+    `🔹 /caveman [on|off]: Bật/tắt chế độ trả lời siêu ngắn gọn, trực diện (tiết kiệm token & phản hồi cực nhanh)\n` +
     `🔹 /help: Hiển thị hướng dẫn này\n\n` +
     `🚫 QUẢN TRỊ VIÊN — ĐIỀU HÀNH NHÓM:\n` +
     `🔹 /chanbot: Quote tin nhắn người cần chặn rồi gõ /chanbot (hoặc /chanbot [Tên/ID])\n` +
@@ -2652,17 +2658,13 @@ QUY TẮC BẮT BUỘC:
 
   contextLines.push("=== TIN NHẮN THẢO LUẬN CỦA CÁC THÀNH VIÊN ===");
   if (relevantMessages && relevantMessages.length > 0) {
-    for (const m of relevantMessages.slice(0, 80)) {
-      const rawTs = Number(m.ts) || Date.now();
-      let dateStr = "";
-      try {
-        dateStr = new Date(rawTs + 7 * 3600 * 1000).toISOString().slice(0, 16).replace("T", " ");
-      } catch {
-        dateStr = "";
-      }
+    for (const m of relevantMessages.slice(0, 60)) {
       const isBot = m.is_self === 1 || /(?:sen chúa|sen chua|mộc miên|kevin|bot)/i.test(m.display_name || "");
-      const senderLabel = isBot ? `${botName} (Trợ lý AI)` : (m.display_name || "Thành viên");
-      contextLines.push(`${dateStr} | ${senderLabel}: ${m.text}`);
+      const senderLabel = isBot ? "Bot" : (m.display_name || "Thành viên");
+      const cleanLine = (m.text || "").replace(/\s+/g, " ").trim();
+      if (cleanLine) {
+        contextLines.push(`- [${senderLabel}]: ${cleanLine.slice(0, 250)}`);
+      }
     }
   }
 
@@ -2981,6 +2983,11 @@ QUY TẮC BẮT BUỘC:
     searchInstruction +
     directAnswerInstruction;
 
+  const isCavemanGroup = Boolean(groupSettings.cavemanMode);
+  const effectiveSystemPrompt = isCavemanGroup
+    ? `${systemPrompt}\n\n${CAVEMAN_USER_FACING_DIRECTIVE}`
+    : systemPrompt;
+
   const imageRefSection = (options?.imageUrl || targetUrl)
     ? `\n[ẢNH THAM CHIẾU / ĐÍNH KÈM HIỆN TẠI]: "${options?.imageUrl || targetUrl}". Khi người dùng yêu cầu chỉnh sửa, thay đổi chi tiết hoặc biến thể từ ảnh này, hãy gọi 'generate_image' với imageUrl="${options?.imageUrl || targetUrl}" và isEdit=true.\n`
     : "";
@@ -3003,7 +3010,7 @@ QUY TẮC BẮT BUỘC:
     if (needsAgentLoop) {
       // 🚀 Chỉ khi người dùng thực sự yêu cầu gọi tool xuất file, voice hoặc đọc link cụ thể mới chạy Agent Loop
       const dynamicTimeout = (fileTextContent?.length || 0) > 10_000 ? 150_000 : undefined;
-      answer = await callGeminiAgentLoop(systemPrompt, userPrompt, {
+      answer = await callGeminiAgentLoop(effectiveSystemPrompt, userPrompt, {
         model: Boolean(mediaPart) ? (config.geminiModel || "gemini-3.7-flash") : (config.geminiModel || "gemini-3.7-flash"),
         maxTurns: 3,
         timeoutMs: dynamicTimeout,
@@ -3125,13 +3132,13 @@ QUY TẮC BẮT BUỘC:
       const tAiStart = Date.now();
       answer = await answerWithHybridRouting(config.hybridAgent, {
         mode: responseMode,
-        systemPrompt,
+        systemPrompt: effectiveSystemPrompt,
         userPrompt: effectiveUserPrompt,
         sessionKey: `${config.botId}:group:${threadId}:user:${options?.sender || displayName}`,
         isOwner: isSuperAdmin,
         explicitToolRequest: isFileOrVoiceReq,
         hasMedia: Boolean(mediaPart),
-        fallback: async () => await callGemini(systemPrompt, effectiveUserPrompt, {
+        fallback: async () => await callGemini(effectiveSystemPrompt, effectiveUserPrompt, {
           model: chosenModel,
           mediaParts: mediaPart ? [mediaPart] : undefined,
           enableSearch: needsSearch,
@@ -3220,6 +3227,10 @@ QUY TẮC BẮT BUỘC:
         senderName: displayName,
         createdAt: Date.now(),
       });
+    }
+
+    if (isCavemanGroup && answer) {
+      answer = compressCaveman(answer);
     }
 
     return answer;
@@ -3600,6 +3611,37 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       console.log(`[member-assistant] 🧠 Đã phản hồi lệnh trí nhớ (${memoryAction}) cho ${displayName}`);
       return;
     }
+  }
+
+  // 1c. Lệnh /caveman (Bật/tắt chế độ trả lời siêu ngắn gọn để tiết kiệm token)
+  if (lower.startsWith("/caveman") || lower.startsWith("!caveman")) {
+    userCooldowns.set(sender, now);
+    void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.OK);
+    const subCmd = lower.replace(/^[!/]caveman\s*/, "").trim();
+    if (subCmd === "on" || subCmd === "bat" || subCmd === "1") {
+      setGroupCavemanMode(threadId, true);
+      await sendGroupText(
+        api,
+        threadId,
+        `🦴 [Caveman Mode: BẬT]\nTừ giờ ${botName} sẽ phản hồi nhóm siêu cô đọng, gạch đầu dòng trực diện và cắt bỏ mọi câu chào hỏi rườm rà để tiết kiệm token & tối đa tốc độ!`,
+      );
+    } else if (subCmd === "off" || subCmd === "tat" || subCmd === "0") {
+      setGroupCavemanMode(threadId, false);
+      await sendGroupText(
+        api,
+        threadId,
+        `✨ [Caveman Mode: TẮT]\n${botName} đã trở lại phong cách thân thiện, chu đáo và lịch thiệp như thường lệ!`,
+      );
+    } else {
+      const current = getGroupSettings(threadId);
+      const statusText = current.cavemanMode ? "ĐANG BẬT 🟢 (Siêu ngắn gọn)" : "ĐANG TẮT ⚪ (Thân thiện, đầy đủ)";
+      await sendGroupText(
+        api,
+        threadId,
+        `🦴 Hướng dẫn lệnh Caveman:\n- Trạng thái nhóm hiện tại: ${statusText}\n- Bật: \`/caveman on\`\n- Tắt: \`/caveman off\``,
+      );
+    }
+    return;
   }
 
   // 2. Lệnh /rank, /diem, /myrank

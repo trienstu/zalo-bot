@@ -34,6 +34,7 @@ import {
 } from "./tools/voice-generator.js";
 import { runPythonCode } from "./tools/python-runner.js";
 import { generateMusic } from "./tools/music-generator.js";
+import { CAVEMAN_INTERNAL_DIRECTIVE } from "./tools/caveman-compressor.js";
 import {
   getCryptoTicker,
   getFearAndGreedIndex,
@@ -1880,9 +1881,10 @@ async function call9RouterAgentLoop(
   }
 
   const messages: Array<{ role: string; content?: any; tool_calls?: any[]; tool_call_id?: string; name?: string }> = [];
-  if (effectiveSystem) {
-    messages.push({ role: "system", content: effectiveSystem });
-  }
+  const systemWithCaveman = effectiveSystem
+    ? `${effectiveSystem}\n\n${CAVEMAN_INTERNAL_DIRECTIVE}`
+    : CAVEMAN_INTERNAL_DIRECTIVE;
+  messages.push({ role: "system", content: systemWithCaveman });
   messages.push({
     role: "user",
     content: allMedia.length > 0 ? userContent : user,
@@ -2108,7 +2110,9 @@ export async function callGeminiAgentLoop(
         const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKey}`;
 
         const requestBody: Record<string, unknown> = {
-          system_instruction: effectiveSystem ? { parts: [{ text: effectiveSystem }] } : undefined,
+          system_instruction: {
+            parts: [{ text: effectiveSystem ? `${effectiveSystem}\n\n${CAVEMAN_INTERNAL_DIRECTIVE}` : CAVEMAN_INTERNAL_DIRECTIVE }],
+          },
           contents,
           tools: [AGENT_TOOLS_DECLARATION],
           generationConfig: {

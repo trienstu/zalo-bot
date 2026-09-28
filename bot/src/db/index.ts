@@ -89,6 +89,8 @@ function runColumnMigrations(database: Database.Database): void {
     ["bot_groups", "news_auto", "INTEGER NOT NULL DEFAULT 0"],
     ["bot_groups", "news_time", "TEXT NOT NULL DEFAULT '08:30'"],
     ["bot_groups", "news_topic", "TEXT NOT NULL DEFAULT 'AI & Công nghệ trên X'"],
+    // Chế độ trả lời siêu ngắn gọn Caveman theo nhóm
+    ["bot_groups", "caveman_mode", "INTEGER NOT NULL DEFAULT 0"],
     // Dữ liệu động liên kết Google Sheets / Google Docs cho Kho tri thức vĩnh viễn
     ["permanent_knowledge", "source_url", "TEXT NOT NULL DEFAULT ''"],
     ["permanent_knowledge", "source_type", "TEXT NOT NULL DEFAULT 'static'"],
@@ -1980,6 +1982,7 @@ export interface GroupSettings {
   newsTime: string;
   newsTopic: string;
   isActive: boolean;
+  cavemanMode?: boolean;
   updatedAt: number;
 }
 
@@ -1999,6 +2002,7 @@ export function getGroupSettings(groupId: string): GroupSettings {
                 COALESCE(news_auto, 0) as newsAuto,
                 COALESCE(news_time, '08:30') as newsTime,
                 COALESCE(news_topic, 'AI & Công nghệ trên X') as newsTopic,
+                COALESCE(caveman_mode, 0) as cavemanMode,
                 is_active as isActive, updated_at as updatedAt
          FROM bot_groups WHERE group_id = ?`,
       )
@@ -2020,6 +2024,7 @@ export function getGroupSettings(groupId: string): GroupSettings {
         newsAuto: Boolean(row.newsAuto),
         newsTime: row.newsTime || "08:30",
         newsTopic: row.newsTopic || "AI & Công nghệ trên X",
+        cavemanMode: Boolean(row.cavemanMode),
         isActive: Boolean(row.isActive),
         updatedAt: row.updatedAt || Date.now(),
       };
@@ -2041,6 +2046,7 @@ export function getGroupSettings(groupId: string): GroupSettings {
     newsAuto: false,
     newsTime: "08:30",
     newsTopic: "AI & Công nghệ trên X",
+    cavemanMode: false,
     isActive: true,
     updatedAt: Date.now(),
   };
@@ -2103,6 +2109,21 @@ export function updateGroupSettings(
       now: Date.now(),
     });
 }
+
+/** Bật/tắt chế độ Caveman siêu ngắn gọn cho nhóm */
+export function setGroupCavemanMode(groupId: string, enabled: boolean): void {
+  try {
+    const db = getDb();
+    db.prepare(`UPDATE bot_groups SET caveman_mode = ?, updated_at = ? WHERE group_id = ?`).run(
+      enabled ? 1 : 0,
+      Date.now(),
+      groupId,
+    );
+  } catch (err) {
+    console.warn("[db] setGroupCavemanMode error:", err);
+  }
+}
+
 
 /** Lấy chế độ hoạt động của nhóm: 'interactive' | 'silent' | 'disabled' */
 export function getGroupMode(groupId: string): "interactive" | "silent" | "disabled" {
