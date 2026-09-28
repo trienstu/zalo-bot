@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { getGroupHubToken, verifyGroupHubToken } from "@/lib/hub-token";
+import { isAuthenticatedAdmin } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -76,12 +77,8 @@ export async function GET(request: Request) {
 
     // Kiểm tra bảo mật:
     // - Nếu có token: Cho phép thành viên vào nhóm riêng được ủy quyền
-    // - Nếu không có token: Bắt buộc phải là Admin (đã đăng nhập qua cookie hoặc x-admin-auth header) hoặc đang truy cập từ Localhost máy chủ
-    const cookieHeader = request.headers.get("cookie") || "";
-    const xAdminAuth = request.headers.get("x-admin-auth") || "";
-    const isAdminAuthenticated =
-      cookieHeader.includes("admin_auth_session=authenticated_admin") ||
-      xAdminAuth === "authenticated_admin";
+    // - Nếu không có token: Bắt buộc phải là Admin (phiên HMAC hợp lệ) hoặc đang truy cập từ Localhost máy chủ
+    const isAdminAuthenticated = await isAuthenticatedAdmin(request);
     const host = request.headers.get("host") || "";
     const isDevLocalhost =
       process.env.NODE_ENV === "development" &&

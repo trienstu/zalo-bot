@@ -74,18 +74,8 @@ function ForbiddenAccessScreen() {
         <div className="space-y-2">
           <h2 className="text-2xl font-bold text-white tracking-tight">403 — Không Có Quyền Truy Cập</h2>
           <p className="text-xs text-slate-400 leading-relaxed">
-            Trang này chỉ dành riêng cho Quản trị viên hệ thống. Vui lòng quay lại Kho Kiến Thức để xem các tài liệu và chia sẻ từ cộng đồng.
+            Khu vực này được bảo vệ nghiêm ngặt và chỉ dành cho Quản trị viên hệ thống.
           </p>
-        </div>
-
-        <div className="pt-2">
-          <Link
-            href="/hub"
-            className="flex items-center justify-center gap-2 w-full rounded-xl bg-cyan-500 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-cyan-500/20 transition-all hover:bg-cyan-400"
-          >
-            <span>Vào Kho Kiến Thức Cộng Đồng</span>
-            <ArrowRight className="h-4 w-4" />
-          </Link>
         </div>
       </div>
     </div>
@@ -213,23 +203,15 @@ function AppShellInner({
 
     async function checkAuth() {
       try {
-        const hasLocalAuth = typeof window !== "undefined" && localStorage.getItem("admin_auth") === "true";
-        if (hasLocalAuth && typeof document !== "undefined" && !document.cookie.includes("admin_auth_session=authenticated_admin")) {
-          document.cookie = "admin_auth_session=authenticated_admin; path=/; max-age=2592000; SameSite=Lax";
-        }
-        const headers: Record<string, string> = {};
-        if (hasLocalAuth) {
-          headers["x-admin-auth"] = "authenticated_admin";
-        }
-        const res = await fetch("/api/auth", { headers });
+        const res = await fetch("/api/auth");
         if (res.ok) {
           const data = await res.json();
-          setIsAdminAuthenticated(data.authenticated === true || hasLocalAuth);
+          setIsAdminAuthenticated(data.authenticated === true);
         } else {
-          setIsAdminAuthenticated(hasLocalAuth);
+          setIsAdminAuthenticated(false);
         }
       } catch {
-        setIsAdminAuthenticated(typeof window !== "undefined" && localStorage.getItem("admin_auth") === "true");
+        setIsAdminAuthenticated(false);
       }
     }
     checkAuth();
@@ -240,11 +222,8 @@ function AppShellInner({
     try {
       await fetch("/api/auth", { method: "DELETE" });
     } catch {}
-    localStorage.removeItem("admin_auth");
-    if (typeof document !== "undefined") {
-      document.cookie = "admin_auth_session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax";
-    }
     setIsAdminAuthenticated(false);
+    router.push("/admin");
   }
 
   const activeGroupId = searchParams.get("group") || (groups.length > 0 ? groups[0].id : "");

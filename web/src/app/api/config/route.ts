@@ -3,13 +3,14 @@ import { writeConfig } from "@/lib/config";
 import { DbNotReadyError } from "@/lib/db";
 import { CONFIG_KEYS, type ConfigField } from "@/lib/config-meta";
 import { isOriginAllowed } from "@/lib/http";
+import { isAuthenticatedAdmin } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 /** POST { field, value } → ghi 1 config vào bot_state (đã validate). */
 export async function POST(request: Request) {
-  if (!isOriginAllowed(request)) {
-    return NextResponse.json({ error: "Origin không hợp lệ" }, { status: 403 });
+  if (!isOriginAllowed(request) || !(await isAuthenticatedAdmin(request))) {
+    return NextResponse.json({ error: "Không được phép hoặc thiếu quyền Quản trị viên" }, { status: 401 });
   }
 
   let body: unknown;

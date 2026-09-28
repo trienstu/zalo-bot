@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { DbNotReadyError } from "@/lib/db";
 import { readModerationConfig, writeModerationConfig } from "@/lib/blacklist";
 import { isOriginAllowed } from "@/lib/http";
+import { isAuthenticatedAdmin } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -22,8 +23,8 @@ export async function GET() {
 
 /** POST { enabled?, action?, words? } → ghi config kiểm duyệt từ khoá. */
 export async function POST(request: Request) {
-  if (!isOriginAllowed(request)) {
-    return NextResponse.json({ error: "Origin không hợp lệ" }, { status: 403 });
+  if (!isOriginAllowed(request) || !(await isAuthenticatedAdmin(request))) {
+    return NextResponse.json({ error: "Không được phép hoặc thiếu quyền Quản trị viên" }, { status: 401 });
   }
 
   let body: unknown;

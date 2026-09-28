@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import { DbNotReadyError, getBotHealth, getState, isBotHealthFresh } from "@/lib/db";
 import { kickNowRequestPath } from "@/lib/login-status";
 import { isOriginAllowed } from "@/lib/http";
+import { isAuthenticatedAdmin } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,10 @@ function handleDbError(e: unknown): NextResponse | never {
 
 /** GET ?requestId=... → poll kết quả kick nhanh (bot xử lý bất đồng bộ qua listener). */
 export async function GET(request: Request) {
+  if (!(await isAuthenticatedAdmin(request))) {
+    return NextResponse.json({ error: "Yêu cầu quyền Quản trị viên" }, { status: 401 });
+  }
+
   try {
     const requestId = new URL(request.url).searchParams.get("requestId");
     if (!requestId) {
@@ -51,8 +56,8 @@ export async function GET(request: Request) {
 
 /** POST { zaloUserId, displayName, block } → ghi yêu cầu kick 1 người NGAY, không qua duyệt Telegram. */
 export async function POST(request: Request) {
-  if (!isOriginAllowed(request)) {
-    return NextResponse.json({ error: "Origin không hợp lệ" }, { status: 403 });
+  if (!isOriginAllowed(request) || !(await isAuthenticatedAdmin(request))) {
+    return NextResponse.json({ error: "Không được phép hoặc thiếu quyền Quản trị viên" }, { status: 401 });
   }
 
   let body: unknown;

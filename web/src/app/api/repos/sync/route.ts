@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { callGeminiDirect } from "@/lib/gemini-summary";
+import { isAuthenticatedAdmin } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -400,11 +401,7 @@ Mô tả gốc: "${meta.description || "No description"}"`;
 export async function POST(request: Request) {
   try {
     // Kiểm tra quyền Admin trước khi cho phép quét / đồng bộ
-    const cookieHeader = request.headers.get("cookie") || "";
-    const xAdminAuth = request.headers.get("x-admin-auth") || "";
-    const isAdminAuthenticated =
-      cookieHeader.includes("admin_auth_session=authenticated_admin") ||
-      xAdminAuth === "authenticated_admin";
+    const isAdminAuthenticated = await isAuthenticatedAdmin(request);
     const host = request.headers.get("host") || "";
     const isDevLocalhost =
       process.env.NODE_ENV === "development" &&

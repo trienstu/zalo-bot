@@ -177,19 +177,8 @@ export function ReposClient() {
       params.set("page", String(page));
       params.set("limit", "24");
 
-      // Đồng bộ cookie phiên admin nếu trình duyệt đã lưu admin_auth
-      const hasLocalAdmin = typeof window !== "undefined" && localStorage.getItem("admin_auth") === "true";
-      if (hasLocalAdmin && typeof document !== "undefined" && !document.cookie.includes("admin_auth_session=authenticated_admin")) {
-        document.cookie = "admin_auth_session=authenticated_admin; path=/; max-age=2592000; SameSite=Lax";
-      }
-      const fetchHeaders: Record<string, string> = {};
-      if (hasLocalAdmin) {
-        fetchHeaders["x-admin-auth"] = "authenticated_admin";
-      }
-
       const res = await fetch(`/api/repos?${params.toString()}`, {
         credentials: "include",
-        headers: fetchHeaders,
       });
 
       if (res.status === 401) {
@@ -209,7 +198,7 @@ export function ReposClient() {
       if (res.ok) {
         setUnauthorizedError(null);
         const data = await res.json();
-        setIsAdmin(!!data.isAdmin || hasLocalAdmin);
+        setIsAdmin(!!data.isAdmin);
         setRepos(data.repos || []);
         setCategories(data.categories || []);
         setGroups(data.groups || []);
@@ -257,16 +246,10 @@ export function ReposClient() {
     setSyncing(true);
     setSyncMessage(null);
     try {
-      const hasLocalAdmin = typeof window !== "undefined" && localStorage.getItem("admin_auth") === "true";
-      const syncHeaders: Record<string, string> = {};
-      if (hasLocalAdmin) {
-        syncHeaders["x-admin-auth"] = "authenticated_admin";
-      }
       const qs = selectedGroupId && selectedGroupId !== "all" ? `?groupId=${selectedGroupId}` : "";
       const res = await fetch(`/api/repos/sync${qs}`, {
         method: "POST",
         credentials: "include",
-        headers: syncHeaders,
       });
       const data = await res.json();
       if (res.ok) {
@@ -319,16 +302,6 @@ export function ReposClient() {
             <p className="text-xs text-slate-400 leading-relaxed bg-slate-950/80 p-3 rounded-xl border border-slate-800">
               💡 <strong>Dành cho thành viên:</strong> Vui lòng sử dụng đường link chia sẻ bảo mật do Trưởng nhóm Zalo cung cấp để vào thẳng kho repo của nhóm mình.
             </p>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
-            <Link
-              href="/admin"
-              className="flex items-center justify-center gap-2 w-full sm:w-auto rounded-xl bg-indigo-500 px-6 py-3 text-sm font-bold text-slate-950 shadow-lg shadow-indigo-500/20 transition-all hover:bg-indigo-400"
-            >
-              <span>Đăng Nhập Quản Trị Viên</span>
-              <ArrowRight className="h-4 w-4" />
-            </Link>
           </div>
         </div>
       </div>

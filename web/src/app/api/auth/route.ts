@@ -1,24 +1,28 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import {
+  ADMIN_COOKIE_NAME,
+  createAdminSessionToken,
+  isAuthenticatedAdmin,
+  verifyAdminPassword,
+} from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
-
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Admin@!#321";
-const COOKIE_NAME = "admin_auth_session";
 
 export async function POST(request: Request) {
   try {
     const body = (await request.json().catch(() => ({}))) as { password?: string };
-    const password = body.password || "";
+    const password = (body.password || "").trim();
 
-    if (password === ADMIN_PASSWORD) {
+    if (verifyAdminPassword(password)) {
       const proto = request.headers.get("x-forwarded-proto") || "";
       const isHttps = proto === "https" || request.url.startsWith("https:");
 
+      const token = createAdminSessionToken();
       const cookieStore = await cookies();
-      cookieStore.set(COOKIE_NAME, "authenticated_admin", {
+      cookieStore.set(ADMIN_COOKIE_NAME, token, {
         path: "/",
-        httpOnly: false, // Cho phép client đọc trạng thái
+        httpOnly: true, // Bảo vệ chống XSS/Script trích xuất
         secure: isHttps,
         maxAge: 60 * 60 * 24 * 30, // 30 ngày
         sameSite: "lax",
@@ -28,22 +32,18 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ ok: false, error: "Mật khẩu Admin không chính xác" }, { status: 401 });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ ok: false, error: "Lỗi xử lý xác thực" }, { status: 500 });
   }
 }
 
 export async function GET(request: Request) {
-  const cookieStore = await cookies();
-  const session = cookieStore.get(COOKIE_NAME);
-  const authHeader = request.headers.get("x-admin-auth");
-  const isAuthenticated = session?.value === "authenticated_admin" || authHeader === "authenticated_admin";
-
-  return NextResponse.json({ authenticated: isAuthenticated });
+  const authenticated = await isAuthenticatedAdmin(request);
+  return NextResponse.json({ authenticated });
 }
 
 export async function DELETE() {
   const cookieStore = await cookies();
-  cookieStore.delete(COOKIE_NAME);
+  cookieStore.delete(ADMIN_COOKIE_NAME);
   return NextResponse.json({ ok: true, message: "Đã đăng xuất Admin" });
 }

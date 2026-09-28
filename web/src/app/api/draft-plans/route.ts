@@ -4,6 +4,7 @@ import { readConfig } from "@/lib/config";
 import { CONFIG_DEFAULTS } from "@/lib/config-meta";
 import { readVip } from "@/lib/vip";
 import { isOriginAllowed } from "@/lib/http";
+import { isAuthenticatedAdmin } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +14,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  if (!isOriginAllowed(request)) {
-    return NextResponse.json({ error: "Origin không hợp lệ" }, { status: 403 });
+  if (!isOriginAllowed(request) || !(await isAuthenticatedAdmin(request))) {
+    return NextResponse.json({ error: "Không được phép hoặc thiếu quyền Quản trị viên" }, { status: 401 });
   }
 
   if (!dbExists()) return NextResponse.json({ error: "Bot chưa tạo DB." }, { status: 503 });

@@ -5,6 +5,7 @@ import os from "node:os";
 import Database from "better-sqlite3";
 import { getBotInfo } from "@/lib/bot-registry";
 import { resolveBotIdFromRequest, resolveRequestBotIdSync } from "@/lib/bot-id";
+import { isAuthenticatedAdmin } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -258,6 +259,10 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  if (!(await isAuthenticatedAdmin(request))) {
+    return NextResponse.json({ error: "Yêu cầu quyền Quản trị viên" }, { status: 401 });
+  }
+
   try {
     const body = (await request.json().catch(() => ({}))) as {
       botId?: string;
