@@ -18,6 +18,7 @@ import {
   generateCsvFile,
   generateHtmlFile,
   parseMarkdownToSlides,
+  parseMarkdownToWordBlocks,
   type GeneratedFileResult,
   type ThemeName,
 } from "./tools/file-generator.js";
@@ -1641,19 +1642,8 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
           return result;
         }
       } else if (fileType === "docx") {
-        const headingPattern = /^(?:#{1,4}\s*|[A-Z0-9IVX]+[\.:\)]\s*|(?:KỊCH BẢN|PHẦN|CHƯƠNG|MỤC|BÀI|ĐIỀU|KHOẢN|GIAI ĐOẠN|THÁNG)\s+[0-9IVX]+[:\.\s])/iu;
-        const rawSections = content.split(/\n(?=#{1,4}\s|[A-Z0-9IVX]+[\.:\)]\s|(?:KỊCH BẢN|PHẦN|CHƯƠNG|MỤC|BÀI|ĐIỀU|KHOẢN|GIAI ĐOẠN|THÁNG)\s+[0-9IVX]+[:\.\s])/giu);
-        const sections = rawSections.map((sec) => {
-          const lines = sec.trim().split("\n");
-          let heading = "";
-          let paras = lines;
-          if (lines[0] && headingPattern.test(lines[0])) {
-            heading = lines[0].replace(/^#+\s*/, "").trim();
-            paras = lines.slice(1);
-          }
-          return { heading, paragraphs: paras.filter(Boolean) };
-        });
-        const result = await generateWordDoc(fileName, title, sections);
+        const blocks = parseMarkdownToWordBlocks(content, title);
+        const result = await generateWordDoc(fileName, title, blocks);
         return result;
       } else if (fileType === "csv") {
         const headers = Array.isArray(args?.excelHeaders) ? args.excelHeaders.map(String) : ["STT", "Nội dung", "Ghi chú"];

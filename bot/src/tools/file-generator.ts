@@ -1362,6 +1362,174 @@ export function parseMarkdownRuns(text: string, baseFont = "Times New Roman", ba
   return runs.length > 0 ? runs : [new TextRun({ text, font: baseFont, size: baseSize })];
 }
 
+/**
+ * Chuyển đổi văn bản Markdown tự do thành mảng WordBlock chuẩn để sinh file Word (.docx) chuyên nghiệp:
+ * - Tự động nhận diện Bảng Markdown (| Cột 1 | Cột 2 |) thành WordBlock kiểu 'table'
+ * - Tiêu đề cấp 1 (#), cấp 2 (##), cấp 3 (###) thành WordBlock kiểu 'heading'
+ * - Danh sách gạch đầu dòng (- / * / •) thành WordBlock kiểu 'bullets'
+ * - Văn bản thông thường thành WordBlock kiểu 'paragraph'
+ */
+export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string): WordBlock[] {
+  if (!content || !content.trim()) {
+    return [
+      { type: "heading", level: 1, text: defaultTitle || "Tài liệu", align: "center" },
+      { type: "paragraph", text: "Chưa có nội dung chi tiết." },
+    ];
+  }
+
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  const blocks: WordBlock[] = [];
+
+  // Nếu có defaultTitle mà trong dòng đầu của content chưa có heading 1
+  if (defaultTitle && defaultTitle.trim()) {
+    const trimmedFirstLine = lines.find((l) => l.trim().length > 0) || "";
+    if (!trimmedFirstLine.startsWith("# ")) {
+      blocks.push({
+        type: "heading",
+        level: 1,
+        text: defaultTitle.trim(),
+        align: "center",
+      });
+    }
+  }
+
+  let i = 0;
+  while (i < lines.length) {
+    const rawLine = lines[i]!;
+    const line = rawLine.trim();
+
+    // 1. Dòng trống
+    if (!line) {
+      i++;
+      continue;
+    }
+
+    // 2. Kiểm tra Bảng Markdown (bắt đầu bằng '|' hoặc chứa ít nhất 2 dấu '|')
+    const isTableRow = (line.startsWith("|") && line.endsWith("|")) || (line.match(/\|/g) || []).length >= 2;
+    if (isTableRow) {
+      const tableLines: string[] = [];
+      while (
+        i < lines.length &&
+        lines[i]!.trim() &&
+        ((lines[i]!.trim().startsWith("|") && lines[i]!.trim().endsWith("|")) || (lines[i]!.trim().match(/\|/g) || []).length >= 2)
+      ) {
+        tableLines.push(lines[i]!.trim());
+        i++;
+      }
+
+      if (tableLines.length >= 2) {
+        const parseRowCells = (rowStr: string): string[] => {
+          let parts = rowStr.split("|").map((c) => c.trim());
+          if (rowStr.startsWith("|") && parts.length > 0) {
+            parts.shift();
+          }
+          if (rowStr.endsWith("|") && parts.length > 0) {
+            parts.pop();
+          }
+          return parts;
+        };
+
+        const headers = parseRowCells(tableLines[0]!);
+        const isSeparatorRow = /^\|?(?:\s*:?-+:?\s*\|?)+$/.test(tableLines[1]!) || tableLines[1]!.includes("---");
+        const startIndex = isSeparatorRow ? 2 : 1;
+
+        const dataRows: string[][] = [];
+        for (let r = startIndex; r < tableLines.length; r++) {
+          const cells = parseRowCells(tableLines[r]!);
+          while (cells.length < headers.length) {
+            cells.push("");
+          }
+          dataRows.push(cells);
+        }
+
+        blocks.push({
+          type: "table",
+          tableHeaders: headers,
+          tableRows: dataRows,
+        });
+        continue;
+      } else {
+        blocks.push({ type: "paragraph", text: tableLines[0]! });
+        continue;
+      }
+    }
+
+    // 3. Tiêu đề Markdown (#, ##, ###)
+    if (/^#{1,3}\s+/.test(line)) {
+      const level = line.startsWith("### ") ? 3 : line.startsWith("## ") ? 2 : 1;
+      const text = line.replace(/^#{1,3}\s+/, "").trim();
+      blocks.push({
+        type: "heading",
+        level,
+        text,
+        align: level === 1 && blocks.length <= 1 ? "center" : "left",
+      });
+      i++;
+      continue;
+    }
+
+    // 4. Danh sách gạch đầu dòng (- / * / •) hoặc số (1. / 2.)
+    if (/^(?:[-*•]\s+|\d+[\.)]\s+)/.test(line)) {
+      const bullets: string[] = [];
+      while (i < lines.length && /^(?:[-*•]\s+|\d+[\.)]\s+)/.test(lines[i]!.trim())) {
+        bullets.push(lines[i]!.trim());
+        i++;
+      }
+      blocks.push({
+        type: "bullets",
+        paragraphs: bullets,
+      });
+      continue;
+    }
+
+    // 5. Phân cách trang (=== TRANG X ===) hoặc đường kẻ ngang (---)
+    if (/^===+\s*TRANG\s*\d+\s*===+/i.test(line)) {
+      blocks.push({
+        type: "heading",
+        level: 2,
+        text: line.replace(/^[= -]+|[= -]+$/g, "").trim(),
+        align: "left",
+      });
+      i++;
+      continue;
+    }
+
+    if (/^---+$/.test(line) || /^===+$/.test(line)) {
+      i++;
+      continue;
+    }
+
+    // 6. Đoạn văn bản thông thường (Paragraph)
+    const paraLines: string[] = [line];
+    i++;
+    while (i < lines.length) {
+      const nextLine = lines[i]!.trim();
+      if (!nextLine) break;
+      const isNextTable = (nextLine.startsWith("|") && nextLine.endsWith("|")) || ((nextLine.match(/\|/g) || []).length >= 2);
+      if (
+        isNextTable ||
+        /^#{1,3}\s+/.test(nextLine) ||
+        /^(?:[-*•]\s+|\d+[\.)]\s+)/.test(nextLine) ||
+        /^===+\s*TRANG\s*\d+\s*===+/i.test(nextLine) ||
+        /^---+$/.test(nextLine)
+      ) {
+        break;
+      }
+      paraLines.push(nextLine);
+      i++;
+    }
+
+    const fullParaText = paraLines.join(" ");
+    blocks.push({
+      type: "paragraph",
+      text: fullParaText,
+      align: "justify",
+    });
+  }
+
+  return blocks;
+}
+
 export async function generateWordDoc(
   fileName: string,
   title: string,
@@ -1535,15 +1703,18 @@ export async function generateWordDoc(
         } else if (block.type === "table" && block.tableHeaders && block.tableRows) {
           const thinBorder = { style: BorderStyle.SINGLE, size: 1, color: "888888" };
           const cellBorders = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder };
+          const colCount = Math.max(block.tableHeaders.length, ...block.tableRows.map((r) => r.length), 1);
+          const colWidthPct = Math.floor(100 / colCount);
 
           const headerRow = new TableRow({
             tableHeader: true,
             children: block.tableHeaders.map(
               (h) =>
                 new TableCell({
+                  width: { size: colWidthPct, type: WidthType.PERCENTAGE },
                   children: [
                     new Paragraph({
-                      children: [new TextRun({ text: h, bold: true, font: "Times New Roman", size: 24 })],
+                      children: [new TextRun({ text: h.replace(/\*\*/g, ""), bold: true, font: "Times New Roman", size: 22 })],
                       alignment: AlignmentType.CENTER,
                     }),
                   ],
@@ -1559,9 +1730,10 @@ export async function generateWordDoc(
                 children: row.map(
                   (c) =>
                     new TableCell({
+                      width: { size: colWidthPct, type: WidthType.PERCENTAGE },
                       children: [
                         new Paragraph({
-                          children: [new TextRun({ text: String(c ?? ""), font: "Times New Roman", size: 24 })],
+                          children: parseMarkdownRuns(String(c ?? "").trim(), "Times New Roman", 22),
                         }),
                       ],
                       borders: cellBorders,

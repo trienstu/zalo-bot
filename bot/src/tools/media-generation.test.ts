@@ -12,6 +12,7 @@ import {
   checkIsVoiceRequest,
   isQuickMarkdownExportRequest,
   parseMarkdownToSlides,
+  parseMarkdownToWordBlocks,
   parseMarkdownRuns,
   sanitizeSafeFileName,
   sanitizeSlideList,
@@ -229,6 +230,42 @@ test("generateWordDoc tạo file .docx hỗ trợ thể thức hai cột Nghị 
   try {
     fs.unlinkSync(res.filePath);
   } catch { }
+});
+
+test("parseMarkdownToWordBlocks bóc tách bảng Markdown và tạo file Word có bảng lưới thành công", async () => {
+  const markdown = `
+# BẢNG GHI ĐIỂM THI TỐT NGHIỆP THPT
+
+Dưới đây là kết quả điểm thi chính thức:
+
+| TT | Số báo danh | Họ và tên thí sinh | Ngày sinh | Điểm Văn | Điểm Toán | Kết quả |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: |
+| 1 | 010001 | Nguyễn Văn An | 15/05/2006 | 8.5 | 9.0 | **ĐỖ** |
+| 2 | 010002 | Trần Thị Bình | 20/08/2006 | 7.0 | 8.5 | **ĐỖ** |
+| 3 | 010003 | Lê Hoàng Cường | 03/11/2006 | 9.0 | 9.5 | **THỦ KHOA** |
+
+- Ghi chú 1: Điểm thi đã bao gồm điểm ưu tiên (nếu có).
+- Ghi chú 2: Thí sinh có 10 ngày để nộp đơn phúc khảo.
+`;
+
+  const blocks = parseMarkdownToWordBlocks(markdown, "Bảng Điểm");
+  assert.ok(blocks.length >= 4);
+
+  const tableBlock = blocks.find((b) => b.type === "table");
+  assert.ok(tableBlock, "Phải tìm thấy khối WordBlock kiểu table");
+  assert.equal(tableBlock?.tableHeaders?.length, 7);
+  assert.equal(tableBlock?.tableRows?.length, 3);
+  assert.equal(tableBlock?.tableRows?.[0]?.[2], "Nguyễn Văn An");
+  assert.equal(tableBlock?.tableRows?.[2]?.[6], "**THỦ KHOA**");
+
+  const docxRes = await generateWordDoc("test_bang_diem", "BẢNG ĐIỂM THI", blocks);
+  assert.equal(docxRes.success, true);
+  assert.ok(fs.existsSync(docxRes.filePath));
+  assert.ok(docxRes.fileSize > 2000);
+
+  try {
+    fs.unlinkSync(docxRes.filePath);
+  } catch {}
 });
 
 test("generateExcelFile tạo bảng tính đa sheet và công thức tự động", async () => {
