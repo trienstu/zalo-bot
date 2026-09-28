@@ -49,6 +49,7 @@ import { generateMusic } from "./tools/music-generator.js";
 import { transcribeAudioBuffer } from "./audio-transcoder.js";
 import { runBatchAudioJob } from "./workers/batch-audio-processor.js";
 import { isPresentationVideoRequest, runPresentationVideoJob } from "./workers/presentation-video-processor.js";
+import { isMotionVideoRequest, runMotionVideoJob } from "./workers/motion-video-processor.js";
 
 async function deliverGeneratedToolFileDirect(
   api: any,
@@ -1838,6 +1839,20 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       displayName,
     });
     queryPlan = plan;
+
+    if (plan.taskType === "motion_video" && isMotionVideoRequest(rawText, event.quote?.text)) {
+      console.log(`[admin-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Motion Video 1:1: "${rawText.slice(0, 80)}"`);
+      void runMotionVideoJob({
+        api,
+        sender,
+        isGroup: false,
+        userGreeting,
+        displayName,
+        userPrompt: rawText,
+        quoteText: event.quote?.text || fileTextContent || "",
+      }).catch((err) => console.error("[admin-assistant] Lỗi runMotionVideoJob từ Planner:", err));
+      return;
+    }
 
     if (plan.taskType === "presentation_video" && isPresentationVideoRequest(rawText, event.quote?.text)) {
       console.log(`[admin-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Video 1:1: "${rawText.slice(0, 80)}"`);

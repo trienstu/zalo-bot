@@ -16,8 +16,10 @@ import {
 import { getSystemTemporalPrompt } from "./temporal.js";
 import { checkIsFileOrVoiceGeneration } from "./tools/file-generator.js";
 import { isPresentationVideoRequest } from "./workers/presentation-video-processor.js";
+import { isMotionVideoRequest } from "./workers/motion-video-processor.js";
 
 export type PlannerTaskType =
+  | "motion_video"
   | "presentation_video"
   | "file_generation"
   | "voice_generation"
@@ -72,6 +74,15 @@ export function applyExecutionSignals(
     merged.taskType = "none";
     merged.toolIntent = "none";
     merged.responseMode = "fast";
+  } else if (merged.taskType === "motion_video") {
+    if (!isMotionVideoRequest(question, quoteText)) {
+      merged.taskType = "none";
+      merged.toolIntent = "none";
+      merged.responseMode = "fast";
+    } else {
+      merged.toolIntent = "create";
+      merged.responseMode = "action";
+    }
   } else if (merged.taskType === "presentation_video") {
     // Chống nhận nhầm: kiểm tra chặt chẽ bằng isPresentationVideoRequest
     const hasExplicitFileOrPresentationKeyword = /\b(?:file|tập\s*tin|tài\s*liệu|powerpoint|pptx|slide|thuyết\s*trình)\b/iu.test(question);
@@ -444,6 +455,20 @@ export async function planSearchQueries(params: {
       intent: "knowledge",
       queries: [],
       summaryIntent: "Người dùng đồng ý / giục thực thi tác vụ tạo nội dung đã chốt",
+      responseMode: "action",
+      toolIntent: "create",
+    }, question, quoteText);
+  }
+
+  // Nhận diện câu lệnh tạo video đồ họa chuyển động Remotion (TikTok, Shorts, So sánh, Tin tức)
+  const isMotion = isMotionVideoRequest(question, quoteText);
+  if (isMotion) {
+    return applyExecutionSignals({
+      needsSearch: false,
+      intent: "knowledge",
+      queries: [],
+      summaryIntent: "Người dùng yêu cầu dựng video đồ họa chuyển động Remotion",
+      taskType: "motion_video",
       responseMode: "action",
       toolIntent: "create",
     }, question, quoteText);

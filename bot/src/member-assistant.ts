@@ -56,6 +56,7 @@ import { cleanOutdatedVoicePromisesFromAnswer, cleanCoreSpeechText } from "./too
 import { generateMusic } from "./tools/music-generator.js";
 import { runBatchAudioJob } from "./workers/batch-audio-processor.js";
 import { isPresentationVideoRequest, runPresentationVideoJob } from "./workers/presentation-video-processor.js";
+import { isMotionVideoRequest, runMotionVideoJob } from "./workers/motion-video-processor.js";
 
 async function deliverGeneratedToolFile(
   api: any,
@@ -1861,6 +1862,21 @@ QUY TẮC BẮT BUỘC:
       });
       quotePlan = plan;
 
+      if (options?.api && plan.taskType === "motion_video" && isMotionVideoRequest(question, options?.quote?.text)) {
+        console.log(`[member-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Motion Video (Quote QA): "${question.slice(0, 80)}"`);
+        void runMotionVideoJob({
+          api: options.api,
+          sender: options.sender || "",
+          isGroup: true,
+          threadId,
+          userGreeting: isSuperAdmin ? "Sếp" : (displayName ? `bác ${displayName}` : "bác"),
+          displayName,
+          userPrompt: question,
+          quoteText: options.quote.text || fileTextContent || "",
+        }).catch((err) => console.error("[member-assistant] Lỗi runMotionVideoJob từ Quote Planner:", err));
+        return "";
+      }
+
       if (options?.api && plan.taskType === "presentation_video" && isPresentationVideoRequest(question, options?.quote?.text)) {
         console.log(`[member-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Video (Quote QA): "${question.slice(0, 80)}"`);
         void runPresentationVideoJob({
@@ -2697,6 +2713,21 @@ QUY TẮC BẮT BUỘC:
         displayName,
       });
       queryPlan = plan;
+
+      if (options?.api && plan.taskType === "motion_video" && isMotionVideoRequest(question, options?.quote?.text)) {
+        console.log(`[member-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Motion Video: "${question.slice(0, 80)}"`);
+        void runMotionVideoJob({
+          api: options.api,
+          sender: options.sender || "",
+          isGroup: true,
+          threadId,
+          userGreeting: isSuperAdmin ? "Sếp" : (displayName ? `bác ${displayName}` : "bác"),
+          displayName,
+          userPrompt: question,
+          quoteText: options?.quote?.text || fileTextContent || "",
+        }).catch((err) => console.error("[member-assistant] Lỗi runMotionVideoJob từ Planner:", err));
+        return "";
+      }
 
       if (options?.api && plan.taskType === "presentation_video" && isPresentationVideoRequest(question, options?.quote?.text)) {
         console.log(`[member-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Video: "${question.slice(0, 80)}"`);
