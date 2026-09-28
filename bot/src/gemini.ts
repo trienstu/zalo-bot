@@ -571,6 +571,15 @@ export async function call9Router(
   const router = hybridAgentSettings?.nineRouter;
   if (!router?.enabled || !router.apiKey) return null;
 
+  // Nếu có mediaPart là application/pdf, 9Router (OpenAI-compatible) sẽ lỗi HTTP 400 vì image_url không hỗ trợ PDF
+  const hasPdfMedia = options?.mediaParts?.some(
+    (m) => m.mimeType === "application/pdf" || m.mimeType?.includes("pdf")
+  );
+  if (hasPdfMedia) {
+    console.log("[gemini] 📄 Phát hiện file PDF trong mediaParts, bỏ qua 9Router để dùng Google Gemini native API...");
+    return null;
+  }
+
   const baseUrl = (router.baseUrl || "http://127.0.0.1:20128/v1").replace(/\/+$/, "");
   const targetModel = options?.model || router.chatModel || "ag/gemini-3.8-flash-medium";
   const timeoutMs = options?.timeoutMs || router.timeoutMs || 45_000;
@@ -674,10 +683,15 @@ export async function callGemini(
 
   const allMedia = [...(options?.images || []), ...(options?.mediaParts || [])];
   const hasMedia = allMedia.length > 0;
+  const hasPdfMedia = options?.mediaParts?.some(
+    (m) => m.mimeType === "application/pdf" || m.mimeType?.includes("pdf")
+  );
 
   let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-3.7-flash";
   if (isSearchEnabled) {
     primaryModel = "gemini-3-flash-preview";
+  } else if (hasPdfMedia) {
+    primaryModel = "gemini-3.8-flash";
   } else if (hasMedia && primaryModel.includes("lite")) {
     primaryModel = config.geminiModel || "gemini-3.7-flash";
   }
@@ -696,8 +710,8 @@ export async function callGemini(
   const temperature = options?.temperature ?? 0.3;
   const maxTokens = options?.maxTokens;
 
-  // Ưu tiên 9Router chạy trước tiên khi nineRouter được cấu hình (trừ khi có search grounding cần tool Google search trực tiếp)
-  if (hybridAgentSettings?.nineRouter?.enabled && hybridAgentSettings.nineRouter.apiKey && !isSearchEnabled) {
+  // Ưu tiên 9Router chạy trước tiên khi nineRouter được cấu hình (trừ khi có search grounding hoặc có file PDF)
+  if (hybridAgentSettings?.nineRouter?.enabled && hybridAgentSettings.nineRouter.apiKey && !isSearchEnabled && !hasPdfMedia) {
     const routerModel = (primaryModel.startsWith("ag/") || primaryModel.startsWith("cx/"))
       ? primaryModel
       : (hybridAgentSettings.nineRouter.chatModel || "ag/gemini-3.8-flash-medium");
@@ -719,7 +733,7 @@ export async function callGemini(
   }
 
   if (apiKeys.length === 0) {
-    if (hybridAgentSettings?.nineRouter?.enabled && hybridAgentSettings.nineRouter.apiKey) {
+    if (hybridAgentSettings?.nineRouter?.enabled && hybridAgentSettings.nineRouter.apiKey && !hasPdfMedia) {
       const fallbackRes = await call9Router(effectiveSystem, user, {
         model: hybridAgentSettings.nineRouter.chatModel || "ag/gemini-3.8-flash-medium",
         maxTokens,
@@ -872,9 +886,9 @@ export async function callGemini(
       return content;
     };
 
-    // 1. Thử model chính (primaryModel, mặc định gemini-flash-lite-latest siêu tốc, 20s khi có Search Grounding)
+    // 1. Thử model chính (primaryModel, 45s khi có file/media nặng, 20s khi có Search Grounding, 8s cho chat thường)
     try {
-      const primaryTimeout = isSearchEnabled ? 20_000 : 8_000;
+      const primaryTimeout = isSearchEnabled ? 20_000 : (hasMedia ? 45_000 : 8_000);
       const primaryRes = await executeModel(primaryModel, primaryTimeout);
       if (primaryRes) {
         botKeyOffset = (keyIdx + 1) % numKeys;
@@ -890,7 +904,8 @@ export async function callGemini(
       try {
         console.log(`[gemini] ⚡ Model chính gặp lỗi/nghẽn, tự động chuyển sang model dự phòng: ${fbModel}...`);
         delete requestBody.tools; // Gỡ bỏ tool search vì các model lite không hỗ trợ google_search
-        const fbRes = await executeModel(fbModel, 6_000);
+        const fbTimeout = hasMedia ? 35_000 : 6_000;
+        const fbRes = await executeModel(fbModel, fbTimeout);
         if (fbRes) {
           console.log(`[gemini] ✅ Đã phản hồi thành công qua fallback model ${fbModel}!`);
           botKeyOffset = (keyIdx + 1) % numKeys;
@@ -902,8 +917,8 @@ export async function callGemini(
     }
   }
 
-  // Fallback qua cổng 9Router (ag/gemini-3.7-flash-medium hoặc Codex)
-  if (hybridAgentSettings?.nineRouter?.enabled && hybridAgentSettings.nineRouter.apiKey) {
+  // Fallback qua cổng 9Router (trừ khi có file PDF vì 9Router không hỗ trợ application/pdf qua image_url)
+  if (hybridAgentSettings?.nineRouter?.enabled && hybridAgentSettings.nineRouter.apiKey && !hasPdfMedia) {
     try {
       const fallback9RouterModel = hybridAgentSettings.nineRouter.chatModel || "ag/gemini-3.8-flash-medium";
       console.log(`[gemini] 🚀 Google API gặp sự cố, kích hoạt tầng dự phòng cao cấp qua 9Router (${fallback9RouterModel})...`);
@@ -1631,6 +1646,15 @@ async function call9RouterAgentLoop(
   const maxTurns = options?.maxTurns || 3;
   const temperature = options?.temperature ?? 0.2;
 
+  // Nếu có mediaPart là application/pdf, 9Router (OpenAI-compatible) sẽ lỗi HTTP 400 vì image_url không hỗ trợ PDF
+  const hasPdfMedia = options?.mediaParts?.some(
+    (m) => m.mimeType === "application/pdf" || m.mimeType?.includes("pdf")
+  );
+  if (hasPdfMedia) {
+    console.log("[gemini-agent] 📄 Phát hiện file PDF trong mediaParts, bỏ qua 9Router để dùng Google Gemini native API...");
+    return null;
+  }
+
   const allMedia = [...(options?.images || []), ...(options?.mediaParts || [])];
   const userContent: Array<Record<string, unknown>> = [];
 
@@ -1830,8 +1854,16 @@ export async function callGeminiAgentLoop(
     throw new Error("Thiếu GEMINI_API_KEY trong .env");
   }
 
+  const allMedia = [...(options?.images || []), ...(options?.mediaParts || [])];
+  const hasMedia = allMedia.length > 0;
+  const hasPdfMedia = options?.mediaParts?.some(
+    (m) => m.mimeType === "application/pdf" || m.mimeType?.includes("pdf")
+  );
+
   let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-flash-latest";
-  if (!primaryModel || primaryModel.includes("2.5-flash") || primaryModel.includes("3.1-flash-lite")) {
+  if (hasPdfMedia) {
+    primaryModel = "gemini-3.8-flash";
+  } else if (!primaryModel || primaryModel.includes("2.5-flash") || primaryModel.includes("3.1-flash-lite")) {
     primaryModel = "gemini-flash-latest";
   }
   const maxTurns = options?.maxTurns || 2;
@@ -1840,7 +1872,6 @@ export async function callGeminiAgentLoop(
 
   // Xây dựng userParts ban đầu
   const initialUserParts: Record<string, unknown>[] = [];
-  const allMedia = [...(options?.images || []), ...(options?.mediaParts || [])];
   for (const img of allMedia) {
     initialUserParts.push({
       inline_data: {
@@ -1885,9 +1916,10 @@ export async function callGeminiAgentLoop(
         };
 
         try {
+          const loopTimeout = hasMedia ? 45_000 : 15_000;
           resp = await fetch(endpoint, {
             method: "POST",
-            signal: AbortSignal.timeout(15_000),
+            signal: AbortSignal.timeout(loopTimeout),
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(requestBody),
           });

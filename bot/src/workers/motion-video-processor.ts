@@ -238,7 +238,11 @@ export async function planMotionVideoWithGemini(
 
   try {
     const rawJson = await callGeminiJson(systemInstruction, userContent, 4000);
-    const plan = JSON.parse(rawJson) as MotionPlan;
+    const cleanedJson = rawJson
+      .replace(/^[^{\[]*/, "")
+      .replace(/[^}\]]*$/, "")
+      .trim();
+    const plan = JSON.parse(cleanedJson) as MotionPlan;
 
     if (!plan || !plan.genre) {
       throw new Error("Gemini không trả về plan hợp lệ");
@@ -246,14 +250,39 @@ export async function planMotionVideoWithGemini(
     return plan;
   } catch (err) {
     console.warn("[motion-video] Gemini plan JSON lỗi, dùng fallback plan:", err);
+    const fallbackScenes = [
+      {
+        hookEmoji: "🚨",
+        badge: "CẢNH BÁO",
+        words: (prompt.slice(0, 40).toUpperCase() || "SAI LẦM PHỔ BIẾN").split(/\s+/),
+        subtext: "Rất nhiều người đang mắc phải sai lầm này",
+        accentColor: "#ef4444",
+      },
+      {
+        hookEmoji: "🧠",
+        badge: "BẢN CHẤT",
+        words: ["TÂM", "LÝ", "VỘI", "VÃ", "THIẾU", "KIẾN", "THỨC"],
+        subtext: "Dẫn đến các quyết định chưa tối ưu",
+        accentColor: "#f59e0b",
+      },
+      {
+        hookEmoji: "🚀",
+        badge: "GIẢI PHÁP",
+        words: ["HỌC", "HỎI", "VÀ", "ĐỒNG", "HÀNH", "CÙNG", "AI"],
+        subtext: "Liên tục cập nhật kiến thức mỗi ngày",
+        accentColor: "#10b981",
+      },
+    ];
+
     return {
       genre: detectedGenre,
       badge: "AI SPOTLIGHT",
       title: "TỔNG HỢP KIẾN THỨC NỔI BẬT",
       subtitle: prompt.slice(0, 60),
-      narrationScript: `Chào các bạn, sau đây là tổng hợp nhanh về ${prompt.slice(0, 80)}. Chúc các bạn tiếp thu nhiều kiến thức hữu ích cùng Sen Chúa AI.`,
+      narrationScript: `Chào các bạn, sau đây là điểm tin nhanh về ${prompt.slice(0, 70)}. Chúc các bạn luôn tỉnh táo và thành công cùng Sen Chúa AI.`,
       primaryColor: "#4f46e5",
       secondaryColor: "#ec4899",
+      scenes: detectedGenre === "tiktok_story" ? fallbackScenes : undefined,
       points: [
         "Nội dung trọng tâm số 1: Tối ưu quy trình vận hành tự động",
         "Nội dung trọng tâm số 2: Tận dụng sức mạnh trí tuệ nhân tạo",
@@ -347,11 +376,34 @@ export async function runMotionVideoJob(options: MotionVideoJobOptions): Promise
       subtitle: plan.subtitle,
     };
 
-    if (plan.genre === "tiktok_story" && plan.scenes && plan.scenes.length > 0) {
+    if (plan.genre === "tiktok_story") {
       compositionId = "TikTokViralStory";
+      const scenes = (plan.scenes && plan.scenes.length > 0) ? plan.scenes : [
+        {
+          hookEmoji: "🚨",
+          badge: plan.badge || "CẢNH BÁO",
+          words: (plan.title || "SAI LẦM PHỔ BIẾN").split(/\s+/),
+          subtext: plan.subtitle || "Rất nhiều người đang mắc phải",
+          accentColor: "#ef4444",
+        },
+        {
+          hookEmoji: "🧠",
+          badge: "BẢN CHẤT",
+          words: ["TÂM", "LÝ", "VỘI", "VÃ", "THIẾU", "KIẾN", "THỨC"],
+          subtext: "Dẫn đến các quyết định sai lầm",
+          accentColor: "#f59e0b",
+        },
+        {
+          hookEmoji: "🚀",
+          badge: "GIẢI PHÁP",
+          words: ["QUẢN", "TRỊ", "RỦI", "RO", "TỰ", "ĐỘNG", "HÓA"],
+          subtext: "Cùng đồng hành với Sen Chúa AI",
+          accentColor: "#10b981",
+        },
+      ];
       inputProps = {
         audioFile: audioFileName,
-        scenes: plan.scenes,
+        scenes,
       };
     } else if (plan.genre === "versus" && plan.optionA && plan.optionB) {
       compositionId = "VersusComparison";
