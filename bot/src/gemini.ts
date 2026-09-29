@@ -252,6 +252,23 @@ export async function downloadFileContent(
       return { textContent: cachedByUrl.textContent };
     }
 
+    // 0.1 KIỂM TRA LIÊN KẾT GITHUB REPO -> DÙNG GITHUB DOCUMENT PIPELINE SẠCH
+    if (
+      /https?:\/\/(?:www\.)?github\.com\/[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+/i.test(targetUrl) &&
+      !/\.(png|jpe?g|gif|webp|mp4|zip|pdf|tar\.gz)$/i.test(targetUrl)
+    ) {
+      try {
+        const { fetchGithubCleanDocument } = await import("./github-enricher.js");
+        const ghDoc = await fetchGithubCleanDocument(targetUrl);
+        if (ghDoc && ghDoc.trim().length > 30) {
+          console.log(`[gemini] 🐙 [GitHub Document Pipeline] Đã nạp thành công tài liệu GitHub sạch cho "${targetUrl.slice(0, 60)}" (${ghDoc.length.toLocaleString("vi-VN")} ký tự)`);
+          return { textContent: ghDoc };
+        }
+      } catch (ghErr) {
+        console.warn(`[gemini] Không thể nạp tài liệu GitHub qua pipeline chuyên dụng:`, ghErr);
+      }
+    }
+
     if (fs.existsSync(targetUrl)) {
       const stats = fs.statSync(targetUrl);
       if (stats.size > 50 * 1024 * 1024) {

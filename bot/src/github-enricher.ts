@@ -38,6 +38,7 @@ export interface ExtractedGithubRepo {
   repo: string;
   fullName: string;
   url: string;
+  subpath?: string;
 }
 
 export interface GithubRepoMetadata {
@@ -59,7 +60,7 @@ export interface GithubRepoMetadata {
 export function extractGithubRepoUrls(text: string): ExtractedGithubRepo[] {
   if (!text || !text.includes("github.com")) return [];
 
-  const GITHUB_REPO_REGEX = /https?:\/\/(?:www\.)?github\.com\/([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+)(?:\/)?(?:$|[?#\s])/gi;
+  const GITHUB_REPO_REGEX = /https?:\/\/(?:www\.)?github\.com\/([a-zA-Z0-9._-]+)\/([a-zA-Z0-9._-]+)((?:\/[^\s?#]*)?)(?:$|[?#\s])/gi;
   const results: ExtractedGithubRepo[] = [];
   const seen = new Set<string>();
 
@@ -67,6 +68,9 @@ export function extractGithubRepoUrls(text: string): ExtractedGithubRepo[] {
   while ((match = GITHUB_REPO_REGEX.exec(text)) !== null) {
     const owner = match[1]?.trim() || "";
     let repo = match[2]?.trim() || "";
+    const rawRest = (match[3] || "").trim();
+    const subpath = rawRest.replace(/^\/+/, "").replace(/\/+$/, "");
+
     // Bỏ đuôi .git nếu có
     if (repo.endsWith(".git")) repo = repo.slice(0, -4);
 
@@ -78,7 +82,7 @@ export function extractGithubRepoUrls(text: string): ExtractedGithubRepo[] {
 
     if (!seen.has(fullName.toLowerCase())) {
       seen.add(fullName.toLowerCase());
-      results.push({ owner, repo, fullName, url: cleanUrl });
+      results.push({ owner, repo, fullName, url: cleanUrl, subpath: subpath || undefined });
     }
   }
 
@@ -524,3 +528,148 @@ export async function processGithubReposInMessage(params: {
 
   return { cards, repos };
 }
+
+/**
+ * Tải tài liệu phân tích sạch cho Repository hoặc tệp tin/thư mục con GitHub
+ * (thay thế việc cào 220KB HTML thô của giao diện GitHub)
+ */
+export async function fetchGithubCleanDocument(url: string): Promise<string | null> {
+  const extracted = extractGithubRepoUrls(url);
+  if (extracted.length === 0) return null;
+
+  const target = extracted[0];
+  if (!target) return null;
+  const { owner, repo, subpath } = target;
+  const meta = await fetchGithubRepoMetadata(owner, repo);
+  if (!meta) return null;
+
+  const token = process.env.GITHUB_TOKEN?.trim();
+  const headers: Record<string, string> = {
+    Accept: "application/vnd.github.raw+json",
+    "User-Agent": "ZaloBot-RepoDiscovery/1.0",
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let subpathContent = "";
+  if (subpath) {
+    // 1. Nếu là link trỏ vào file cụ thể: /blob/:branch/:filepath
+    const blobMatch = subpath.match(/^blob\/([^/]+)\/(.+)$/i);
+    if (blobMatch) {
+      const [, branch, filepath] = blobMatch;
+      const rawFileUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filepath}`;
+      try {
+        const c = new AbortController();
+        const t = setTimeout(() => c.abort(), 5000);
+        const res = await fetch(rawFileUrl, { signal: c.signal });
+        clearTimeout(t);
+        if (res.ok) {
+          const text = await res.text();
+          subpathContent = `### Tệp nguồn [${filepath}]:\n\`\`\`\n${text.slice(0, 20000)}\n\`\`\``;
+        }
+      } catch {}
+    } else {
+      // 2. Nếu là thư mục hoặc nhánh: /tree/:branch/:folder
+      const treeMatch = subpath.match(/^tree\/([^/]+)(?:\/(.+))?$/i);
+      const branch = treeMatch ? treeMatch[1] : "main";
+      const folder = treeMatch && treeMatch[2] ? treeMatch[2] : "";
+
+      if (folder) {
+        // Thử tìm SKILL.md hoặc README.md trong thư mục con
+        const candidateFiles = [`${folder}/SKILL.md`, `${folder}/README.md`, `${folder}/readme.md`];
+        for (const f of candidateFiles) {
+          try {
+            const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${f}`;
+            const c = new AbortController();
+            const t = setTimeout(() => c.abort(), 4000);
+            const res = await fetch(rawUrl, { signal: c.signal });
+            clearTimeout(t);
+            if (res.ok) {
+              const text = await res.text();
+              if (text.trim().length > 20) {
+                subpathContent = `### Tài liệu thư mục con [${f}]:\n${text.slice(0, 20000)}`;
+                break;
+              }
+            }
+          } catch {}
+        }
+
+        // Nếu chưa có, thử lấy danh sách file từ API
+        if (!subpathContent) {
+          try {
+            const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(folder)}`;
+            const c = new AbortController();
+            const t = setTimeout(() => c.abort(), 4000);
+            const res = await fetch(apiUrl, {
+              headers: { ...headers, Accept: "application/vnd.github.v3+json" },
+              signal: c.signal,
+            });
+            clearTimeout(t);
+            if (res.ok) {
+              const files: any = await res.json();
+              if (Array.isArray(files)) {
+                const fileList = files.map((item: any) => `- ${item.name} (${item.type})`).join("\n");
+                subpathContent = `### Danh sách tệp trong thư mục [${folder}]:\n${fileList}`;
+              }
+            }
+          } catch {}
+        }
+      }
+    }
+  }
+
+  // 3. Tải tài liệu README chính của repository
+  let mainReadme = "";
+  try {
+    const readmeUrl = `https://api.github.com/repos/${owner}/${repo}/readme`;
+    const c = new AbortController();
+    const t = setTimeout(() => c.abort(), 4000);
+    const res = await fetch(readmeUrl, { headers, signal: c.signal });
+    clearTimeout(t);
+    if (res.ok) {
+      mainReadme = await res.text();
+    }
+  } catch {}
+
+  // Fallback tải raw README nếu API chưa lấy được
+  if (!mainReadme) {
+    for (const b of ["main", "master", "HEAD"]) {
+      try {
+        const rawReadmeUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${b}/README.md`;
+        const c = new AbortController();
+        const t = setTimeout(() => c.abort(), 3500);
+        const res = await fetch(rawReadmeUrl, { signal: c.signal });
+        clearTimeout(t);
+        if (res.ok) {
+          mainReadme = await res.text();
+          if (mainReadme.trim().length > 30) break;
+        }
+      } catch {}
+    }
+  }
+
+  const cleanReadme = (mainReadme || meta.description || "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<details[\s\S]*?<\/details>/gi, "")
+    .slice(0, 35000)
+    .trim();
+
+  const formattedDoc = [
+    `# TỔNG QUAN REPOSITORY GITHUB: ${meta.fullName}`,
+    `- URL: ${meta.htmlUrl}`,
+    subpath ? `- Thư mục/tệp đang tra cứu: ${subpath}` : "",
+    `- Tác giả: ${meta.owner}`,
+    `- Ngôn ngữ lập trình: ${meta.language || "Không xác định"}`,
+    `- Chỉ số cộng đồng: ★ ${meta.stars.toLocaleString("vi-VN")} Stars | ⑂ ${meta.forks.toLocaleString("vi-VN")} Forks`,
+    `- Topics: ${meta.topics.join(", ") || "Không có"}`,
+    `- Mô tả gốc: "${meta.description || "No description"}"`,
+    "",
+    subpathContent ? `${subpathContent}\n` : "",
+    "## NỘI DUNG TÀI LIỆU HƯỚNG DẪN (README.md):",
+    cleanReadme || "(Repository không có file README hoặc README rỗng)",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return formattedDoc;
+}
+

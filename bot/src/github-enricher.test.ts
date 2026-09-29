@@ -19,13 +19,19 @@ test("extractGithubRepoUrls trích xuất chính xác repo hợp lệ và loại
     Hoặc https://github.com/modelcontextprotocol/servers.git nữa.
     Đừng bấm vào https://github.com/trending hay https://github.com/features nha.
     Trùng lặp: https://github.com/astral-sh/uv/
+    Có subpath tree: https://github.com/ibelick/ui-skills/tree/main/skills/baseline-ui
+    Có subpath blob: https://github.com/facebook/react/blob/main/packages/react/index.js
   `;
 
   const results = extractGithubRepoUrls(text);
-  assert.equal(results.length, 2);
+  assert.equal(results.length, 4);
   assert.equal(results[0]?.fullName, "astral-sh/uv");
   assert.equal(results[0]?.url, "https://github.com/astral-sh/uv");
   assert.equal(results[1]?.fullName, "modelcontextprotocol/servers");
+  assert.equal(results[2]?.fullName, "ibelick/ui-skills");
+  assert.equal(results[2]?.subpath, "tree/main/skills/baseline-ui");
+  assert.equal(results[3]?.fullName, "facebook/react");
+  assert.equal(results[3]?.subpath, "blob/main/packages/react/index.js");
 });
 
 test("formatZaloRepoCard định dạng thẻ Zalo chuẩn, tinh gọn và rõ ràng", () => {
