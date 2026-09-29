@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { exec, execSync } from "node:child_process";
+import { execFile, execSync } from "node:child_process";
 import { promisify } from "node:util";
 import { config } from "../config.js";
 import { sanitizeSafeFileName } from "./file-generator.js";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export const DOWNLOADS_VIDEO_DIR = path.resolve(process.cwd(), "data", "downloads", "videos");
 
@@ -92,6 +92,26 @@ export function scheduleFileCleanup(filePath: string, delayMs = 120_000): void {
 export function isSupportedVideoUrl(url: string): boolean {
   if (!url || typeof url !== "string") return false;
   return /https?:\/\/(?:www\.|m\.|vt\.|v\.|vm\.)?(?:tiktok\.com|youtube\.com|youtu\.be|facebook\.com|fb\.watch|fb\.com|instagram\.com|twitter\.com|x\.com|threads\.net|reddit\.com|pinterest\.com|bilibili\.com)\b/i.test(url.trim());
+}
+
+/**
+ * Tìm đường dẫn file cookies của YouTube cho yt-dlp nếu có
+ */
+export function getYtDlpCookiesPath(): string | null {
+  const customPath = process.env.YTDLP_COOKIES_PATH?.trim();
+  if (customPath && fs.existsSync(customPath)) {
+    return customPath;
+  }
+  const defaultPaths = [
+    path.resolve(process.cwd(), "data/cookies/youtube.txt"),
+    path.resolve(process.cwd(), "cookies/youtube.txt"),
+    "/home/ubuntu/zalo-bot-2/bot/data/cookies/youtube.txt",
+    "/home/ubuntu/zalo-bot-2/bot/cookies/youtube.txt",
+  ];
+  for (const p of defaultPaths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
 }
 
 /**
@@ -282,7 +302,7 @@ async function downloadYouTubeViaApify(
   try {
     console.log(`[video-downloader] 🔄 Kích hoạt Apify Fallback cho YouTube: ${url.slice(0, 60)}...`);
     const runRes = await fetch(
-      "https://api.apify.com/v2/acts/streamers~youtube-video-downloader/run-sync-get-dataset-items?timeout=60",
+      "https://api.apify.com/v2/acts/streamers~youtube-video-downloader/run-sync-get-dataset-items?timeout=120",
       {
         method: "POST",
         headers: {
@@ -290,11 +310,10 @@ async function downloadYouTubeViaApify(
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          startUrls: [{ url: url.trim() }],
+          videos: [{ url: url.trim() }],
           downloadFormat: isAudio ? "mp3" : "mp4",
-          maxResults: 1,
         }),
-        signal: AbortSignal.timeout(65_000),
+        signal: AbortSignal.timeout(130_000),
       },
     );
 
@@ -303,14 +322,15 @@ async function downloadYouTubeViaApify(
     if (!Array.isArray(items) || items.length === 0) return null;
 
     const item = items[0];
-    const mediaDownloadUrl = item.downloadUrl || item.url || item.videoUrl;
+    const mediaDownloadUrl = item.downloadedFileUrl || item.audioOnlyUrl || item.videoOnlyUrl || item.downloadUrl || item.url;
     if (!mediaDownloadUrl) return null;
 
-    const title = String(item.title || "youtube_video").slice(0, 50);
+    const rawTitle = String(item.fileKey || item.title || "youtube_media").replace(/\.[^/.]+$/, "");
+    const title = rawTitle.slice(0, 50);
     const author = String(item.channelTitle || item.uploader || "YouTube Creator");
-    const duration = Number(item.duration) || undefined;
+    const duration = Number(item.durationSeconds || item.duration) || undefined;
     const ext = isAudio ? "mp3" : "mp4";
-    const safeTitle = sanitizeSafeFileName(title, "youtube_video");
+    const safeTitle = sanitizeSafeFileName(title, "youtube_media");
     const fileName = `${safeTitle}_${Date.now()}.${ext}`;
     const targetFilePath = path.join(outputDir, fileName);
 
@@ -390,14 +410,21 @@ export async function downloadMediaVideo(
       const timestamp = Date.now();
       const outputTemplate = path.join(outputDir, `media_${timestamp}_%(id)s.%(ext)s`);
 
-      let cmd = "";
-      if (isAudio) {
-        cmd = `${ytDlpBin} --no-warnings --no-playlist --max-filesize ${maxMb}M -x --audio-format mp3 --audio-quality 0 --print "%(title)s\t%(duration)s\t%(uploader)s\t%(filename)s" -o "${outputTemplate}" "${cleanUrl}"`;
-      } else {
-        cmd = `${ytDlpBin} --no-warnings --no-playlist --max-filesize ${maxMb}M -f "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4 --print "%(title)s\t%(duration)s\t%(uploader)s\t%(filename)s" -o "${outputTemplate}" "${cleanUrl}"`;
-      }
+      const cookiesPath = getYtDlpCookiesPath();
+      const ytArgs: string[] = [
+        ...(cookiesPath ? ["--cookies", cookiesPath] : []),
+        "--no-warnings",
+        "--no-playlist",
+        "--max-filesize", `${maxMb}M`,
+        ...(isAudio
+          ? ["-x", "--audio-format", "mp3", "--audio-quality", "0"]
+          : ["-f", "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best", "--merge-output-format", "mp4"]),
+        "--print", "%(title)s\t%(duration)s\t%(uploader)s\t%(filename)s",
+        "-o", outputTemplate,
+        cleanUrl,
+      ];
 
-      const { stdout } = await execAsync(cmd, { timeout: timeoutMs });
+      const { stdout } = await execFileAsync(ytDlpBin, ytArgs, { timeout: timeoutMs });
       const lines = stdout.trim().split("\n").filter(Boolean);
       const lastLine = lines[lines.length - 1] || "";
       const [title = "video", durationStr = "", author = "", outputPath = ""] = lastLine.split("\t");
