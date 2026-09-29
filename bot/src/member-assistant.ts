@@ -1561,7 +1561,8 @@ async function handleHistoryQA(
               if (options?.api) {
                 const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
                 const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
-                const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+                const isMedia = Boolean(file.isMediaDownload);
+                const isVoice = !isMedia && /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
                 if (isVoice) {
                   voiceGenerated = true;
                 } else {
@@ -1572,9 +1573,11 @@ async function handleHistoryQA(
                     ? `📊 ${botName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
                     : isImg
                       ? `📊 Biểu đồ / Hình ảnh đã hoàn tất cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
-                      : isVoice
-                        ? `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`
-                        : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+                      : isMedia
+                        ? `🎵 ${botName} đã tải xong tệp âm thanh [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+                        : isVoice
+                          ? `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`
+                          : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
                 );
                 if (isVoice) {
                   await sendGroupVoice(
@@ -2044,7 +2047,8 @@ QUY TẮC BẮT BUỘC:
                 const isVideo = Boolean(file.isVideo) || /\.(mp4|mov|mkv)$/i.test(file.filePath);
                 const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
                 const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
-                const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+                const isMedia = Boolean(file.isMediaDownload);
+                const isVoice = !isMedia && /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
                 if (isVoice) {
                   voiceGenerated = true;
                 } else {
@@ -2058,9 +2062,11 @@ QUY TẮC BẮT BUỘC:
                       ? `📊 ${botName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${userGreeting}!`
                       : isImg
                         ? `📊 Biểu đồ / Hình ảnh đã hoàn tất cho ${userGreeting}!`
-                        : isVoice
-                          ? `🎙️ ${botName} gửi voice cho ${userGreeting} nghe nhé!`
-                          : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${userGreeting}!`
+                        : isMedia
+                          ? `🎵 ${botName} đã tải xong tệp âm thanh [${file.fileName}] cho ${userGreeting}!`
+                          : isVoice
+                            ? `🎙️ ${botName} gửi voice cho ${userGreeting} nghe nhé!`
+                            : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${userGreeting}!`
                 );
                 if (isVoice) {
                   await sendGroupVoice(
@@ -3080,7 +3086,8 @@ QUY TẮC BẮT BUỘC:
               const isVideo = Boolean(file.isVideo) || /\.(mp4|mov|mkv)$/i.test(file.filePath);
               const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
               const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
-              const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+              const isMedia = Boolean(file.isMediaDownload);
+              const isVoice = !isMedia && /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
               if (isVoice) {
                 voiceGenerated = true;
               } else {
@@ -3094,11 +3101,13 @@ QUY TẮC BẮT BUỘC:
                     ? `📊 ${botName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${userGreeting}!`
                     : isImg
                       ? `🎨 Ảnh của ${userGreeting} đây ạ! ✨`
-                      : isVoice
-                        ? `🎙️ ${botName} gửi voice cho ${userGreeting} nghe nhé!`
-                        : /\.(md|markdown)$/i.test(file.filePath)
-                          ? `📄 ${botName} đã xuất xong file Markdown [${file.fileName}] cho ${userGreeting}!`
-                          : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${userGreeting}!`
+                      : isMedia
+                        ? `🎵 ${botName} đã tải xong tệp âm thanh [${file.fileName}] cho ${userGreeting}!`
+                        : isVoice
+                          ? `🎙️ ${botName} gửi voice cho ${userGreeting} nghe nhé!`
+                          : /\.(md|markdown)$/i.test(file.filePath)
+                            ? `📄 ${botName} đã xuất xong file Markdown [${file.fileName}] cho ${userGreeting}!`
+                            : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${userGreeting}!`
               );
               if (isVoice) {
                 await sendGroupVoice(options.api, threadId, file.filePath, caption);

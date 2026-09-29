@@ -310,6 +310,7 @@ export interface GeneratedFileResult {
   coverPath?: string;
   title?: string;
   isVideo?: boolean;
+  isMediaDownload?: boolean;
   pptxPath?: string;
 }
 

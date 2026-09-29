@@ -2820,7 +2820,8 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
             const isVideo = Boolean(file.isVideo) || /\.(mp4|mov|mkv)$/i.test(file.filePath);
             const isSlide = /\.(pptx|ppt)$/i.test(file.filePath);
             const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
-            const isVoice = /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+            const isMedia = Boolean(file.isMediaDownload);
+            const isVoice = !isMedia && /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
             if (isVoice) {
               voiceGenerated = true;
             } else {
@@ -2834,9 +2835,11 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
                   ? `📊 ${defaultBotName} đã soạn xong bài thuyết trình PowerPoint [${file.fileName}] cho ${userGreeting}!`
                   : isImg
                     ? `🎨 ${defaultBotName} đã tạo ảnh [${file.fileName}] thành công cho ${userGreeting}!`
-                    : isVoice
-                      ? `🎙️ ${defaultBotName} gửi voice cho ${userGreeting} nghe đây ạ!`
-                      : `📄 ${defaultBotName} đã tạo file [${file.fileName}] thành công cho ${userGreeting}!`
+                    : isMedia
+                      ? `🎵 ${defaultBotName} đã tải xong tệp âm thanh [${file.fileName}] cho ${userGreeting}!`
+                      : isVoice
+                        ? `🎙️ ${defaultBotName} gửi voice cho ${userGreeting} nghe đây ạ!`
+                        : `📄 ${defaultBotName} đã tạo file [${file.fileName}] thành công cho ${userGreeting}!`
             );
             if (isVoice) {
               await sendDirectVoice(api, sender, file.filePath, caption);

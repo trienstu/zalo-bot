@@ -24,6 +24,7 @@ export interface VideoDownloadResult {
   duration?: number;
   author?: string;
   fileType?: "mp4" | "mp3";
+  isMediaDownload?: boolean;
   caption?: string;
   summary?: string;
   error?: string;
@@ -192,6 +193,7 @@ async function downloadTikTokViaTikWm(
       author,
       duration,
       fileType: ext as "mp4" | "mp3",
+      isMediaDownload: true,
       caption: isAudio
         ? `🎵 Đã tách xong âm thanh MP3 từ clip TikTok của [${author}]!`
         : `🎬 Đã tải xong video TikTok không watermark của [${author}]!`,
@@ -277,6 +279,7 @@ async function downloadTikTokViaApify(
       author,
       duration,
       fileType: ext as "mp4" | "mp3",
+      isMediaDownload: true,
       caption: isAudio
         ? `🎵 Đã tách xong âm thanh MP3 từ clip TikTok của [${author}] qua Apify!`
         : `🎬 Đã tải xong video TikTok không watermark của [${author}] qua Apify!`,
@@ -359,6 +362,7 @@ async function downloadYouTubeViaApify(
       author,
       duration,
       fileType: ext as "mp4" | "mp3",
+      isMediaDownload: true,
       caption: isAudio
         ? `🎵 Đã tải xong file âm thanh MP3 từ YouTube: [${title}]!`
         : `🎬 Đã tải xong video YouTube [${title}]!`,
@@ -418,7 +422,12 @@ export async function downloadMediaVideo(
         "--max-filesize", `${maxMb}M`,
         ...(isAudio
           ? ["-x", "--audio-format", "mp3", "--audio-quality", "0"]
-          : ["-f", "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best", "--merge-output-format", "mp4"]),
+          : [
+              "-f",
+              "bestvideo[vcodec^=avc1][height<=1080]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc][height<=1080]+bestaudio[acodec^=mp4a]/bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+              "--merge-output-format",
+              "mp4",
+            ]),
         "--print", "%(title)s\t%(duration)s\t%(uploader)s\t%(filename)s",
         "-o", outputTemplate,
         cleanUrl,
@@ -456,6 +465,7 @@ export async function downloadMediaVideo(
           author: author.trim() || undefined,
           duration,
           fileType: ext,
+          isMediaDownload: true,
           caption: isAudio
             ? `🎵 Đã tách xong âm thanh MP3 cho [${cleanTitle || "bản nhạc"}]!`
             : `🎬 Đã tải xong video [${cleanTitle || "clip"}] (${(stats.size / 1024 / 1024).toFixed(1)} MB)!`,
