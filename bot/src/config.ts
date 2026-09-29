@@ -351,8 +351,8 @@ export const config = {
   /** API key Google Gemini chuyên dùng cho Google Search Grounding (key có gắn thẻ billing để hưởng 1500 lượt search/ngày). Rỗng = dùng key đầu tiên của GEMINI_API_KEY. */
   geminiGroundingApiKey: process.env.GEMINI_GROUNDING_API_KEY?.trim() || "",
 
-  /** Model Gemini dùng để tóm tắt và xử lý thông tin (mặc định gemini-3-flash-preview hoạt động ổn định và nhanh). */
-  geminiModel: process.env.GEMINI_MODEL?.trim() || "gemini-3.8-flash",
+  /** Model Gemini dùng để tóm tắt và xử lý thông tin (mặc định ag/gemini-3.8-flash-low siêu tốc qua 9Router). */
+  geminiModel: process.env.GEMINI_MODEL?.trim() || "ag/gemini-3.8-flash-low",
 
   /** Google Cloud Vertex AI (Chuyên dụng cho Google Search Grounding: hưởng 1500 lượt search/ngày & trừ vào $300 credit) */
   vertexProjectId: process.env.VERTEX_PROJECT_ID?.trim() || "gen-lang-client-0283698215",
@@ -403,7 +403,7 @@ export const config = {
 
   /** Cấu hình sinh ảnh: "codex" (mặc định qua 9Router/Hermes) hoặc "cloudflare" */
   imageProvider: (process.env.IMAGE_PROVIDER?.trim() || "codex").toLowerCase(),
-  codexImageModel: process.env.CODEX_IMAGE_MODEL?.trim() || "cx/gpt-image-2",
+  codexImageModel: process.env.CODEX_IMAGE_MODEL?.trim() || "cx/gpt-image-2.5",
 
   /**
    * Thư mục ảnh bản tin công khai (bản WebP nhẹ) để nginx serve thẳng cho

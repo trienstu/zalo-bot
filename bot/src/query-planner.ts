@@ -5,6 +5,7 @@
  * Trang bị Graceful Fallback hoàn toàn để không bao giờ làm gián đoạn luồng bot.
  */
 
+import { config } from "./config.js";
 import { callGemini } from "./gemini.js";
 import {
   normalizeExecutionSignals,
@@ -14,11 +15,12 @@ import {
   type ToolIntent,
 } from "./hybrid-routing.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
-import { checkIsFileOrVoiceGeneration } from "./tools/file-generator.js";
+import { checkIsFileOrVoiceGeneration, isImageRequest } from "./tools/file-generator.js";
 import { isPresentationVideoRequest } from "./workers/presentation-video-processor.js";
 import { isMotionVideoRequest } from "./workers/motion-video-processor.js";
 
 export type PlannerTaskType =
+  | "image_generation"
   | "motion_video"
   | "presentation_video"
   | "file_generation"
@@ -70,7 +72,10 @@ export function applyExecutionSignals(
     /(?:^|[^\p{L}\p{N}])(?:làm|tạo|dựng|quay|xuất)\s+(?:video|clip|slide|file).*?(?:có\s+khó|như\s+thế\s+nào|kiếm\s+tiền|phần\s+mềm|bằng\s+app|app\s+gì|dễ\s+không|sao\s+nhỉ|ở\s+đâu|bằng\s+cách\s+nào)/iu.test(question) ||
     /^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|xuất)?\s*(?:được|đc|duoc)?(?:\s+(?:tạo|làm|soạn|xuất))?\s+(?:video|clip|slide|file)\s*(?:không|ko)?\s*(?:hả|nhỉ|hở|ạ|không|ko)\s*[?]?$/iu.test(question.trim());
 
-  if (isHypotheticalOrInquiry) {
+  if (merged.taskType === "image_generation") {
+    merged.toolIntent = "create";
+    merged.responseMode = "action";
+  } else if (isHypotheticalOrInquiry) {
     merged.taskType = "none";
     merged.toolIntent = "none";
     merged.responseMode = "fast";
@@ -413,9 +418,10 @@ export async function planSearchQueries(params: {
 }): Promise<QueryPlanResult> {
   const { question, quoteText, recentContext, displayName } = params;
 
-  // Nếu câu chào đơn giản hoặc quá ngắn, bỏ qua planner để tiết kiệm tài nguyên
+  // Nếu câu chào đơn thuần (không có trích dẫn quote, không có động từ hành động), bỏ qua planner để tiết kiệm tài nguyên
   const trimmed = question.trim();
-  if (/^(?:chào|hi|hello|alo|ê|cảm ơn|thanks|ok|oki|vâng|dạ)\b/i.test(trimmed) && trimmed.length < 20) {
+  const hasActionKeyword = /(?:tạo|làm|vẽ|xuất|soạn|viết|triển|gửi|lưu|chạy|sinh|đọc|thu\s*âm|ghi\s*âm|hát|phối|dựng|quay)/iu.test(trimmed);
+  if (!quoteText && !hasActionKeyword && /^(?:chào|hi|hello|alo|ê|cảm ơn|thanks|vâng|dạ)$/iu.test(trimmed)) {
     return applyExecutionSignals({
       needsSearch: false,
       intent: "chat",
@@ -448,15 +454,17 @@ export async function planSearchQueries(params: {
     }, question, quoteText);
   }
 
-  // Nhận diện câu lệnh yêu cầu thực thi / tạo file / soạn tiếp từ phản hồi trước (ví dụ: "soạn luôn đi", "làm luôn đi", "tạo luôn đi e")
+  // Nhận diện câu lệnh yêu cầu thực thi / tạo file / soạn tiếp từ phản hồi trước (ví dụ: "soạn luôn đi", "làm luôn đi", "tạo luôn đi e", "ok tạo đi e")
   const isAffirmativeTaskExecution =
-    /^(?:soạn|làm|tạo|xuất|viết|triển\s*khai|chốt|triển|lên)\s*(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|luôn\s*đi|luôn\s*đi\s*e|luôn\s*hộ\s*e|luôn\s*nhé|luôn\s*nha|tiếp\s*đi)\b/i.test(trimmed);
+    /^(?:ok(?:ela|ay|e)?|ừ|uh|u|dạ|da|vâng|vang|dc|được|chốt|nhất trí|duyệt|tiến hành)?[\s,.:;!-]*(?:soạn|làm|tạo|xuất|viết|triển\s*khai|chốt|triển|lên|vẽ|sinh|chạy|tiến\s*hành)\s*(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|tiếp|nào)?/iu.test(trimmed);
   if (isAffirmativeTaskExecution) {
+    const isImgFollowUp = isImageRequest(question, quoteText);
     return applyExecutionSignals({
       needsSearch: false,
       intent: "knowledge",
       queries: [],
-      summaryIntent: "Người dùng đồng ý / giục thực thi tác vụ tạo nội dung đã chốt",
+      summaryIntent: isImgFollowUp ? "Người dùng đồng ý / giục vẽ ảnh đã chốt" : "Người dùng đồng ý / giục thực thi tác vụ tạo nội dung đã chốt",
+      taskType: "file_generation",
       responseMode: "action",
       toolIntent: "create",
     }, question, quoteText);
@@ -479,13 +487,18 @@ export async function planSearchQueries(params: {
   // Nhận diện câu lệnh tạo file, tạo/sửa ảnh, vẽ tranh, tạo voice hoặc video thuyết trình rõ ràng
   // Bỏ qua bước gọi LLM tốn 6s của planner vì tác vụ tạo media/ảnh/file không dùng kết quả tìm kiếm RSS/Google
   const isVideo = isPresentationVideoRequest(question, quoteText);
+  const isImg = isImageRequest(question, quoteText);
   const isFileOrMedia = checkIsFileOrVoiceGeneration(question, quoteText);
-  if (isVideo || isFileOrMedia) {
+  if (isVideo || isImg || isFileOrMedia) {
     return applyExecutionSignals({
       needsSearch: false,
       intent: "knowledge",
       queries: [],
-      summaryIntent: isVideo ? "Người dùng yêu cầu dựng video thuyết trình" : "Người dùng yêu cầu tạo file / vẽ ảnh / âm thanh",
+      summaryIntent: isVideo
+        ? "Người dùng yêu cầu dựng video thuyết trình"
+        : isImg
+          ? "Người dùng yêu cầu tạo / vẽ / chỉnh sửa hình ảnh"
+          : "Người dùng yêu cầu tạo file / âm thanh",
       taskType: isVideo ? "presentation_video" : "file_generation",
       responseMode: "action",
       toolIntent: "create",
@@ -494,10 +507,10 @@ export async function planSearchQueries(params: {
 
   const executionPlannerContract =
     `4. Phân loại tác vụ hành động (taskType) & Đề xuất thực thi chuẩn mực (ANTI-OVERTHINKING):\n` +
-    `   - taskType: "presentation_video" (CHỈ KHI người dùng yêu cầu rõ ràng làm VIDEO/CLIP/MP4/thước phim thuyết trình hoặc bài giảng khổ dọc 9:16 hoặc 16:9) | "file_generation" (Tạo file Word, Excel, PowerPoint slide pptx, HTML, CSV) | "voice_generation" (Đọc giọng, podcast) | "music_generation" (Suno AI) | "python_diagram" (Vẽ biểu đồ/poster) | "none" (Hỏi đáp bình thường).\n` +
+    `   - taskType: "image_generation" (Tạo ảnh mới, vẽ tranh, vẽ chân dung, phong cảnh, sửa ảnh, biến thể ảnh, hoặc người dùng xác nhận/giục vẽ ảnh từ yêu cầu trước/quote) | "presentation_video" (CHỈ KHI người dùng yêu cầu rõ ràng làm VIDEO/CLIP/MP4/thước phim thuyết trình hoặc bài giảng khổ dọc 9:16 hoặc 16:9) | "file_generation" (Tạo file Word, Excel, PowerPoint slide pptx, HTML, CSV) | "voice_generation" (Đọc giọng, podcast) | "music_generation" (Suno AI) | "python_diagram" (Vẽ biểu đồ/poster) | "none" (Hỏi đáp bình thường).\n` +
     `     * NGUYÊN TẮC PHÂN BIỆT FILE SLIDE vs VIDEO (QUAN TRỌNG): Các yêu cầu như "tạo file thuyết trình", "tạo slide", "xuất file powerpoint", "làm pptx", "soạn slide dự án" mà KHÔNG có từ khóa video/clip thì BẮT BUỘC gán taskType: "file_generation", mediaFormat: { fileType: "pptx" }! TUYỆT ĐỐI KHÔNG gán "presentation_video" khi không yêu cầu video!\n` +
     `     * NGUYÊN TẮC CHỐNG ẢO GIÁC (ANTI-OVERTHINKING): CHỈ gán taskType khi người dùng có MỆNH LỆNH THỰC THI RÕ RÀNG ("hãy làm...", "tạo cho anh...", "xuất video...", "dựng clip..."). Nếu người dùng chỉ hỏi han, hỏi ý kiến ("làm video có khó không?", "bot biết làm slide không?", "SQLite là gì?"), BẮT BUỘC gán taskType: "none"!\n` +
-    `   - mediaFormat: { aspectRatio: "9:16" (nếu có từ "khổ dọc", "shorts", "reels", "tiktok") hoặc "16:9" (nếu có từ "khổ ngang", "youtube", "bài giảng"), fileType?: "docx"|"pptx"|"xlsx"|"csv"|"html" }\n` +
+    `   - mediaFormat: { aspectRatio: "9:16" (nếu có từ "khổ dọc", "shorts", "reels", "tiktok") hoặc "16:9" (nếu có từ "khổ ngang", "youtube", "bài giảng") hoặc "1:1" (vuông), fileType?: "docx"|"pptx"|"xlsx"|"csv"|"html" }\n` +
     `   - responseMode: "fast" cho câu đơn giản/ổn định; "grounded" khi cần dữ liệu kiểm chứng; "deep" cho phân tích nhiều bước; "action" chỉ khi người dùng yêu cầu rõ việc đọc/tạo/chạy công cụ.\n` +
     `   - complexity: "low" | "medium" | "high" theo số bước suy luận và phạm vi tổng hợp.\n` +
     `   - toolIntent: "none" | "read" | "create" | "execute".\n` +
@@ -508,8 +521,8 @@ export async function planSearchQueries(params: {
     `  "intent": "realtime_news" | "fact_check" | "knowledge" | "chat",\n` +
     `  "queries": string[],\n` +
     `  "summaryIntent": string,\n` +
-    `  "taskType": "presentation_video" | "file_generation" | "voice_generation" | "music_generation" | "python_diagram" | "none",\n` +
-    `  "mediaFormat": { "aspectRatio": "9:16" | "16:9" },\n` +
+    `  "taskType": "image_generation" | "presentation_video" | "file_generation" | "voice_generation" | "music_generation" | "python_diagram" | "none",\n` +
+    `  "mediaFormat": { "aspectRatio": "9:16" | "16:9" | "1:1" },\n` +
     `  "responseMode": "fast" | "grounded" | "deep" | "action",\n` +
     `  "complexity": "low" | "medium" | "high",\n` +
     `  "toolIntent": "none" | "read" | "create" | "execute",\n` +
@@ -568,7 +581,7 @@ export async function planSearchQueries(params: {
   try {
     const plannerPromise = (async () => {
       const text = await callGemini(system, user, {
-        model: "gemini-3.1-flash-lite-preview",
+        model: config.geminiModel || "ag/gemini-3.8-flash-low",
         maxTokens: 1000,
         json: true,
       });

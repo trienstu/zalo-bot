@@ -248,7 +248,7 @@ async function requestRouterImage(
 
 /**
  * Sinh hoặc sửa ảnh chất lượng cao với chuỗi Cascade Fallback 3 tầng tự động:
- * - Tầng 1: Model Codex OpenAI qua 9Router (mặc định cx/gpt-image-2)
+ * - Tầng 1: Model Codex OpenAI qua 9Router (mặc định cx/gpt-image-2.5)
  * - Tầng 2: Model Google Gemini qua 9Router (ag/gemini-3.1-flash-image)
  * - Tầng 3: Engine dự phòng cuối Cloudflare FLUX.1-schnell (dành cho tạo mới)
  */
@@ -259,7 +259,7 @@ export async function generateCodexImage(
   const router = hybridAgentSettings.nineRouter;
   const baseUrl = (router.baseUrl || process.env.NINE_ROUTER_BASE_URL || "http://127.0.0.1:20128/v1").replace(/\/+$/, "");
   const apiKey = router.apiKey || process.env.NINE_ROUTER_API_KEY || "";
-  const preferredModel = options?.model?.trim() || config.codexImageModel || "cx/gpt-image-2";
+  const preferredModel = options?.model?.trim() || config.codexImageModel || "cx/gpt-image-2.5";
   const ratio: AspectRatioOption = options?.aspectRatio || "1:1";
   const timeoutMs = options?.timeoutMs || 90_000;
   const imageDataUrl = options?.image ? prepareImageDataUrl(options.image) : null;

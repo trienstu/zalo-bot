@@ -1461,9 +1461,9 @@ async function handleHistoryQA(
       `7. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
       `   - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * để in đậm vì Zalo không hỗ trợ markdown (sẽ hiện nguyên văn hai dấu sao rất xấu). Hãy viết hoa chữ cái đầu hoặc viết hoa tiêu đề để làm nổi bật (ví dụ: '1. NHÂN VẬT CHÍNH:', '2. KHÁCH HÀNG:').\n` +
       `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Giữ phong cách thanh lịch, gọn gàng. TUYỆT ĐỐI KHÔNG spam icon ở từng dòng hay từng gạch đầu dòng.\n` +
-      (targetUrl || /(?:vẽ|ve|tạo|tao|sinh|chỉnh sửa|chinh sua)\s+ảnh/i.test(question)
+      (targetUrl || /(?:vẽ|ve|tạo|tao|sinh|chỉnh sửa|chinh sua)\s+ảnh/i.test(question) || (options?.quote?.text && /(?:ảnh|hình ảnh|vẽ|codex)/i.test(options.quote.text))
         ? `8. [KỸ NĂNG TẠO & CHỈNH SỬA ẢNH NGHỆ THUẬT (generate_image)]:\n` +
-          `   - Khi người dùng yêu cầu vẽ ảnh, tạo ảnh, sinh ảnh, tạo tranh, vẽ chân dung, anime, đồ vật, phong cảnh, hoặc sửa ảnh, biến thể ảnh: BẮT BUỘC GỌI TOOL 'generate_image'.\n` +
+          `   - Khi người dùng yêu cầu vẽ ảnh, tạo ảnh, sinh ảnh, tạo tranh, vẽ chân dung, anime, đồ vật, phong cảnh, hoặc sửa ảnh, biến thể ảnh, hoặc XÁC NHẬN/GIỤC VẼ ẢNH từ ngữ cảnh trước/quote: BẮT BUỘC GỌI TOOL 'generate_image'.\n` +
           `   - NẾU là chỉnh sửa/thay đổi trên ảnh có sẵn: Đặt isEdit=true và truyền imageUrl nếu có.\n`
         : "") +
       buildDynamicSystemPromptModules({ question, quoteText: options?.quote?.text, botName, isSuperAdmin });
@@ -1990,14 +1990,22 @@ QUY TẮC BẮT BUỘC:
     let answer = "";
     let voiceGenerated = false;
     let fileGenerated = false;
-    const isGreetingQuote =
-      /^(?:chào|hi|hello|alo|ê|cảm ơn|thanks|ok)\b/i.test(question.trim()) && question.trim().length < 25;
+    const hasActionKeyword = /(?:tạo|làm|vẽ|xuất|soạn|viết|triển|gửi|lưu|chạy|sinh|đọc|thu\s*âm|ghi\s*âm|hát|phối|dựng|quay)/iu.test(question.trim());
+    const isPureGreeting = !hasActionKeyword && /^(?:chào|hi|hello|alo|cảm ơn|thanks)$/iu.test(question.trim());
+    const isQuotePlanAction = quotePlan?.taskType === "image_generation" ||
+      quotePlan?.taskType === "file_generation" ||
+      quotePlan?.taskType === "voice_generation" ||
+      quotePlan?.taskType === "music_generation" ||
+      quotePlan?.taskType === "python_diagram" ||
+      quotePlan?.responseMode === "action" ||
+      quotePlan?.toolIntent === "create" ||
+      quotePlan?.toolIntent === "execute";
     try {
-      const needsAgentLoop = checkIsFileOrVoiceGeneration(question, options.quote.text) || /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(question);
-      if (needsAgentLoop && !isGreetingQuote) {
+      const needsAgentLoop = (checkIsFileOrVoiceGeneration(question, options.quote.text) || isQuotePlanAction || /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(question)) && !isPureGreeting;
+      if (needsAgentLoop) {
         const dynamicTimeout = (options.quote.text?.length || 0) > 10_000 || (options.directDocContent?.length || 0) > 10_000 ? 150_000 : undefined;
         answer = await callGeminiAgentLoop(quoteSystemPrompt, quoteUserPrompt, {
-          model: "ag/gemini-3.1-pro-low",
+          model: Boolean(mediaPart) ? (config.geminiModel || "ag/gemini-3.7-flash-high") : (config.geminiModel || "ag/gemini-3.8-flash-low"),
           maxTurns: 3,
           timeoutMs: dynamicTimeout,
           mediaParts: mediaPart ? [mediaPart] : undefined,
@@ -2859,10 +2867,10 @@ QUY TẮC BẮT BUỘC:
     `   - Thông tin liên quan có giá trị gia tăng (nếu có): Chỉ ghi chú ngắn gọn, khiêm tốn ở phần phụ: "*(Ngoài ra, nếu anh/chị quan tâm đến [...], thì [...])*".\n` +
     `   - Khi yêu cầu tạo/xuất file (Word .docx, Excel .xlsx...): BẮT BUỘC gọi tool 'generate_file'. Tuyệt đối cấm viết tin nhắn giả mạo khi chưa gọi tool!\n` +
     `   - [KỸ NĂNG TẠO & CHỈNH SỬA ẢNH NGHỆ THUẬT (generate_image)]:\n` +
-    `     + Khi người dùng yêu cầu vẽ ảnh, tạo ảnh, sinh ảnh, tạo tranh, vẽ chân dung, anime, đồ vật, phong cảnh, hoặc sửa ảnh, biến thể ảnh: BẮT BUỘC GỌI TOOL 'generate_image'.\n` +
-    `     + ĐẶC BIỆT KHI NGƯỜI DÙNG BẢO 'dựa vào prompt của bác xyz ở trên', 'theo prompt này', hoặc 'vẽ ảnh' (kèm quote): BẮT BUỘC ĐỌC KỸ LỊCH SỬ CHAT VÀ NỘI DUNG QUOTE, TRÍCH XUẤT ĐẦY ĐỦ Ý TƯỞNG/PROMPT ĐÓ ra và truyền vào tham số 'prompt' của tool generate_image. TUYỆT ĐỐI CẤM để prompt là 'dựa vào prompt của bác...' cộc lốc!\n` +
+    `     + Khi người dùng yêu cầu vẽ ảnh, tạo ảnh, sinh ảnh, tạo tranh, vẽ chân dung, anime, đồ vật, phong cảnh, hoặc sửa ảnh, biến thể ảnh, hoặc XÁC NHẬN/GIỤC VẼ ẢNH từ yêu cầu trước/quote: BẮT BUỘC GỌI TOOL 'generate_image'.\n` +
+    `     + ĐẶC BIỆT KHI NGƯỜI DÙNG BẢO 'dựa vào prompt của bác xyz ở trên', 'theo prompt này', 'vẽ ảnh' (kèm quote), hoặc 'ok tạo đi e' / 'làm lại cái nãy': BẮT BUỘC ĐỌC KỸ LỊCH SỬ CHAT VÀ NỘI DUNG QUOTE, TRÍCH XUẤT ĐẦY ĐỦ Ý TƯỞNG/PROMPT ĐÓ ra và GỌI TOOL 'generate_image' NGAY LẬP TỨC. TUYỆT ĐỐI CẤM để prompt là 'dựa vào prompt của bác...' cộc lốc!\n` +
     `     + NẾU là chỉnh sửa/thay đổi trên ảnh có sẵn: Đặt isEdit=true và truyền imageUrl nếu có.\n` +
-    `     + TUYỆT ĐỐI CẤM bịa đặt bằng chữ 'em đang vẽ ảnh / đã gửi ảnh' khi chưa thực sự gọi tool 'generate_image'!\n` +
+    `     + TUYỆT ĐỐI CẤM bịa đặt bằng chữ 'em đang nạp lệnh / đang vẽ ảnh / đã gửi ảnh' khi chưa thực sự gọi tool 'generate_image'!\n` +
     `   - KỸ NĂNG VẼ BIỂU ĐỒ, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
     `     + Khi người dùng yêu cầu vẽ biểu đồ số liệu, đồ thị, sơ đồ, poster lịch thi đấu, bảng xếp hạng hoặc yêu cầu làm lại/sửa lại biểu đồ: BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM in code Python ra chat!\n` +
     `     + Với lịch thi đấu/bảng sự kiện/roadmap: Dùng PIL vẽ Infographic Poster Card Layout nền tối (burgundy/navy), thẻ bo góc, badge nổi bật ([CHÍNH THỨC], [GIAO HỮU]), tiêu đề vàng kim #FFD700. Với số liệu: Dùng matplotlib dark theme.\n` +
@@ -2959,7 +2967,15 @@ QUY TẮC BẮT BUỘC:
     `HÃY TRẢ LỜI THẬT ${isSuperAdmin ? "CHU ĐÁO, CHUẨN XÁC VÀ TÔN TRỌNG SẾP" : "DUYÊN DÁNG, CHUẨN XÁC VÀ HÓM HỈNH"}:`;
 
   try {
-    const isFileOrVoiceReq = checkIsFileOrVoiceGeneration(question, options?.quote?.text);
+    const isPlanAction = queryPlan?.taskType === "image_generation" ||
+      queryPlan?.taskType === "file_generation" ||
+      queryPlan?.taskType === "voice_generation" ||
+      queryPlan?.taskType === "music_generation" ||
+      queryPlan?.taskType === "python_diagram" ||
+      queryPlan?.responseMode === "action" ||
+      queryPlan?.toolIntent === "create" ||
+      queryPlan?.toolIntent === "execute";
+    const isFileOrVoiceReq = checkIsFileOrVoiceGeneration(question, options?.quote?.text) || isPlanAction;
     const needsAgentLoop = isFileOrVoiceReq || (!isSearchDisabled && /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(question));
 
     let answer = "";
@@ -2969,7 +2985,7 @@ QUY TẮC BẮT BUỘC:
       // 🚀 Chỉ khi người dùng thực sự yêu cầu gọi tool xuất file, voice hoặc đọc link cụ thể mới chạy Agent Loop
       const dynamicTimeout = (fileTextContent?.length || 0) > 10_000 ? 150_000 : undefined;
       answer = await callGeminiAgentLoop(effectiveSystemPrompt, userPrompt, {
-        model: Boolean(mediaPart) ? (config.geminiModel || "ag/gemini-3.7-flash-high") : (config.geminiModel || "ag/gemini-3.1-pro-low"),
+        model: Boolean(mediaPart) ? (config.geminiModel || "ag/gemini-3.7-flash-high") : (config.geminiModel || "ag/gemini-3.8-flash-low"),
         maxTurns: 3,
         timeoutMs: dynamicTimeout,
         mediaParts: mediaPart ? [mediaPart] : undefined,

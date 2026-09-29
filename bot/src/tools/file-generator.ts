@@ -112,6 +112,37 @@ export function checkIsVoiceRequest(question: string, quoteText = ""): boolean {
   return false;
 }
 
+/**
+ * Nhận diện ý định tạo ảnh, vẽ tranh, sửa ảnh hoặc xác nhận vẽ ảnh từ tin nhắn trích dẫn (quote).
+ */
+export function isImageRequest(question: string, quoteText = ""): boolean {
+  const qLower = (question || "").toLowerCase().trim();
+  const quoteLower = (quoteText || "").toLowerCase().trim();
+
+  // Bỏ qua nếu là câu hỏi thăm dò/kỹ thuật/phàn nàn
+  if (/(?:sao|tại\s*sao)\s+.*?(?:vẽ|tạo|sinh)\s+ảnh/iu.test(qLower)) return false;
+  if (/^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|vẽ)?\s*(?:được|đc|duoc)?(?:\s+(?:vẽ|tạo))?\s+ảnh\s*(?:không|ko)?\s*[?]?$/iu.test(qLower)) return false;
+
+  const directImage =
+    /(?:vẽ|ve|tạo|tao|sinh|chỉnh\s*sửa|chinh\s*sua|sửa|edit|làm\s*nét|biến\s*đổi)\s+(?:lại\s+)?(?:cho\s+.*?\s+)?(?:ảnh|hình|bức\s*ảnh|tấm\s*ảnh|tranh|poster|avatar|chân\s*dung)/iu.test(qLower) ||
+    /^[/!](?:taoanh|veanh|draw|suaanh|chinhanh|chinhsuaanh|editanh|editimage|modifyimage|imagine|image)\b/iu.test(qLower) ||
+    /(?:dựa\s+(?:vào|theo)|theo)\s+(?:prompt|câu\s*lệnh|ý\s*tưởng|mô\s*tả)\s+.*?(?:vẽ|tạo|ảnh)/iu.test(qLower);
+
+  if (directImage) return true;
+
+  // Nếu có quoteText liên quan đến ảnh (yêu cầu vẽ ảnh, lời hứa hẹn tạo ảnh của bot, hoặc prompt ảnh)
+  if (quoteLower) {
+    const quoteHasImage = /(?:vẽ|tạo|xuất|sinh|trả|sửa)\s+(?:ảnh|hình|tranh|poster)|(?:bức|tấm)\s+ảnh|hệ\s*thống\s*codex|worker\s+kết\s*xuất|gemini.*?image|tool\s+tạo\s*ảnh/iu.test(quoteLower);
+    const isAffirmationOrRework =
+      /(?:^|[^\p{L}\p{N}])(?:ok(?:ela|ay|e)?|ừ|uh|u|dạ|vâng|được|dc|triển|chốt|tiến\s*hành)(?=$|[^\p{L}\p{N}])/iu.test(qLower) ||
+      /(?:vẽ|tạo|làm|sinh|sửa|chỉnh)\s*(?:lại|tiếp|luôn|ngay|đi|hộ|giúp)/iu.test(qLower);
+
+    if (quoteHasImage && isAffirmationOrRework) return true;
+  }
+
+  return false;
+}
+
 export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): boolean {
   const qLower = (question || "").toLowerCase().trim();
   const quoteLower = (quoteText || "").toLowerCase().trim();
@@ -127,10 +158,13 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
     return false;
   }
 
-  // 2. Kiểm tra voice request (chỉ khi không bị chặn bởi complaint)
+  // 2. Kiểm tra image request (trực tiếp hoặc quote xác nhận tạo ảnh)
+  if (isImageRequest(question, quoteText)) return true;
+
+  // 3. Kiểm tra voice request (chỉ khi không bị chặn bởi complaint)
   if (checkIsVoiceRequest(question, quoteText)) return true;
 
-  // 3. Kiểm tra music request: chỉ khi người dùng trực tiếp yêu cầu nhạc HOẶC quote nhạc kèm xác nhận
+  // 4. Kiểm tra music request: chỉ khi người dùng trực tiếp yêu cầu nhạc HOẶC quote nhạc kèm xác nhận
   if (checkIsMusicRequest(question)) return true;
   if (quoteLower && checkIsMusicRequest(quoteText)) {
     const isAffirmation =
@@ -168,12 +202,12 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
 
   if (isQuotingGeneratedArtifact && isReworkOrCritique) return true;
 
-  // Nhận diện nếu đang trích dẫn tin nhắn bot vừa soạn dàn ý hoặc hỏi tín hiệu xuất file
+  // Nhận diện nếu đang trích dẫn tin nhắn bot vừa soạn dàn ý hoặc hỏi tín hiệu xuất file/ảnh
   const isQuotingProposalOrDraft =
-    /(?:đóng\s*gói\s*thành\s*file|tải\s*về\s*máy|cho\s*em\s*tín\s*hiệu|xuất\s*file|soạn\s*thành\s*file|chuyển\s*đổi\s*sang|tạo\s*file|\.md|\.docx|\.pptx|\.xlsx)/iu.test(quoteText);
+    /(?:đóng\s*gói\s*thành\s*file|tải\s*về\s*máy|cho\s*em\s*tín\s*hiệu|xuất\s*file|soạn\s*thành\s*file|chuyển\s*đổi\s*sang|tạo\s*file|\.md|\.docx|\.pptx|\.xlsx|vẽ\s*ảnh|tạo\s*ảnh|trả\s*ảnh|kết\s*xuất|hệ\s*thống\s*codex|đợi\s*em.*?worker|nạp\s*lệnh\s*vào|tool\s*tạo\s*ảnh)/iu.test(quoteText);
   if (
     isQuotingProposalOrDraft &&
-    /(?:ok|oke|ừ|uh|u|dạ|vâng|được|triển|làm|soạn|gửi|trả|cho\s*mình|cho\s*anh|cho\s*em|tín\s*hiệu|file)/iu.test(qLower)
+    /(?:^|[^\p{L}\p{N}])(?:ok(?:ela|ay|e)?|ừ|uh|u|dạ|vâng|được|dc|triển|làm|soạn|gửi|trả|cho\s*mình|cho\s*anh|cho\s*em|tín\s*hiệu|file|tạo|vẽ)(?=$|[^\p{L}\p{N}])/iu.test(qLower)
   ) {
     return true;
   }
@@ -186,7 +220,8 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
     /(?:tạo|xuất|soạn|làm|dựng|quay|viết|gửi|lưu|thiết\s*kế|chuyển\s*(?:thành|sang|qua|lên|ra)?|đổi\s*(?:thành|sang|qua)?|bật|convert|generate|export|triển\s*khai|đọc\s*(?:giúp|hộ|cho|bằng)?|ngâm(?:\s+thơ)?|thu\s*âm|ghi\s*âm|vẽ(?:\s+lại)?|làm(?:\s+lại)?|thiết\s*kế(?:\s+lại)?|sửa(?:\s+lại)?|chỉnh(?:\s+lại)?|đóng\s*gói|gom|cho\s*vào|bỏ\s*vào|lưu\s*vào|nhét\s*vào|in\s*ra|trả\s*(?:file|cho)?|gửi\s*(?:file|cho)?|đưa\s*(?:file|cho)?|xin\s*(?:file)?|lấy\s*(?:file)?|tải\s*(?:file)?)/iu;
 
   const isAffirmativeFollowUp =
-    /^(?:ok(?:ela|ay|e)?|ừ|uh|u|dạ|da|vâng|vang|dc|được|chốt|nhất trí|duyệt|tiến hành)?[\s,.:;!-]*(?:soạn|làm|tạo|xuất|viết|triển\s*khai|chốt|triển|lên|đóng\s*gói|gom|trả\s*file|gửi\s*file|lấy\s*file|trả|gửi|lấy)\s*(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|luôn\s*đi|luôn\s*đi\s*e|luôn\s*hộ\s*e|luôn\s*nhé|luôn\s*nha|tiếp\s*đi|cho\s*mình\s*đi|cho\s*anh\s*đi|cho\s*em\s*đi|cho\s*mình|cho\s*anh|cho\s*em)?\b/iu.test(qLower.trim());
+    /^(?:ok(?:ela|ay|e)?|ừ|uh|u|dạ|da|vâng|vang|dc|được|chốt|nhất\s*trí|duyệt|tiến\s*hành)[\s,.:;!-]*(?:soạn|làm|tạo|xuất|viết|triển\s*khai|chốt|triển|lên|đóng\s*gói|gom|trả\s*file|gửi\s*file|lấy\s*file|trả|gửi|lấy|vẽ|sinh)?\s*(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|tiếp|luôn\s*đi|cho\s*mình|cho\s*anh|cho\s*em)?\b/iu.test(qLower.trim()) ||
+    /^(?:soạn|làm|tạo|xuất|viết|triển\s*khai|chốt|triển|lên|đóng\s*gói|gom|trả\s*file|gửi\s*file|lấy\s*file|trả|gửi|lấy|vẽ|sinh)\s*(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|tiếp|luôn\s*đi|cho\s*mình|cho\s*anh|cho\s*em)?\b/iu.test(qLower.trim());
 
   // Hành động nằm trong câu hỏi mới HOẶC nằm trong nội dung trích dẫn (khi câu hỏi mới là tag gọi bot hoặc xác nhận)
   const isQuotingActionRequest =
