@@ -1310,9 +1310,13 @@ const AGENT_TOOLS_DECLARATION = {
         type: "OBJECT",
         properties: {
           url: { type: "STRING", description: "Đường link video (TikTok, YouTube, Facebook, Instagram, Twitter...)" },
-          format: { type: "STRING", description: "Định dạng cần xuất: 'video' (mặc định tải video MP4) hoặc 'audio' (khi người dùng yêu cầu tách nhạc, lấy mp3, chỉ lấy âm thanh)" },
+          format: {
+            type: "STRING",
+            enum: ["video", "audio"],
+            description: "BẮT BUỘC CHỌN: 'audio' (khi người dùng yêu cầu tải mp3, tách nhạc, lấy âm thanh, audio); hoặc 'video' (khi người dùng yêu cầu tải video MP4, clip)",
+          },
         },
-        required: ["url"],
+        required: ["url", "format"],
       },
     },
     {
@@ -2088,6 +2092,18 @@ async function call9RouterAgentLoop(
         }
       }
 
+      if (fnName === "download_media_video") {
+        if (!fnArgs) fnArgs = {};
+        const reqText = `${user || ""}`.toLowerCase();
+        const wantsAudio = /(?:tách\s*nhạc|tach\s*nhac|lấy\s*nhạc|lay\s*nhac|tải\s*mp3|tai\s*mp3|\bmp3\b|\baudio\b|âm\s*thanh|am\s*thanh|tiếng|tieng|nhạc\s*nền|nhac\s*nen|tách\s*audio|tach\s*audio)/iu.test(reqText);
+        if (wantsAudio && fnArgs.format !== "audio") {
+          console.log(`[9router-agent] 🎵 Phát hiện yêu cầu âm thanh/MP3 từ người dùng, tự động ép format -> 'audio'`);
+          fnArgs.format = "audio";
+        } else if (!fnArgs.format) {
+          fnArgs.format = "video";
+        }
+      }
+
       options?.onToolCall?.(fnName, fnArgs);
       const result = await executeAgentTool(fnName, fnArgs);
 
@@ -2350,6 +2366,18 @@ export async function callGeminiAgentLoop(
             }
             if (options?.targetImageUrl && fc.args.isEdit === undefined) {
               fc.args.isEdit = true;
+            }
+          }
+
+          if (fc.name === "download_media_video") {
+            if (!fc.args) fc.args = {};
+            const reqText = `${user || ""}`.toLowerCase();
+            const wantsAudio = /(?:tách\s*nhạc|tach\s*nhac|lấy\s*nhạc|lay\s*nhac|tải\s*mp3|tai\s*mp3|\bmp3\b|\baudio\b|âm\s*thanh|am\s*thanh|tiếng|tieng|nhạc\s*nền|nhac\s*nen|tách\s*audio|tach\s*audio)/iu.test(reqText);
+            if (wantsAudio && fc.args.format !== "audio") {
+              console.log(`[gemini-agent] 🎵 Phát hiện yêu cầu âm thanh/MP3 từ người dùng, tự động ép format -> 'audio'`);
+              fc.args.format = "audio";
+            } else if (!fc.args.format) {
+              fc.args.format = "video";
             }
           }
           options?.onToolCall?.(fc.name, fc.args || {});

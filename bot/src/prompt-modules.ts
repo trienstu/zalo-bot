@@ -66,8 +66,8 @@ export function getPromptModuleVideoDownload(): string {
   return `\n- KỸ NĂNG TẢI VIDEO VÀ TÁCH ÂM THANH ĐA NỀN TẢNG (download_media_video):
   + Khi người dùng gửi đường link video (TikTok, YouTube, Facebook Video/Reels, Instagram, X/Twitter...) kèm yêu cầu tải video, tải clip, tách nhạc hoặc lấy audio:
     * BẮT BUỘC SỬ DỤNG CÔNG CỤ 'download_media_video'.
-    * NẾU NGƯỜI DÙNG YÊU CẦU TÁCH NHẠC / LẤY MP3 / CHỈ LẤY ÂM THANH: Đặt tham số 'format: "audio"'.
-    * NẾU NGƯỜI DÙNG YÊU CẦU TẢI VIDEO / CLIP (TIKTOK KHÔNG LOGO, FACEBOOK, YOUTUBE MP4): Đặt tham số 'format: "video"'.
+    * NẾU NGƯỜI DÙNG YÊU CẦU TÁCH NHẠC / TẢI MP3 / LẤY MP3 / BÀI HÁT / CHỈ LẤY ÂM THANH: BẮT BUỘC ĐẶT THAM SỐ 'format: "audio"'.
+    * NẾU NGƯỜI DÙNG YÊU CẦU TẢI VIDEO / CLIP (TIKTOK KHÔNG LOGO, FACEBOOK, YOUTUBE MP4): BẮT BUỘC ĐẶT THAM SỐ 'format: "video"'.
     * Hệ thống sẽ tự động tải file chuẩn H.264/MP3 và gửi trực tiếp đính kèm vào nhóm Zalo cho người dùng lưu về máy!\n`;
 }
 
