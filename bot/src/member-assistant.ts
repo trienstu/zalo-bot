@@ -1954,13 +1954,16 @@ QUY TẮC BẮT BUỘC:
       ? `\n=== DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT: ===\n${quoteLiveNews}\n`
       : "";
 
+    const userPromptContent = question ||
+      "Thành viên trích dẫn nội dung trên và gọi bạn hỗ trợ. Hãy đọc kỹ toàn bộ nội dung trích dẫn để thực thi chính xác (nếu trích dẫn là yêu cầu tạo ảnh/file/voice/nhạc thì kích hoạt tool tương ứng, nếu là câu hỏi/vấn đề cần giải đáp thì trả lời chuyên sâu, nếu là bài viết cần nhận xét thì đưa ra phản hồi sắc bén).";
+
     const quoteUserPrompt =
       `BẠN ĐANG TƯƠNG TÁC TẠI NHÓM "${currentGroupName}".\n` +
       `${recentChatContext}\n` +
       `=== NỘI DUNG ĐƯỢC TRÍCH DẪN (TỪ ${options.quote.senderName || "THÀNH VIÊN"}): ===\n` +
       `"${options.quote.text}"\n` +
       `${quoteDocSection}${quoteLinksSection}${quoteLiveNewsSection}\n` +
-      `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${question || "Hãy giải thích ngắn gọn nội dung này giúp tôi."}\n\n` +
+      `YÊU CẦU / ${isSuperAdmin ? "CHỈ ĐẠO TỪ SẾP" : "CÂU HỎI TỪ THÀNH VIÊN"} (${displayName}): ${userPromptContent}\n\n` +
       `HÃY TRẢ LỜI NGAY DỰA TRÊN DỮ LIỆU MỚI NHẤT ĐƯỢC CUNG CẤP:`;
 
     let answer = "";
@@ -3329,7 +3332,16 @@ export function parseImagePromptAndRatio(
     }
   }
 
-  const promptCandidate = quoteImageEditPrompt || extracted;
+  // Nếu câu hỏi rỗng hoặc chỉ có tag bot, nhưng trích dẫn (quote) có yêu cầu tạo ảnh (VD: quote lại "vẽ cho anh con rồng...", rồi tag bot)
+  let quoteTextPrompt = "";
+  if (!extracted && !quoteImageEditPrompt && quote?.text) {
+    const fromQuote = extractImagePromptFromText(quote.text, botName);
+    if (fromQuote) {
+      quoteTextPrompt = fromQuote;
+    }
+  }
+
+  const promptCandidate = quoteImageEditPrompt || quoteTextPrompt || extracted;
   if (!promptCandidate) return null;
 
   let cleaned = promptCandidate;

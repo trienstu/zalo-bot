@@ -38,6 +38,16 @@ export function checkIsVoiceRequest(question: string, quoteText = ""): boolean {
   const qLower = (question || "").toLowerCase().trim();
   const quoteLower = (quoteText || "").toLowerCase().trim();
 
+  // Bỏ qua nếu là câu chất vấn, phàn nàn ngược hoặc từ chối tạo file/voice
+  if (
+    /(?:sao|tại\s*sao|sao\s*lại)\s+.*?(?:gửi|đóng\s*gói|xuất|tạo|làm|sinh|soạn|vẽ|thu\s*âm|ghi\s*âm|phát\s+voice|voice|audio|làm\s*gì|chi\s*vậy|thế|hả|à)/iu.test(qLower) ||
+    /(?:không\s+yêu\s*cầu|ko\s+yêu\s*cầu|chưa\s+yêu\s*cầu|tự\s*nhiên\s+(?:gửi|xuất|tạo|làm|phát|thu)|ai\s+mượn|ai\s+bắt|ai\s+khiến|đâu\s+có\s+(?:bảo|kêu|nhờ|yêu\s*cầu))/iu.test(qLower) ||
+    /(?:đừng|không\s*cần|ko\s*cần|chưa\s*cần|thôi|hủy|bỏ\s*qua)\s+(?:tạo|làm|xuất|soạn|vẽ|sinh|gửi|đóng\s*gói|thu\s*âm|ghi\s*âm|phát\s+voice|voice|audio)/iu.test(qLower) ||
+    /^(?:không\s+cần|ko\s+cần|thôi|hủy)\s+(?:voice|giọng\s*đọc|audio)\b/iu.test(qLower)
+  ) {
+    return false;
+  }
+
   // Bỏ qua nếu chỉ là câu hỏi thăm dò năng lực thuần túy
   if (
     /^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|thu)?\s*(?:được|đc|duoc)?(?:\s+(?:thu|làm|tạo))?\s+(?:voice|âm\s*thanh|giọng\s*đọc)\s*(?:không|ko)?\s*(?:hả|nhỉ|hở|ạ|không|ko)\s*[?]?$/i.test(
@@ -103,33 +113,50 @@ export function checkIsVoiceRequest(question: string, quoteText = ""): boolean {
 }
 
 export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): boolean {
-  if (checkIsVoiceRequest(question, quoteText) || checkIsMusicRequest(question) || checkIsMusicRequest(quoteText)) return true;
+  const qLower = (question || "").toLowerCase().trim();
+  const quoteLower = (quoteText || "").toLowerCase().trim();
 
-  const combined = `${question || ""} ${quoteText || ""}`.toLowerCase();
-  const qLower = (question || "").toLowerCase();
-  const quoteLower = (quoteText || "").toLowerCase();
+  // 1. Chặn tuyệt đối các câu chất vấn, phàn nàn ngược ("sao gửi file word/excel/voice làm gì", "không yêu cầu", "ai mượn")
+  const isNegativeOrComplaint =
+    /(?:sao|tại\s*sao|sao\s*lại)\s+.*?(?:gửi|đóng\s*gói|xuất|tạo|làm|sinh|soạn|vẽ|thu\s*âm|ghi\s*âm|phát|file|word|excel|slide|voice|nhạc|ảnh|làm\s*gì|chi\s*vậy|thế|hả|à)/iu.test(qLower) ||
+    /(?:không\s+yêu\s*cầu|ko\s+yêu\s*cầu|chưa\s+yêu\s*cầu|tự\s*nhiên\s+(?:gửi|xuất|tạo|làm|sinh)|ai\s+mượn|ai\s+bắt|ai\s+khiến|đâu\s+có\s+(?:bảo|kêu|nhờ|yêu\s*cầu))/iu.test(qLower) ||
+    /(?:đừng|không\s*cần|ko\s*cần|chưa\s*cần|thôi|hủy|bỏ\s*qua)\s+(?:tạo|làm|xuất|soạn|vẽ|sinh|gửi|đóng\s*gói|thu\s*âm|ghi\s*âm|phát\s+voice)/iu.test(qLower) ||
+    /^(?:không\s+cần|ko\s+cần|thôi|hủy)\s+(?:file|slide|word|excel|voice|nhạc|ảnh)\b/iu.test(qLower);
 
-  // Bỏ qua nếu người dùng nói rõ là không cần / hủy / đừng làm file
-  if (/(?:đừng|không\s*cần|chưa\s*cần|thôi|hủy|bỏ\s*qua)\s+(?:tạo|làm|xuất|soạn|vẽ|sinh)/iu.test(qLower)) {
+  if (isNegativeOrComplaint) {
     return false;
   }
 
-  // Bỏ qua nếu chỉ là câu hỏi thăm dò năng lực thuần túy không có chủ đề cụ thể (VD: "em có biết tạo file không?", "bot có tạo được slide không hả?")
+  // 2. Kiểm tra voice request (chỉ khi không bị chặn bởi complaint)
+  if (checkIsVoiceRequest(question, quoteText)) return true;
+
+  // 3. Kiểm tra music request: chỉ khi người dùng trực tiếp yêu cầu nhạc HOẶC quote nhạc kèm xác nhận
+  if (checkIsMusicRequest(question)) return true;
+  if (quoteLower && checkIsMusicRequest(quoteText)) {
+    const isAffirmation =
+      /(?:ok|oke|ừ|uh|u|dạ|vâng|được|triển|làm\s*đi|tạo\s*đi|sáng\s*tác\s*đi|hát\s*đi|phối\s*đi)/iu.test(qLower);
+    if (isAffirmation) return true;
+  }
+
+  // 4. Bỏ qua nếu chỉ là câu hỏi thăm dò năng lực thuần túy không có chủ đề cụ thể (VD: "em có biết tạo file không?", "bot có tạo được slide không hả?")
   const isGenericCapabilityInquiry =
     /^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|xuất|soạn)?\s*(?:được|đc|duoc)?(?:\s+(?:tạo|làm|soạn|xuất))?\s+(?:file|slide|voice|ảnh|nhạc|tài\s*liệu)\s*(?:không|ko)?\s*(?:hả|nhỉ|hở|ạ|không|ko)\s*[?]?$/iu.test(
-      qLower.trim(),
+      qLower,
     );
   if (isGenericCapabilityInquiry) return false;
 
-  // Bỏ qua nếu là câu hỏi hỏi ý kiến / thăm dò công cụ / hỏi cách làm mà không có ý định ra lệnh tạo file
+  // 5. Bỏ qua nếu là câu hỏi hỏi ý kiến / thăm dò công cụ / hỏi cách làm mà không có ý định ra lệnh tạo file
   const isHypotheticalOrInquiry =
     /(?:có\s+(?:khó|dễ|nhanh|lâu|được|đc|tốn|mất)\s*(?:không|ko|chăng|hả|hở|nhỉ|ạ)|(?:^|[^\p{L}\p{N}])(?:bằng\s+cách\s+nào|như\s+thế\s+nào|làm\s+sao|app\s+gì|phần\s+mềm\s+gì|tool\s+gì|trang\s+web\s+nào|web\s+gì|công\s+cụ\s+gì|ở\s+đâu)(?=$|[^\p{L}\p{N}]))/iu.test(qLower);
   if (isHypotheticalOrInquiry && !/(?:hãy|giúp|cho\s*mình|cho\s*anh|cho\s*em|ngay|luôn)\b/iu.test(qLower)) {
     return false;
   }
 
-  const hasFileTarget =
-    /(?:powerpoint|slide|pptx|ppt|trình\s*chiếu|thuyết\s*trình|words?|docx|văn\s*bản\s*hành\s*chính|hợp\s*đồng|excel|excell|exel|xlsx|bảng\s*tính|báo\s*giá|csv|html|báo\s*cáo\s*web|pdf|markdown|\.md\b|file|tệp|voice|podcast|thu\s*âm|ghi\s*âm|audio|giọng\s*đọc|nhạc|bài\s*hát|ca\s*khúc|bản\s*nhạc|beat|track|poster|biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|hình\s*ảnh|ảnh|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/iu.test(combined);
+  const fileTargetRegex =
+    /(?:powerpoint|slide|pptx|ppt|trình\s*chiếu|thuyết\s*trình|words?|docx|văn\s*bản\s*hành\s*chính|hợp\s*đồng|excel|excell|exel|xlsx|bảng\s*tính|báo\s*giá|csv|html|báo\s*cáo\s*web|pdf|markdown|\.md\b|file|tệp|voice|podcast|thu\s*âm|ghi\s*âm|audio|giọng\s*đọc|nhạc|bài\s*hát|ca\s*khúc|bản\s*nhạc|beat|track|poster|biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|hình\s*ảnh|ảnh|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/iu;
+
+  const hasFileTargetInQuestion = fileTargetRegex.test(qLower);
+  const hasFileTargetInQuote = fileTargetRegex.test(quoteLower);
 
   // Nhận diện nếu đang trích dẫn một file/ảnh/biểu đồ/voice bot đã tạo trước đó
   const isQuotingGeneratedArtifact =
@@ -153,7 +180,7 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
 
   // Nhận diện cấu trúc ngữ pháp tự nhiên đưa nội dung vào/ra file hoặc voice (VD: "chuyển nó về dạng excell", "xuất thành file word")
   const hasStructuralDirection =
-    /(?:vào|ra|thành|sang|qua|lên|bằng|về|dưới|dạng)\s+(?:thành\s+)?(?:dạng\s+)?(?:file\s+)?(?:docx|words?|excel|excell|exel|xlsx|bảng\s*tính|pptx|ppt|powerpoint|slide|pdf|csv|txt|md|markdown|html|voice|audio)/iu.test(combined);
+    /(?:vào|ra|thành|sang|qua|lên|bằng|về|dưới|dạng)\s+(?:thành\s+)?(?:dạng\s+)?(?:file\s+)?(?:docx|words?|excel|excell|exel|xlsx|bảng\s*tính|pptx|ppt|powerpoint|slide|pdf|csv|txt|md|markdown|html|voice|audio)/iu.test(qLower);
 
   const actionPattern =
     /(?:tạo|xuất|soạn|làm|dựng|quay|viết|gửi|lưu|thiết\s*kế|chuyển\s*(?:thành|sang|qua|lên|ra)?|đổi\s*(?:thành|sang|qua)?|bật|convert|generate|export|triển\s*khai|đọc\s*(?:giúp|hộ|cho|bằng)?|ngâm(?:\s+thơ)?|thu\s*âm|ghi\s*âm|vẽ(?:\s+lại)?|làm(?:\s+lại)?|thiết\s*kế(?:\s+lại)?|sửa(?:\s+lại)?|chỉnh(?:\s+lại)?|đóng\s*gói|gom|cho\s*vào|bỏ\s*vào|lưu\s*vào|nhét\s*vào|in\s*ra|trả\s*(?:file|cho)?|gửi\s*(?:file|cho)?|đưa\s*(?:file|cho)?|xin\s*(?:file)?|lấy\s*(?:file)?|tải\s*(?:file)?)/iu;
@@ -164,19 +191,21 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
   // Hành động nằm trong câu hỏi mới HOẶC nằm trong nội dung trích dẫn (khi câu hỏi mới là tag gọi bot hoặc xác nhận)
   const isQuotingActionRequest =
     actionPattern.test(quoteLower) &&
+    hasFileTargetInQuote &&
     (qLower.length === 0 ||
       /(?:ok|oke|ừ|uh|u|dạ|vâng|được|triển|làm|soạn|gửi|nhé|nha|đi|giúp|hộ|em|bot|sen chúa|mộc miên)/iu.test(qLower));
 
   const hasAction = actionPattern.test(qLower) || isQuotingActionRequest;
 
   if (hasStructuralDirection) return true;
-  if (hasFileTarget && (hasAction || isAffirmativeFollowUp)) return true;
+  const hasFileTarget = hasFileTargetInQuestion || (hasFileTargetInQuote && isAffirmativeFollowUp);
+  if ((hasFileTarget || isQuotingActionRequest) && (hasAction || isAffirmativeFollowUp)) return true;
 
   const isCodeOrChart =
-    /(?:vẽ|tạo|xuất|lập|thiết\s*kế|làm|soạn|sinh|render)(?:\s+lại)?\s*(?:cho\s*.*?\s*)?(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|poster|ảnh|hình|tranh|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/iu.test(combined) ||
-    /(?:biểu\s*đồ|đồ\s*họa|poster|infographic|hình\s*ảnh|bức\s*ảnh|tấm\s*ảnh).*?(?:làm\s*lại|sửa\s*lại|vẽ\s*lại|cẩn\s*thận|đẹp\s*hơn|chuyên\s*nghiệp)/iu.test(combined) ||
+    /(?:vẽ|tạo|xuất|lập|thiết\s*kế|làm|soạn|sinh|render)(?:\s+lại)?\s*(?:cho\s*.*?\s*)?(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|poster|ảnh|hình|tranh|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/iu.test(qLower) ||
+    /(?:biểu\s*đồ|đồ\s*họa|poster|infographic|hình\s*ảnh|bức\s*ảnh|tấm\s*ảnh).*?(?:làm\s*lại|sửa\s*lại|vẽ\s*lại|cẩn\s*thận|đẹp\s*hơn|chuyên\s*nghiệp)/iu.test(qLower) ||
     /^[/!](?:taoanh|veanh|draw|plot|chart|suaanh|chinhanh|chinhsuaanh|editanh|editimage|modifyimage|imagine|image)\b/iu.test(qLower) ||
-    /(?:sửa|chỉnh\s*sửa|chỉnh|edit|thay|đổi|xoá|xóa|làm\s*nét|biến\s*đổi|phục\s*chế)\s+(?:ảnh|hình|bức\s*ảnh|tấm\s*ảnh|phông|nền|background|tóc|áo|quần|váy|kính|màu|người)/iu.test(combined) ||
+    /(?:sửa|chỉnh\s*sửa|chỉnh|edit|thay|đổi|xoá|xóa|làm\s*nét|biến\s*đổi|phục\s*chế)\s+(?:ảnh|hình|bức\s*ảnh|tấm\s*ảnh|phông|nền|background|tóc|áo|quần|váy|kính|màu|người)/iu.test(qLower) ||
     /(?:dựa\s+(?:vào|theo)|theo)\s+(?:prompt|câu\s*lệnh|ý\s*tưởng|mô\s*tả)\b/iu.test(qLower) ||
     /(?:chạy|viết|run|execute)\s*(?:code|mã|script)\s*(?:python|py)/iu.test(qLower);
 

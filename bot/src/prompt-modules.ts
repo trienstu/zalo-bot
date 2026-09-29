@@ -1,5 +1,6 @@
 import { getSystemArchitectureProfile, isSystemArchitectureQuery } from "./system-architecture.js";
 import { checkIsFileOrVoiceGeneration } from "./tools/file-generator.js";
+import { checkIsMusicRequest } from "./tools/music-generator.js";
 import { isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
 
 export function getPromptModuleDocGen(): string {
@@ -58,6 +59,8 @@ export function buildDynamicSystemPromptModules(params: {
   isSuperAdmin: boolean;
 }): string {
   const { question, quoteText = "", botName, isSuperAdmin } = params;
+  const qTrim = (question || "").trim().toLowerCase();
+  const quoteTrim = (quoteText || "").trim().toLowerCase();
   const combinedText = `${question} ${quoteText}`;
   let extraModules = "";
 
@@ -67,23 +70,29 @@ export function buildDynamicSystemPromptModules(params: {
   }
 
   // 2. Module tạo / xuất tài liệu văn phòng (Word, Excel, PowerPoint, CSV, MD, Voice)
-  const isDocOrFileGen =
-    checkIsFileOrVoiceGeneration(question, quoteText) ||
-    /(?:tạo|tao|xuất|xuat|soạn|soan|đóng gói|dong goi|chuyển thành|chuyen thanh|lưu vào|luu vao|trả file|tra file|chuyển đổi|chuyen doi)\s+(?:file|slide|powerpoint|word|excel|docx|xlsx|pptx|markdown|\.md|csv|html)/i.test(combinedText);
+  const isDocOrFileGen = checkIsFileOrVoiceGeneration(question, quoteText);
   if (isDocOrFileGen) {
     extraModules += getPromptModuleDocGen();
   }
 
-  // 3. Module âm nhạc Suno AI
-  const isMusicGen = /(?:tạo nhạc|tao nhac|sáng tác|sang tac|bài hát|bai hat|ca khúc|ca khuc|phối beat|phoi beat|viết nhạc|viet nhac|suno|giai điệu|giai dieu|làm nhạc|lam nhac)/i.test(combinedText);
+  // 3. Module âm nhạc Suno AI (chỉ kích hoạt khi hỏi nhạc hoặc quote nhạc kèm xác nhận)
+  const isMusicGen =
+    checkIsMusicRequest(question) ||
+    (Boolean(quoteTrim) &&
+      checkIsMusicRequest(quoteTrim) &&
+      /(?:ok|oke|ừ|uh|u|dạ|vâng|được|triển|làm\s*đi|tạo\s*đi|sáng\s*tác\s*đi|hát\s*đi|phối\s*đi)/iu.test(qTrim));
   if (isMusicGen) {
     extraModules += getPromptModuleMediaGen();
   }
 
   // 4. Module Python đồ thị / Infographic poster
   const isPythonChart =
-    /(?:vẽ|ve|tạo|tao|thiết kế|thiet ke|vẽ lại|ve lai)\s+(?:biểu đồ|bieu do|đồ thị|do thi|sơ đồ|so do|mindmap|infographic|poster|bảng xếp hạng|bang xep hang|lịch thi đấu|lich thi dau|chart)/i.test(combinedText) ||
-    /python_interpreter/i.test(combinedText);
+    /(?:vẽ|ve|tạo|tao|thiết kế|thiet ke|vẽ lại|ve lai)\s+(?:biểu đồ|bieu do|đồ thị|do thi|sơ đồ|so do|mindmap|infographic|poster|bảng xếp hạng|bang xep hang|lịch thi đấu|lich thi dau|chart)/i.test(
+      question,
+    ) ||
+    /python_interpreter/i.test(question) ||
+    (/(?:biểu\s*đồ|hình\s*ảnh|chart|poster)/iu.test(quoteTrim) &&
+      /(?:làm\s*lại|vẽ\s*lại|sửa\s*lại|chỉnh\s*lại|cẩn\s*thận|đẹp\s*hơn)/iu.test(qTrim));
   if (isPythonChart) {
     extraModules += getPromptModulePythonChart();
   }

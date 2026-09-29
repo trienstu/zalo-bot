@@ -115,25 +115,21 @@ export function extractCleanUserQuery(question: string, quoteText = ""): string 
   let clean = question
     .replace(/@\S+/g, "")
     .replace(/(?<=^|[^\p{L}\p{N}])(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot)(?=[^\p{L}\p{N}]|$)/giu, "")
-    // Xóa tiền tố mệnh lệnh/tra cứu thường gặp ở đầu câu
-    .replace(/^(?:check|kiểm tra|kiem tra|xem|tra cứu|tra cuu|hỏi|hoi)\s+/iu, "")
-    // Xóa từ xưng hô, đệm, trợ từ câu hỏi đuôi
-    .replace(/(?<=^|[^\p{L}\p{N}])(?:có|chưa|rồi|khi nào|bao giờ|ở đâu|sắp tới đó|sắp tới|vừa qua|cho a|cho anh|cho em|giúp anh|giúp a|giúp em|với anh|với a|với em|nhé|nha|ạ|với|đó|vậy|thế|nhỉ|hả|hử|sao)(?=[^\p{L}\p{N}]|$)/giu, "")
-    .replace(/[\/?.!,]+/g, " ")
+    // Chỉ xóa tiền tố mệnh lệnh tra cứu đơn thuần ở đầu câu nếu có
+    .replace(/^(?:check|kiểm tra|kiem tra|tra cứu|tra cuu)\s+/iu, "")
     .replace(/\s+/g, " ")
     .trim();
 
   const isPureFeedbackOrQuestionParticle =
     /^(?:e\s+nhầm|em\s+nhầm|nhầm|sai|sai\s+rồi|nhầm\s+rồi|bị\s+lú|bị\s+ngáo|lú|ngáo|nhầm\s+vậy)$/i.test(clean);
 
-  if ((clean.length < 3 || isPureFeedbackOrQuestionParticle) && quoteText) {
+  if ((clean.length < 2 || isPureFeedbackOrQuestionParticle) && quoteText) {
     clean = quoteText
       .replace(/@\S+/g, "")
-      .replace(/[\/?.!,]+/g, " ")
       .replace(/\s+/g, " ")
       .trim();
   }
-  return clean.slice(0, 100);
+  return clean;
 }
 
 function isAdvisoryComparison(text: string): boolean {

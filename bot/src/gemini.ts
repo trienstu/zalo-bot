@@ -635,7 +635,7 @@ export async function call9Router(
   }
 
   const baseUrl = (router.baseUrl || "http://127.0.0.1:20128/v1").replace(/\/+$/, "");
-  const targetModel = options?.model || router.chatModel || "ag/gemini-3.1-pro-low";
+  const targetModel = options?.model || router.chatModel || "ag/gemini-3.8-flash-low";
   const timeoutMs = options?.timeoutMs || router.timeoutMs || 90_000;
 
   const allMedia = [...(options?.images || []), ...(options?.mediaParts || [])];
@@ -768,7 +768,7 @@ export async function callGemini(
   if (hybridAgentSettings?.nineRouter?.enabled && hybridAgentSettings.nineRouter.apiKey && !isSearchEnabled && !hasPdfMedia) {
     const primaryRouterModel = (primaryModel.startsWith("ag/") || primaryModel.startsWith("cx/"))
       ? primaryModel
-      : (hybridAgentSettings.nineRouter.chatModel || "ag/gemini-3.1-pro-low");
+      : (hybridAgentSettings.nineRouter.chatModel || "ag/gemini-3.8-flash-low");
     try {
       console.log(`[gemini] 🧠 Ưu tiên sử dụng 9Router siêu tốc (Tầng 1): ${primaryRouterModel}`);
       const routerRes = await call9Router(effectiveSystem, user, {
@@ -1875,7 +1875,7 @@ async function call9RouterAgentLoop(
   if (!router?.enabled || !router.apiKey) return null;
 
   const baseUrl = (router.baseUrl || "http://127.0.0.1:20128/v1").replace(/\/+$/, "");
-  let targetModel = options?.model || router.chatModel || "ag/gemini-3.1-pro-low";
+  let targetModel = options?.model || router.chatModel || "ag/gemini-3.8-flash-low";
   // Nếu model truyền vào không có prefix ag/ hoặc cx/ (ví dụ 'gemini-3.7-flash', 'gemini-3.8-flash'):
   // Chuẩn hóa sang model 9Router tương ứng có prefix hợp lệ
   if (!targetModel.startsWith("ag/") && !targetModel.startsWith("cx/")) {
@@ -1888,7 +1888,7 @@ async function call9RouterAgentLoop(
     } else {
       targetModel = (router.chatModel && (router.chatModel.startsWith("ag/") || router.chatModel.startsWith("cx/")))
         ? router.chatModel
-        : "ag/gemini-3.1-pro-low";
+        : "ag/gemini-3.8-flash-low";
     }
   }
   const configuredTimeout = options?.timeoutMs || (options as any)?.timeoutMs || router.timeoutMs || 45_000;

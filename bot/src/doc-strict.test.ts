@@ -62,3 +62,37 @@ test("Nhận diện cú pháp /doc và link doc nghiêm ngặt", () => {
   );
   assert.equal(hasGoogleDocUrl("https://google.com/search"), false);
 });
+
+test("checkIsFileOrVoiceGeneration chặn khiếu nại và ngăn quote thụ động cướp quyền", async () => {
+  const { checkIsFileOrVoiceGeneration } = await import("./tools/file-generator.js");
+  const { buildDynamicSystemPromptModules } = await import("./prompt-modules.js");
+
+  // 1. Chặn phàn nàn / khiếu nại ngược
+  assert.equal(checkIsFileOrVoiceGeneration("sao lại gửi file word làm gì thế"), false);
+  assert.equal(checkIsFileOrVoiceGeneration("tại sao tự nhiên xuất file excel chi vậy bot"), false);
+  assert.equal(checkIsFileOrVoiceGeneration("ai mượn gửi voice"), false);
+  assert.equal(checkIsFileOrVoiceGeneration("không yêu cầu tạo file slide nha"), false);
+  assert.equal(checkIsFileOrVoiceGeneration("đừng làm file nữa nhé"), false);
+
+  // 2. Quote thụ động có nhắc tới file/nhạc nhưng người dùng chỉ hỏi bình thường
+  const passiveQuoteWithFile = "Em đã chuẩn bị sẵn file word và excel báo cáo tài chính cho anh.";
+  assert.equal(checkIsFileOrVoiceGeneration("thủ đô của Pháp là gì?", passiveQuoteWithFile), false);
+  assert.equal(checkIsFileOrVoiceGeneration("giá vàng hôm nay sao rồi bot", passiveQuoteWithFile), false);
+
+  // 3. Prompt modules không bị nhiễm quote thụ động
+  const modules = buildDynamicSystemPromptModules({
+    question: "thời tiết hôm nay thế nào?",
+    quoteText: passiveQuoteWithFile,
+    botName: "Sen Chúa",
+    isSuperAdmin: false,
+  });
+  assert.equal(modules.includes("generate_file"), false);
+  assert.equal(modules.includes("generate_music"), false);
+  assert.equal(modules.includes("python_interpreter"), false);
+
+  // 4. Khi người dùng xác nhận rõ ràng hoặc ra lệnh trực tiếp thì vẫn kích hoạt chuẩn xác
+  assert.equal(checkIsFileOrVoiceGeneration("ok soạn luôn đi e", passiveQuoteWithFile), true);
+  assert.equal(checkIsFileOrVoiceGeneration("tạo file word cho mình", ""), true);
+  assert.equal(checkIsFileOrVoiceGeneration("xuất slide pptx về dự án này", ""), true);
+});
+

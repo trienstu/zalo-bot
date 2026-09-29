@@ -223,15 +223,15 @@ test("extractCleanUserQuery bóc tách sạch sẽ và bảo toàn nguyên vẹn
   const cases = [
     {
       input: "có lịch thi đấu fifa asean cup 2026 chưa sen chúa mộc miên",
-      expected: "lịch thi đấu fifa asean cup 2026",
+      expected: "có lịch thi đấu fifa asean cup 2026 chưa",
     },
     {
       input: "check giá vàng sjc hôm nay bao nhiêu vậy bot",
-      expected: "giá vàng sjc hôm nay bao nhiêu",
+      expected: "giá vàng sjc hôm nay bao nhiêu vậy",
     },
     {
       input: "xem tỷ số trận real madrid vs barca vừa qua với",
-      expected: "tỷ số trận real madrid vs barca",
+      expected: "xem tỷ số trận real madrid vs barca vừa qua với",
     },
   ];
 
