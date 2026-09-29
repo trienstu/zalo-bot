@@ -238,6 +238,127 @@ export interface DownloadFileResult {
 }
 
 /**
+ * Trích xuất toàn bộ văn bản và ghi chú từng trang từ file PowerPoint (.pptx)
+ */
+export async function extractTextFromPptx(buffer: Buffer, fileName = "presentation.pptx"): Promise<string | null> {
+  const tempPptxPath = path.join("/tmp", `pptx_extract_${Date.now()}_${Math.random().toString(36).slice(2)}.pptx`);
+  try {
+    fs.writeFileSync(tempPptxPath, buffer);
+    const { execFile } = await import("child_process");
+    const { promisify } = await import("util");
+    const execFileAsync = promisify(execFile);
+
+    const { stdout: listOut } = await execFileAsync("unzip", ["-Z", "-1", tempPptxPath]);
+    const files = listOut.split("\n").map((f) => f.trim()).filter(Boolean);
+
+    const slideEntries = files.filter((p) => /^ppt\/slides\/slide\d+\.xml$/i.test(p));
+    slideEntries.sort((a, b) => {
+      const numA = parseInt(a.match(/slide(\d+)\.xml/i)?.[1] || "0", 10);
+      const numB = parseInt(b.match(/slide(\d+)\.xml/i)?.[1] || "0", 10);
+      return numA - numB;
+    });
+
+    if (slideEntries.length === 0) return null;
+
+    const slideSections: string[] = [];
+
+    for (const entry of slideEntries) {
+      const slideNum = entry.match(/slide(\d+)\.xml/i)?.[1] || "";
+      try {
+        const { stdout: slideXml } = await execFileAsync("unzip", ["-p", tempPptxPath, entry]);
+        const textLines = slideXml
+          .replace(/<a:p[^>]*>/g, "\n")
+          .replace(/<a:br[^>]*\/>/g, "\n")
+          .replace(/<[^>]+>/g, "")
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .replace(/&amp;/g, "&")
+          .replace(/&quot;/g, '"')
+          .replace(/&apos;/g, "'")
+          .split("\n")
+          .map((l) => l.trim())
+          .filter(Boolean);
+
+        let notesText = "";
+        const noteEntry = `ppt/notesSlides/notesSlide${slideNum}.xml`;
+        if (files.includes(noteEntry)) {
+          try {
+            const { stdout: noteXml } = await execFileAsync("unzip", ["-p", tempPptxPath, noteEntry]);
+            const noteLines = noteXml
+              .replace(/<a:p[^>]*>/g, "\n")
+              .replace(/<[^>]+>/g, "")
+              .replace(/&lt;/g, "<")
+              .replace(/&gt;/g, ">")
+              .replace(/&amp;/g, "&")
+              .replace(/&quot;/g, '"')
+              .replace(/&apos;/g, "'")
+              .split("\n")
+              .map((l) => l.trim())
+              .filter(Boolean);
+            if (noteLines.length > 0) {
+              notesText = `\n  • [Speaker Notes / Ghi chú]: ${noteLines.join(" | ")}`;
+            }
+          } catch {}
+        }
+
+        if (textLines.length > 0) {
+          slideSections.push(`[SLIDE ${slideNum}]\n${textLines.join("\n")}${notesText}`);
+        }
+      } catch (slideErr) {
+        console.warn(`[gemini] Lỗi đọc slide ${entry}:`, slideErr);
+      }
+    }
+
+    if (slideSections.length > 0) {
+      return `=== BÀI THUYẾT TRÌNH POWERPOINT: ${fileName} (${slideSections.length} SLIDE) ===\n\n${slideSections.join("\n\n---\n\n")}`;
+    }
+    return null;
+  } catch (err) {
+    console.warn(`[gemini] Lỗi trích xuất text từ PPTX:`, err);
+    return null;
+  } finally {
+    try { fs.unlinkSync(tempPptxPath); } catch {}
+  }
+}
+
+/**
+ * Trích xuất toàn bộ dữ liệu bảng tính từ file Excel (.xlsx)
+ */
+export async function extractTextFromXlsx(buffer: Buffer, fileName = "sheet.xlsx"): Promise<string | null> {
+  try {
+    const ExcelJS = (await import("exceljs")).default;
+    const workbook = new ExcelJS.Workbook();
+    // @ts-expect-error exceljs buffer input
+    await workbook.xlsx.load(buffer);
+
+    const sheetSummaries: string[] = [];
+    workbook.eachSheet((worksheet) => {
+      const rows: string[] = [];
+      worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+        if (rowNumber > 50) return;
+        const values = Array.isArray(row.values)
+          ? row.values.slice(1).map((v) => (v !== null && v !== undefined ? String(v).trim() : ""))
+          : [];
+        if (values.some((v) => v.length > 0)) {
+          rows.push(`| ${values.join(" | ")} |`);
+        }
+      });
+      if (rows.length > 0) {
+        sheetSummaries.push(`### Sheet: ${worksheet.name} (${worksheet.rowCount} dòng)\n${rows.slice(0, 50).join("\n")}`);
+      }
+    });
+
+    if (sheetSummaries.length > 0) {
+      return `=== TÀI LIỆU BẢNG TÍNH EXCEL: ${fileName} ===\n\n${sheetSummaries.join("\n\n")}`;
+    }
+    return null;
+  } catch (err) {
+    console.warn(`[gemini] Lỗi trích xuất text từ Excel .xlsx:`, err);
+    return null;
+  }
+}
+
+/**
  * Tải và giải mã nội dung tài liệu (PDF, Text, Code, CSV, JSON, Audio, Image).
  * Hỗ trợ cả file cục bộ trong ổ cứng lẫn URL tải qua mạng.
  * Giới hạn an toàn 50MB để tránh tràn RAM VPS và timeout.
@@ -423,8 +544,23 @@ export async function downloadFileContent(
       }
     }
 
+    const isPkZip = buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4b && buffer[2] === 0x03 && buffer[3] === 0x04;
+    const isPptx = ext === "pptx" || (isPkZip && (buffer.includes(Buffer.from("ppt/presentation.xml")) || buffer.includes(Buffer.from("ppt/slides/"))));
+    const isDocx = ext === "docx" || detectedMime.includes("wordprocessingml") || (isPkZip && buffer.includes(Buffer.from("word/document.xml")));
+    const isXlsx = ext === "xlsx" || detectedMime.includes("spreadsheetml") || (isPkZip && (buffer.includes(Buffer.from("xl/workbook.xml")) || buffer.includes(Buffer.from("xl/worksheets/"))));
+
+    // 1.4 File PowerPoint (.pptx): Bóc tách toàn bộ slide, tiêu đề, bullet points & Speaker Notes
+    if (isPptx) {
+      const pptxText = await extractTextFromPptx(buffer, fileName || "presentation.pptx");
+      if (pptxText && pptxText.trim().length >= 10) {
+        saveDocumentOcrCache(fileHash, targetUrl, fileName || "presentation.pptx", pptxText, 1);
+        console.log(`[gemini] 📊 Đã trích xuất ${pptxText.length.toLocaleString("vi-VN")} ký tự văn bản từ PowerPoint .pptx "${fileName || "tài liệu"}"`);
+        return { textContent: pptxText };
+      }
+    }
+
     // 1.5 File Word (.docx): Bóc tách toàn bộ Text từ word/document.xml
-    if (ext === "docx" || detectedMime.includes("wordprocessingml") || (buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4b && ext === "docx")) {
+    if (isDocx) {
       try {
         const tempDocxPath = path.join("/tmp", `docx_extract_${Date.now()}_${Math.random().toString(36).slice(2)}.docx`);
         fs.writeFileSync(tempDocxPath, buffer);
@@ -459,7 +595,17 @@ export async function downloadFileContent(
       }
     }
 
-    // 1.6 File nén Archive (ZIP, RAR, 7Z, TAR...): Lưu tạm ra đĩa để batch worker xử lý
+    // 1.55 File Excel (.xlsx): Bóc tách dữ liệu các Sheet thành bảng Markdown
+    if (isXlsx) {
+      const xlsxText = await extractTextFromXlsx(buffer, fileName || "sheet.xlsx");
+      if (xlsxText && xlsxText.trim().length >= 10) {
+        saveDocumentOcrCache(fileHash, targetUrl, fileName || "sheet.xlsx", xlsxText, 1);
+        console.log(`[gemini] 📈 Đã trích xuất ${xlsxText.length.toLocaleString("vi-VN")} ký tự bảng tính từ Excel .xlsx "${fileName || "tài liệu"}"`);
+        return { textContent: xlsxText };
+      }
+    }
+
+    // 1.6 File nén Archive (ZIP, RAR, 7Z, TAR...): Chỉ áp dụng cho file nén thực sự (không phải Office OpenXML)
     const isZip =
       ext === "zip" ||
       ext === "rar" ||
@@ -467,9 +613,8 @@ export async function downloadFileContent(
       ext === "tar" ||
       ext === "gz" ||
       ext === "bz2" ||
-      (detectedMime.includes("zip") && ext !== "docx" && ext !== "xlsx" && ext !== "pptx") ||
-      (detectedMime.includes("compressed") || detectedMime.includes("tar") || detectedMime.includes("rar") || detectedMime.includes("7z")) ||
-      (buffer.length >= 4 && buffer[0] === 0x50 && buffer[1] === 0x4b && buffer[2] === 0x03 && buffer[3] === 0x04 && ext !== "docx" && ext !== "xlsx" && ext !== "pptx");
+      ((detectedMime.includes("zip") || isPkZip) && !isPptx && !isDocx && !isXlsx) ||
+      (detectedMime.includes("compressed") || detectedMime.includes("tar") || detectedMime.includes("rar") || detectedMime.includes("7z"));
 
     if (isZip) {
       const cleanSafeName = (fileName || "archive.zip").replace(/[^a-zA-Z0-9._-]/g, "_");

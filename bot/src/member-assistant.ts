@@ -1270,8 +1270,8 @@ async function handleHistoryQA(
   let targetUrl = (rawTargetUrl && isMediaOrDocUrl(rawTargetUrl)) ? rawTargetUrl : undefined;
   let fileName = options?.fileAttachment?.name || options?.quote?.fileAttachment?.name || "";
 
-  if (!fileName && options?.quote?.text) {
-    const fnMatch = options.quote.text.match(/^([^—–\n\r]+?\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar\.gz|tar|mp3|wma|wav|m4a))/i);
+  if ((!fileName || fileName.toLowerCase() === "tài liệu" || !fileName.includes(".")) && options?.quote?.text) {
+    const fnMatch = options.quote.text.match(/([^—–\n\r\t]+\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar\.gz|tar|mp3|wma|wav|m4a))/i);
     if (fnMatch && fnMatch[1]) {
       fileName = fnMatch[1].trim();
     }
@@ -1369,8 +1369,11 @@ async function handleHistoryQA(
       fileTextContent = fileRes.textContent;
       console.log(`[member-assistant] ✅ Đã đọc file văn bản thành công (${fileTextContent.length} ký tự)`);
     } else if (fileRes?.isZip && fileRes.zipFilePath) {
-      if (options?.api) {
-        console.log(`[member-assistant] 📦 Phát hiện file nén [${fileName}] trong nhóm, tự động kích hoạt Batch Audio Processor...`);
+      const isBatchAudioReq =
+        /(?:bóc\s*băng|boc\s*bang|chép\s*lời|chep\s*loi|tách\s*lời|dịch\s*thoại|audio\s*batch|bài\s*nghe|chép\s*audio)/i.test(question) ||
+        /\b(?:audio|mp3|wav|wma)\b/i.test(fileName);
+      if (options?.api && isBatchAudioReq) {
+        console.log(`[member-assistant] 📦 Phát hiện file nén âm thanh [${fileName}] trong nhóm, tự động kích hoạt Batch Audio Processor...`);
         void runBatchAudioJob({
           api: options.api,
           sender: options.sender || "",
@@ -1383,6 +1386,8 @@ async function handleHistoryQA(
           userPrompt: question,
         }).catch((err) => console.error("[member-assistant] Lỗi runBatchAudioJob:", err));
         return "";
+      } else {
+        console.log(`[member-assistant] 📦 Nhận file nén [${fileName}], không phải yêu cầu bóc băng audio, bỏ qua batch audio.`);
       }
     }
   }

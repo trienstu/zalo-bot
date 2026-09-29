@@ -399,11 +399,11 @@ export function extractQuote(payload: any): QuotedMessage | null {
     ""
   ).trim();
 
-  if (!quoteFileName) {
+  if (!quoteFileName || quoteFileName.toLowerCase() === "tài liệu" || !quoteFileName.includes(".")) {
     const candidate = text || String(quote.msg || quote.text || "");
     const fileMatch =
       candidate.match(/^(?:\[File\]|File\s*[·:\-–—]?)\s*(.+)$/i) ||
-      candidate.match(/^([^—–\n\r]+?\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar\.gz|tar|mp3|wma|wav|m4a))/i);
+      candidate.match(/([^—–\n\r\t]+\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar\.gz|tar|mp3|wma|wav|m4a))/i);
     if (fileMatch && fileMatch[1]) {
       quoteFileName = fileMatch[1].trim();
     }
@@ -518,10 +518,10 @@ export function extractFileAttachment(payload: any): FileAttachment | null {
 
   // Nếu không có trong metadata, trích xuất từ nội dung text của tin nhắn: "Tên_File.zip — https://..."
   const rawMsg = String(data?.msg || data?.text || payload?.message || payload?.text || "").trim();
-  if (!name && rawMsg) {
+  if ((!name || name.toLowerCase() === "tài liệu" || !name.includes(".")) && rawMsg) {
     const nameMatch =
       rawMsg.match(/^(?:\[File\]|File\s*[·:\-–—]?)\s*([^\n\r—–]+)/i) ||
-      rawMsg.match(/^([^—–\n\r]+?\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar\.gz|tar|mp3|wma|wav|m4a))/i);
+      rawMsg.match(/([^—–\n\r\t]+\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar\.gz|tar|mp3|wma|wav|m4a))/i);
     if (nameMatch && nameMatch[1]) {
       name = nameMatch[1].trim();
     }

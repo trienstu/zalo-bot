@@ -2226,8 +2226,8 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     event.quote?.fileAttachment?.name ||
     "";
 
-  if (!fileName && event.quote?.text) {
-    const fnMatch = event.quote.text.match(/^([^—–\n\r]+?\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar\.gz|tar|mp3|wma|wav|m4a))/i);
+  if ((!fileName || fileName.toLowerCase() === "tài liệu" || !fileName.includes(".")) && event.quote?.text) {
+    const fnMatch = event.quote.text.match(/([^—–\n\r\t]+\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar\.gz|tar|mp3|wma|wav|m4a))/i);
     if (fnMatch && fnMatch[1]) {
       fileName = fnMatch[1].trim();
     }
@@ -2240,8 +2240,8 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     }
   }
 
-  if (!fileName && rawText) {
-    const fnMatch = rawText.match(/^([^—–\n\r]+?\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar\.gz|tar|mp3|wma|wav|m4a))/i);
+  if ((!fileName || fileName.toLowerCase() === "tài liệu" || !fileName.includes(".")) && rawText) {
+    const fnMatch = rawText.match(/([^—–\n\r\t]+\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar\.gz|tar|mp3|wma|wav|m4a))/i);
     if (fnMatch && fnMatch[1]) {
       fileName = fnMatch[1].trim();
     }
@@ -2336,25 +2336,32 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         timestamp: Date.now(),
       });
     } else if (fileRes?.isZip && fileRes.zipFilePath) {
-      console.log(`[admin-assistant] 📦 Phát hiện file nén [${fileName}], tự động kích hoạt Batch Audio Processor...`);
-      lastUploadedZipFiles.set(sender, {
-        name: fileName || "Tai_Lieu_Audio.zip",
-        filePath: fileRes.zipFilePath,
-        timestamp: Date.now(),
-      });
-      void runBatchAudioJob({
-        api,
-        sender,
-        isGroup: false,
-        userGreeting,
-        displayName,
-        zipFilePath: fileRes.zipFilePath,
-        originalFileName: fileName || "Tai_Lieu_Audio.zip",
-        userPrompt: rawText,
-      }).catch((err) => {
-        console.error("[admin-assistant] Lỗi runBatchAudioJob:", err);
-      });
-      return;
+      const isBatchAudioReq =
+        /(?:bóc\s*băng|boc\s*bang|chép\s*lời|chep\s*loi|tách\s*lời|dịch\s*thoại|audio\s*batch|bài\s*nghe|chép\s*audio)/i.test(rawText) ||
+        /\b(?:audio|mp3|wav|wma)\b/i.test(fileName);
+      if (isBatchAudioReq) {
+        console.log(`[admin-assistant] 📦 Phát hiện file nén âm thanh [${fileName}], tự động kích hoạt Batch Audio Processor...`);
+        lastUploadedZipFiles.set(sender, {
+          name: fileName || "Tai_Lieu_Audio.zip",
+          filePath: fileRes.zipFilePath,
+          timestamp: Date.now(),
+        });
+        void runBatchAudioJob({
+          api,
+          sender,
+          isGroup: false,
+          userGreeting,
+          displayName,
+          zipFilePath: fileRes.zipFilePath,
+          originalFileName: fileName || "Tai_Lieu_Audio.zip",
+          userPrompt: rawText,
+        }).catch((err) => {
+          console.error("[admin-assistant] Lỗi runBatchAudioJob:", err);
+        });
+        return;
+      } else {
+        console.log(`[admin-assistant] 📦 Nhận file nén [${fileName}], không phải yêu cầu bóc băng audio, bỏ qua batch audio.`);
+      }
     } else {
       // Báo rõ lỗi tải file theo đúng danh xưng của người dùng
       if (fileRes?.error === "UNSUPPORTED_IMAGE_FORMAT") {
