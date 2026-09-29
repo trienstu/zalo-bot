@@ -197,3 +197,35 @@ test("isQuickMarkdownExportRequest chặn khiếu nại và chỉ kích hoạt k
   assert.equal(isQuickMarkdownExportRequest("cho anh xin file md câu trả lời trên"), true);
   assert.equal(isQuickMarkdownExportRequest("xuất file md để lưu"), true);
 });
+
+test("findDirectUserByNameOrId tìm thấy thành viên trong group_members", async () => {
+  const { findDirectUserByNameOrId, getDb } = await import("./db/index.js");
+  const db = getDb();
+  const testUid = "test_user_hoa_van_999";
+  const testGid = "test_group_ai_888";
+
+  // Thêm nhóm và thành viên test
+  db.prepare("INSERT OR REPLACE INTO bot_groups (group_id, name, updated_at) VALUES (?, ?, ?)").run(
+    testGid,
+    "Nhóm Test AI",
+    Date.now()
+  );
+  db.prepare("INSERT OR REPLACE INTO group_members (zalo_user_id, group_id, display_name, first_seen_at) VALUES (?, ?, ?, ?)").run(
+    testUid,
+    testGid,
+    "Hoa Van Test",
+    Date.now()
+  );
+
+  const found = findDirectUserByNameOrId("Hoa Van Test");
+  assert.ok(found.length > 0);
+  const target = found.find((u) => u.userId === testUid);
+  assert.ok(target);
+  assert.equal(target?.displayName, "Hoa Van Test");
+  assert.equal(target?.source, "group_member");
+  assert.equal(target?.groupName, "Nhóm Test AI");
+
+  // Dọn dẹp
+  db.prepare("DELETE FROM group_members WHERE zalo_user_id = ?").run(testUid);
+  db.prepare("DELETE FROM bot_groups WHERE group_id = ?").run(testGid);
+});

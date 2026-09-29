@@ -3933,11 +3933,12 @@ export function getRecentDirectFailures(sinceMs: number, limit = 30): DirectInte
 export interface DirectUserProfile {
   userId: string;
   displayName: string;
-  source: "friend" | "direct_interaction" | "memory";
+  source: "friend" | "direct_interaction" | "memory" | "group_member";
   lastActiveAt: number;
   interactionCount: number;
   pronoun?: string;
   gender?: string;
+  groupName?: string;
   memories: UserMemoryItem[];
 }
 
@@ -3949,7 +3950,13 @@ export function findDirectUserByNameOrId(query: string): DirectUserProfile[] {
 
     const userMap = new Map<
       string,
-      { displayName: string; source: "friend" | "direct_interaction" | "memory"; lastActiveAt: number; count: number }
+      {
+        displayName: string;
+        source: "friend" | "direct_interaction" | "memory" | "group_member";
+        lastActiveAt: number;
+        count: number;
+        groupName?: string;
+      }
     >();
 
     // 1. Tìm trong bot_friends
@@ -4024,6 +4031,76 @@ export function findDirectUserByNameOrId(query: string): DirectUserProfile[] {
       }
     }
 
+    // 4. Tìm trong group_members (Thành viên các nhóm Zalo bot đang tham gia)
+    const groupMemberRows = db
+      .prepare(
+        `SELECT gm.zalo_user_id as userId, gm.display_name as displayName, gm.group_id as groupId,
+                COALESCE(bg.name, '') as groupName
+         FROM group_members gm
+         LEFT JOIN bot_groups bg ON gm.group_id = bg.group_id
+         WHERE gm.zalo_user_id = ? OR LOWER(gm.display_name) LIKE ?
+         LIMIT 20`
+      )
+      .all(cleanQuery, `%${cleanQuery.toLowerCase()}%`) as any[];
+
+    for (const r of groupMemberRows) {
+      const existing = userMap.get(r.userId);
+      if (existing) {
+        if (!existing.displayName && r.displayName) existing.displayName = r.displayName;
+        if (!existing.groupName && r.groupName) existing.groupName = r.groupName;
+      } else {
+        let msgCount = 0;
+        let lastMsgTs = 0;
+        try {
+          const stats = db
+            .prepare(`SELECT COUNT(id) as c, MAX(ts) as maxTs FROM group_messages WHERE zalo_user_id = ?`)
+            .get(r.userId) as any;
+          msgCount = stats?.c || 0;
+          lastMsgTs = stats?.maxTs || 0;
+        } catch {}
+
+        userMap.set(r.userId, {
+          displayName: r.displayName || "",
+          source: "group_member",
+          lastActiveAt: lastMsgTs || 0,
+          count: msgCount,
+          groupName: r.groupName || "",
+        });
+      }
+    }
+
+    // 5. Tìm trong members nếu chưa có
+    const generalMemberRows = db
+      .prepare(
+        `SELECT zalo_user_id as userId, display_name as displayName
+         FROM members
+         WHERE zalo_user_id = ? OR LOWER(display_name) LIKE ?
+         LIMIT 15`
+      )
+      .all(cleanQuery, `%${cleanQuery.toLowerCase()}%`) as any[];
+
+    for (const r of generalMemberRows) {
+      if (!userMap.has(r.userId)) {
+        let msgCount = 0;
+        let lastMsgTs = 0;
+        try {
+          const stats = db
+            .prepare(`SELECT COUNT(id) as c, MAX(ts) as maxTs FROM group_messages WHERE zalo_user_id = ?`)
+            .get(r.userId) as any;
+          msgCount = stats?.c || 0;
+          lastMsgTs = stats?.maxTs || 0;
+        } catch {}
+
+        userMap.set(r.userId, {
+          displayName: r.displayName || "",
+          source: "group_member",
+          lastActiveAt: lastMsgTs || 0,
+          count: msgCount,
+          groupName: "",
+        });
+      }
+    }
+
     const profiles: DirectUserProfile[] = [];
     for (const [uid, info] of userMap.entries()) {
       const mems = getUserMemories(uid, 20);
@@ -4045,6 +4122,7 @@ export function findDirectUserByNameOrId(query: string): DirectUserProfile[] {
         source: info.source,
         lastActiveAt: info.lastActiveAt,
         interactionCount: info.count,
+        groupName: info.groupName,
         pronoun,
         gender,
         memories: mems,

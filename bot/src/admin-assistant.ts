@@ -846,7 +846,7 @@ async function handleSingleUserProfileReport(api: any, sender: string, targetQue
     await sendDirectText(
       api,
       sender,
-      `🔍 KHÔNG TÌM THẤY HỒ SƠ:\n\nEm không tìm thấy người dùng nào có tên hoặc ID khớp với "${targetQuery}" trong danh bạ bạn bè hoặc lịch sử chat 1:1.\n\n👉 Sếp có thể gõ /users11 để xem danh sách hoặc dặn em lưu mới: "Lưu bạn ${targetQuery} là nữ, gọi bằng chị" nhé!`
+      `🔍 KHÔNG TÌM THẤY HỒ SƠ:\n\nEm không tìm thấy người dùng nào có tên hoặc ID khớp với "${targetQuery}" trong các nhóm Zalo, danh bạ bạn bè hoặc lịch sử chat 1:1.\n\n👉 Sếp có thể gõ /users11 để xem danh sách 1:1 hoặc dặn em lưu mới: "Lưu bạn ${targetQuery} là nữ, gọi bằng chị" nhé!`
     );
     return;
   }
@@ -854,7 +854,8 @@ async function handleSingleUserProfileReport(api: any, sender: string, targetQue
   if (candidates.length > 1) {
     let msg = `🔍 TÌM THẤY ${candidates.length} NGƯỜI DÙNG PHÙ HỢP VỚI "${targetQuery}":\n\n`;
     candidates.slice(0, 5).forEach((c, i) => {
-      msg += `${i + 1}. 👤 ${c.displayName} (ID: ${c.userId})\n`;
+      const extra = c.groupName ? ` [Nhóm: ${c.groupName}]` : "";
+      msg += `${i + 1}. 👤 ${c.displayName} (ID: ${c.userId})${extra}\n`;
     });
     msg += `\n👉 Sếp gõ: /userinfo <ID> để xem chính xác người cần tra cứu nhé!`;
     await sendDirectText(api, sender, msg);
@@ -866,12 +867,17 @@ async function handleSingleUserProfileReport(api: any, sender: string, targetQue
   let msg = `🧠 HỒ SƠ & BỘ NHỚ CHI TIẾT:\n👤 ${p.displayName} (ID: ${p.userId})\n\n`;
 
   const meta: string[] = [];
+  if (p.groupName) meta.push(`Nhóm: ${p.groupName}`);
   if (p.gender) meta.push(`Giới tính: ${p.gender}`);
   if (p.pronoun) meta.push(`Xưng hô: ${p.pronoun}`);
+  const sourceLabel = p.source === "group_member"
+    ? "Thành viên nhóm"
+    : (p.source === "friend" ? "Bạn bè Zalo" : (p.source === "memory" ? "Bộ nhớ cá nhân" : "Chat 1:1"));
+  meta.push(`Nguồn: ${sourceLabel}`);
   if (meta.length > 0) msg += `• ${meta.join(" | ")}\n`;
 
   if (p.memories.length === 0) {
-    msg += `• Trí nhớ: Chưa có sở thích hay thông tin cá nhân nào được lưu.\n`;
+    msg += `• Trí nhớ cá nhân: Chưa có sở thích hay thông tin cá nhân nào được lưu.\n`;
   } else {
     msg += `• Danh sách trí nhớ đã lưu:\n`;
     p.memories.forEach((m) => {
@@ -881,7 +887,10 @@ async function handleSingleUserProfileReport(api: any, sender: string, targetQue
   }
 
   const timeStr = p.lastActiveAt ? new Date(p.lastActiveAt).toLocaleString("vi-VN") : "Chưa rõ";
-  msg += `\n• Hoạt động gần nhất: ${timeStr} (${p.interactionCount} tin nhắn)`;
+  const activityLabel = p.source === "group_member"
+    ? `Hoạt động nhóm gần nhất: ${timeStr} (${p.interactionCount} tin nhắn trong nhóm)`
+    : `Hoạt động gần nhất: ${timeStr} (${p.interactionCount} tin nhắn 1:1)`;
+  msg += `\n• ${activityLabel}`;
   msg += `\n\n💡 Sếp có thể dặn: "Lưu bạn ${p.displayName} thích hoa lan, làm nghề bác sĩ" để em cập nhật thêm!`;
 
   await sendDirectText(api, sender, msg);
@@ -933,7 +942,8 @@ async function handleAdminUserProfileUpdate(api: any, sender: string, update: Pa
   if (candidates.length > 1) {
     let msg = `🔍 TÌM THẤY ${candidates.length} NGƯỜI CÓ TÊN GẦN GIỐNG "${update.targetQuery}":\n\n`;
     candidates.slice(0, 5).forEach((c, i) => {
-      msg += `${i + 1}. 👤 ${c.displayName} (ID: ${c.userId})\n`;
+      const extra = c.groupName ? ` [Nhóm: ${c.groupName}]` : "";
+      msg += `${i + 1}. 👤 ${c.displayName} (ID: ${c.userId})${extra}\n`;
     });
     const firstId = candidates[0]?.userId || "";
     msg += `\n👉 Sếp ghi kèm ID (VD: "/setuser ${firstId} ...") để em cập nhật chuẩn xác đúng người nhé!`;
@@ -1113,7 +1123,8 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       if (candidates.length > 1) {
         let msg = `🔍 TÌM THẤY ${candidates.length} NGƯỜI CÓ TÊN GẦN GIỐNG "${updateIntent.targetQuery}":\n\n`;
         candidates.slice(0, 5).forEach((c, i) => {
-          msg += `${i + 1}. 👤 ${c.displayName} (ID: ${c.userId})\n`;
+          const extra = c.groupName ? ` [Nhóm: ${c.groupName}]` : "";
+          msg += `${i + 1}. 👤 ${c.displayName} (ID: ${c.userId})${extra}\n`;
         });
         const firstId = candidates[0]?.userId || "";
         msg += `\n👉 Sếp ghi kèm ID (VD: "/setuser ${firstId} ...") để em cập nhật chuẩn xác đúng người nhé!`;
