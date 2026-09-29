@@ -181,6 +181,48 @@ test("direct_interactions DB operations work with fresh schema", () => {
   }
 });
 
+test("getDirectConversationHistory nạp đúng ngữ cảnh theo thứ tự thời gian và bỏ qua lượt lỗi", async () => {
+  const { logDirectInteraction, getDirectConversationHistory } = await import("./db/index.js");
+  const testUid = `test_rehydrate_${Date.now()}`;
+
+  // Ghi 3 lượt thành công và 1 lượt lỗi
+  logDirectInteraction({
+    userId: testUid,
+    displayName: "User Test",
+    userMessage: "Câu hỏi 1: Thủ đô của Pháp là gì?",
+    botReply: "Dạ Paris ạ.",
+    status: "success",
+  });
+
+  logDirectInteraction({
+    userId: testUid,
+    displayName: "User Test",
+    userMessage: "Câu hỏi lỗi",
+    botReply: "Lỗi",
+    status: "failed",
+  });
+
+  logDirectInteraction({
+    userId: testUid,
+    displayName: "User Test",
+    userMessage: "Câu hỏi 2: Thế còn dân số bao nhiêu?",
+    botReply: "Dạ khoảng 2.1 triệu người ạ.",
+    status: "success",
+  });
+
+  const history = getDirectConversationHistory(testUid, 5);
+  // Có 2 lượt thành công -> 4 message items (user, model, user, model)
+  assert.equal(history.length, 4);
+  assert.equal(history[0]?.role, "user");
+  assert.equal(history[0]?.text, "Câu hỏi 1: Thủ đô của Pháp là gì?");
+  assert.equal(history[1]?.role, "model");
+  assert.equal(history[1]?.text, "Dạ Paris ạ.");
+  assert.equal(history[2]?.role, "user");
+  assert.equal(history[2]?.text, "Câu hỏi 2: Thế còn dân số bao nhiêu?");
+  assert.equal(history[3]?.role, "model");
+  assert.equal(history[3]?.text, "Dạ khoảng 2.1 triệu người ạ.");
+});
+
 test("isAffirmativeConfirmation và isCancelConfirmation nhận diện chuẩn xác", async () => {
   const { isAffirmativeConfirmation, isCancelConfirmation } = await import("./admin-assistant.js");
   assert.equal(isAffirmativeConfirmation("ok"), true);

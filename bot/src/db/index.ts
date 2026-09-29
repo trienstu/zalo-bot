@@ -3930,6 +3930,38 @@ export function getRecentDirectFailures(sinceMs: number, limit = 30): DirectInte
   }
 }
 
+export function getDirectConversationHistory(
+  userId: string,
+  limit = 6,
+): { role: "user" | "model"; text: string }[] {
+  try {
+    if (!userId || !userId.trim()) return [];
+    const db = getDb();
+    const rows = db
+      .prepare(
+        `SELECT user_message as userMessage, bot_reply as botReply
+         FROM direct_interactions
+         WHERE user_id = ? AND status = 'success' AND user_message != '' AND bot_reply != ''
+         ORDER BY id DESC
+         LIMIT ?`
+      )
+      .all(userId.trim(), limit) as { userMessage: string; botReply: string }[];
+
+    if (!rows || rows.length === 0) return [];
+
+    const history: { role: "user" | "model"; text: string }[] = [];
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const r = rows[i];
+      if (r?.userMessage) history.push({ role: "user", text: r.userMessage });
+      if (r?.botReply) history.push({ role: "model", text: r.botReply });
+    }
+    return history;
+  } catch (e) {
+    console.warn("[db] getDirectConversationHistory error:", e);
+    return [];
+  }
+}
+
 export interface DirectUserProfile {
   userId: string;
   displayName: string;

@@ -24,6 +24,7 @@ import {
   findDirectUserByNameOrId,
   getAllDirectUsersWithProfiles,
   setUserCustomProfile,
+  getDirectConversationHistory,
 } from "./db/index.js";
 import { sendDirectText, sendDirectFile, sendDirectVoice, sendGroupText, sendReaction, sendTyping, Reactions } from "./zalo/client.js";
 import { ocrImage } from "./jobs/ocr.js";
@@ -379,13 +380,15 @@ const lastDirectMedia = new Map<string, { mediaPart: GeminiMediaPart; imageBuffe
 
 function getAdminHistory(userId: string) {
   if (!adminChatSessions.has(userId)) {
-    adminChatSessions.set(userId, []);
+    // 🔄 Tự động khôi phục ngữ cảnh hội thoại gần nhất từ SQLite direct_interactions khi restart bot
+    const persisted = getDirectConversationHistory(userId, 6);
+    adminChatSessions.set(userId, persisted);
   }
   return adminChatSessions.get(userId)!;
 }
 
 function clearAdminHistory(userId: string) {
-  adminChatSessions.delete(userId);
+  adminChatSessions.set(userId, []);
 }
 
 function sanitizeModelHistoryText(text: string): string {
@@ -716,7 +719,7 @@ export function isDmSummaryOrErrorQuery(text: string): { type: "summary" | "erro
 
 async function handleDmErrorReport(api: any, sender: string, hours = 24): Promise<void> {
   const sinceMs = Date.now() - hours * 3600 * 1000;
-  const failures = getRecentDirectFailures(sinceMs, 30);
+  const failures = getRecentDirectFailures(sinceMs, 30).filter((f) => !isUserAdmin(f.userId));
 
   if (failures.length === 0) {
     await sendDirectText(
@@ -745,7 +748,7 @@ async function handleDmErrorReport(api: any, sender: string, hours = 24): Promis
 
 async function handleDmSummaryReport(api: any, sender: string, hours = 24): Promise<void> {
   const sinceMs = Date.now() - hours * 3600 * 1000;
-  const list = getRecentDirectInteractions(sinceMs, 100);
+  const list = getRecentDirectInteractions(sinceMs, 100).filter((item) => !isUserAdmin(item.userId));
 
   if (list.length === 0) {
     await sendDirectText(
@@ -3041,17 +3044,15 @@ QUY TẮC BẮT BUỘC:
     appendAdminHistory(sender, "user", rawText || `[Gửi file: ${fileName || "hình ảnh"}]`);
     appendAdminHistory(sender, "model", finalAnswer);
 
-    // Ghi nhật ký tương tác 1:1 phục vụ báo cáo / tóm tắt cho Admin
-    if (!isAdmin) {
-      logDirectInteraction({
-        userId: sender,
-        displayName,
-        userMessage: rawText || (hasFile ? `[Gửi file: ${fileName || "Tài liệu"}]` : "[Gửi ảnh]"),
-        botReply: finalAnswer,
-        status: interactionStatus,
-        errorDetail: failureReason,
-      });
-    }
+    // Ghi nhật ký tương tác 1:1 phục vụ báo cáo và duy trì ngữ cảnh nhiều lượt (kể cả sau restart)
+    logDirectInteraction({
+      userId: sender,
+      displayName,
+      userMessage: rawText || (hasFile ? `[Gửi file: ${fileName || "Tài liệu"}]` : "[Gửi ảnh]"),
+      botReply: finalAnswer,
+      status: interactionStatus,
+      errorDetail: failureReason,
+    });
 
     await sendDirectText(api, sender, finalAnswer);
     console.log(`[admin-assistant] ✅ Đã phản hồi 1:1 cho ${isAdmin ? "Admin" : "User"} ${displayName}`);
@@ -3067,15 +3068,15 @@ QUY TẮC BẮT BUỘC:
     });
   } catch (err) {
     console.error(`[admin-assistant] ❌ Lỗi xử lý AI 1:1:`, err);
+    logDirectInteraction({
+      userId: sender,
+      displayName,
+      userMessage: rawText || (hasFile ? `[Gửi file: ${event.fileAttachment?.name || "Tài liệu"}]` : "[Gửi ảnh]"),
+      botReply: "Lỗi hệ thống",
+      status: "failed",
+      errorDetail: String((err as any)?.message || err),
+    });
     if (!isAdmin) {
-      logDirectInteraction({
-        userId: sender,
-        displayName,
-        userMessage: rawText || (hasFile ? `[Gửi file: ${event.fileAttachment?.name || "Tài liệu"}]` : "[Gửi ảnh]"),
-        botReply: "Lỗi hệ thống",
-        status: "failed",
-        errorDetail: String((err as any)?.message || err),
-      });
       void notifyAdminDmFailure(api, sender, displayName, rawText || "[File/Ảnh]", String((err as any)?.message || err)).catch(() => {});
     }
     await sendDirectText(
