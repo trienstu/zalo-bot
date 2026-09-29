@@ -887,27 +887,37 @@ async function handleSingleUserProfileReport(api: any, sender: string, targetQue
   await sendDirectText(api, sender, msg);
 }
 
-export interface PendingAdminAction {
-  type: "profile_update" | "send_direct" | "send_group" | "broadcast";
-  timestamp: number;
-  data: any;
-  summary: string;
-}
+import {
+  PendingAction,
+  getPendingAction,
+  setPendingAction,
+  clearPendingAction,
+  isAffirmativeConfirmation,
+  isCancelConfirmation,
+} from "./pending-actions.js";
 
-export const pendingAdminActions = new Map<string, PendingAdminAction>();
+export type PendingAdminAction = PendingAction;
+export { isAffirmativeConfirmation, isCancelConfirmation };
 
-export function isAffirmativeConfirmation(text: string): boolean {
-  const clean = text.trim().toLowerCase().replace(/[!.,?]+$/, "").trim();
-  return (
-    /^(?:ok|oke|okie|ok em|ok nhé|ok nha|ok a|ok ạ|duyệt|duyet|duyệt đi|tiến hành|tien hanh|tiến hành đi|làm đi|lam di|làm luôn|chấp thuận|chấp nhận|xác nhận|đồng ý|dong y|yes|y|chốt|chot|chốt đi|thực hiện|thuc hien|thực hiện đi|gửi đi|gui di|triển đi|triển|cho đi)$/iu.test(clean) ||
-    /^(?:tiến hành|làm|thực hiện|triển|duyệt)\s+(?:đi|luôn|nhé|nha)$/iu.test(clean)
-  );
-}
-
-export function isCancelConfirmation(text: string): boolean {
-  const clean = text.trim().toLowerCase().replace(/[!.,?]+$/, "").trim();
-  return /^(?:hủy|huy|thôi|thoi|bỏ|bo|không|khong|ko|cancel|đừng|dung|bỏ qua|dừng|dung lai)$/iu.test(clean);
-}
+export const pendingAdminActions = {
+  get(sender: string): PendingAdminAction | undefined {
+    return getPendingAction("direct", sender) || undefined;
+  },
+  set(sender: string, action: { type: any; timestamp?: number; data: any; summary: string }): void {
+    setPendingAction("direct", sender, {
+      type: action.type,
+      data: action.data,
+      summary: action.summary,
+    });
+  },
+  delete(sender: string): boolean {
+    clearPendingAction("direct", sender);
+    return true;
+  },
+  has(sender: string): boolean {
+    return Boolean(getPendingAction("direct", sender));
+  },
+};
 
 async function handleAdminUserProfileUpdate(api: any, sender: string, update: ParsedProfileUpdate): Promise<void> {
   const candidates = findDirectUserByNameOrId(update.targetQuery);

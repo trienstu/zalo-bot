@@ -63,6 +63,13 @@ import {
   compressCaveman,
   CAVEMAN_USER_FACING_DIRECTIVE,
 } from "./tools/caveman-compressor.js";
+import {
+  getPendingAction,
+  setPendingAction,
+  clearPendingAction,
+  isAffirmativeConfirmation,
+  isCancelConfirmation,
+} from "./pending-actions.js";
 
 async function deliverGeneratedToolFile(
   api: any,
@@ -1882,6 +1889,20 @@ QUY TẮC BẮT BUỘC:
 
       if (options?.api && plan.taskType === "presentation_video" && isPresentationVideoRequest(question, options?.quote?.text)) {
         console.log(`[member-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Video (Quote QA): "${question.slice(0, 80)}"`);
+        const isConfirmed = isAffirmativeConfirmation(question) || (options?.quote?.text && /(?:xác nhận|kế hoạch dựng video|tiến hành không|cho em tín hiệu)/i.test(options.quote.text));
+        if (!isConfirmed) {
+          setPendingAction(threadId, options?.sender || "", {
+            type: "create_presentation_video",
+            userName: displayName,
+            data: { userPrompt: question, quoteText: options.quote.text || fileTextContent || "" },
+            summary: `Dựng video thuyết trình: "${question.slice(0, 50)}"`,
+          });
+          return `🎬 KẾ HOẠCH DỰNG VIDEO THUYẾT TRÌNH:\n\n` +
+            `• Đề tài: "${question}"\n` +
+            `• Dự kiến: Soạn kịch bản phân cảnh, tạo slide hình ảnh và lồng tiếng AI.\n\n` +
+            `👉 ${isSuperAdmin ? "Sếp" : `@${displayName}`} có xác nhận để Sen Chúa tiến hành dựng video ngay không ạ? (Gõ "ok" hoặc "duyệt" để chạy, "hủy" để dừng)`;
+        }
+
         void runPresentationVideoJob({
           api: options.api,
           sender: options.sender || "",
@@ -2739,6 +2760,20 @@ QUY TẮC BẮT BUỘC:
 
       if (options?.api && plan.taskType === "presentation_video" && isPresentationVideoRequest(question, options?.quote?.text)) {
         console.log(`[member-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Video: "${question.slice(0, 80)}"`);
+        const isConfirmed = isAffirmativeConfirmation(question) || (options?.quote?.text && /(?:xác nhận|kế hoạch dựng video|tiến hành không|cho em tín hiệu)/i.test(options.quote.text));
+        if (!isConfirmed) {
+          setPendingAction(threadId, options?.sender || "", {
+            type: "create_presentation_video",
+            userName: displayName,
+            data: { userPrompt: question, quoteText: options?.quote?.text || fileTextContent || "" },
+            summary: `Dựng video thuyết trình: "${question.slice(0, 50)}"`,
+          });
+          return `🎬 KẾ HOẠCH DỰNG VIDEO THUYẾT TRÌNH:\n\n` +
+            `• Đề tài: "${question}"\n` +
+            `• Dự kiến: Soạn kịch bản phân cảnh, tạo slide hình ảnh và lồng tiếng AI.\n\n` +
+            `👉 ${isSuperAdmin ? "Sếp" : `@${displayName}`} có xác nhận để Sen Chúa tiến hành dựng video ngay không ạ? (Gõ "ok" hoặc "duyệt" để chạy, "hủy" để dừng)`;
+        }
+
         void runPresentationVideoJob({
           api: options.api,
           sender: options.sender || "",
@@ -3495,6 +3530,39 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
   const lastTime = userCooldowns.get(sender) || 0;
   if (now - lastTime < COOLDOWN_MS) {
     return; // Đang trong thời gian chờ, bỏ qua để chống spam
+  }
+
+  // 0. XỬ LÝ XÁC NHẬN MỆNH LỆNH CHỜ 2 BƯỚC TRONG NHÓM (HUMAN-IN-THE-LOOP)
+  const isSuperAdmin = isUserAdmin(sender);
+  const pending = getPendingAction(threadId, sender);
+  if (pending) {
+    if (isAffirmativeConfirmation(rawText)) {
+      clearPendingAction(threadId, sender);
+      void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.OK);
+      if (pending.type === "create_presentation_video") {
+        await sendGroupText(
+          api,
+          threadId,
+          `🎬 Dạ ${isSuperAdmin ? "Sếp" : `@${displayName}`}, Sen Chúa đã nhận lệnh xác nhận và đang tiến hành dựng video [${pending.summary}] ngay đây ạ! Video hoàn tất sẽ tự động gửi lên nhóm nhé! ✨`,
+        );
+        void runPresentationVideoJob({
+          api,
+          sender,
+          isGroup: true,
+          threadId,
+          userGreeting: isSuperAdmin ? "Sếp" : (displayName ? `bác ${displayName}` : "bác"),
+          displayName,
+          userPrompt: pending.data.userPrompt,
+          quoteText: pending.data.quoteText || "",
+        }).catch((err) => console.error("[member-assistant] Lỗi runPresentationVideoJob:", err));
+        return;
+      }
+    } else if (isCancelConfirmation(rawText)) {
+      clearPendingAction(threadId, sender);
+      void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.OK);
+      await sendGroupText(api, threadId, `❌ Đã hủy thao tác [${pending.summary}] theo yêu cầu của ${isSuperAdmin ? "Sếp" : `@${displayName}`}.`);
+      return;
+    }
   }
 
   const lower = rawText.toLowerCase();

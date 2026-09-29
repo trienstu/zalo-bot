@@ -228,7 +228,7 @@ export function isRealEstateProjectProfileQuery(query: string): boolean {
   const asksRealEstate = /\b(?:du an|bat dong san|bds|nha dat|chung cu|can ho|khu do thi|shophouse|biet thu|condotel|officetel|residence|riverside|heights|urban|apartment|tower|block)\b/i.test(text);
   if (!asksRealEstate) return false;
 
-  const asksProfile = /\b(?:tong quan|gioi thieu|thong tin|review|danh gia|ho so|chu dau tu|vi tri|quy mo|mat bang|so can|san pham|phap ly|tien do|mo ban|ban giao|bang gia|gia ban|gia tham khao)\b/i.test(text);
+  const asksProfile = /\b(?:tong quan|gioi thieu|thong tin|review|danh gia|ho so|chu dau tu|vi tri|quy mo|mat bang|so can|san pham|phap ly|tien do|mo ban|ban giao|bang gia|gia ban|gia tham khao|tu van|chien luoc|dau tu|co nen dau tu|tiem nang|rui ro|phan tich|nen mua)\b/i.test(text);
   const isGeneralMarket = /\b(?:thi truong|tin tuc|tin moi|hom nay|xu huong|nhan dinh thi truong|toan canh)\b/i.test(text) && !/\b(?:du an|chung cu|can ho|khu do thi)\b/i.test(text);
   const hasEntityToken = projectTokens(query).length >= 1;
 
@@ -239,7 +239,7 @@ export function buildRealEstateProjectSearchQueries(query: string): string[] {
   const base = compactText(query)
     .replace(/@[^\s,!?]+/g, " ")
     .replace(/\b(?:sen chúa|sen chua|mộc miên|moc mien|kevin|bot ơi|bot oi|bot|admin|ad ơi|ad oi)\b/gi, " ")
-    .replace(/\b(?:tổng quan|giới thiệu|thông tin|review|đánh giá|check|kiểm tra|cho anh|giúp anh|giúp tôi|với|nhé|nha|ạ)\b/gi, " ")
+    .replace(/\b(?:tổng quan|giới thiệu|thông tin|review|đánh giá|check|kiểm tra|cho anh|giúp anh|giúp tôi|với|nhé|nha|ạ|tư vấn|chiến lược|có nên đầu tư|đầu tư|tiềm năng|rủi ro|phân tích|nguyên nhân|thời điểm này|hiện tại|nên mua|mua được không|mua dc ko)\b/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
   const normalizedBase = base || compactText(query);
@@ -248,6 +248,7 @@ export function buildRealEstateProjectSearchQueries(query: string): string[] {
     `${normalizedBase} tổng quan chủ đầu tư quy mô`,
     `${normalizedBase} vị trí pháp lý tiến độ bàn giao`,
     `${normalizedBase} bảng giá số căn diện tích mặt bằng`,
+    `${normalizedBase} tiềm năng đầu tư đánh giá rủi ro`,
   ].map((item) => compactText(item).slice(0, 140))));
 }
 
