@@ -51,3 +51,15 @@ export function getSystemArchitectureProfile(options: SystemArchitectureOptions 
    - Khi được hỏi về nguồn gốc, backend, công nghệ, cách tạo file/ảnh/âm thanh, mô hình sử dụng hoặc môi trường chạy: Tự tin, am hiểu sâu sắc, giải thích chuẩn xác theo kiến trúc thực tế nêu trên.
    - Giọng điệu như một kỹ sư hệ thống thực thụ: Chuyên môn sâu, giải thích cặn kẽ, khiêm tốn, lịch thiệp và tự nhiên. Tuyệt đối không trả lời ngô nghê, không tự nhận là "chatbot mô hình ngôn ngữ lớn đóng hộp trên web".`;
 }
+
+export function isSystemArchitectureQuery(text: string): boolean {
+  if (!text) return false;
+  const normalized = String(text)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/gi, "d")
+    .toLowerCase();
+  return /\b(?:he thong|backend|server|may chu|chay tren|kien truc|source code|ma nguon|9router|hermes|dung model|mo hinh gi|ban la ai|em la ai|ai tao ra|ai phat trien|ai viet ra|cong nghe gi|nguon goc|ha tang)\b/i.test(
+    normalized
+  );
+}

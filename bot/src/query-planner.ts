@@ -142,8 +142,9 @@ function isAdvisoryComparison(text: string): boolean {
 
 function isHighStakesAdvice(text: string): boolean {
   const scienceLaw = /\b(?:dinh luat|quy luat|luat bao toan|luat hap dan|luat newton|luat ohm)\b/i.test(text);
+  const isConceptOrMechanism = /\b(?:la gi|nghia la gi|khai niem|dinh nghia|giai thich|nguyen ly|co che|hoat dong nhu the nao|cach hoat dong|tai sao|vi sao|y nghia)\b/i.test(text);
   const highStakes = /\b(?:thuoc|lieu dung|lieu luong|dieu tri|vac xin|vaccine|phac do|benh|trieu chung|chan doan|mang thai|thai ky|dinh duong|thuc pham chuc nang|y te|phap ly|luat|thue|hop dong|khoi kien|muc phat|dau tu|co phieu|chung khoan|crypto|tien dien tu|tin dung|vay|bao hiem)\b/i.test(text);
-  return highStakes && !scienceLaw;
+  return highStakes && !scienceLaw && !isConceptOrMechanism;
 }
 
 type PlannerSignals = {
@@ -162,9 +163,14 @@ type PlannerSignals = {
 function detectPlannerSignals(question: string, quoteText = ""): PlannerSignals {
   const text = normalizePlannerText(`${question} ${quoteText}`);
   const scienceLaw = /\b(?:dinh luat|quy luat|luat bao toan|luat hap dan|luat newton|luat ohm)\b/i.test(text);
-  const explicitlyCurrent = /\b(?:hien nay|hien tai|hom nay|toi nay|chieu nay|sang nay|dem nay|trua nay|ngay mai|ngay kia|hom qua|luc nay|bay gio|moi nhat|co gi moi|tin moi|nghien cuu moi|vua qua|sap toi|nam nay|thang nay|tuan nay|cap nhat|dang dien ra|con hieu luc|phien ban moi|vua ra mat|sap ra mat|bang gia|bao gia|gia ban|gia mua|gia thi truong|lich thi dau|ket qua|ti so|bang xep hang|du bao|thoi tiet|may gio|luc may gio|khi nao|bao gio|gio nao)\b/i.test(text) ||
-    /^gia\s+/i.test(text);
-  const inherentlyVolatile = /\b(?:lanh dao|chu tich|bi thu|tong bi thu|thu tuong|bo truong|giam doc|ceo|hlv|chuc vu|nhan su|gia vang|gia xang|gia dau|ty gia|lai suat|chung khoan|co phieu|vn-index|crypto|bitcoin|thoi tiet|bao so|bao ap thap|con bao|lu lut|ngap lut|dong dat|lich thi dau|ket qua tran|ti so|bang xep hang|vo dich|chuyen nhuong|phap luat|luat|nghi dinh|thong tu|thue|muc phat|thu tuc|quy hoach|sap nhap|dia gioi|dan so|gdp|du an|bat dong san|mo ban|tien do|phap ly|chu dau tu|chuyen bay|xo so|dich benh|canh bao an ninh|lo hong bao mat|tuyen sinh|diem chuan|hoc phi|lich thi|visa|thi thuc|giay phep|lich mo cua|gio mo cua|thong so ky thuat|ngay phat hanh|tran dau|doi tuyen|da bong|da banh|bong da|giai dau|kenh chieu|phat song|truc tiep|xem o dau|da voi ai|da luc|da gio|thi dau)\b/i.test(text) && !scienceLaw;
+  const isConceptOrMechanism = /\b(?:la gi|nghia la gi|khai niem|dinh nghia|giai thich|nguyen ly|co che|hoat dong nhu the nao|cach hoat dong|tai sao|vi sao|y nghia)\b/i.test(text);
+  const hasExplicitTimeAnchor = /\b(?:hien nay|hien tai|hom nay|toi nay|chieu nay|sang nay|dem nay|trua nay|ngay mai|ngay kia|hom qua|luc nay|bay gio|moi nhat|co gi moi|tin moi|nghien cuu moi|vua qua|sap toi|nam nay|thang nay|tuan nay|cap nhat|dang dien ra|con hieu luc|phien ban moi|vua ra mat|sap ra mat|may gio|luc may gio|khi nao|bao gio|gio nao)\b/i.test(text);
+  const explicitlyCurrent = (!isConceptOrMechanism || hasExplicitTimeAnchor) && (
+    hasExplicitTimeAnchor ||
+    /\b(?:bang gia|bao gia|gia ban|gia mua|gia thi truong|lich thi dau|ket qua|ti so|bang xep hang|du bao|thoi tiet)\b/i.test(text) ||
+    /^gia\s+/i.test(text)
+  );
+  const inherentlyVolatile = !isConceptOrMechanism && /\b(?:lanh dao|chu tich|bi thu|tong bi thu|thu tuong|bo truong|giam doc|ceo|hlv|chuc vu|nhan su|gia vang|gia xang|gia dau|ty gia|lai suat|chung khoan|co phieu|vn-index|crypto|bitcoin|thoi tiet|bao so|bao ap thap|con bao|lu lut|ngap lut|dong dat|lich thi dau|ket qua tran|ti so|bang xep hang|vo dich|chuyen nhuong|phap luat|luat|nghi dinh|thong tu|thue|muc phat|thu tuc|quy hoach|sap nhap|dia gioi|dan so|gdp|du an|bat dong san|mo ban|tien do|phap ly|chu dau tu|chuyen bay|xo so|dich benh|canh bao an ninh|lo hong bao mat|tuyen sinh|diem chuan|hoc phi|lich thi|visa|thi thuc|giay phep|lich mo cua|gio mo cua|thong so ky thuat|ngay phat hanh|tran dau|doi tuyen|da bong|da banh|bong da|giai dau|kenh chieu|phat song|truc tiep|xem o dau|da voi ai|da luc|da gio|thi dau)\b/i.test(text) && !scienceLaw;
   const stableTask = /\b(?:dich|viet lai|tom tat van ban|soan|sang tac|dat ten|giai phuong trinh|tinh toan|chung minh|viet code|sua code|regex|thuat toan|giai thich khai niem|la gi|hoat dong nhu the nao|cach hoat dong)\b/i.test(text) &&
     !explicitlyCurrent && !inherentlyVolatile;
   return {

@@ -340,4 +340,27 @@ test("câu hỏi lý thuyết/thăm dò về tạo ảnh hoặc video KHÔNG b�
   assert.notEqual(res.toolIntent, "create", `Hypothetical query must not trigger toolIntent: create`);
 });
 
+test("câu hỏi khái niệm, lý thuyết, giải thích không bị ép needsSearch=true", async () => {
+  const { normalizeQueryPlanIntent } = await import("./query-planner.js");
+  const basePlan = {
+    needsSearch: false,
+    intent: "knowledge" as const,
+    queries: [],
+  };
+  const conceptQueries = [
+    "Luật cung cầu trong kinh tế là gì?",
+    "Nguyên lý hoạt động của động cơ phản lực",
+    "Tại sao thời tiết lại có 4 mùa?",
+    "Định nghĩa hợp đồng thông minh trong blockchain",
+    "Ý nghĩa của chỉ số P/E trong đầu tư chứng khoán",
+  ];
+
+  for (const q of conceptQueries) {
+    const res = normalizeQueryPlanIntent(basePlan, q);
+    assert.equal(res.needsSearch, false, `Failed on: ${q}`);
+    assert.equal(res.intent, "knowledge", `Failed on: ${q}`);
+    assert.deepEqual(res.queries, [], `Failed on: ${q}`);
+  }
+});
+
 

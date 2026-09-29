@@ -36,8 +36,9 @@ import { handleSetReminder, handleListReminders, handleCancelReminder } from "./
 import { searchRealtimeNews } from "./realtime-search.js";
 import { refreshDynamicKnowledgeIfExpired, fetchGoogleContent, parseGoogleUrl } from "./google-sync.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
-import { getSystemArchitectureProfile } from "./system-architecture.js";
+import { getSystemArchitectureProfile, isSystemArchitectureQuery } from "./system-architecture.js";
 import { planSearchQueries, type QueryPlanResult } from "./query-planner.js";
+import { buildDynamicSystemPromptModules } from "./prompt-modules.js";
 import fs from "node:fs";
 import { config, defaultBotName } from "./config.js";
 import { finalizeGroundedAnswer } from "./search-evidence.js";
@@ -1438,7 +1439,9 @@ async function handleHistoryQA(
     const fastSystemPrompt =
       `${getSystemTemporalPrompt()}\n\n` +
       `${personaIntro}\n${customPromptSection}\n` +
-      `${getSystemArchitectureProfile({ botName, isSuperAdmin })}\n\n` +
+      (isSystemArchitectureQuery(`${question} ${options?.quote?.text || ""}`)
+        ? `${getSystemArchitectureProfile({ botName, isSuperAdmin })}\n\n`
+        : "") +
       `NHIỆM VỤ:\n` +
       `1. Bạn vừa nhận được một hình ảnh hoặc tài liệu văn bản đính kèm từ ${isSuperAdmin ? `Sếp (${displayName}) - Super Admin / Quản trị viên tối cao của bạn` : "thành viên"}.\n` +
       `2. ĐỌC KỸ TOÀN BỘ NỘI DUNG trong hình ảnh / tài liệu đính kèm.\n` +
@@ -1451,41 +1454,12 @@ async function handleHistoryQA(
       `7. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
       `   - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * để in đậm vì Zalo không hỗ trợ markdown (sẽ hiện nguyên văn hai dấu sao rất xấu). Hãy viết hoa chữ cái đầu hoặc viết hoa tiêu đề để làm nổi bật (ví dụ: '1. NHÂN VẬT CHÍNH:', '2. KHÁCH HÀNG:').\n` +
       `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Giữ phong cách thanh lịch, gọn gàng. TUYỆT ĐỐI KHÔNG spam icon ở từng dòng hay từng gạch đầu dòng.\n` +
-      `8. KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
-      `   - Khi người dùng yêu cầu vẽ biểu đồ số liệu định lượng, đồ thị, sơ đồ quy trình/thuật toán, tạo infographic poster lịch thi đấu/bảng xếp hạng/timeline/roadmap:\n` +
-      `     BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM gõ code Python bằng chữ vào tin nhắn chat Zalo!\n` +
-      `   - Phân biệt rõ hai phong cách thiết kế đồ họa:\n` +
-      `     + VỚI LỊCH THI ĐẤU, BẢNG XẾP HẠNG, ROADMAP, DANH SÁCH SỰ KIỆN: BẮT BUỘC dùng Pillow (PIL) thiết kế INFOGRAPHIC POSTER DẠNG CARD LAYOUT khổ dọc (W=720, H=1100-1400), nền tối sang trọng (thể thao dùng đỏ rượu/burgundy #42030D, công nghệ/doanh nghiệp dùng Navy #0B132B), các thẻ bo góc (draw.rounded_rectangle), huy hiệu trạng thái ([CHÍNH THỨC], [GIAO HỮU]), tiêu đề vàng kim #FFD700 rực rỡ, hàng dữ liệu sắc nét. TUYỆT ĐỐI KHÔNG vẽ biểu đồ cột cho lịch thi đấu!\n` +
-      `     + VỚI BIỂU ĐỒ SỐ LIỆU ĐỊNH LƯỢNG (doanh thu, phần trăm, biến động giá, thống kê): Dùng matplotlib.pyplot với dark theme (plt.style.use('dark_background')), nhãn trục rõ ràng, lưu PNG DPI=150.\n` +
-      `   - Hệ thống tự động cung cấp font tiếng Việt chuẩn Unicode qua hàm get_font(size, bold=True/False) và tự động bắt file ảnh PNG gửi trực tiếp lên Zalo cho ${isSuperAdmin ? "Sếp" : "người dùng"}.\n` +
-      `   - TUYỆT ĐỐI KHÔNG dùng python_interpreter để tạo ảnh nghệ thuật/minh họa (phong cảnh, chân dung, đồ vật, bánh trái, anime...). TUYỆT ĐỐI CẤM tự ý hứa hẹn hoặc nói rằng 'em đang tạo ảnh / hệ thống đang gửi ảnh vào nhóm' khi phiên hỏi đáp này không có công cụ sinh ảnh nghệ thuật!\n` +
-      `   - TUYỆT ĐỐI CẤM từ chối hoặc bảo người dùng nhờ designer vẽ lại!\n` +
-      `9. KỸ NĂNG XUẤT FILE TÀI LIỆU (.MD, .DOCX, .XLSX, .PPTX, .HTML, .CSV), SLIDE VÀ VOICE (generate_file & create_voice):\n` +
-      `   - Khi người dùng yêu cầu tạo bài thuyết trình / slide PowerPoint (.pptx), tài liệu Word (.docx), Excel (.xlsx), Markdown (.md), HTML (.html), Text (.txt), hoặc tạo giọng đọc / voice / podcast (.m4a), HOẶC giục 'soạn luôn đi', 'làm luôn đi', 'trả file cho mình đi', 'xuất file đi':\n` +
-      `     * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_file' (fileType='md' cho Markdown, 'docx' cho word, 'xlsx' cho excel, 'pptx' cho slide, 'html' cho html, 'csv' cho csv) HOẶC 'create_voice' để xuất file thực tế gửi lên Zalo!\n` +
-      `     * TUYỆT ĐỐI CẤM CHỈ GÕ DÀN Ý BẰNG CHỮ RỒI HỎI NGƯỢC LẠI NGƯỜI DÙNG có muốn soạn/đóng gói thành file không! Hãy hành động và xuất file ngay lập tức!\n` +
-      `     * [QUY TẮC TRẢ FILE THEO YÊU CẦU]: Khi người dùng yêu cầu 'trả file cho mình đi', 'trả file .md cho mình đi', 'xuất file đi', 'gửi file đi': NẾU NỘI DUNG ĐÃ ĐƯỢC BẠN SOẠN THẢO HOẶC ĐÃ THẢO LUẬN TRONG LỊCH SỬ CHAT HOẶC NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE): BẮT BUỘC PHẢI LẤY CHÍNH NỘI DUNG ĐÓ ĐỂ GỌI 'generate_file' (fileType='md' hoặc file tương ứng) XUẤT FILE GỬI LÊN ZALO NGAY LẬP TỨC! TUYỆT ĐỐI CẤM TỪ CHỐI HAY BÁO LỖI KHÔNG TẢI ĐƯỢC LINK!\n` +
-      `     * [QUY TẮC BẢO LƯU NGUYÊN VẸN TRI THỨC KHI ĐÓNG GÓI / XUẤT FILE ĐA LĨNH VỰC]:\n` +
-      `       + Khi người dùng yêu cầu 'đóng gói', 'xuất file', 'lưu vào file', 'chuyển thành file' (Word/docx, Excel/xlsx, PowerPoint/pptx, PDF, CSV, TXT...) từ nội dung tin nhắn được trích dẫn (quote) hoặc nội dung đã bàn luận trước đó:\n` +
-      `       + BẮT BUỘC PHẢI BẢO LƯU NGUYÊN VẸN 100% TOÀN BỘ NỘI DUNG CHI TIẾT GỐC VÀO THAM SỐ 'content' CỦA TOOL 'generate_file' (bao gồm đầy đủ căn cứ/điều khoản pháp luật, bảng biểu/số liệu tài chính - BĐS, toàn bộ lời thoại/phân cảnh kịch bản media, mã nguồn/kiến trúc kỹ thuật, quy chế doanh nghiệp...). TUYỆT ĐỐI CẤM tự ý tóm tắt thành dàn ý gạch đầu dòng sơ sài làm mất mát dữ liệu và tri thức chuyên sâu của người dùng!\n` +
-      `     * [QUY TẮC NỘI DUNG VOICE / TTS CHO MỌI LĨNH VỰC (Thơ ca, Tin tức, Pháp luật, Tài chính, Kịch bản, Kể chuyện)]: Khi gọi 'create_voice', tham số 'text' CHỈ ĐƯỢC CHỨA NỘI DUNG CỐT LÕI CẦN ĐỌC THÀNH TIẾNG (Tên tác phẩm/bản tin/điều luật, Tác giả/Nguồn nếu có, và toàn bộ nội dung chi tiết bài thơ / tin tức / đối thoại / câu chuyện). TUYỆT ĐỐI CẤM đưa lời chào xưng hô (@mention, 'Dạ Sếp...', 'Em xin gửi...'), lời dẫn phiếm đàm ('Dưới đây là...'), thông báo tiến độ ('Hệ thống đang xử lý qua worker...'), câu hỏi kết thúc ('Sếp có muốn...', 'Chúc bạn nghe vui...'), ĐẶC BIỆT TUYỆT ĐỐI CẤM đưa các đoạn phân tích, bình luận, cảm nhận, ý nghĩa, bối cảnh sáng tác hay giải thích bên dưới vào tham số 'text' của giọng đọc (người dùng chỉ muốn nghe chính tác phẩm, không nghe phân tích ngoài lề)!\n` +
-      `     * [KỊCH BẢN ĐỐI THOẠI / PODCAST 2 NGƯỜI]: Khi người dùng yêu cầu kịch bản 2 người nói chuyện, cuộc đối thoại, hoặc podcast 2 người: BẮT BUỘC tự động soạn kịch bản đối đáp sinh động, phân vai rõ ràng theo từng lượt nói (ví dụ: 'Nam: ...\nNữ: ...' hoặc 'MC Nam: ...\nKhách mời: ...', có thể thêm cảm xúc trong ngoặc như 'Nam (hào hứng): ...') và BẮT BUỘC GỌI 'create_voice' truyền toàn bộ kịch bản vào tham số 'text' để hệ thống tự động tổng hợp thành file Podcast .m4a 2 giọng gửi lên Zalo!\n` +
-      `     * TUYỆT ĐỐI CẤM in cú pháp giả lập dạng '[create_voice text="..."]' hoặc '[generate_file(...)]' ra tin nhắn văn bản! BẮT BUỘC PHẢI THỰC SỰ GỌI FUNCTION CALLING CỦA TOOL!\n` +
-      `     * [QUY ĐỊNH CÂU TRẢ LỜI BẰNG CHỮ KÈM THEO]:\n` +
-      `       + Với Slide PowerPoint (.pptx), File Word (.docx), Excel (.xlsx): Câu trả lời bằng chữ chỉ cần ngắn gọn 1-3 dòng tóm tắt và thông báo file đã gửi, không xả hàng chục trang vào chat Zalo.\n` +
-      `       + Với Yêu cầu Voice / Đọc bài thơ / Ngâm thơ / Đọc tin tức / Kịch bản / Kể chuyện: BẮT BUỘC PHẢI IN TOÀN BỘ NỘI DUNG BÀI THƠ / BÀI VIẾT / KỊCH BẢN ĐẦY ĐỦ RA TIN NHẮN CHAT (ghi rõ Tên bài thơ/tác phẩm, Tác giả nếu có, và toàn văn từng dòng từng khổ). TUYỆT ĐỐI KHÔNG được chỉ gửi mỗi câu thông báo 1 dòng nhận việc mà quên in nội dung!\n` +
-      `     * [QUY TẮC CỐT LÕI: NẾU KHÔNG THỰC HIỆN ĐƯỢC HOẶC KHÔNG HIỂU RÕ THÌ PHẢI BÁO LẠI, TUYỆT ĐỐI KHÔNG TỰ BỊA ĐẶT (ZERO-HALLUCINATION & BÁO CÁO TRUNG THỰC)]:\n` +
-      `       + NGUYÊN TẮC TỐI THƯỢNG: NẾU KHÔNG THỰC HIỆN ĐƯỢC HOẶC KHÔNG HIỂU RÕ YÊU CẦU, BẮT BUỘC PHẢI BÁO CÁO TRUNG THỰC VÀ RÕ RÀNG CHO NGƯỜI DÙNG / SẾP BIẾT LÝ DO, TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT HOẶC "NHẬN VƠ"!\n` +
-      `       + KHI KHÔNG HIỂU RÕ YÊU CẦU: Nếu câu hỏi/chỉ đạo quá vắn tắt, mơ hồ, tối nghĩa hoặc thiếu thông tin ngữ cảnh để xử lý, hãy lịch sự hỏi lại và nhờ người dùng làm rõ hoặc cung cấp thêm chi tiết. CẤM tự đoán mò và bịa ra thông tin sai lệch!\n` +
-      `       + KHI KHÔNG THỰC HIỆN ĐƯỢC: Nếu tác vụ vượt quá khả năng, thiếu công cụ hỗ trợ hoặc gặp lỗi hệ thống: Báo thẳng thắn, trung thực lý do chưa thể thực hiện và hướng dẫn người dùng thao tác phù hợp.\n` +
-      `       + TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT LINK TẢI FILE: CẤM TỰ GÕ BẤT KỲ ĐƯỜNG LINK TẢI NÀO (như link https://fg40.dlfl.vn/..., zdn.vn, zalo.me...). Link tải file chỉ do hệ thống máy chủ đính kèm tự động khi thực sự xuất file thành công qua tool!\n` +
-      `       + TUYỆT ĐỐI CẤM NÓI DỐI ĐÃ GỬI FILE: CẤM in vào tin nhắn chat rằng "em đã xuất xong file", "đã gửi file", "anh/chị bấm vào link tải" khi CHƯA THỰC SỰ GỌI CÔNG CỤ XUẤT FILE!\n` +
-      `       + TUYỆT ĐỐI CẤM bịa đặt các câu như 'hạn mức 2 tác vụ/giờ', 'đạt ngưỡng hệ thống', 'chỉ chủ nhân mới có quyền', 'lát nữa em mới thu âm', 'uống trà đợi em'. Khi người dùng yêu cầu, PHẢI THỰC HIỆN NGAY LẬP TỨC!\n` +
-      `   - [KỸ NĂNG TẠO & CHỈNH SỬA ẢNH NGHỆ THUẬT (generate_image)]:\n` +
-      `     + Khi người dùng yêu cầu vẽ ảnh, tạo ảnh, sinh ảnh, tạo tranh, vẽ chân dung, anime, đồ vật, phong cảnh, hoặc sửa ảnh, biến thể ảnh: BẮT BUỘC GỌI TOOL 'generate_image'.\n` +
-      `     + ĐẶC BIỆT KHI NGƯỜI DÙNG BẢO 'dựa vào prompt của...', 'theo prompt này', hoặc 'vẽ ảnh' (kèm quote/ảnh đính kèm): BẮT BUỘC ĐỌC KỸ LỊCH SỬ CHAT VÀ NỘI DUNG QUOTE, TRÍCH XUẤT ĐẦY ĐỦ Ý TƯỞNG/PROMPT ĐÓ ra và truyền vào tham số 'prompt' của tool generate_image. TUYỆT ĐỐI CẤM để prompt cộc lốc!\n` +
-      `     + NẾU là chỉnh sửa/thay đổi trên ảnh có sẵn: Đặt isEdit=true và truyền imageUrl nếu có.\n` +
-      `     + TUYỆT ĐỐI CẤM bịa đặt bằng chữ 'em đang vẽ ảnh / đã gửi ảnh' khi chưa thực sự gọi tool 'generate_image'!`;
+      (targetUrl || /(?:vẽ|ve|tạo|tao|sinh|chỉnh sửa|chinh sua)\s+ảnh/i.test(question)
+        ? `8. [KỸ NĂNG TẠO & CHỈNH SỬA ẢNH NGHỆ THUẬT (generate_image)]:\n` +
+          `   - Khi người dùng yêu cầu vẽ ảnh, tạo ảnh, sinh ảnh, tạo tranh, vẽ chân dung, anime, đồ vật, phong cảnh, hoặc sửa ảnh, biến thể ảnh: BẮT BUỘC GỌI TOOL 'generate_image'.\n` +
+          `   - NẾU là chỉnh sửa/thay đổi trên ảnh có sẵn: Đặt isEdit=true và truyền imageUrl nếu có.\n`
+        : "") +
+      buildDynamicSystemPromptModules({ question, quoteText: options?.quote?.text, botName, isSuperAdmin });
 
     const imageRefHint = targetUrl
       ? `\n[ẢNH THAM CHIẾU / ĐÍNH KÈM HIỆN TẠI]: "${targetUrl}". Khi người dùng yêu cầu chỉnh sửa, thay đổi chi tiết hoặc biến thể từ ảnh này, hãy gọi 'generate_image' với imageUrl="${targetUrl}" và isEdit=true.\n`
@@ -1836,7 +1810,9 @@ QUY TẮC BẮT BUỘC:
       `${getSystemTemporalPrompt()}\n\n` +
       `BẠN ĐANG TƯƠNG TÁC TRỰC TIẾP TRONG NHÓM: "${currentGroupName}" (ID: ${threadId}).\n` +
       `${personaIntro}\n${customPromptSection}\n` +
-      `${getSystemArchitectureProfile({ botName, isSuperAdmin })}\n\n` +
+      (isSystemArchitectureQuery(`${question} ${options.quote.text}`)
+        ? `${getSystemArchitectureProfile({ botName, isSuperAdmin })}\n\n`
+        : "") +
       `NHIỆM VỤ:\n` +
       `1. Thành viên đang trích dẫn (quote) một tin nhắn hoặc nội dung thảo luận trước đó và đặt câu hỏi tiếp theo.\n` +
       `2. ÁP DỤNG 5 NGUYÊN TẮC VÀNG HOẠT ĐỘNG TOÀN NĂNG:\n` +
@@ -1856,43 +1832,7 @@ QUY TẮC BẮT BUỘC:
           `     + Duyên dáng, mặn mà, hóm hỉnh, tôn trọng nhưng cực kỳ uy tín về tri thức. Không xưng 'tôi', không gọi 'bạn'.\n`) +
       `   - [NGUYÊN TẮC 5 - CÔ LẬP DỮ LIỆU & ĐỘ ƯU TIÊN THỜI GIAN THỰC]: Dữ liệu thời gian thực tra cứu được (Live News, Web Search, Bách khoa toàn thư) CÓ ĐỘ ƯU TIÊN CAO NHẤT, ĐÈ LÊN MỌI LẬP LUẬN CŨ TRONG LỊCH SỬ CHAT VÀ DỮ LIỆU LỖI THỜI TRONG TRÍ NHỚ. Tuyệt đối không lặp lại số liệu cũ nếu có thông tin mới hơn!\n` +
       `   - [CẬP NHẬT DỮ KIỆN THỜI GIAN THỰC & PHÁP LUẬT / HÀNH CHÍNH MỚI NHẤT]: BẮT BUỘC ưu tiên dữ liệu mới nhất từ phần 'DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT'. Khi câu hỏi liên quan đến dữ kiện thực tế có tính biến động (chính sách, luật pháp, đơn vị hành chính, giá cả, số liệu): TUYỆT ĐỐI KHÔNG bám vào số liệu cũ trong trí nhớ đã lỗi thời hay câu trả lời cũ trong lịch sử chat nếu dữ liệu tra cứu cung cấp văn bản, nghị quyết hoặc số liệu mới hơn. Phải giải thích rõ ràng và cập nhật số liệu mới nhất cho người hỏi!\n` +
-      `   - [QUY TẮC BẮT BUỘC KHI TẠO SLIDE THUYẾT TRÌNH, XUẤT FILE TÀI LIỆU HOẶC TẠO VOICE]:\n` +
-      `     + Khi người dùng yêu cầu tạo bài thuyết trình / slide PowerPoint (.pptx), xuất file Word (.docx), Excel (.xlsx), hoặc tạo giọng đọc / voice (.m4a), HOẶC giục 'soạn luôn đi', 'làm luôn đi':\n` +
-      `       * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_file' (fileType='pptx' cho slide, 'docx' cho word, 'xlsx' cho excel) HOẶC 'create_voice' để xuất file thực tế gửi lên Zalo!\n` +
-      `       * Với slide PowerPoint (.pptx): Phải chia nội dung thành các slide rõ ràng bằng các tiêu đề markdown '# Tiêu đề slide' và nội dung gạch đầu dòng chi tiết cho từng slide.\n` +
-      `       * TUYỆT ĐỐI CẤM CHỈ GÕ DÀN Ý BẰNG CHỮ RỒI HỎI NGƯỢC LẠI NGƯỜI DÙNG có muốn soạn không. Hãy hành động và xuất file ngay lập tức!\n` +
-      `       * [QUY TẮC BẢO LƯU NGUYÊN VẸN TRI THỨC KHI ĐÓNG GÓI / XUẤT FILE ĐA LĨNH VỰC]:\n` +
-      `         - Khi người dùng yêu cầu 'đóng gói', 'xuất file', 'lưu vào file', 'chuyển thành file' (Word/docx, Excel/xlsx, PowerPoint/pptx, PDF, CSV, TXT...) từ nội dung tin nhắn được trích dẫn (quote) hoặc nội dung đã bàn luận trước đó:\n` +
-      `         - BẮT BUỘC PHẢI BẢO LƯU NGUYÊN VẸN 100% TOÀN BỘ NỘI DUNG CHI TIẾT GỐC VÀO THAM SỐ 'content' CỦA TOOL 'generate_file' (bao gồm đầy đủ căn cứ/điều khoản pháp luật, bảng biểu/số liệu tài chính - BĐS, toàn bộ lời thoại/phân cảnh kịch bản media, mã nguồn/kiến trúc kỹ thuật, quy chế doanh nghiệp...). TUYỆT ĐỐI CẤM tự ý tóm tắt thành dàn ý gạch đầu dòng sơ sài làm mất mát dữ liệu và tri thức chuyên sâu của người dùng!\n` +
-      `       * [QUY TẮC NỘI DUNG VOICE / TTS CHO MỌI LĨNH VỰC (Thơ ca, Tin tức, Pháp luật, Tài chính, Kịch bản, Kể chuyện)]: Khi gọi 'create_voice', tham số 'text' CHỈ ĐƯỢC CHỨA NỘI DUNG CỐT LÕI CẦN ĐỌC THÀNH TIẾNG (Tên tác phẩm/bản tin/điều luật, Tác giả/Nguồn nếu có, và toàn bộ nội dung chi tiết bài thơ / tin tức / đối thoại / câu chuyện). TUYỆT ĐỐI CẤM đưa lời chào xưng hô (@mention, 'Dạ Sếp...', 'Em xin gửi...'), lời dẫn phiếm đàm ('Dưới đây là...'), thông báo tiến độ ('Hệ thống đang xử lý qua worker...'), câu hỏi kết thúc ('Sếp có muốn...', 'Chúc bạn nghe vui...'), ĐẶC BIỆT TUYỆT ĐỐI CẤM đưa các đoạn phân tích, bình luận, cảm nhận, ý nghĩa, bối cảnh sáng tác hay giải thích bên dưới vào tham số 'text' của giọng đọc (người dùng chỉ muốn nghe chính tác phẩm, không nghe phân tích ngoài lề)!\n` +
-       `       * [KỊCH BẢN ĐỐI THOẠI / PODCAST 2 NGƯỜI]: Khi người dùng yêu cầu kịch bản 2 người nói chuyện, cuộc đối thoại, hoặc podcast 2 người: BẮT BUỘC tự động soạn kịch bản đối đáp sinh động, phân vai rõ ràng theo từng lượt nói (ví dụ: 'Nam: ...\nNữ: ...' hoặc 'MC Nam: ...\nKhách mời: ...', có thể thêm cảm xúc trong ngoặc như 'Nam (hào hứng): ...') và BẮT BUỘC GỌI 'create_voice' truyền toàn bộ kịch bản vào tham số 'text' để hệ thống tự động tổng hợp thành file Podcast .m4a 2 giọng gửi lên Zalo!\n` +
-      `       * TUYỆT ĐỐI CẤM in cú pháp giả lập dạng '[create_voice text="..."]' hoặc '[generate_file(...)]' ra tin nhắn văn bản! BẮT BUỘC PHẢI THỰC SỰ GỌI FUNCTION CALLING CỦA TOOL!\n` +
-      `     * [QUY ĐỊNH CÂU TRẢ LỜI BẰNG CHỮ KÈM THEO]:\n` +
-      `       + Với Slide PowerPoint (.pptx), File Word (.docx), Excel (.xlsx): Câu trả lời bằng chữ chỉ cần ngắn gọn 1-3 dòng tóm tắt và thông báo file đã gửi, không xả hàng chục trang vào chat Zalo.\n` +
-      `       + Với Yêu cầu Voice / Đọc bài thơ / Ngâm thơ / Đọc tin tức / Kịch bản / Kể chuyện: BẮT BUỘC PHẢI IN TOÀN BỘ NỘI DUNG BÀI THƠ / BÀI VIẾT / KỊCH BẢN ĐẦY ĐỦ RA TIN NHẮN CHAT (ghi rõ Tên bài thơ/tác phẩm, Tác giả nếu có, và toàn văn từng dòng từng khổ). TUYỆT ĐỐI KHÔNG được chỉ gửi mỗi câu thông báo 1 dòng nhận việc mà quên in nội dung!\n` +
-      `     * [QUY TẮC CỐT LÕI: NẾU KHÔNG THỰC HIỆN ĐƯỢC HOẶC KHÔNG HIỂU RÕ THÌ PHẢI BÁO LẠI, TUYỆT ĐỐI KHÔNG TỰ BỊA ĐẶT (ZERO-HALLUCINATION & BÁO CÁO TRUNG THỰC)]:\n` +
-      `       + NGUYÊN TẮC TỐI THƯỢNG: NẾU KHÔNG THỰC HIỆN ĐƯỢC HOẶC KHÔNG HIỂU RÕ YÊU CẦU, BẮT BUỘC PHẢI BÁO CÁO TRUNG THỰC VÀ RÕ RÀNG CHO NGƯỜI DÙNG / SẾP BIẾT LÝ DO, TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT HOẶC "NHẬN VƠ"!\n` +
-      `       + KHI KHÔNG HIỂU RÕ YÊU CẦU: Nếu câu hỏi/chỉ đạo quá vắn tắt, mơ hồ, tối nghĩa hoặc thiếu thông tin ngữ cảnh để xử lý, hãy lịch sự hỏi lại và nhờ người dùng làm rõ hoặc cung cấp thêm chi tiết. CẤM tự đoán mò và bịa ra thông tin sai lệch!\n` +
-      `       + KHI KHÔNG THỰC HIỆN ĐƯỢC: Nếu tác vụ vượt quá khả năng, thiếu công cụ hỗ trợ hoặc gặp lỗi hệ thống: Báo thẳng thắn, trung thực lý do chưa thể thực hiện và hướng dẫn người dùng thao tác phù hợp.\n` +
-      `       + TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT LINK TẢI FILE: CẤM TỰ GÕ BẤT KỲ ĐƯỜNG LINK TẢI NÀO (như link https://fg40.dlfl.vn/..., zdn.vn, zalo.me...). Link tải file chỉ do hệ thống máy chủ đính kèm tự động khi thực sự xuất file thành công qua tool!\n` +
-      `       + TUYỆT ĐỐI CẤM NÓI DỐI ĐÃ GỬI FILE: CẤM in vào tin nhắn chat rằng "em đã xuất xong file", "đã gửi file", "anh/chị bấm vào link tải" khi CHƯA THỰC SỰ GỌI CÔNG CỤ XUẤT FILE!\n` +
-      `       + TUYỆT ĐỐI CẤM bịa đặt các câu như 'hạn mức 2 tác vụ/giờ', 'đạt ngưỡng hệ thống', 'chỉ chủ nhân mới có quyền', 'lát nữa em mới thu âm', 'uống trà đợi em'. Khi người dùng yêu cầu, PHẢI THỰC HIỆN NGAY LẬP TỨC!\n` +
-      `   - [KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ, POSTER & ĐỒ HỌA BẰNG PYTHON (python_interpreter)]:\n` +
-      `     + Khi người dùng yêu cầu vẽ biểu đồ, sơ đồ quy trình, mindmap hoặc thiết kế đồ họa / poster / bảng lịch thi đấu / bảng xếp hạng, HOẶC khi người dùng chê ảnh xấu/lỗi font và yêu cầu làm lại cẩn thận:\n` +
-      `       BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM gõ code Python bằng chữ vào tin nhắn chat Zalo!\n` +
-      `     + VỚI LỊCH THI ĐẤU, BẢNG XẾP HẠNG, SƠ ĐỒ, ROADMAP: BẮT BUỘC dùng PIL thiết kế INFOGRAPHIC POSTER CARD LAYOUT khổ dọc (W=720, H=1100-1400), nền tối sang trọng (thể thao dùng burgundy #42030D, doanh nghiệp dùng navy #0B132B), thẻ bo góc rounded_rectangle, badge trạng thái ([CHÍNH THỨC], [GIAO HỮU], [LỘ TRÌNH]), tiêu đề vàng kim #FFD700 nổi bật, hàng dữ liệu phân tầng rõ ràng, dùng get_font(size, bold) chuẩn tiếng Việt 100% không lỗi ô vuông. TUYỆT ĐỐI KHÔNG vẽ biểu đồ cột [1, 1, 1] cho lịch thi đấu!\n` +
-      `     + VỚI SỐ LIỆU ĐỊNH LƯỢNG (% tăng trưởng, doanh thu, giá cả): Dùng matplotlib với plt.style.use('dark_background') và plt.savefig('chart.png', dpi=150, bbox_inches='tight').\n` +
-      `     + Hệ thống sẽ tự động bắt file ảnh PNG được tạo ra và gửi trực tiếp lên nhóm Zalo!\n` +
-      `     + TUYỆT ĐỐI CẤM từ chối hoặc bảo người dùng nhờ designer vẽ lại! Hãy chủ động viết code Python tự vẽ và xuất file ảnh ngay lập tức!\n` +
-      `   - [KHI CÂU HỎI LÀ TỔNG QUAN DỰ ÁN BẤT ĐỘNG SẢN / CÔNG TRÌNH / HỒ SƠ THƯƠNG MẠI]:\n` +
-      `     + BẮT BUỘC cấu trúc câu trả lời chuyên nghiệp, sắc nét, đầy đủ theo các phân mục rõ ràng:\n` +
-      `       • 🏢 TỔNG QUAN DỰ ÁN (Tên thương mại, Chủ đầu tư/đơn vị phát triển, Đơn vị thiết kế/thi công, Tổng vốn đầu tư, Mốc khởi công & dự kiến bàn giao).\n` +
-      `       • 📍 1. Vị trí đắc địa & Kết nối giao thông (Địa chỉ chi tiết, lợi thế ven sông/hồ, cự ly kết nối tới bệnh viện, TTTM, hạ tầng trọng điểm).\n` +
-      `       • 📐 2. Quy mô & Cơ cấu sản phẩm (Diện tích khu đất, số lượng tháp/tầng, chi tiết từng loại hình: Căn hộ ở 1-3PN, Căn hộ Officetel, Shophouse khối đế, diện tích từng loại).\n` +
-      `       • 🌿 3. Tiện ích & Phong cách sống (Phát triển theo phong cách gì, hồ bơi, gym, yoga, sauna, mảng xanh, tiện ích đặc quyền).\n` +
-      `       • 💰 4. Giá bán & Chính sách tham khảo (Giá rumor/dự kiến đợt 1 từng loại hình, chính sách bán hàng hoặc vay vốn nếu có).\n` +
-      `     + In đậm các số liệu quan trọng, trình bày gạch đầu dòng rõ ràng, mạch lạc, tối ưu hiển thị trên giao diện chat Zalo.\n` +
-      `   - [CHỐNG BẺ LÁI SANG BẤT ĐỘNG SẢN]: Khi người dùng hỏi về địa lý, xã hội, khoa học, chính trị, thể thao, công nghệ, lịch sử: PHẢI TRẢ LỜI ĐÚNG TRỌNG TÂM, CẤM tự ý suy diễn người hỏi đi du lịch hay lôi chuyện bất động sản/mua bán đất vào câu trả lời nếu người dùng không hỏi về BĐS!` +
+      buildDynamicSystemPromptModules({ question, quoteText: options.quote.text, botName, isSuperAdmin }) +
       (quoteUserMemorySection
         ? `\n\n   - [HỒ SƠ & BỘ NHỚ VỀ THÀNH VIÊN ĐANG TRÒ CHUYỆN (@${displayName})]:\n${quoteUserMemorySection}`
         : "");
@@ -1901,13 +1841,28 @@ QUY TẮC BẮT BUỘC:
     let quoteEvidenceRequired = false;
     let quotePlan: QueryPlanResult | null = null;
     const isFileOrVoiceReq = checkIsFileOrVoiceGeneration(question, options.quote.text);
+    const isPureQuoteComprehension = Boolean(
+      options.quote.text &&
+      !isFileOrVoiceReq &&
+      !isMotionVideoRequest(question, options.quote.text) &&
+      !isPresentationVideoRequest(question, options.quote.text) &&
+      /(?:tóm tắt|tom tat|tóm lược|ý chính|nội dung chính|phân tích|giai thich|giải thích|dịch|dich|dịch sang|nghĩa là gì|la gi|nghĩa gì|đọc hiểu|nói về gì|nói gì|rút gọn|đoạn này|quote này|tin nhắn này)/i.test(question) &&
+      !/(?:hôm nay|mới nhất|tin tức|giá vàng|tỷ giá|thời tiết|kết quả|tỉ số|sáng nay|chiều nay|tối nay)/i.test(question)
+    );
+
     try {
-      const plan = await planSearchQueries({
-        question,
-        quoteText: options.quote.text,
-        recentContext: recentChatContext,
-        displayName,
-      });
+      let plan: QueryPlanResult;
+      if (isPureQuoteComprehension) {
+        console.log(`[member-assistant] ⚡ Fast-path: Đọc hiểu/tóm tắt trích dẫn thuần túy, bỏ qua Planner tra cứu.`);
+        plan = { needsSearch: false, queries: [], intent: "chat" };
+      } else {
+        plan = await planSearchQueries({
+          question,
+          quoteText: options.quote.text,
+          recentContext: recentChatContext,
+          displayName,
+        });
+      }
       quotePlan = plan;
 
       if (options?.api && plan.taskType === "motion_video" && isMotionVideoRequest(question, options?.quote?.text)) {
@@ -2889,7 +2844,9 @@ QUY TẮC BẮT BUỘC:
     `${getSystemTemporalPrompt()}\n\n` +
     `BẠN ĐANG TƯƠNG TÁC TRỰC TIẾP TRONG NHÓM: "${currentGroupName}" (ID: ${threadId}).\n` +
     `${personaIntro}\n${customPromptSection}\n` +
-    `${getSystemArchitectureProfile({ botName, isSuperAdmin })}\n\n` +
+    (isSystemArchitectureQuery(`${question} ${options?.quote?.text || ""}`)
+      ? `${getSystemArchitectureProfile({ botName, isSuperAdmin })}\n\n`
+      : "") +
     `=== 5 NGUYÊN TẮC VÀNG HOẠT ĐỘNG TOÀN NĂNG (UNIVERSAL GOLDEN RULES) ===\n\n` +
     `1. NGUYÊN TẮC 1: DUAL GROUNDING ĐA LĨNH VỰC (STRICT FACT VS OPEN KNOWLEDGE)\n` +
     `   - [A. DỮ LIỆU ĐÓNG NỘI BỘ (File đính kèm, Link Google Doc/Sheet, Hợp đồng, Chính sách, SOP, Bảng biểu)]:\n` +
@@ -2941,44 +2898,7 @@ QUY TẮC BẮT BUỘC:
     `- KHI CÂU HỎI LÀ TRA CỨU SỰ KIỆN / SỐ LIỆU / DỮ KIỆN THỰC TẾ: Đi thẳng vào câu trả lời và số liệu rõ ràng, không mở bài bằng các câu chào hỏi hay cảm thán sáo rỗng dài dòng làm loãng thông tin, KHÔNG chèn thông tin bổ trợ bên lề.\n` +
     `- CẬP NHẬT DỮ KIỆN THỜI GIAN THỰC & PHÁP LUẬT / HÀNH CHÍNH MỚI NHẤT: BẮT BUỘC ưu tiên dữ liệu mới nhất từ phần 'DỮ LIỆU THỜI GIAN THỰC & BÁCH KHOA MỚI NHẤT'. Khi câu hỏi liên quan đến dữ kiện thực tế có tính biến động (chính sách, luật pháp, đơn vị hành chính, giá cả, số liệu): TUYỆT ĐỐI KHÔNG bám vào số liệu cũ trong trí nhớ đã lỗi thời nếu dữ liệu tra cứu cung cấp văn bản, nghị quyết hoặc số liệu mới hơn. Phải giải thích rõ ràng và cập nhật số liệu mới nhất cho người hỏi!\n` +
     `- KHI HỎI VỀ QUY TRÌNH, HƯỚNG DẪN HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Trích dẫn và diễn giải chi tiết từng bước (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến từ lịch sử chat. Không chỉ đưa mỗi link tài liệu.\n` +
-    `- QUY TẮC BẮT BUỘC KHI TẠO SLIDE THUYẾT TRÌNH, XUẤT FILE TÀI LIỆU (.MD, .DOCX, .XLSX, .PPTX, .HTML, .CSV) HOẶC TẠO VOICE:\n` +
-    `  + Khi người dùng yêu cầu tạo bài thuyết trình / slide PowerPoint (.pptx), xuất file Word (.docx), Excel (.xlsx), Markdown (.md), HTML (.html), Text (.txt), hoặc tạo giọng đọc / voice (.m4a), HOẶC giục 'soạn luôn đi', 'làm luôn đi', 'trả file cho mình đi', 'xuất file đi':\n` +
-    `    * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_file' (fileType='md' cho Markdown, 'docx' cho word, 'xlsx' cho excel, 'pptx' cho slide, 'html' cho html, 'csv' cho csv) HOẶC 'create_voice' để xuất file thực tế gửi lên Zalo!\n` +
-    `    * Với slide PowerPoint (.pptx): Phải chia nội dung thành các slide rõ ràng bằng các tiêu đề markdown '# Tiêu đề slide' và nội dung gạch đầu dòng chi tiết cho từng slide.\n` +
-    `    * TUYỆT ĐỐI CẤM CHỈ GÕ DÀN Ý BẰNG CHỮ RỒI HỎI NGƯỢC LẠI NGƯỜI DÙNG có muốn soạn/đóng gói thành file không! Hãy hành động và xuất file ngay lập tức!\n` +
-    `    * [QUY TẮC TRẢ FILE THEO YÊU CẦU]: Khi người dùng yêu cầu 'trả file cho mình đi', 'trả file .md cho mình đi', 'xuất file đi', 'gửi file đi': NẾU NỘI DUNG ĐÃ ĐƯỢC BẠN SOẠN THẢO HOẶC ĐÃ THẢO LUẬN TRONG LỊCH SỬ CHAT: BẮT BUỘC PHẢI LẤY CHÍNH NỘI DUNG ĐÓ ĐỂ GỌI 'generate_file' (fileType='md' hoặc file tương ứng) XUẤT FILE GỬI LÊN ZALO NGAY LẬP TỨC! TUYỆT ĐỐI CẤM TỪ CHỐI HAY BÁO LỖI KHÔNG TẢI ĐƯỢC LINK!\n` +
-    `    * [QUY TẮC BẢO LƯU NGUYÊN VẸN TRI THỨC KHI ĐÓNG GÓI / XUẤT FILE ĐA LĨNH VỰC]: Khi người dùng yêu cầu 'đóng gói', 'xuất file', 'lưu vào file', 'chuyển thành file' (Word/docx, Excel/xlsx, PowerPoint/pptx, PDF, CSV, TXT...) từ nội dung tin nhắn được trích dẫn (quote) hoặc nội dung đã bàn luận trước đó: BẮT BUỘC PHẢI BẢO LƯU NGUYÊN VẸN 100% TOÀN BỘ NỘI DUNG CHI TIẾT GỐC VÀO THAM SỐ 'content' CỦA TOOL 'generate_file' (đầy đủ căn cứ/điều khoản pháp luật, bảng biểu/số liệu tài chính - BĐS, toàn bộ lời thoại/phân cảnh kịch bản media, mã nguồn/kiến trúc kỹ thuật...). TUYỆT ĐỐI CẤM tự ý tóm tắt thành dàn ý gạch đầu dòng sơ sài làm mất mát dữ liệu và tri thức chuyên sâu của người dùng!\n` +
-    `    * [QUY TẮC NỘI DUNG VOICE / TTS CHO MỌI LĨNH VỰC (Thơ ca, Tin tức, Pháp luật, Tài chính, Kịch bản, Kể chuyện)]: Khi gọi 'create_voice', tham số 'text' CHỈ ĐƯỢC CHỨA NỘI DUNG CỐT LÕI CẦN ĐỌC THÀNH TIẾNG (Tên tác phẩm/bản tin/điều luật, Tác giả/Nguồn nếu có, và toàn bộ nội dung chi tiết bài thơ / tin tức / đối thoại / câu chuyện). TUYỆT ĐỐI CẤM đưa lời chào xưng hô (@mention, 'Dạ Sếp...', 'Em xin gửi...'), lời dẫn phiếm đàm ('Dưới đây là...'), thông báo tiến độ ('Hệ thống đang xử lý qua worker...'), câu hỏi kết thúc ('Sếp có muốn...', 'Chúc bạn nghe vui...'), ĐẶC BIỆT TUYỆT ĐỐI CẤM đưa các đoạn phân tích, bình luận, cảm nhận, ý nghĩa, bối cảnh sáng tác hay giải thích bên dưới vào tham số 'text' của giọng đọc (người dùng chỉ muốn nghe chính tác phẩm, không nghe phân tích ngoài lề)!\n` +
-    `    * [KỊCH BẢN ĐỐI THOẠI / PODCAST 2 NGƯỜI]: Khi người dùng yêu cầu kịch bản 2 người nói chuyện, cuộc đối thoại, hoặc podcast 2 người: BẮT BUỘC tự động soạn kịch bản đối đáp sinh động, phân vai rõ ràng theo từng lượt nói (ví dụ: 'Nam: ...\nNữ: ...' hoặc 'MC Nam: ...\nKhách mời: ...', có thể thêm cảm xúc trong ngoặc như 'Nam (hào hứng): ...') và BẮT BUỘC GỌI 'create_voice' truyền toàn bộ kịch bản vào tham số 'text' để hệ thống tự động tổng hợp thành file Podcast .m4a 2 giọng gửi lên Zalo!\n` +
-    `    * TUYỆT ĐỐI CẤM in cú pháp giả lập dạng '[create_voice text="..."]' hoặc '[generate_file(...)]' ra tin nhắn văn bản! BẮT BUỘC PHẢI THỰC SỰ GỌI FUNCTION CALLING CỦA TOOL!\n` +
-    `    * CHỈ từ chối tạo file khi người dùng chỉ hỏi thăm năng lực (ví dụ: 'em biết tạo slide không?'). Khi đó chỉ giải thích năng lực và mời người dùng yêu cầu cụ thể.\n` +
-    `    * [QUY ĐỊNH CÂU TRẢ LỜI BẰNG CHỮ KÈM THEO]:\n` +
-    `      + Với Slide PowerPoint (.pptx), File Word (.docx), Excel (.xlsx): Câu trả lời bằng chữ chỉ cần ngắn gọn 1-3 dòng tóm tắt và thông báo file đã gửi, không xả hàng chục trang vào chat Zalo.\n` +
-    `      + Với Yêu cầu Voice / Đọc bài thơ / Ngâm thơ / Đọc tin tức / Kịch bản / Kể chuyện: BẮT BUỘC PHẢI IN TOÀN BỘ NỘI DUNG BÀI THƠ / BÀI VIẾT / KỊCH BẢN ĐẦY ĐỦ RA TIN NHẮN CHAT (ghi rõ Tên bài thơ/tác phẩm, Tác giả nếu có, và toàn văn từng dòng từng khổ). TUYỆT ĐỐI KHÔNG được chỉ gửi mỗi câu thông báo 1 dòng nhận việc mà quên in nội dung!\n` +
-    `    * [QUY TẮC CỐT LÕI: NẾU KHÔNG THỰC HIỆN ĐƯỢC HOẶC KHÔNG HIỂU RÕ THÌ PHẢI BÁO LẠI, TUYỆT ĐỐI KHÔNG TỰ BỊA ĐẶT (ZERO-HALLUCINATION & BÁO CÁO TRUNG THỰC)]:\n` +
-    `      + NGUYÊN TẮC TỐI THƯỢNG: NẾU KHÔNG THỰC HIỆN ĐƯỢC HOẶC KHÔNG HIỂU RÕ YÊU CẦU, BẮT BUỘC PHẢI BÁO CÁO TRUNG THỰC VÀ RÕ RÀNG CHO NGƯỜI DÙNG / SẾP BIẾT LÝ DO, TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT HOẶC "NHẬN VƠ"!\n` +
-    `      + KHI KHÔNG HIỂU RÕ YÊU CẦU: Nếu câu hỏi/chỉ đạo quá vắn tắt, mơ hồ, tối nghĩa hoặc thiếu thông tin ngữ cảnh để xử lý, hãy lịch sự hỏi lại và nhờ người dùng làm rõ hoặc cung cấp thêm chi tiết. CẤM tự đoán mò và bịa ra thông tin sai lệch!\n` +
-    `      + KHI KHÔNG THỰC HIỆN ĐƯỢC: Nếu tác vụ vượt quá khả năng, thiếu công cụ hỗ trợ hoặc gặp lỗi hệ thống: Báo thẳng thắn, trung thực lý do chưa thể thực hiện và hướng dẫn người dùng thao tác phù hợp.\n` +
-    `      + TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT LINK TẢI FILE: CẤM TỰ GÕ BẤT KỲ ĐƯỜNG LINK TẢI NÀO (như link https://fg40.dlfl.vn/..., zdn.vn, zalo.me...). Link tải file chỉ do hệ thống máy chủ đính kèm tự động khi thực sự xuất file thành công qua tool!\n` +
-    `      + TUYỆT ĐỐI CẤM NÓI DỐI ĐÃ GỬI FILE: CẤM in vào tin nhắn chat rằng "em đã xuất xong file", "đã gửi file", "anh/chị bấm vào link tải" khi CHƯA THỰC SỰ GỌI CÔNG CỤ XUẤT FILE!\n` +
-    `      + TUYỆT ĐỐI CẤM bịa đặt các câu như 'hạn mức 2 tác vụ/giờ', 'đạt ngưỡng hệ thống', 'chỉ chủ nhân mới có quyền', 'lát nữa em mới thu âm', 'uống trà đợi em'. Khi người dùng yêu cầu, PHẢI THỰC HIỆN NGAY LẬP TỨC!\n` +
-    `- KỸ NĂNG TẠO NHẠC & SÁNG TÁC CA KHÚC BẰNG SUNO AI (generate_music):\n` +
-    `  + Khi người dùng yêu cầu tạo nhạc, sáng tác bài hát, viết ca khúc, phối beat, làm bài nhạc, tạo giai điệu (lofi, rap, ballad, pop, rock, acoustic, bolero...):\n` +
-    `    * BẮT BUỘC PHẢI GỌI CÔNG CỤ 'generate_music' (với prompt, style, title, lyrics, instrumental) để AI Suno thực sự tạo bài hát và xuất thẻ bài hát kèm link nghe trực tiếp!\n` +
-    `    * TUYỆT ĐỐI CẤM gọi nhầm sang 'create_voice' (create_voice chỉ dùng để đọc giọng văn bản/thơ/podcast bằng Text-to-Speech, không biết tạo bài hát/giai điệu/nhạc cụ)!\n` +
-    `    * TUYỆT ĐỐI CẤM chỉ in lời bài hát ra chat rồi hứa hẹn suông là hệ thống đang xử lý âm thanh mà không gọi tool! BẮT BUỘC PHẢI THỰC SỰ GỌI FUNCTION CALL 'generate_music'!\n` +
-    `    * [CÂU TRẢ LỜI BẰNG CHỮ KÈM THEO]: Bạn PHẢI trình bày Card thông tin bài hát rõ ràng: Tựa đề bài hát, Thể loại/Phong cách âm nhạc, Link nghe trực tiếp trên Suno (được cung cấp từ kết quả tool), và toàn văn lời bài hát đã sáng tác để người dùng vừa xem lời vừa bấm link nghe bài hát trực tiếp!\n` +
-    `- KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
-    `  + Khi người dùng yêu cầu vẽ biểu đồ, đồ thị, sơ đồ, poster lịch thi đấu, bảng xếp hạng hoặc yêu cầu làm lại/sửa lại ảnh/biểu đồ: BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM in code Python ra chat!\n` +
-    `  + Với lịch thi đấu/bảng sự kiện/roadmap: Dùng PIL vẽ Infographic Poster Card Layout nền tối (burgundy/navy), thẻ bo góc, badge nổi bật ([CHÍNH THỨC], [GIAO HỮU]), tiêu đề vàng kim #FFD700. Với số liệu: Dùng matplotlib dark theme.\n` +
-    `- KHI CÂU HỎI LÀ TỔNG QUAN DỰ ÁN BẤT ĐỘNG SẢN / CÔNG TRÌNH / HỒ SƠ THƯƠNG MẠI:\n` +
-    `  + BẮT BUỘC cấu trúc câu trả lời chuyên nghiệp, sắc nét, đầy đủ theo các phân mục rõ ràng:\n` +
-    `    • 🏢 TỔNG QUAN DỰ ÁN (Tên thương mại, Chủ đầu tư/đơn vị phát triển, Đơn vị thiết kế/thi công, Tổng vốn đầu tư, Mốc khởi công & dự kiến bàn giao).\n` +
-    `    • 📍 1. Vị trí đắc địa & Kết nối giao thông (Địa chỉ chi tiết, lợi thế ven sông/hồ, cự ly kết nối tới bệnh viện, TTTM, hạ tầng trọng điểm).\n` +
-    `    • 📐 2. Quy mô & Cơ cấu sản phẩm (Diện tích khu đất, số lượng tháp/tầng, chi tiết từng loại hình: Căn hộ ở 1-3PN, Căn hộ Officetel, Shophouse khối đế, diện tích từng loại).\n` +
-    `    • 🌿 3. Tiện ích & Phong cách sống (Phát triển theo phong cách gì, hồ bơi, gym, yoga, sauna, mảng xanh, tiện ích đặc quyền).\n` +
-    `    • 💰 4. Giá bán & Chính sách tham khảo (Giá rumor/dự kiến đợt 1 từng loại hình, chính sách bán hàng hoặc vay vốn nếu có).\n` +
-    `  + In đậm các số liệu quan trọng, trình bày gạch đầu dòng rõ ràng, mạch lạc, tối ưu hiển thị trên giao diện chat Zalo.\n` +
+    buildDynamicSystemPromptModules({ question, quoteText: options?.quote?.text, botName, isSuperAdmin }) +
     `- TỐI ƯU TỐC ĐỘ PHẢN HỒI: Nếu trong dữ liệu thời gian thực hoặc context đã có đủ thông tin để trả lời, PHẢI TẬP TRUNG TRẢ LỜI NGAY, không gọi thêm công cụ tìm kiếm lặp lại để tránh làm chậm phản hồi.\n` +
     searchInstruction +
     directAnswerInstruction;
@@ -3095,8 +3015,7 @@ QUY TẮC BẮT BUỘC:
       const needsSearch = !isSearchDisabled && !isInternalGroupLookup && (
         planNeedsSearch ||
         (isResourceQuery && relevantLinks.length === 0) ||
-        isRealEstateProjectProfileQuery(question) ||
-        /(?:thời tiết|giá vàng|tỷ giá|chứng khoán|tin tức|mới nhất|khi nào|bao giờ|ai là|lịch thi đấu|tỉ số|kết quả|vừa ra mắt|tối nay|chiều nay|sáng nay|đêm nay|ngày mai|đá lúc|mấy giờ|trận đấu|kênh chiếu|phát sóng|trực tiếp|đội tuyển|bóng đá|đá banh|đá bóng)/i.test(question)
+        isRealEstateProjectProfileQuery(question)
       );
 
       let effectiveUserPrompt = userPrompt;

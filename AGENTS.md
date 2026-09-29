@@ -93,3 +93,19 @@ Dự án áp dụng quy trình kiểm tra chất lượng mã nguồn 2 tầng k
     - CẤM hardcode điều kiện, từ khóa hay prompt chỉ nhắm tới một trận đấu, một cá nhân, một sự kiện cụ thể.
     - CẤM can thiệp thô bạo (ad-hoc patches) làm phình to hoặc méo mó prompt, gây xung đột logic và làm sai lệch hành vi của bot ở các lĩnh vực khác.
   - **NGUYÊN TẮC THIẾT KẾ CORE**: Mọi logic về tìm kiếm thời gian thực (Search/RSS), trích xuất thông tin, định tuyến công cụ (Tool Routing), lập kế hoạch truy vấn (Query Planner) và cấu trúc câu trả lời (System Prompt) phải luôn là các khuôn mẫu chuẩn (standardized patterns), nhất quán, có thể tái sử dụng và hoạt động chính xác trên toàn bộ phạm vi tri thức.
+
+# Nguyên Tắc Logic Thực Chứng & Nghiêm Cấm Phán Đoán Theo Quán Tính (Evidence-Based Logic & Zero-Assumption Rule)
+
+- **NGHIÊM CẤM NÓI CHUYỆN THEO QUÁN TÍNH & LÝ THUYẾT SUÔNG (NO INERTIAL ASSUMPTIONS OR GENERIC THEORY)**:
+  - **TUYỆT ĐỐI CẤM** nói chuyện theo quán tính, dùng "lý thuyết chung chung bên ngoài", hoặc phỏng đoán cảm tính để đưa ra nhận định kỹ thuật mà chưa kiểm chứng thực tế trong project.
+  - **CẤM võ đoán hiệu năng, tốc độ, hoặc hành vi hệ thống** dựa trên tên gọi hình thức (ví dụ: tự ý cho rằng model có tên "Flash" thì luôn nhanh hơn "Pro", hay mặc định một thư viện/công nghệ nào đó tốt hơn mà không có số liệu benchmark thực tế).
+  - **CẤM phát biểu không có cơ sở logic**: Mọi tuyên bố kỹ thuật phải có căn cứ rõ ràng từ mã nguồn, cấu hình, hoặc log vận hành.
+- **BẮT BUỘC KIỂM CHỨNG BẰNG SỐ LIỆU THỰC NGHIỆM (EVIDENCE & BENCHMARK FIRST)**:
+  - Khi so sánh tốc độ, hiệu năng, kiến trúc hoặc tính khả thi:
+    1. **BẮT BUỘC** đọc lại lịch sử đo lường, benchmark thực tế đã thực hiện trên máy chủ/project.
+    2. **BẮT BUỘC** kiểm tra trực tiếp mã nguồn, log runtime, file cấu hình `.env` và database trước khi kết luận.
+    3. Nếu chưa đo đạc hoặc chưa đủ dữ liệu thực chứng: **Phải thực thi lệnh đo đạc/kiểm tra trước**, tuyệt đối không tự tin phát biểu lý thuyết suông.
+- **TÍNH NHẤT QUÁN LOGIC & TÔN TRỌNG QUYẾT ĐỊNH ĐÃ THỐNG NHẤT (STRICT LOGICAL CONSISTENCY)**:
+  - Không được đưa ra nhận định mâu thuẫn với kết quả thực nghiệm và các quyết định kỹ thuật mà người dùng và agent đã cùng kiểm chứng, thống nhất trước đó.
+  - Khi phân tích nguyên nhân - kết quả: phải truy vết theo chuỗi logic kỹ thuật mạch lạc (bước A tốn bao nhiêu ms, bước B tốn bao nhiêu ms, điểm nghẽn thực sự nằm ở đâu), không suy diễn vòng vo.
+
