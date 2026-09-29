@@ -223,6 +223,7 @@ export interface ParsedProfileUpdate {
   preferences?: string[];
   facts?: string[];
   customNotes?: string;
+  messageToSend?: string;
 }
 
 /**
@@ -271,7 +272,7 @@ export async function parseAdminProfileUpdateIntent(
   text: string
 ): Promise<ParsedProfileUpdate | null> {
   const clean = text.trim();
-  if (!clean || clean.length < 8) return null;
+  if (!clean || clean.length < 5) return null;
   const lower = clean.toLowerCase();
 
   // 1. Phân tích lệnh quản trị nhanh: /setuser <target> <content>
@@ -282,10 +283,14 @@ export async function parseAdminProfileUpdateIntent(
     return parseUpdateContentFast(target, content);
   }
 
-  // 2. Nhận diện các mẫu câu tự nhiên phổ biến:
-  const isCandidateText =
-    /(?:lưu|sửa|cập nhật|đổi|chỉnh|note|ghi nhớ|dặn|bạn|thành viên|khách)\s+.*?(?:nữ|nam|chị|anh|em|cô|chú|bác|sở thích|thích|nghề|làm)/iu.test(lower);
+  // 2. Nhận diện các mẫu câu tự nhiên có thể là ý định cập nhật hồ sơ, xưng hô hoặc nhắn tin cho user
+  const hasUpdateKeyword = /(?:lưu|sửa|cập nhật|đổi|chỉnh|note|ghi nhớ|dặn|nhớ|xưng|xưng hô|danh xưng|gọi|hồ sơ|trí nhớ|bộ nhớ|thông tin|profile)\b/iu.test(lower);
+  const hasEntityOrPronoun = /(?:anh|ảnh|chị|em|cô|chú|bác|dì|thím|ông|bà|nam|nữ|con trai|con gái|sở thích|thích|nghề|làm|bạn|khách|thành viên)\b/iu.test(lower);
+  const hasDirectPattern =
+    /(?:là anh|là chị|là em|là nam|là nữ|xưng anh|xưng chị|gọi là anh|gọi là chị|không phải dì|ko phải dì|nhắn tin xin lỗi|nhắn xin lỗi)/iu.test(lower) ||
+    /^(?:bạn|khách|thành viên|user)\s+[^\s,:]+\s+(?:là|thích|mê|làm|chuyên|xưng|gọi)/iu.test(clean);
 
+  const isCandidateText = (hasUpdateKeyword && hasEntityOrPronoun) || hasDirectPattern;
   if (!isCandidateText) return null;
 
   // 2.1. Dạng dặn trực tiếp: "Bạn Tuấn thích ...", "Bạn Thảo là nữ xưng chị", "Bạn Nam làm nghề..."
@@ -296,7 +301,9 @@ export async function parseAdminProfileUpdateIntent(
     const target = directUserMatch[1].trim();
     const content = clean.slice(clean.indexOf(target) + target.length).trim();
     if (target.length >= 2 && !/^(?:tôi|mình|em|anh|chị|bot|ai)$/i.test(target)) {
-      return parseUpdateContentFast(target, content);
+      if (!/(?:nhắn|gửi|xin lỗi|bảo)/iu.test(content)) {
+        return parseUpdateContentFast(target, content);
+      }
     }
   }
 
@@ -308,29 +315,34 @@ export async function parseAdminProfileUpdateIntent(
     const target = actionRegex[1].trim();
     const content = actionRegex[2].trim();
     if (target.length >= 2 && !/^(?:tôi|mình|em|anh|chị|bot|ai)$/i.test(target)) {
-      return parseUpdateContentFast(target, content);
+      if (!/(?:nhắn|gửi|xin lỗi|bảo)/iu.test(content)) {
+        return parseUpdateContentFast(target, content);
+      }
     }
   }
 
   // 3. Fallback AI thông minh cho các câu văn nói tiếng Việt phức tạp
   try {
-    const prompt = `Phân tích câu lệnh quản trị viên để cập nhật hồ sơ/trí nhớ của người dùng:
+    const prompt = `Phân tích câu lệnh của Admin về việc cập nhật hồ sơ/trí nhớ hoặc nhắn tin cho một người dùng:
 "${clean}"
 
-Hãy bóc tách thành JSON chuẩn (nếu không phải câu yêu cầu cập nhật hồ sơ người dùng, trả về {"isUpdate": false}):
+Hãy bóc tách thành JSON chuẩn (nếu câu này không phải yêu cầu cập nhật hồ sơ, danh xưng, trí nhớ hoặc gửi tin nhắn cho người dùng, trả về {"isUpdate": false}):
 {
   "isUpdate": true,
-  "targetQuery": "Tên hoặc ID người dùng cần sửa",
+  "targetQuery": "Tên hoặc ID người dùng cần xử lý (VD: Trần Văn Tuyến, Tuấn, 123456...)",
   "gender": "nữ" | "nam" | null,
-  "pronoun": "Chị" | "Anh" | "Em" | "Cô" | "Chú" | "Bác" | "Dì" | null,
+  "pronoun": "Chị" | "Anh" | "Em" | "Cô" | "Chú" | "Bác" | null,
   "preferences": ["sở thích 1", ...],
   "facts": ["thông tin/nghề nghiệp 1", ...],
-  "customNotes": "ghi chú khác nếu có"
+  "customNotes": "ghi chú khác nếu có",
+  "messageToSend": "Nội dung tin nhắn 1:1 cần gửi cho người dùng nếu Admin yêu cầu (ví dụ: 'Dạ em chào Anh Tuyến, em rất xin lỗi Anh vì sự nhầm lẫn trong cách xưng hô vừa rồi ạ! Em đã ghi nhớ lại chuẩn xác rồi ạ.'). Nếu Admin KHÔNG dặn nhắn tin hoặc xin lỗi thì bắt buộc để null"
 }
 QUY TẮC BẮT BUỘC:
-- Nếu bảo "là nữ" / "con gái" mà chưa nói xưng hô, tự suy ra pronoun là "Chị".
-- Nếu bảo "là nam" / "con trai" mà chưa nói xưng hô, tự suy ra pronoun là "Anh".
-- Trả về DUY NHẤT mã JSON, không có giải thích.`;
+- Nếu bảo là "anh", "con trai", "nam" -> gender: "nam", pronoun: "Anh"
+- Nếu bảo là "chị", "con gái", "nữ" -> gender: "nữ", pronoun: "Chị"
+- Nếu bảo "không phải Dì, là anh" -> pronoun: "Anh", gender: "nam"
+- Nếu Admin dặn "nhắn tin xin lỗi", "nhắn tin cho ảnh": Soạn ngay một tin nhắn 1:1 ngắn gọn, lịch sự, xưng hô chuẩn xác danh xưng mới để bot gửi cho người đó.
+- Trả về DUY NHẤT mã JSON hợp lệ, không có giải thích.`;
 
     const rawResponse = await callGemini(
       "Bạn là bộ trích xuất thông tin có cấu trúc cho trợ lý AI Zalo.",
@@ -350,6 +362,7 @@ QUY TẮC BẮT BUỘC:
       preferences: Array.isArray(json.preferences) ? json.preferences.filter(Boolean) : [],
       facts: Array.isArray(json.facts) ? json.facts.filter(Boolean) : [],
       customNotes: json.customNotes || undefined,
+      messageToSend: json.messageToSend ? String(json.messageToSend).trim() : undefined,
     };
   } catch (e) {
     console.warn("[user-memory] parseAdminProfileUpdateIntent AI error:", e);

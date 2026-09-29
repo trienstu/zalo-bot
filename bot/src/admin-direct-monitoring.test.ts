@@ -173,3 +173,27 @@ test("direct_interactions DB operations work with fresh schema", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("isAffirmativeConfirmation và isCancelConfirmation nhận diện chuẩn xác", async () => {
+  const { isAffirmativeConfirmation, isCancelConfirmation } = await import("./admin-assistant.js");
+  assert.equal(isAffirmativeConfirmation("ok"), true);
+  assert.equal(isAffirmativeConfirmation("duyệt"), true);
+  assert.equal(isAffirmativeConfirmation("tiến hành đi"), true);
+  assert.equal(isAffirmativeConfirmation("làm đi!"), true);
+  assert.equal(isAffirmativeConfirmation("chưa làm"), false);
+
+  assert.equal(isCancelConfirmation("hủy"), true);
+  assert.equal(isCancelConfirmation("thôi"), true);
+  assert.equal(isCancelConfirmation("bỏ qua"), true);
+  assert.equal(isCancelConfirmation("không"), true);
+  assert.equal(isCancelConfirmation("tiếp tục"), false);
+});
+
+test("isQuickMarkdownExportRequest chặn khiếu nại và chỉ kích hoạt khi yêu cầu rõ ràng", async () => {
+  const { isQuickMarkdownExportRequest } = await import("./tools/file-generator.js");
+  assert.equal(isQuickMarkdownExportRequest("sao lại tạo file .md khi chưa có yêu cầu?"), false);
+  assert.equal(isQuickMarkdownExportRequest("sao gửi file md làm gì vậy hả"), false);
+  assert.equal(isQuickMarkdownExportRequest("không yêu cầu mà tự gửi file md"), false);
+  assert.equal(isQuickMarkdownExportRequest("cho anh xin file md câu trả lời trên"), true);
+  assert.equal(isQuickMarkdownExportRequest("xuất file md để lưu"), true);
+});

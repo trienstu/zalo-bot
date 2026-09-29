@@ -140,7 +140,7 @@ function matchesPronounWithContext(text: string, titlePattern: string, unaccente
   // - Đứng trước: chào, chao, thưa, thua, kính, kinh, cháu, chau, gọi, goi, cho, gửi, gui, nhờ, nho
   // - Đứng sau: ơi, oi, nhé, nhe, nha, ạ, a, bảo, bao, nhờ, nho
   const contextualRegex = new RegExp(
-    `(?:(?<![\\p{L}\\p{N}])(?:chào|chao|thưa|thua|kính|kinh|cháu|chau|gọi|goi|cho|gửi|gui|nhờ|nho)\\s+${unaccentedWord}(?![\\p{L}\\p{N}])|(?<![\\p{L}\\p{N}])${unaccentedWord}\\s+(?:ơi|oi|nhé|nhe|nha|ạ|a|bảo|bao|nhờ|nho)(?![\\p{L}\\p{N}]))`,
+    `(?:(?<![\\p{L}\\p{N}])(?:chào|chao|thưa|thua|kính|kinh|cháu|chau|gọi|goi|cho|gửi|gui|nhờ|nho)\\s+(?:${unaccentedWord})(?![\\p{L}\\p{N}])|(?<![\\p{L}\\p{N}])(?:${unaccentedWord})\\s+(?:ơi|oi|nhé|nhe|nha|ạ|a|bảo|bao|nhờ|nho)(?![\\p{L}\\p{N}]))`,
     "iu"
   );
   return contextualRegex.test(text);
@@ -887,6 +887,28 @@ async function handleSingleUserProfileReport(api: any, sender: string, targetQue
   await sendDirectText(api, sender, msg);
 }
 
+export interface PendingAdminAction {
+  type: "profile_update" | "send_direct" | "send_group" | "broadcast";
+  timestamp: number;
+  data: any;
+  summary: string;
+}
+
+export const pendingAdminActions = new Map<string, PendingAdminAction>();
+
+export function isAffirmativeConfirmation(text: string): boolean {
+  const clean = text.trim().toLowerCase().replace(/[!.,?]+$/, "").trim();
+  return (
+    /^(?:ok|oke|okie|ok em|ok nhé|ok nha|ok a|ok ạ|duyệt|duyet|duyệt đi|tiến hành|tien hanh|tiến hành đi|làm đi|lam di|làm luôn|chấp thuận|chấp nhận|xác nhận|đồng ý|dong y|yes|y|chốt|chot|chốt đi|thực hiện|thuc hien|thực hiện đi|gửi đi|gui di|triển đi|triển|cho đi)$/iu.test(clean) ||
+    /^(?:tiến hành|làm|thực hiện|triển|duyệt)\s+(?:đi|luôn|nhé|nha)$/iu.test(clean)
+  );
+}
+
+export function isCancelConfirmation(text: string): boolean {
+  const clean = text.trim().toLowerCase().replace(/[!.,?]+$/, "").trim();
+  return /^(?:hủy|huy|thôi|thoi|bỏ|bo|không|khong|ko|cancel|đừng|dung|bỏ qua|dừng|dung lai)$/iu.test(clean);
+}
+
 async function handleAdminUserProfileUpdate(api: any, sender: string, update: ParsedProfileUpdate): Promise<void> {
   const candidates = findDirectUserByNameOrId(update.targetQuery);
   if (candidates.length === 0) {
@@ -921,13 +943,24 @@ async function handleAdminUserProfileUpdate(api: any, sender: string, update: Pa
     customNotes: update.customNotes,
   });
 
+  let sendDirectStatus = "";
+  if (update.messageToSend) {
+    try {
+      await sendDirectText(api, target.userId, update.messageToSend);
+      sendDirectStatus = `\n💬 Đã gửi tin nhắn 1:1 tới ${target.displayName}: "${update.messageToSend}"`;
+    } catch (err) {
+      sendDirectStatus = `\n⚠️ Gửi tin nhắn tới ${target.displayName} bị lỗi: ${String(err)}`;
+    }
+  }
+
   const reply =
     `✅ ĐÃ CẬP NHẬT HỒ SƠ & TRÍ NHỚ THÀNH CÔNG!\n\n` +
     `👤 Khách hàng: ${target.displayName} (ID: ${target.userId})\n` +
     `📋 Nội dung đã lưu:\n` +
     (res.summary ? `• ${res.summary}\n` : "") +
     (update.customNotes ? `• Ghi chú: ${update.customNotes}\n` : "") +
-    `\n👉 Từ nay khi bạn ${target.displayName} nhắn tin 1:1, Bot sẽ tự động xưng hô chuẩn xác là ${update.pronoun || (update.gender === "nữ" ? "Chị" : "Anh")} và vận dụng các thông tin này! ✨`;
+    `\n👉 Từ nay khi bạn ${target.displayName} nhắn tin 1:1, Bot sẽ tự động xưng hô chuẩn xác là ${update.pronoun || (update.gender === "nữ" ? "Chị" : "Anh")} và vận dụng các thông tin này! ✨` +
+    sendDirectStatus;
 
   await sendDirectText(api, sender, reply);
 }
@@ -979,6 +1012,56 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
   // 📊 BÁO CÁO TÓM TẮT & KIỂM TRA LỖI TƯƠNG TÁC 1:1 DÀNH RIÊNG CHO ADMIN
   if (isAdmin) {
+    // 0. XỬ LÝ XÁC NHẬN MỆNH LỆNH CHỜ (2-STEP CONFIRMATION DÀNH CHO ADMIN)
+    const pendingAction = pendingAdminActions.get(sender);
+    if (pendingAction) {
+      const isExpired = Date.now() - pendingAction.timestamp > 10 * 60 * 1000;
+      if (isExpired) {
+        pendingAdminActions.delete(sender);
+      } else if (isAffirmativeConfirmation(rawText)) {
+        pendingAdminActions.delete(sender);
+        if (pendingAction.type === "profile_update") {
+          await handleAdminUserProfileUpdate(api, sender, pendingAction.data.update);
+          return;
+        } else if (pendingAction.type === "send_group") {
+          const { targetGroupId, targetGroupName, contentToSend } = pendingAction.data;
+          try {
+            await sendGroupText(api, targetGroupId, contentToSend);
+            await sendDirectText(api, sender, `🚀 [HỆ THỐNG]: Đã gửi nội dung vào nhóm [${targetGroupName}] thành công 100%! 🎉`);
+          } catch (e) {
+            await sendDirectText(api, sender, `⚠️ [HỆ THỐNG]: Gửi vào nhóm [${targetGroupName}] bị lỗi: ${String(e)}`);
+          }
+          return;
+        } else if (pendingAction.type === "send_direct") {
+          const { targetUserId, targetUserName, contentToSend } = pendingAction.data;
+          try {
+            await sendDirectText(api, targetUserId, contentToSend);
+            await sendDirectText(api, sender, `🚀 [HỆ THỐNG]: Đã gửi tin nhắn 1:1 tới [${targetUserName || targetUserId}] thành công 100%! 🎉`);
+          } catch (e) {
+            await sendDirectText(api, sender, `⚠️ [HỆ THỐNG]: Gửi tin nhắn 1:1 tới [${targetUserName || targetUserId}] bị lỗi: ${String(e)}`);
+          }
+          return;
+        } else if (pendingAction.type === "broadcast") {
+          const { groups, messageToSend } = pendingAction.data;
+          let successCount = 0;
+          for (const g of groups) {
+            try {
+              await sendGroupText(api, g.groupId, messageToSend);
+              successCount++;
+            } catch (e) {
+              console.warn(`[admin-assistant] Broadcast lỗi ở nhóm ${g.name}: ${String(e)}`);
+            }
+          }
+          await sendDirectText(api, sender, `✅ ĐÃ PHÁT THÔNG BÁO THÀNH CÔNG ĐẾN ${successCount}/${groups.length} NHÓM! 🎉`);
+          return;
+        }
+      } else if (isCancelConfirmation(rawText)) {
+        pendingAdminActions.delete(sender);
+        await sendDirectText(api, sender, "❌ Đã hủy lệnh theo yêu cầu của Sếp.");
+        return;
+      }
+    }
+
     const dmQuery = isDmSummaryOrErrorQuery(rawText);
     if (dmQuery.type === "errors") {
       await handleDmErrorReport(api, sender, dmQuery.hours);
@@ -1002,7 +1085,56 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
     const updateIntent = await parseAdminProfileUpdateIntent(rawText);
     if (updateIntent) {
-      await handleAdminUserProfileUpdate(api, sender, updateIntent);
+      const isForced = /(?:làm luôn|thực hiện ngay|gửi luôn|nhắn luôn|ko cần hỏi|không cần hỏi|ko cần xác nhận|không cần xác nhận)/i.test(rawText);
+      if (isForced) {
+        await handleAdminUserProfileUpdate(api, sender, updateIntent);
+        return;
+      }
+
+      const candidates = findDirectUserByNameOrId(updateIntent.targetQuery);
+      if (candidates.length === 0) {
+        await sendDirectText(
+          api,
+          sender,
+          `⚠️ CHƯA TÌM THẤY NGƯỜI DÙNG:\n\nEm đã tìm trong danh bạ bạn bè và lịch sử chat 1:1 nhưng chưa thấy ai có tên hoặc ID là "${updateIntent.targetQuery}".\n\n👉 Sếp kiểm tra lại chính xác tên Zalo hoặc gửi kèm ID Zalo (VD: "/setuser 123456 nữ, xưng chị") để em lưu chính xác nhé!`
+        );
+        return;
+      }
+      if (candidates.length > 1) {
+        let msg = `🔍 TÌM THẤY ${candidates.length} NGƯỜI CÓ TÊN GẦN GIỐNG "${updateIntent.targetQuery}":\n\n`;
+        candidates.slice(0, 5).forEach((c, i) => {
+          msg += `${i + 1}. 👤 ${c.displayName} (ID: ${c.userId})\n`;
+        });
+        const firstId = candidates[0]?.userId || "";
+        msg += `\n👉 Sếp ghi kèm ID (VD: "/setuser ${firstId} ...") để em cập nhật chuẩn xác đúng người nhé!`;
+        await sendDirectText(api, sender, msg);
+        return;
+      }
+
+      const targetUser = candidates[0];
+      if (!targetUser) {
+        await sendDirectText(api, sender, `⚠️ Không thể xác định thông tin người dùng "${updateIntent.targetQuery}".`);
+        return;
+      }
+      pendingAdminActions.set(sender, {
+        type: "profile_update",
+        timestamp: Date.now(),
+        data: { update: updateIntent, target: targetUser },
+        summary: `Cập nhật hồ sơ [${targetUser.displayName}]`,
+      });
+
+      const confirmPrompt =
+        `⚠️ XÁC NHẬN MỆNH LỆNH:\n\n` +
+        `👤 Đối tượng: ${targetUser.displayName} (ID: ${targetUser.userId})\n` +
+        (updateIntent.gender ? `• Giới tính: ${updateIntent.gender}\n` : "") +
+        (updateIntent.pronoun ? `• Danh xưng: ${updateIntent.pronoun}\n` : "") +
+        (updateIntent.preferences?.length ? `• Sở thích: ${updateIntent.preferences.join(", ")}\n` : "") +
+        (updateIntent.facts?.length ? `• Thông tin: ${updateIntent.facts.join(", ")}\n` : "") +
+        (updateIntent.customNotes ? `• Ghi chú: ${updateIntent.customNotes}\n` : "") +
+        (updateIntent.messageToSend ? `• Gửi tin 1:1: "${updateIntent.messageToSend}"\n` : "") +
+        `\n👉 Sếp gõ "ok" hoặc "duyệt" để thực hiện, hoặc "hủy" để bỏ qua.`;
+
+      await sendDirectText(api, sender, confirmPrompt);
       return;
     }
   }
@@ -1917,6 +2049,25 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       return;
     }
 
+    const isForced = /(?:bắn luôn|gửi luôn|làm luôn|thực hiện ngay)/i.test(rawText);
+    if (!isForced) {
+      pendingAdminActions.set(sender, {
+        type: "broadcast",
+        timestamp: Date.now(),
+        data: { groups, messageToSend },
+        summary: `Broadcast đến ${groups.length} nhóm`,
+      });
+      await sendDirectText(
+        api,
+        sender,
+        `⚠️ XÁC NHẬN PHÁT THÔNG BÁO TOÀN HỆ THỐNG:\n\n` +
+        `• Số lượng nhóm nhận: ${groups.length} nhóm\n` +
+        `• Nội dung:\n"${messageToSend}"\n\n` +
+        `👉 Sếp gõ "ok" hoặc "duyệt" để phát thông báo, hoặc "hủy" để dừng.`
+      );
+      return;
+    }
+
     let successCount = 0;
     for (const g of groups) {
       try {
@@ -2242,12 +2393,11 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `2. Nếu Admin gửi FILE TÀI LIỆU (PDF, Word, Excel, Code, TXT) hoặc HÌNH ẢNH: Đọc kỹ, trích xuất dữ liệu, dịch thuật, phân tích sâu, tìm lỗi code hoặc tóm tắt theo ý Admin.\n` +
     `3. Nếu Admin nhờ soạn thông báo, bài viết cho nhóm: Hãy soạn thảo thật hấp dẫn, chuyên nghiệp, có icon đẹp mắt, định dạng rõ ràng.\n` +
     `4. Danh sách các nhóm Zalo bạn đang quản lý để tham khảo:\n${groupsSummary}\n` +
-    `5. ĐẶC BIỆT - KHI ADMIN YÊU CẦU BẠN GỬI HOẶC BẮN TIN NHẮN/THÔNG BÁO VÀO MỘT NHÓM CỤ THỂ:\n` +
+    `5. ĐẶC BIỆT - KHI ADMIN YÊU CẦU BẠN GỬI HOẶC BẮN TIN NHẮN/THÔNG BÁO VÀO MỘT NHÓM CỤ THỂ HOẶC GỬI TIN 1:1 CHO MỘT BẠN BÈ/USER:\n` +
     `   Hãy xuất thẻ hành động ở cuối câu trả lời như sau:\n` +
-    `   [ACTION:SEND_GROUP target="TÊN_NHÓM_HOẶC_ID"]\n` +
-    `   <nội dung thực tế cần gửi vào nhóm>\n` +
-    `   [/ACTION]\n` +
-    `   Hệ thống máy chủ sẽ tự động bóc tách thẻ này và gửi tin nhắn thật vào nhóm Zalo cho Sếp ngay lập tức!\n` +
+    `   - Gửi vào nhóm: [ACTION:SEND_GROUP target="TÊN_NHÓM_HOẶC_ID"]<nội dung>[/ACTION]\n` +
+    `   - Gửi tin 1:1 cho bạn bè/user: [ACTION:SEND_DIRECT target="TÊN_HOẶC_ID_USER"]<nội dung>[/ACTION]\n` +
+    `   Hệ thống máy chủ sẽ tự động bóc tách thẻ này và xin xác nhận của Sếp trước khi gửi đi!\n` +
     `6. ĐỊNH DẠNG TINH HOA ZALO RICH TEXT (ZALO MARKDOWN ENGINE):\n` +
     `   - Hệ thống đã tích hợp bộ chuyển đổi Rich Text native cho Zalo. THOẢI MÁI dùng cú pháp Markdown tiêu chuẩn:\n` +
     `     + Dùng **in đậm** cho từ khóa chính, số liệu then chốt, tên trận đấu/đội bóng, thời gian, tên thực thể.\n` +
@@ -2789,27 +2939,74 @@ QUY TẮC BẮT BUỘC:
       }
     }
 
-    // Kiểm tra và thực thi thẻ hành động [ACTION:SEND_GROUP target="..."]...[/ACTION] CHỈ DÀNH CHO ADMIN
+    // Kiểm tra và thực thi thẻ hành động [ACTION:SEND_GROUP] và [ACTION:SEND_DIRECT] CHỈ DÀNH CHO ADMIN
     let finalAnswer = answer;
     if (isAdmin) {
-      const actionMatch = answer.match(/\[ACTION:SEND_GROUP\s+target=["']([^"']+)["']\]([\s\S]*?)\[\/ACTION\]/i);
-      if (actionMatch && actionMatch[1] && actionMatch[2]) {
-        const targetGroupQuery = actionMatch[1].trim();
-        const contentToSend = actionMatch[2].trim();
+      const actionGroupMatch = answer.match(/\[ACTION:SEND_GROUP\s+target=["']([^"']+)["']\]([\s\S]*?)\[\/ACTION\]/i);
+      const actionDirectMatch = answer.match(/\[ACTION:SEND_DIRECT\s+target=["']([^"']+)["']\]([\s\S]*?)\[\/ACTION\]/i);
+
+      if (actionGroupMatch && actionGroupMatch[1] && actionGroupMatch[2]) {
+        const targetGroupQuery = actionGroupMatch[1].trim();
+        const contentToSend = actionGroupMatch[2].trim();
         finalAnswer = answer.replace(/\[ACTION:SEND_GROUP[\s\S]*?\[\/ACTION\]/gi, "").trim();
 
         const target = findGroup(targetGroupQuery);
         if (target && contentToSend) {
-          try {
-            await sendGroupText(api, target.groupId, contentToSend);
-            finalAnswer += `\n\n🚀 [HỆ THỐNG]: Em đã tự động gửi nội dung trên vào nhóm [${target.name}] thành công 100%! 🎉`;
-          } catch (e) {
-            finalAnswer += `\n\n⚠️ [HỆ THỐNG]: Tự động gửi vào nhóm [${target.name}] bị lỗi: ${String(e)}`;
+          const isForced = /(?:gửi luôn|bắn luôn|post luôn|send luôn|làm luôn|thực hiện ngay)/i.test(rawText);
+          if (isForced) {
+            try {
+              await sendGroupText(api, target.groupId, contentToSend);
+              finalAnswer += `\n\n🚀 [HỆ THỐNG]: Em đã tự động gửi nội dung trên vào nhóm [${target.name}] thành công 100%! 🎉`;
+            } catch (e) {
+              finalAnswer += `\n\n⚠️ [HỆ THỐNG]: Tự động gửi vào nhóm [${target.name}] bị lỗi: ${String(e)}`;
+            }
+          } else {
+            pendingAdminActions.set(sender, {
+              type: "send_group",
+              timestamp: Date.now(),
+              data: { targetGroupId: target.groupId, targetGroupName: target.name, contentToSend },
+              summary: `Gửi tin vào nhóm [${target.name}]`,
+            });
+            finalAnswer +=
+              `\n\n⚠️ XÁC NHẬN GỬI TIN VÀO NHÓM:\n` +
+              `• Nhóm nhận: [${target.name}]\n` +
+              `• Nội dung:\n"${contentToSend}"\n\n` +
+              `👉 Sếp gõ "ok" hoặc "duyệt" để gửi đi, hoặc "hủy" để bỏ qua.`;
+          }
+        }
+      } else if (actionDirectMatch && actionDirectMatch[1] && actionDirectMatch[2]) {
+        const targetUserQuery = actionDirectMatch[1].trim();
+        const contentToSend = actionDirectMatch[2].trim();
+        finalAnswer = answer.replace(/\[ACTION:SEND_DIRECT[\s\S]*?\[\/ACTION\]/gi, "").trim();
+
+        const candidates = findDirectUserByNameOrId(targetUserQuery);
+        const targetUser = candidates[0];
+        if (targetUser && contentToSend) {
+          const isForced = /(?:gửi luôn|nhắn luôn|send luôn|làm luôn|thực hiện ngay)/i.test(rawText);
+          if (isForced) {
+            try {
+              await sendDirectText(api, targetUser.userId, contentToSend);
+              finalAnswer += `\n\n🚀 [HỆ THỐNG]: Đã gửi tin nhắn 1:1 tới ${targetUser.displayName} thành công! 🎉`;
+            } catch (e) {
+              finalAnswer += `\n\n⚠️ [HỆ THỐNG]: Gửi tin nhắn 1:1 tới ${targetUser.displayName} bị lỗi: ${String(e)}`;
+            }
+          } else {
+            pendingAdminActions.set(sender, {
+              type: "send_direct",
+              timestamp: Date.now(),
+              data: { targetUserId: targetUser.userId, targetUserName: targetUser.displayName, contentToSend },
+              summary: `Gửi tin 1:1 tới [${targetUser.displayName}]`,
+            });
+            finalAnswer +=
+              `\n\n⚠️ XÁC NHẬN GỬI TIN 1:1:\n` +
+              `• Người nhận: ${targetUser.displayName} (ID: ${targetUser.userId})\n` +
+              `• Nội dung:\n"${contentToSend}"\n\n` +
+              `👉 Sếp gõ "ok" hoặc "duyệt" để gửi đi, hoặc "hủy" để bỏ qua.`;
           }
         }
       }
     } else {
-      finalAnswer = answer.replace(/\[ACTION:SEND_GROUP[\s\S]*?\[\/ACTION\]/gi, "").trim();
+      finalAnswer = answer.replace(/\[ACTION:SEND_(?:GROUP|DIRECT)[\s\S]*?\[\/ACTION\]/gi, "").trim();
     }
 
     // Lưu vào lịch sử hội thoại nhiều lượt

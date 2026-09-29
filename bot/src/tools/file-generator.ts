@@ -187,15 +187,24 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
  * Kiểm tra xem người dùng có muốn xuất nhanh câu trả lời trước đó thành file Markdown (.md) hay không.
  * Ví dụ: "gửi tôi file md để lưu", "xuất file md câu trả lời trên", "lưu lại thành file md"
  */
-export function isQuickMarkdownExportRequest(question: string, quoteText = ""): boolean {
-  const combined = `${question || ""} ${quoteText || ""}`.toLowerCase();
+export function isQuickMarkdownExportRequest(question: string, _quoteText = ""): boolean {
   const qLower = (question || "").toLowerCase();
-  const isMdTarget = /(?:\.md\b|markdown|file\s+md\b|tệp\s+md\b)/iu.test(combined);
-  if (!isMdTarget) return false;
+
+  // Chặn tuyệt đối các câu chất vấn, phàn nàn ngược ("sao gửi file md làm gì", "không yêu cầu")
+  if (/(?:sao|tại\s*sao|sao\s*lại)\s+.*?(?:gửi|đóng\s*gói|xuất|làm\s*gì|chi\s*vậy|thế|hả|à)/iu.test(qLower)) {
+    return false;
+  }
+  if (/(?:không\s+yêu\s*cầu|ko\s+yêu\s*cầu|chưa\s+yêu\s*cầu|tự\s*nhiên\s+gửi|ai\s+mượn)/iu.test(qLower)) {
+    return false;
+  }
+
+  // Mục tiêu Markdown bắt buộc phải được người dùng nêu rõ trong chính câu hỏi (không lấy từ quote cũ của bot)
+  const isMdMentioned = /(?:\.md\b|markdown|file\s+md\b|tệp\s+md\b)/iu.test(qLower);
+  if (!isMdMentioned) return false;
 
   const isExportOrSaveAction =
-    /(?:xuất|gửi|lưu|cho\s+xin|xin|tải|export|trả|lấy|đóng\s*gói|gom)\s+.*?(?:file\s+md|\.md|markdown)/iu.test(combined) ||
-    (/(?:file\s+md|\.md|markdown)/iu.test(combined) && /(?:để\s+lưu|lưu\s+lại|dễ\s+bị\s+trôi|lưu\s+trữ|về\s+máy|lưu\s+vào)/iu.test(combined)) ||
+    /(?:xuất|gửi|lưu|cho\s+xin|xin|tải|export|trả|lấy|đóng\s*gói|gom)\s+.*?(?:file\s+md|\.md|markdown)/iu.test(qLower) ||
+    (/(?:file\s+md|\.md|markdown)/iu.test(qLower) && /(?:để\s+lưu|lưu\s+lại|dễ\s+bị\s+trôi|lưu\s+trữ|về\s+máy|lưu\s+vào)/iu.test(qLower)) ||
     /^(?:cho\s+mình|cho\s+anh|cho\s+em|gửi|xuất|lưu)\s+(?:xin\s+)?(?:file\s+)?(?:md|\.md|markdown)\b/iu.test(qLower.trim());
 
   return isExportOrSaveAction;
