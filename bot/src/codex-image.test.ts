@@ -49,4 +49,52 @@ test("prepareImageDataUrl chuyển đổi chính xác các định dạng ảnh 
   assert.equal(prepareImageDataUrl(null as any), null);
 });
 
+test("resolveImageModelPreference tuân thủ phân cấp ưu tiên (Explicit Engine > Phong cách > Mặc định)", async () => {
+  const { resolveImageModelPreference } = await import("./codex-image.js");
+
+  // 1. Có cả "màu nước" và "codex" -> Explicit engine "codex" phải THẮNG "màu nước"
+  assert.equal(
+    resolveImageModelPreference("Vẽ cho tôi ảnh thiếu nữ mặc áo dài hoa sen màu nước bằng codex"),
+    "codex",
+  );
+
+  // 2. Có cả "tả thực 8k" và "gemini" -> Explicit engine "gemini" phải THẮNG "tả thực"
+  assert.equal(
+    resolveImageModelPreference("Vẽ siêu xe Lamborghini tả thực 8k bằng gemini"),
+    "gemini",
+  );
+
+  // 3. Chỉ có phong cách màu nước / vẽ tay (không nhắc engine) -> Ưu tiên Gemini (~15s)
+  assert.equal(
+    resolveImageModelPreference("Vẽ một góc phố cổ Hà Nội phong cách tranh màu nước nghệ thuật"),
+    "gemini",
+  );
+  assert.equal(
+    resolveImageModelPreference("Vẽ chân dung hoa hồng handraw vẽ tay"),
+    "gemini",
+  );
+
+  // 4. Chỉ có phong cách tả thực / 8K (không nhắc engine) -> Ưu tiên Codex
+  assert.equal(
+    resolveImageModelPreference("Vẽ chân dung cô gái Việt Nam chụp thật siêu nét 8k"),
+    "codex",
+  );
+
+  // 5. Không có từ khóa phong cách lẫn engine -> Mặc định Codex
+  assert.equal(
+    resolveImageModelPreference("Vẽ chú mèo con dễ thương đang ngủ"),
+    "codex",
+  );
+
+  // 6. Model chỉ định qua options/tool calling
+  assert.equal(
+    resolveImageModelPreference("Vẽ hoa sen màu nước", "codex"),
+    "codex",
+  );
+  assert.equal(
+    resolveImageModelPreference("Vẽ con mèo", "gemini"),
+    "gemini",
+  );
+});
+
 

@@ -338,6 +338,47 @@ async function requestGeminiMultimodalImage(
   }
 }
 
+export type ResolvedImagePreference = "gemini" | "codex";
+
+/**
+ * Phân cấp nhận diện ý định model vẽ/sửa ảnh:
+ * Cấp 1 (Ưu tiên cao nhất): Người dùng chỉ định đích danh engine trong text prompt ("bằng codex", "dùng gemini")
+ * Cấp 2: Chỉ định qua options/tool calling từ LLM
+ * Cấp 3: Định tuyến theo phong cách mỹ thuật khi không có chỉ định engine (màu nước/vẽ tay -> Gemini; tả thực/8K -> Codex)
+ * Cấp 4: Mặc định Codex (chất lượng cao)
+ */
+export function resolveImageModelPreference(
+  prompt: string,
+  explicitModel?: string,
+): ResolvedImagePreference {
+  const promptLower = prompt.toLowerCase();
+  const rawModel = (explicitModel || "").toLowerCase().trim();
+
+  // Cấp 1 (Ưu tiên cao nhất): Người dùng gõ trực tiếp tên engine trong prompt
+  const promptHasCodex = /\b(?:codex|gpt-image)\b/i.test(promptLower);
+  const promptHasGemini = /\b(?:gemini|google\s*image)\b/i.test(promptLower);
+
+  if (promptHasCodex && !promptHasGemini) return "codex";
+  if (promptHasGemini && !promptHasCodex) return "gemini";
+
+  // Cấp 2: Chỉ định qua options hoặc tool calling
+  const optionIsCodex = rawModel === "codex" || rawModel.includes("codex") || rawModel.includes("gpt-image");
+  const optionIsGemini = rawModel === "gemini" || rawModel.includes("gemini");
+
+  if (optionIsCodex && !optionIsGemini) return "codex";
+  if (optionIsGemini && !optionIsCodex) return "gemini";
+
+  // Cấp 3: Định tuyến theo phong cách nghệ thuật khi không có tên engine
+  const hasArtisticStyle = /\b(?:màu\s*nước|watercolor|vẽ\s*tay|handraw|tranh\s*vẽ)\b/i.test(promptLower);
+  const hasRealisticStyle = /\b(?:tả\s*thực|chụp\s*thật|photoreal|8k|render\s*3d)\b/i.test(promptLower);
+
+  if (hasArtisticStyle && !hasRealisticStyle) return "gemini";
+  if (hasRealisticStyle && !hasArtisticStyle) return "codex";
+
+  // Cấp 4: Mặc định Codex
+  return "codex";
+}
+
 /**
  * Sinh hoặc sửa ảnh chất lượng cao với chuỗi Cascade Fallback đa tầng tự động:
  * - Hỗ trợ cả OpenAI Codex (cx/gpt-image-2.5) và Google Gemini (ag/gemini-3.1-flash-image)
@@ -374,20 +415,10 @@ export async function generateCodexImage(
     const fileName = `${prefix}_${timestamp}_${randStr}.png`;
     const targetPath = path.join(GENERATED_IMAGES_DIR, fileName);
 
-    // 1. Nhận diện ý định model từ options hoặc từ khóa trong prompt
-    const promptLower = prompt.toLowerCase();
-    const rawModel = (options?.model || "").toLowerCase().trim();
-
-    const prefersGemini =
-      rawModel === "gemini" ||
-      rawModel.includes("gemini") ||
-      /\b(?:gemini|google|màu\s*nước|watercolor|vẽ\s*tay|handraw|tranh\s*vẽ)\b/i.test(promptLower);
-
-    const prefersCodex =
-      rawModel === "codex" ||
-      rawModel.includes("codex") ||
-      rawModel.includes("gpt-image") ||
-      /\b(?:codex|gpt-image|dall-?e|tả\s*thực|chụp\s*thật|photoreal|8k|render\s*3d)\b/i.test(promptLower);
+    // 1. Nhận diện ý định model theo thứ bậc ưu tiên (Tên engine > Phong cách mỹ thuật > Mặc định)
+    const preferredEngine = resolveImageModelPreference(prompt, options?.model);
+    const prefersGemini = preferredEngine === "gemini";
+    const prefersCodex = preferredEngine === "codex";
 
     const geminiModel = "ag/gemini-3.1-flash-image";
     const codexModel = (options?.model && !prefersGemini ? options.model : null) || config.codexImageModel || "cx/gpt-image-2.5";

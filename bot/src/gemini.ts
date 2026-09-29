@@ -1866,7 +1866,7 @@ const AGENT_TOOLS_DECLARATION = {
           model: {
             type: "STRING",
             enum: ["gemini", "codex", "auto"],
-            description: "Chỉ định model vẽ ảnh: 'gemini' (nhanh ~12s, mạnh về vẽ tay, màu nước, tranh vẽ nghệ thuật, Á Đông), 'codex' (mạnh về ảnh chụp thật 8K siêu nét, render 3D, chi tiết kỹ thuật), hoặc 'auto' (để hệ thống tự chọn)",
+            description: "Chỉ định model vẽ ảnh: Nếu người dùng đích danh yêu cầu 'codex' hoặc 'gemini', BẮT BUỘC chọn đúng model đó. Nếu không chỉ định model, chọn 'gemini' nếu vẽ tranh màu nước, vẽ tay, nghệ thuật; chọn 'codex' nếu ảnh chụp thật 8K, render 3D; hoặc chọn 'auto'.",
           },
         },
         required: ["prompt"],
