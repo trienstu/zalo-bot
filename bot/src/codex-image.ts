@@ -247,10 +247,102 @@ async function requestRouterImage(
 }
 
 /**
- * Sinh hoặc sửa ảnh chất lượng cao với chuỗi Cascade Fallback 3 tầng tự động:
- * - Tầng 1: Model Codex OpenAI qua 9Router (mặc định cx/gpt-image-2.5)
- * - Tầng 2: Model Google Gemini qua 9Router (ag/gemini-3.1-flash-image)
- * - Tầng 3: Engine dự phòng cuối Cloudflare FLUX.1-schnell (dành cho tạo mới)
+ * Gửi yêu cầu sinh ảnh hoặc sửa ảnh đa phương thức qua endpoint chat/completions của 9Router
+ * Chuyên dùng cho các model Google Gemini (ag/gemini-3.1-flash-image)
+ */
+async function requestGeminiMultimodalImage(
+  model: string,
+  prompt: string,
+  baseUrl: string,
+  apiKey: string,
+  timeoutMs: number,
+  targetPath: string,
+  fileName: string,
+  imageDataUrl?: string | null,
+): Promise<{ success: boolean; filePath: string; fileName: string; fileSize: number; error?: string }> {
+  try {
+    const userContent: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+    if (imageDataUrl) {
+      userContent.push({
+        type: "image_url",
+        image_url: { url: imageDataUrl },
+      });
+    }
+    userContent.push({
+      type: "text",
+      text: prompt,
+    });
+
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        messages: [
+          {
+            role: "user",
+            content: userContent,
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const errBody = await response.text().catch(() => "");
+      return {
+        success: false,
+        filePath: "",
+        fileName: "",
+        fileSize: 0,
+        error: `HTTP ${response.status}: ${errBody.slice(0, 200)}`,
+      };
+    }
+
+    const resJson = (await response.json()) as any;
+    const content = resJson?.choices?.[0]?.message?.content || "";
+
+    // Trích xuất Base64 ảnh từ markdown ![image](data:image/...;base64,...)
+    const imgMatch = content.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/);
+    if (!imgMatch || !imgMatch[1]) {
+      return {
+        success: false,
+        filePath: "",
+        fileName: "",
+        fileSize: 0,
+        error: content.slice(0, 200) || "Model Gemini không trả về dữ liệu ảnh",
+      };
+    }
+
+    const buffer = Buffer.from(imgMatch[1], "base64");
+    fs.writeFileSync(targetPath, buffer);
+    return {
+      success: true,
+      filePath: targetPath,
+      fileName,
+      fileSize: buffer.length,
+    };
+  } catch (err: any) {
+    const msg = err?.name === "TimeoutError" ? `Hết thời gian chờ (${timeoutMs}ms)` : err?.message || String(err);
+    return {
+      success: false,
+      filePath: "",
+      fileName: "",
+      fileSize: 0,
+      error: msg,
+    };
+  }
+}
+
+/**
+ * Sinh hoặc sửa ảnh chất lượng cao với chuỗi Cascade Fallback đa tầng tự động:
+ * - Hỗ trợ cả OpenAI Codex (cx/gpt-image-2.5) và Google Gemini (ag/gemini-3.1-flash-image)
+ * - Tự động định tuyến thông minh theo yêu cầu người dùng hoặc phong cách vẽ (màu nước, vẽ tay -> Gemini; tả thực, 8K -> Codex)
+ * - Tầng dự phòng cuối Cloudflare FLUX.1-schnell (dành cho tạo mới)
  */
 export async function generateCodexImage(
   prompt: string,
@@ -259,7 +351,6 @@ export async function generateCodexImage(
   const router = hybridAgentSettings.nineRouter;
   const baseUrl = (router.baseUrl || process.env.NINE_ROUTER_BASE_URL || "http://127.0.0.1:20128/v1").replace(/\/+$/, "");
   const apiKey = router.apiKey || process.env.NINE_ROUTER_API_KEY || "";
-  const preferredModel = options?.model?.trim() || config.codexImageModel || "cx/gpt-image-2.5";
   const ratio: AspectRatioOption = options?.aspectRatio || "1:1";
   const timeoutMs = options?.timeoutMs || 90_000;
   const imageDataUrl = options?.image ? prepareImageDataUrl(options.image) : null;
@@ -283,101 +374,119 @@ export async function generateCodexImage(
     const fileName = `${prefix}_${timestamp}_${randStr}.png`;
     const targetPath = path.join(GENERATED_IMAGES_DIR, fileName);
 
-    // 1. Làm giàu & dịch visual prompt sang tiếng Anh
+    // 1. Nhận diện ý định model từ options hoặc từ khóa trong prompt
+    const promptLower = prompt.toLowerCase();
+    const rawModel = (options?.model || "").toLowerCase().trim();
+
+    const prefersGemini =
+      rawModel === "gemini" ||
+      rawModel.includes("gemini") ||
+      /\b(?:gemini|google|màu\s*nước|watercolor|vẽ\s*tay|handraw|tranh\s*vẽ)\b/i.test(promptLower);
+
+    const prefersCodex =
+      rawModel === "codex" ||
+      rawModel.includes("codex") ||
+      rawModel.includes("gpt-image") ||
+      /\b(?:codex|gpt-image|dall-?e|tả\s*thực|chụp\s*thật|photoreal|8k|render\s*3d)\b/i.test(promptLower);
+
+    const geminiModel = "ag/gemini-3.1-flash-image";
+    const codexModel = (options?.model && !prefersGemini ? options.model : null) || config.codexImageModel || "cx/gpt-image-2.5";
+
+    // 2. Làm giàu & dịch visual prompt sang tiếng Anh
     const finalPrompt = await enhanceVisualPrompt(prompt, ratio, baseUrl, apiKey, isEdit);
     const targetSize = mapAspectRatioToSize(ratio);
+    const opLabel = isEdit ? "sửa ảnh" : "sinh ảnh";
 
     // ==========================================
-    // TẦNG 1: OpenAI Codex (cx/gpt-image-2)
+    // NHÁNH A: ƯU TIÊN GOOGLE GEMINI (SIÊU TỐC ~12S / MÀU NƯỚC / VẼ TAY)
     // ==========================================
-    const tier1Label = isEdit ? "sửa ảnh" : "sinh ảnh";
-    console.log(`[codex-image] 🎨 [Tier 1] Đang gửi lệnh ${tier1Label} tới Codex (${preferredModel}, size: ${targetSize}${imageDataUrl ? ", có ảnh tham chiếu" : ""})...`);
-    console.log(`[codex-image] 📝 Prompt hoàn chỉnh: "${finalPrompt.slice(0, 150)}..."`);
+    if (prefersGemini) {
+      console.log(`[codex-image] 🎨 [Ưu tiên Gemini] Đang ${opLabel} với Gemini (${geminiModel}, multimodal: ${Boolean(imageDataUrl)})...`);
+      const geminiTimeout = isEdit ? 45_000 : 35_000;
+      
+      // Với Gemini: dùng endpoint chat/completions đa phương thức
+      const geminiRes = isEdit
+        ? await requestGeminiMultimodalImage(geminiModel, finalPrompt, baseUrl, apiKey, geminiTimeout, targetPath, fileName, imageDataUrl)
+        : await requestRouterImage(geminiModel, finalPrompt, targetSize, baseUrl, apiKey, geminiTimeout, targetPath, fileName);
 
-    // Tầng 1 Timeout:
-    // Đối với isEdit (Image-to-Image / inpainting với base64 payload), Codex cx/gpt-image-2
-    // thường cần từ 50s - 75s để xử lý. Cần cấp tối thiểu 100.000ms.
-    // Đối với text-to-image thông thường, cấp tối thiểu 65.000ms để tránh timeout khi 9router/OpenAI bận.
-    const tier1Timeout = isEdit ? Math.max(timeoutMs, 100_000) : Math.min(timeoutMs, 65_000);
+      if (geminiRes.success) {
+        console.log(`[codex-image] ✅ [Gemini: ${geminiModel}] ${opLabel} thành công: ${targetPath} (${(geminiRes.fileSize / 1024).toFixed(1)} KB)`);
+        return {
+          success: true,
+          filePath: targetPath,
+          fileName,
+          fileSize: geminiRes.fileSize,
+          translatedPrompt: finalPrompt,
+          tierUsed: `Gemini (${geminiModel})`,
+        };
+      }
 
-    const tier1Res = await requestRouterImage(
-      preferredModel,
-      finalPrompt,
-      targetSize,
-      baseUrl,
-      apiKey,
-      tier1Timeout,
-      targetPath,
-      fileName,
-      imageDataUrl,
-    );
+      console.warn(`[codex-image] ⚠️ [Gemini: ${geminiModel}] Không thành công: ${geminiRes.error}. Đang tự động chuyển sang Codex (${codexModel})...`);
 
-    if (tier1Res.success) {
-      console.log(`[codex-image] ✅ [Tier 1: ${preferredModel}] ${tier1Label} thành công: ${targetPath} (${(tier1Res.fileSize / 1024).toFixed(1)} KB)`);
-      return {
-        success: true,
-        filePath: targetPath,
-        fileName,
-        fileSize: tier1Res.fileSize,
-        translatedPrompt: finalPrompt,
-        tierUsed: `Codex (${preferredModel})`,
-      };
+      // Fallback sang Codex
+      const codexTimeout = isEdit ? Math.max(timeoutMs, 100_000) : Math.min(timeoutMs, 65_000);
+      const codexRes = await requestRouterImage(codexModel, finalPrompt, targetSize, baseUrl, apiKey, codexTimeout, targetPath, fileName, imageDataUrl);
+      if (codexRes.success) {
+        console.log(`[codex-image] ✅ [Dự phòng Codex: ${codexModel}] ${opLabel} thành công: ${targetPath}`);
+        return {
+          success: true,
+          filePath: targetPath,
+          fileName,
+          fileSize: codexRes.fileSize,
+          translatedPrompt: finalPrompt,
+          tierUsed: `Codex (${codexModel})`,
+        };
+      }
+    } else {
+      // ==========================================
+      // NHÁNH B: ƯU TIÊN OPENAI CODEX (MẶC ĐỊNH / TẢ THỰC 8K / INPAINTING)
+      // ==========================================
+      const codexTag = prefersCodex ? "Ưu tiên Codex" : "Mặc định Codex";
+      console.log(`[codex-image] 🎨 [${codexTag}] Đang gửi lệnh ${opLabel} tới Codex (${codexModel}, size: ${targetSize}${imageDataUrl ? ", có ảnh tham chiếu" : ""})...`);
+      const codexTimeout = isEdit ? Math.max(timeoutMs, 100_000) : Math.min(timeoutMs, 65_000);
+      const codexRes = await requestRouterImage(codexModel, finalPrompt, targetSize, baseUrl, apiKey, codexTimeout, targetPath, fileName, imageDataUrl);
+
+      if (codexRes.success) {
+        console.log(`[codex-image] ✅ [Codex: ${codexModel}] ${opLabel} thành công: ${targetPath} (${(codexRes.fileSize / 1024).toFixed(1)} KB)`);
+        return {
+          success: true,
+          filePath: targetPath,
+          fileName,
+          fileSize: codexRes.fileSize,
+          translatedPrompt: finalPrompt,
+          tierUsed: `Codex (${codexModel})`,
+        };
+      }
+
+      console.warn(`[codex-image] ⚠️ [Codex: ${codexModel}] Không thành công: ${codexRes.error}. Đang tự động chuyển sang Gemini (${geminiModel})...`);
+
+      // Fallback sang Gemini Multimodal
+      const geminiTimeout = 40_000;
+      const geminiRes = isEdit
+        ? await requestGeminiMultimodalImage(geminiModel, finalPrompt, baseUrl, apiKey, geminiTimeout, targetPath, fileName, imageDataUrl)
+        : await requestRouterImage(geminiModel, finalPrompt, targetSize, baseUrl, apiKey, geminiTimeout, targetPath, fileName);
+
+      if (geminiRes.success) {
+        console.log(`[codex-image] ✅ [Dự phòng Gemini: ${geminiModel}] ${opLabel} thành công: ${targetPath} (${(geminiRes.fileSize / 1024).toFixed(1)} KB)`);
+        return {
+          success: true,
+          filePath: targetPath,
+          fileName,
+          fileSize: geminiRes.fileSize,
+          translatedPrompt: finalPrompt,
+          tierUsed: `Gemini (${geminiModel})`,
+        };
+      }
     }
 
-    // NẾU LÀ SỬA ẢNH (Image-to-Image):
-    // Tuyệt đối KHÔNG fallback sang Gemini Flash Image hay Cloudflare FLUX vì các engine này
-    // KHÔNG hỗ trợ inpainting/sửa ảnh gốc, sẽ bị ảo giác sinh ra một bức ảnh người khác hoàn toàn!
-    if (isEdit) {
-      console.warn(`[codex-image] ⚠️ [Tier 1: ${preferredModel}] Sửa ảnh không thành công: ${tier1Res.error}. Không chuyển tiếp sang Tier 2 vì Gemini Image không hỗ trợ Image-to-Image inpainting.`);
-      return {
-        success: false,
-        filePath: "",
-        fileName: "",
-        fileSize: 0,
-        error: `Codex sửa ảnh không thành công: ${tier1Res.error}`,
-      };
-    }
-
-    console.warn(`[codex-image] ⚠️ [Tier 1: ${preferredModel}] Không thành công: ${tier1Res.error}. Đang tự động chuyển sang Tier 2 (ag/gemini-3.1-flash-image)...`);
-
     // ==========================================
-    // TẦNG 2: Google Gemini Image (ag/gemini-3.1-flash-image) - Chỉ dùng cho sinh ảnh mới
-    // ==========================================
-    const tier2Model = "ag/gemini-3.1-flash-image";
-    const tier2Res = await requestRouterImage(
-      tier2Model,
-      finalPrompt,
-      targetSize,
-      baseUrl,
-      apiKey,
-      35_000,
-      targetPath,
-      fileName,
-      imageDataUrl,
-    );
-
-    if (tier2Res.success) {
-      console.log(`[codex-image] ✅ [Tier 2: ${tier2Model}] Dự phòng ${tier1Label} thành công: ${targetPath} (${(tier2Res.fileSize / 1024).toFixed(1)} KB)`);
-      return {
-        success: true,
-        filePath: targetPath,
-        fileName,
-        fileSize: tier2Res.fileSize,
-        translatedPrompt: finalPrompt,
-        tierUsed: `Gemini (${tier2Model})`,
-      };
-    }
-
-    console.warn(`[codex-image] ⚠️ [Tier 2: ${tier2Model}] Không thành công: ${tier2Res.error}.`);
-
-    // ==========================================
-    // TẦNG 3: Cloudflare FLUX.1-schnell (Chỉ cho Text-to-Image)
+    // TẦNG DỰ PHÒNG CUỐI: Cloudflare FLUX.1-schnell (Chỉ cho Text-to-Image)
     // ==========================================
     if (!imageDataUrl && isCloudflareConfigured()) {
-      console.log("[codex-image] 🔄 Đang chuyển tiếp sang Tier 3 (Cloudflare FLUX)...");
+      console.log("[codex-image] 🔄 Đang chuyển tiếp sang Tier dự phòng cuối (Cloudflare FLUX)...");
       const cfRes = await generateCloudflareImage(prompt, { aspectRatio: ratio, timeoutMs: 25_000 });
       if (cfRes.success && cfRes.filePath) {
-        console.log(`[codex-image] ✅ [Tier 3: Cloudflare FLUX] Dự phòng cuối thành công: ${cfRes.filePath}`);
+        console.log(`[codex-image] ✅ [Cloudflare FLUX] Dự phòng cuối thành công: ${cfRes.filePath}`);
         return {
           success: true,
           filePath: cfRes.filePath,
@@ -387,18 +496,14 @@ export async function generateCodexImage(
           tierUsed: "Cloudflare (FLUX.1-schnell)",
         };
       }
-      console.warn(`[codex-image] ⚠️ [Tier 3: Cloudflare FLUX] Không thành công: ${cfRes.error}`);
     }
-
-    // Nếu các tầng đều thất bại
-    const failReason = `Cả 3 tầng sinh ảnh đều bận (Tier 1: ${tier1Res.error} | Tier 2: ${tier2Res.error})`;
 
     return {
       success: false,
       filePath: "",
       fileName: "",
       fileSize: 0,
-      error: failReason,
+      error: `Hệ thống tạo ảnh hiện đang quá tải hoặc gặp sự cố kết nối. Vui lòng thử lại sau ít phút.`,
     };
   } catch (err: any) {
     const msg = err?.name === "TimeoutError" ? "Hết thời gian chờ xử lý ảnh (Timeout)" : err?.message || String(err);

@@ -1863,6 +1863,11 @@ const AGENT_TOOLS_DECLARATION = {
             type: "BOOLEAN",
             description: "true nếu là chỉnh sửa/thay đổi/biến thể trên ảnh đã có, false nếu vẽ mới hoàn toàn",
           },
+          model: {
+            type: "STRING",
+            enum: ["gemini", "codex", "auto"],
+            description: "Chỉ định model vẽ ảnh: 'gemini' (nhanh ~12s, mạnh về vẽ tay, màu nước, tranh vẽ nghệ thuật, Á Đông), 'codex' (mạnh về ảnh chụp thật 8K siêu nét, render 3D, chi tiết kỹ thuật), hoặc 'auto' (để hệ thống tự chọn)",
+          },
         },
         required: ["prompt"],
       },
@@ -2173,11 +2178,17 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
       }
 
       const isCodex = config.imageProvider === "codex";
+      const requestedModel = args?.model ? String(args.model).trim() : undefined;
       if (isCodex) {
         if (!isCodexImageConfigured()) {
-          return { error: "Tính năng tạo/sửa ảnh AI (Codex) chưa được cấu hình NINE_ROUTER_API_KEY trong file .env." };
+          return { error: "Tính năng tạo/sửa ảnh AI (Codex / Gemini) chưa được cấu hình NINE_ROUTER_API_KEY trong file .env." };
         }
-        const imgRes = await generateCodexImage(prompt, { aspectRatio, image: inputImageDataUrl, isEdit });
+        const imgRes = await generateCodexImage(prompt, {
+          aspectRatio,
+          image: inputImageDataUrl,
+          isEdit,
+          model: requestedModel,
+        });
         if (imgRes.success && imgRes.filePath) {
           const ratioTag = aspectRatio !== "1:1" ? ` (${aspectRatio})` : "";
           const shortNote = prompt.length <= 40 ? ` ("${prompt}"${ratioTag})` : "";
