@@ -19,6 +19,7 @@ import {
   getRecentGroupMessages,
   stitchMultiChunkQuote,
   setGroupCavemanMode,
+  getRecentDirectDocument,
 } from "./db/index.js";
 import { sendGroupText, sendGroupFile, sendGroupVoice, sendReaction, sendTyping, Reactions, sleep, cleanZaloText } from "./zalo/client.js";
 import { ocrImage } from "./jobs/ocr.js";
@@ -3674,6 +3675,16 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     }
 
     void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.LIKE);
+
+    // Kế thừa ngữ cảnh tài liệu nếu người dùng không quote trực tiếp
+    let inheritedQuote = event.quote?.text;
+    if (!inheritedQuote) {
+      const dbDoc = getRecentDirectDocument(sender);
+      if (dbDoc && Date.now() - dbDoc.updatedAt < 30 * 60 * 1000) {
+        inheritedQuote = `[TÀI LIỆU VỪA ĐƯỢC GỬI GẦN NHẤT]:\n- Tên file: ${dbDoc.fileName}\n- Nội dung trích xuất:\n${dbDoc.text}`;
+      }
+    }
+
     void runHermesTaskJob({
       api,
       sender,
@@ -3682,7 +3693,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       displayName,
       userGreeting: isSuperAdmin ? "Sếp" : (displayName ? `bác ${displayName}` : "bác"),
       userPrompt: taskCmd.taskPrompt,
-      quoteText: event.quote?.text,
+      quoteText: inheritedQuote,
     }).catch((err) => console.error("[member-assistant] Lỗi runHermesTaskJob:", err));
     return;
   }

@@ -239,85 +239,198 @@ export interface DownloadFileResult {
 
 /**
  * Trích xuất toàn bộ văn bản và ghi chú từng trang từ file PowerPoint (.pptx)
+ * Hỗ trợ cả slide chứa text thông thường và slide trình chiếu bằng poster/hình ảnh (Picture-Based Presentation)
  */
 export async function extractTextFromPptx(buffer: Buffer, fileName = "presentation.pptx"): Promise<string | null> {
   const tempPptxPath = path.join("/tmp", `pptx_extract_${Date.now()}_${Math.random().toString(36).slice(2)}.pptx`);
+  const extractDir = path.join("/tmp", `pptx_dir_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+
   try {
     fs.writeFileSync(tempPptxPath, buffer);
     const { execFile } = await import("child_process");
     const { promisify } = await import("util");
     const execFileAsync = promisify(execFile);
 
-    const { stdout: listOut } = await execFileAsync("unzip", ["-Z", "-1", tempPptxPath]);
-    const files = listOut.split("\n").map((f) => f.trim()).filter(Boolean);
+    // Giải nén toàn bộ file pptx ra thư mục tạm để đọc trực tiếp không bị giới hạn bộ nhớ buffer stdout
+    try {
+      await execFileAsync("unzip", ["-q", tempPptxPath, "-d", extractDir]);
+    } catch (unzipErr) {
+      console.warn(`[gemini] Lỗi giải nén PPTX:`, unzipErr);
+      return null;
+    }
 
-    const slideEntries = files.filter((p) => /^ppt\/slides\/slide\d+\.xml$/i.test(p));
-    slideEntries.sort((a, b) => {
+    const slidesDir = path.join(extractDir, "ppt/slides");
+    if (!fs.existsSync(slidesDir)) {
+      return null;
+    }
+
+    const slideFiles = fs.readdirSync(slidesDir).filter((f) => /^slide\d+\.xml$/i.test(f));
+    slideFiles.sort((a, b) => {
       const numA = parseInt(a.match(/slide(\d+)\.xml/i)?.[1] || "0", 10);
       const numB = parseInt(b.match(/slide(\d+)\.xml/i)?.[1] || "0", 10);
       return numA - numB;
     });
 
-    if (slideEntries.length === 0) return null;
+    if (slideFiles.length === 0) return null;
+
+    interface SlideInfo {
+      slideNum: number;
+      xmlFile: string;
+      textLines: string[];
+      notesText: string;
+      imageFiles: string[];
+      altDescr?: string;
+    }
+
+    const slides: SlideInfo[] = [];
+
+    for (const file of slideFiles) {
+      const slideNum = parseInt(file.match(/slide(\d+)\.xml/i)?.[1] || "0", 10);
+      const slideXmlPath = path.join(slidesDir, file);
+      let slideXml = "";
+      try {
+        slideXml = fs.readFileSync(slideXmlPath, "utf-8");
+      } catch {
+        continue;
+      }
+
+      // 1. Digital text
+      const textLines = slideXml
+        .replace(/<a:p[^>]*>/g, "\n")
+        .replace(/<a:br[^>]*\/>/g, "\n")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&amp;/g, "&")
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'")
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+      // 2. Speaker notes
+      let notesText = "";
+      const notePath = path.join(extractDir, `ppt/notesSlides/notesSlide${slideNum}.xml`);
+      if (fs.existsSync(notePath)) {
+        try {
+          const noteXml = fs.readFileSync(notePath, "utf-8");
+          const noteLines = noteXml
+            .replace(/<a:p[^>]*>/g, "\n")
+            .replace(/<[^>]+>/g, "")
+            .replace(/&lt;/g, "<")
+            .replace(/&gt;/g, ">")
+            .replace(/&amp;/g, "&")
+            .replace(/&quot;/g, '"')
+            .replace(/&apos;/g, "'")
+            .split("\n")
+            .map((l) => l.trim())
+            .filter(Boolean);
+          if (noteLines.length > 0) {
+            notesText = `\n  • [Speaker Notes / Ghi chú]: ${noteLines.join(" | ")}`;
+          }
+        } catch {}
+      }
+
+      // 3. Alt text / descr nếu có
+      const descrMatch = slideXml.match(/<p:cNvPr[^>]*descr="([^"]+)"/i);
+      const altDescr = descrMatch?.[1] ? descrMatch[1].trim() : undefined;
+
+      // 4. Tìm các hình ảnh liên kết trong slide (qua file .rels)
+      const relsPath = path.join(slidesDir, "_rels", `${file}.rels`);
+      const imageFiles: string[] = [];
+      if (fs.existsSync(relsPath)) {
+        try {
+          const relsXml = fs.readFileSync(relsPath, "utf-8");
+          const imgMatches = [...relsXml.matchAll(/Target="(?:\.\.\/)?media\/([^"]+)"/gi)];
+          for (const m of imgMatches) {
+            const mediaFileName = m[1];
+            if (!mediaFileName) continue;
+            const fullImgPath = path.join(extractDir, "ppt/media", mediaFileName);
+            if (fs.existsSync(fullImgPath)) {
+              imageFiles.push(fullImgPath);
+            }
+          }
+        } catch {}
+      }
+
+      slides.push({
+        slideNum,
+        xmlFile: file,
+        textLines,
+        notesText,
+        imageFiles,
+        altDescr,
+      });
+    }
+
+    // Kiểm tra xem bài thuyết trình có cần OCR ảnh không (Picture-Based Presentation)
+    const slidesWithDigitalText = slides.filter((s) => s.textLines.length > 0);
+    const isPicturePresentation = slidesWithDigitalText.length === 0 || slidesWithDigitalText.length < slides.length / 2;
+
+    let ocrModule: { ocrImage: (buf: Buffer) => Promise<string> } | null = null;
+    if (isPicturePresentation) {
+      try {
+        ocrModule = await import("./jobs/ocr.js");
+      } catch (e) {
+        console.warn(`[gemini] Không thể load module OCR cho PPTX:`, e);
+      }
+    }
 
     const slideSections: string[] = [];
+    const maxOcrSlides = 20; // Giới hạn tối đa 20 slides để tránh nghẽn
+    let ocrCount = 0;
 
-    for (const entry of slideEntries) {
-      const slideNum = entry.match(/slide(\d+)\.xml/i)?.[1] || "";
-      try {
-        const { stdout: slideXml } = await execFileAsync("unzip", ["-p", tempPptxPath, entry]);
-        const textLines = slideXml
-          .replace(/<a:p[^>]*>/g, "\n")
-          .replace(/<a:br[^>]*\/>/g, "\n")
-          .replace(/<[^>]+>/g, "")
-          .replace(/&lt;/g, "<")
-          .replace(/&gt;/g, ">")
-          .replace(/&amp;/g, "&")
-          .replace(/&quot;/g, '"')
-          .replace(/&apos;/g, "'")
-          .split("\n")
-          .map((l) => l.trim())
-          .filter(Boolean);
+    for (const slide of slides) {
+      let content = "";
+      if (slide.textLines.length > 0) {
+        content = slide.textLines.join("\n");
+      }
 
-        let notesText = "";
-        const noteEntry = `ppt/notesSlides/notesSlide${slideNum}.xml`;
-        if (files.includes(noteEntry)) {
-          try {
-            const { stdout: noteXml } = await execFileAsync("unzip", ["-p", tempPptxPath, noteEntry]);
-            const noteLines = noteXml
-              .replace(/<a:p[^>]*>/g, "\n")
-              .replace(/<[^>]+>/g, "")
-              .replace(/&lt;/g, "<")
-              .replace(/&gt;/g, ">")
-              .replace(/&amp;/g, "&")
-              .replace(/&quot;/g, '"')
-              .replace(/&apos;/g, "'")
-              .split("\n")
-              .map((l) => l.trim())
-              .filter(Boolean);
-            if (noteLines.length > 0) {
-              notesText = `\n  • [Speaker Notes / Ghi chú]: ${noteLines.join(" | ")}`;
+      // Nếu slide không có digital text hoặc là dạng Picture Presentation, quét OCR ảnh slide
+      if ((!content || content.length < 20) && slide.imageFiles.length > 0 && ocrModule && ocrCount < maxOcrSlides) {
+        try {
+          let bestImgPath: string | undefined = slide.imageFiles[0];
+          if (slide.imageFiles.length > 1) {
+            const sorted = [...slide.imageFiles].sort((a, b) => {
+              const sizeA = fs.statSync(a).size;
+              const sizeB = fs.statSync(b).size;
+              return sizeB - sizeA;
+            });
+            bestImgPath = sorted[0];
+          }
+
+          if (bestImgPath && fs.existsSync(bestImgPath)) {
+            const imgBuffer = fs.readFileSync(bestImgPath);
+            console.log(`[gemini] 🔍 Đang OCR slide ${slide.slideNum} (${path.basename(bestImgPath)}, ${(imgBuffer.length / 1024).toFixed(0)}KB)...`);
+            const ocrText = await ocrModule.ocrImage(imgBuffer);
+            ocrCount++;
+            if (ocrText && ocrText.trim().length > 0) {
+              content = content ? `${content}\n${ocrText.trim()}` : ocrText.trim();
             }
-          } catch {}
+          }
+        } catch (ocrErr) {
+          console.warn(`[gemini] Lỗi OCR slide ${slide.slideNum}:`, ocrErr);
         }
+      }
 
-        if (textLines.length > 0) {
-          slideSections.push(`[SLIDE ${slideNum}]\n${textLines.join("\n")}${notesText}`);
-        }
-      } catch (slideErr) {
-        console.warn(`[gemini] Lỗi đọc slide ${entry}:`, slideErr);
+      if (content || slide.altDescr || slide.notesText) {
+        const descrInfo = slide.altDescr && !slide.altDescr.includes(".png") && !slide.altDescr.includes(".jpg")
+          ? `\n  • [Mô tả hình ảnh]: ${slide.altDescr}`
+          : "";
+        slideSections.push(`[SLIDE ${slide.slideNum}]\n${content || "(Slide đồ họa/hình ảnh)"}${descrInfo}${slide.notesText}`);
       }
     }
 
     if (slideSections.length > 0) {
-      return `=== BÀI THUYẾT TRÌNH POWERPOINT: ${fileName} (${slideSections.length} SLIDE) ===\n\n${slideSections.join("\n\n---\n\n")}`;
+      return `=== BÀI THUYẾT TRÌNH POWERPOINT: ${fileName} (${slideFiles.length} SLIDE) ===\n\n${slideSections.join("\n\n---\n\n")}`;
     }
     return null;
   } catch (err) {
     console.warn(`[gemini] Lỗi trích xuất text từ PPTX:`, err);
     return null;
   } finally {
-    try { fs.unlinkSync(tempPptxPath); } catch {}
+    try { fs.rmSync(tempPptxPath, { force: true }); } catch {}
+    try { fs.rmSync(extractDir, { recursive: true, force: true }); } catch {}
   }
 }
 

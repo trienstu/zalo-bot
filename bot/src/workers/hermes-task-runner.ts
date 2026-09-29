@@ -74,8 +74,9 @@ export async function runHermesTaskJob(options: HermesTaskOptions): Promise<void
     `NHIỆM VỤ: Phân tích yêu cầu của người dùng, tự lập kế hoạch đa bước và tự động sử dụng các công cụ có sẵn (terminal, execute_code, web_search, read_file, write_file, browser_exec, vision_analyze...) để giải quyết trọn vẹn bài toán.\n\n` +
     `QUY TẮC XUẤT FILE & TÀI NGUYÊN:\n` +
     `1. Nếu tác vụ yêu cầu tạo ra file thành phẩm (PowerPoint .pptx, Excel .xlsx, Word .docx, PDF, Video .mp4, Hình ảnh .png/.jpg, File nén .zip):\n` +
+    `   - Hãy xác định đúng định dạng file theo yêu cầu hoặc tài liệu mẫu được đính kèm (ví dụ: tài liệu mẫu là bài thuyết trình/slide .pptx thì sản phẩm tạo ra tương tự phải là PowerPoint .pptx; nếu là bảng biểu tính toán/danh sách số liệu thì là Excel .xlsx; nếu là văn bản báo cáo/hợp đồng thì là Word .docx). Tuyệt đối không nhầm giữa slide trình chiếu và bảng tính.\n` +
     `   - Hãy lưu file trực tiếp vào thư mục: ${sharedDir} hoặc /tmp/\n` +
-    `   - Tên file viết không dấu, dùng gạch dưới rõ ràng (ví dụ: ${sharedDir}/phong_chong_ma_tuy_18_slide.pptx)\n` +
+    `   - Tên file viết không dấu, dùng gạch dưới rõ ràng (ví dụ: ${sharedDir}/phong_chong_buon_nguoi_qua_bien_gioi.pptx)\n` +
     `   - Trong câu trả lời cuối cùng, BẮT BUỘC ghi rõ dòng: [FILE: /đường_dẫn_tuyệt_đối_đến_file] để Zalo Bot tự động phát hiện và gửi file cho người dùng!\n` +
     `2. Môi trường Python đã cài sẵn: python-pptx, Pillow, pandas, openpyxl, requests, xlsxwriter... Hãy tận dụng tối đa công cụ execute_code / terminal để viết script Python tạo tài liệu, đồ thị hoặc xử lý dữ liệu.\n` +
     `3. Trả lời bằng tiếng Việt tự nhiên, súc tích, tóm tắt rõ những việc bạn đã thực hiện và kết quả đạt được.`;

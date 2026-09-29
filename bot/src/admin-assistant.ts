@@ -1113,6 +1113,20 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         );
         return;
       }
+      // Kế thừa ngữ cảnh tài liệu vừa gửi gần nhất nếu người dùng không quote trực tiếp
+      let inheritedQuote = event.quote?.text;
+      if (!inheritedQuote) {
+        const lastDoc = lastAnalyzedDocuments.get(sender);
+        if (lastDoc && Date.now() - lastDoc.timestamp < 30 * 60 * 1000) {
+          inheritedQuote = `[TÀI LIỆU VỪA ĐƯỢC GỬI GẦN NHẤT]:\n- Tên file: ${lastDoc.name}\n- Nội dung trích xuất:\n${lastDoc.text}`;
+        } else {
+          const dbDoc = getRecentDirectDocument(sender);
+          if (dbDoc && Date.now() - dbDoc.updatedAt < 30 * 60 * 1000) {
+            inheritedQuote = `[TÀI LIỆU VỪA ĐƯỢC GỬI GẦN NHẤT]:\n- Tên file: ${dbDoc.fileName}\n- Nội dung trích xuất:\n${dbDoc.text}`;
+          }
+        }
+      }
+
       void runHermesTaskJob({
         api,
         sender,
@@ -1120,7 +1134,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         displayName,
         userGreeting: "Sếp",
         userPrompt: taskCmd.taskPrompt,
-        quoteText: event.quote?.text,
+        quoteText: inheritedQuote,
       }).catch((err) => console.error("[admin-assistant] Lỗi runHermesTaskJob:", err));
       return;
     }
@@ -2368,6 +2382,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         text: fileTextContent,
         timestamp: Date.now(),
       });
+      saveRecentDirectDocument(sender, fileName || "Tài liệu", fileTextContent);
     } else if (fileRes?.isZip && fileRes.zipFilePath) {
       const isBatchAudioReq =
         /(?:bóc\s*băng|boc\s*bang|chép\s*lời|chep\s*loi|tách\s*lời|dịch\s*thoại|audio\s*batch|bài\s*nghe|chép\s*audio)/i.test(rawText) ||
