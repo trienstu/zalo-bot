@@ -414,21 +414,22 @@ export async function downloadMediaVideo(
       const timestamp = Date.now();
       const outputTemplate = path.join(outputDir, `media_${timestamp}_%(id)s.%(ext)s`);
 
-      const cookiesPath = getYtDlpCookiesPath();
+      const cookiesPath = isYouTube ? getYtDlpCookiesPath() : null;
       const ytArgs: string[] = [
         ...(cookiesPath ? ["--cookies", cookiesPath] : []),
         "--no-warnings",
+        "--no-simulate",
         "--no-playlist",
         "--max-filesize", `${maxMb}M`,
         ...(isAudio
           ? ["-x", "--audio-format", "mp3", "--audio-quality", "0"]
           : [
               "-f",
-              "bestvideo[vcodec^=avc1][height<=1080]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc][height<=1080]+bestaudio[acodec^=mp4a]/bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+              "bestvideo[vcodec^=avc1][height<=1080]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc][height<=1080]+bestaudio[acodec^=mp4a]/best[ext=mp4]/bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best",
               "--merge-output-format",
               "mp4",
             ]),
-        "--print", "%(title)s\t%(duration)s\t%(uploader)s\t%(filename)s",
+        "--print", "after_move:%(title)s\t%(duration)s\t%(uploader)s\t%(filepath)s",
         "-o", outputTemplate,
         cleanUrl,
       ];

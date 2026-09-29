@@ -1948,6 +1948,45 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
   }
 }
 
+/**
+ * Trích xuất câu hỏi/yêu cầu trực tiếp của người dùng từ prompt tổng thể (bỏ qua chat_history)
+ */
+export function extractUserDirectQuery(userPrompt: string): string {
+  if (!userPrompt) return "";
+  let text = userPrompt.replace(/<chat_history>[\s\S]*?<\/chat_history>/gi, "");
+  text = text.replace(/LỊCH SỬ TRÒ CHUYỆN TRƯỚC ĐÓ:[\s\S]*?(?=\n\n(?:YÊU CẦU|===|\[ẢNH|DANH SÁCH)|$)/gi, "");
+
+  const reqMatch = text.match(/YÊU CẦU\s*(?:\/|\s)\s*(?:CHỈ ĐẠO TỪ SẾP|CÂU HỎI TỪ THÀNH VIÊN|MỚI TỪ)[^:]*:\s*([\s\S]+?)(?=\n\s*HÃY TRẢ LỜI|$)/i);
+  if (reqMatch?.[1]) {
+    return reqMatch[1].trim();
+  }
+  return text.trim();
+}
+
+/**
+ * Chuẩn hóa tham số format cho công cụ download_media_video dựa trên yêu cầu trực tiếp
+ */
+export function resolveMediaDownloadFormat(currentFormat: unknown, userPrompt: string): "video" | "audio" {
+  const directQuery = extractUserDirectQuery(userPrompt).toLowerCase();
+
+  // Nhận diện người dùng nói rõ muốn tải video/clip/mp4
+  const wantsExplicitVideo = /(?:tải|tai|lấy|lay|xin|download|xem)\s+(?:video|clip|mp4|phim)|(?:bản|file)\s+video/i.test(directQuery);
+
+  // Nhận diện người dùng nói rõ muốn tách nhạc/lấy âm thanh/tải mp3
+  const wantsExplicitAudio = /(?:tách\s*nhạc|tach\s*nhac|lấy\s*nhạc|lay\s*nhac|tải\s*mp3|tai\s*mp3|\bmp3\b|\baudio\b|âm\s*thanh|am\s*thanh|tách\s*tiếng|tach\s*tieng|nhạc\s*nền|nhac\s*nen|tách\s*audio|tach\s*audio)/i.test(directQuery);
+
+  if (wantsExplicitVideo) {
+    return "video";
+  }
+  if (wantsExplicitAudio) {
+    return "audio";
+  }
+
+  const norm = String(currentFormat || "").toLowerCase();
+  if (norm === "audio") return "audio";
+  return "video";
+}
+
 async function call9RouterAgentLoop(
   effectiveSystem: string,
   user: string,
@@ -2094,14 +2133,7 @@ async function call9RouterAgentLoop(
 
       if (fnName === "download_media_video") {
         if (!fnArgs) fnArgs = {};
-        const reqText = `${user || ""}`.toLowerCase();
-        const wantsAudio = /(?:tách\s*nhạc|tach\s*nhac|lấy\s*nhạc|lay\s*nhac|tải\s*mp3|tai\s*mp3|\bmp3\b|\baudio\b|âm\s*thanh|am\s*thanh|tiếng|tieng|nhạc\s*nền|nhac\s*nen|tách\s*audio|tach\s*audio)/iu.test(reqText);
-        if (wantsAudio && fnArgs.format !== "audio") {
-          console.log(`[9router-agent] 🎵 Phát hiện yêu cầu âm thanh/MP3 từ người dùng, tự động ép format -> 'audio'`);
-          fnArgs.format = "audio";
-        } else if (!fnArgs.format) {
-          fnArgs.format = "video";
-        }
+        fnArgs.format = resolveMediaDownloadFormat(fnArgs.format, user);
       }
 
       options?.onToolCall?.(fnName, fnArgs);
@@ -2371,14 +2403,7 @@ export async function callGeminiAgentLoop(
 
           if (fc.name === "download_media_video") {
             if (!fc.args) fc.args = {};
-            const reqText = `${user || ""}`.toLowerCase();
-            const wantsAudio = /(?:tách\s*nhạc|tach\s*nhac|lấy\s*nhạc|lay\s*nhac|tải\s*mp3|tai\s*mp3|\bmp3\b|\baudio\b|âm\s*thanh|am\s*thanh|tiếng|tieng|nhạc\s*nền|nhac\s*nen|tách\s*audio|tach\s*audio)/iu.test(reqText);
-            if (wantsAudio && fc.args.format !== "audio") {
-              console.log(`[gemini-agent] 🎵 Phát hiện yêu cầu âm thanh/MP3 từ người dùng, tự động ép format -> 'audio'`);
-              fc.args.format = "audio";
-            } else if (!fc.args.format) {
-              fc.args.format = "video";
-            }
+            fc.args.format = resolveMediaDownloadFormat(fc.args.format, user);
           }
           options?.onToolCall?.(fc.name, fc.args || {});
           const result = await executeAgentTool(fc.name, fc.args || {});
