@@ -16,6 +16,7 @@ import {
   formatFacebookEnrichedPost,
   exportFacebookCommentsToExcel,
 } from "./tools/facebook-scraper.js";
+import { downloadMediaVideo } from "./tools/video-downloader.js";
 import {
   generateWordDoc,
   generateExcelFile,
@@ -1303,6 +1304,18 @@ const AGENT_TOOLS_DECLARATION = {
       },
     },
     {
+      name: "download_media_video",
+      description: "Tải file Video (.mp4) hoặc tách riêng âm thanh Audio (.mp3) từ đường link video mạng xã hội (TikTok không dính watermark, YouTube, Facebook Video/Reels, Instagram, X/Twitter...). File sau khi tải sẽ được tự động gửi trực tiếp đính kèm vào nhóm Zalo cho người dùng lưu về máy.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          url: { type: "STRING", description: "Đường link video (TikTok, YouTube, Facebook, Instagram, Twitter...)" },
+          format: { type: "STRING", description: "Định dạng cần xuất: 'video' (mặc định tải video MP4) hoặc 'audio' (khi người dùng yêu cầu tách nhạc, lấy mp3, chỉ lấy âm thanh)" },
+        },
+        required: ["url"],
+      },
+    },
+    {
       name: "wiki_lookup",
       description: "Tra cứu bách khoa toàn thư Wikipedia về thực thể, công nghệ, nhân vật, lịch sử hoặc khái niệm.",
       parameters: {
@@ -1720,6 +1733,13 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
         formattedContent: formatFacebookEnrichedPost(enriched),
       };
     }
+    case "download_media_video": {
+      const url = String(args?.url || "").trim();
+      if (!url) return { error: "Thiếu đường dẫn URL video cần tải" };
+      const formatStr = String(args?.format || "").toLowerCase();
+      const format = formatStr.includes("audio") || formatStr.includes("mp3") ? "audio" : "video";
+      return await downloadMediaVideo(url, { format });
+    }
     case "wiki_lookup": {
       const q = String(args?.query || "").trim();
       if (!q) return { error: "Thiếu từ khóa tra cứu" };
@@ -2076,6 +2096,7 @@ async function call9RouterAgentLoop(
           fnName === "create_voice" ||
           fnName === "generate_image" ||
           fnName === "generate_music" ||
+          (fnName === "download_media_video" && result?.filePath) ||
           (fnName === "facebook_post_lookup" && result?.filePath)) &&
         result?.success &&
         options?.onFileGenerated
@@ -2333,7 +2354,7 @@ export async function callGeminiAgentLoop(
           }
           options?.onToolCall?.(fc.name, fc.args || {});
           const result = await executeAgentTool(fc.name, fc.args || {});
-          if ((fc.name === "generate_file" || fc.name === "create_voice" || fc.name === "generate_image" || fc.name === "generate_music" || (fc.name === "facebook_post_lookup" && result?.filePath)) && result?.success && options?.onFileGenerated) {
+          if ((fc.name === "generate_file" || fc.name === "create_voice" || fc.name === "generate_image" || fc.name === "generate_music" || (fc.name === "download_media_video" && result?.filePath) || (fc.name === "facebook_post_lookup" && result?.filePath)) && result?.success && options?.onFileGenerated) {
             try {
               await options.onFileGenerated({
                 ...result,

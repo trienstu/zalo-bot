@@ -2026,7 +2026,11 @@ QUY TẮC BẮT BUỘC:
       quotePlan?.toolIntent === "create" ||
       quotePlan?.toolIntent === "execute";
     try {
-      const needsAgentLoop = (checkIsFileOrVoiceGeneration(question, options.quote.text) || isQuotePlanAction || /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(question)) && !isPureGreeting;
+      const isQuoteExternalAction =
+        /(?:facebook\.com|fb\.com|fb\.watch|tiktok\.com|vt\.tiktok\.com|youtube\.com|youtu\.be|instagram\.com|twitter\.com|x\.com)\b/i.test(`${question} ${options.quote.text || ""}`) ||
+        /(?:tải|download|lay|lấy|xin|tach|tách)\s+(?:video|clip|mp4|nhạc|audio|mp3)/i.test(`${question} ${options.quote.text || ""}`) ||
+        /(?:đọc link|tải trang|cào web|check link|bài viết|bình luận|comment)\s+https?:/i.test(question);
+      const needsAgentLoop = (checkIsFileOrVoiceGeneration(question, options.quote.text) || isQuotePlanAction || isQuoteExternalAction) && !isPureGreeting;
       if (needsAgentLoop) {
         const dynamicTimeout = (options.quote.text?.length || 0) > 10_000 || (options.directDocContent?.length || 0) > 10_000 ? 150_000 : undefined;
         answer = await callGeminiAgentLoop(quoteSystemPrompt, quoteUserPrompt, {
@@ -3012,7 +3016,12 @@ QUY TẮC BẮT BUỘC:
       queryPlan?.toolIntent === "create" ||
       queryPlan?.toolIntent === "execute";
     const isFileOrVoiceReq = checkIsFileOrVoiceGeneration(question, options?.quote?.text) || isPlanAction;
-    const needsAgentLoop = isFileOrVoiceReq || (!isSearchDisabled && /(?:đọc link|tải trang|cào web|check link)\s+https?:/i.test(question));
+    const combinedContent = `${question} ${options?.quote?.text || ""}`;
+    const isExternalLinkOrScrapeAction =
+      /(?:facebook\.com|fb\.com|fb\.watch|tiktok\.com|vt\.tiktok\.com|youtube\.com|youtu\.be|instagram\.com|twitter\.com|x\.com)\b/i.test(combinedContent) ||
+      /(?:tải|download|lay|lấy|xin|tach|tách)\s+(?:video|clip|mp4|nhạc|audio|mp3)/i.test(combinedContent) ||
+      (!isSearchDisabled && /(?:đọc link|tải trang|cào web|check link|bài viết|bình luận|comment)\s+https?:/i.test(question));
+    const needsAgentLoop = isFileOrVoiceReq || isExternalLinkOrScrapeAction;
 
     let answer = "";
     let voiceGenerated = false;
@@ -3045,6 +3054,17 @@ QUY TẮC BẮT BUỘC:
                 options.api,
                 threadId,
                 `🎵 ${isSuperAdmin ? "Em đang bắt đầu sáng tác và hòa âm phối khí cho Sếp" : `${botName} đang sáng tác và hòa âm phối khí cho bác @${displayName}`}: "${promptPreview}..."... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em xíu nhé! ✨`,
+              );
+            }
+          }
+          if (toolName === "download_media_video") {
+            const isAudio = String(args?.format || "").toLowerCase().includes("audio") || String(args?.format || "").toLowerCase().includes("mp3");
+            const actionText = isAudio ? "tách âm thanh MP3" : "tải video";
+            if (options?.api) {
+              void sendGroupText(
+                options.api,
+                threadId,
+                `⏳ ${isSuperAdmin ? `Dạ Sếp, em đang tiến hành ${actionText}` : `Dạ bác @${displayName}, ${botName} đang tiến hành ${actionText}`}... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em một lát nhé! 🚀`,
               );
             }
           }

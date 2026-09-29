@@ -62,6 +62,15 @@ export function getPromptModuleFacebookAnalysis(): string {
       - Kết hợp nhuần nhuyễn nội dung bài gốc VÀ các bình luận bổ sung của tác giả (chứa link tài nguyên, phần 2, thông tin giải thích) để viết thành một bài post độc lập, mạch lạc, đầy đủ các liên kết tham khảo mà không bị thiếu thông tin!\n`;
 }
 
+export function getPromptModuleVideoDownload(): string {
+  return `\n- KỸ NĂNG TẢI VIDEO VÀ TÁCH ÂM THANH ĐA NỀN TẢNG (download_media_video):
+  + Khi người dùng gửi đường link video (TikTok, YouTube, Facebook Video/Reels, Instagram, X/Twitter...) kèm yêu cầu tải video, tải clip, tách nhạc hoặc lấy audio:
+    * BẮT BUỘC SỬ DỤNG CÔNG CỤ 'download_media_video'.
+    * NẾU NGƯỜI DÙNG YÊU CẦU TÁCH NHẠC / LẤY MP3 / CHỈ LẤY ÂM THANH: Đặt tham số 'format: "audio"'.
+    * NẾU NGƯỜI DÙNG YÊU CẦU TẢI VIDEO / CLIP (TIKTOK KHÔNG LOGO, FACEBOOK, YOUTUBE MP4): Đặt tham số 'format: "video"'.
+    * Hệ thống sẽ tự động tải file chuẩn H.264/MP3 và gửi trực tiếp đính kèm vào nhóm Zalo cho người dùng lưu về máy!\n`;
+}
+
 export function buildDynamicSystemPromptModules(params: {
   question: string;
   quoteText?: string;
@@ -118,6 +127,14 @@ export function buildDynamicSystemPromptModules(params: {
     /(?:bình\s*luận|comment|cmt|bài\s*post|bài\s*viết)\s+facebook/iu.test(combinedText)
   ) {
     extraModules += getPromptModuleFacebookAnalysis();
+  }
+
+  // 7. Module tải Video và tách âm thanh đa nền tảng
+  const isVideoDownloadQuery =
+    /(?:tải|download|lay|lấy|xin|tach|tách)\s+(?:video|clip|mp4|nhạc|audio|mp3|bài\s+hát|tiếng)/i.test(combinedText) ||
+    /(?:tiktok\.com|vt\.tiktok\.com|youtube\.com|youtu\.be|instagram\.com\/reel|facebook\.com\/(?:reel|watch|share)|fb\.watch)\b/i.test(combinedText);
+  if (isVideoDownloadQuery) {
+    extraModules += getPromptModuleVideoDownload();
   }
 
   return extraModules;
