@@ -1154,8 +1154,7 @@ function isMediaOrDocUrl(url?: string | null): boolean {
     url.includes("chat-photo") ||
     url.includes("res-zalo") ||
     url.includes("zaloapp") ||
-    url.includes("files-cdn.zalo.me") ||
-    url.includes("zalo.me")
+    url.includes("files-cdn.zalo.me")
   ) return true;
   return false;
 }
@@ -1268,7 +1267,7 @@ async function handleHistoryQA(
     options?.quote?.fileAttachment?.url ||
     options?.imageUrl ||
     (options?.quote?.mediaType === "image" || options?.quote?.mediaType === "video" || isMediaOrDocUrl(options?.quote?.mediaUrl) ? options?.quote?.mediaUrl : undefined);
-  let targetUrl = (rawTargetUrl && (isMediaOrDocUrl(rawTargetUrl) || options?.fileAttachment?.url || options?.quote?.fileAttachment?.url)) ? rawTargetUrl : undefined;
+  let targetUrl = (rawTargetUrl && isMediaOrDocUrl(rawTargetUrl)) ? rawTargetUrl : undefined;
   let fileName = options?.fileAttachment?.name || options?.quote?.fileAttachment?.name || "";
 
   if (!fileName && options?.quote?.text) {
@@ -1280,7 +1279,7 @@ async function handleHistoryQA(
 
   if (!targetUrl && options?.quote?.text) {
     const urlMatch = options.quote.text.match(/https?:\/\/[^\s]+/i);
-    if (urlMatch) {
+    if (urlMatch && isMediaOrDocUrl(urlMatch[0])) {
       targetUrl = urlMatch[0];
     }
   }
@@ -1393,7 +1392,7 @@ async function handleHistoryQA(
     console.warn(`[member-assistant] Không nạp được media từ targetUrl: ${targetUrl.slice(0, 80)}`);
     const isImageAnalysisReq =
       /(?:ocr|chữ trong ảnh|văn bản trong ảnh|đọc ảnh|xem ảnh|ảnh này|hình này|soi ảnh|giải bài|đáp án)/i.test(question) ||
-      Boolean(options?.imageUrl);
+      (Boolean(options?.imageUrl) && !/https?:\/\/[^\s]+/i.test(question) && !/(?:link|facebook|fb\.com|fb\.watch|youtube|web|bài viết)/i.test(question));
     if (isImageAnalysisReq) {
       return isSuperAdmin
         ? `Dạ Sếp ơi, em đã nhận được yêu cầu nhưng máy chủ Zalo CDN chưa kịp đồng bộ ảnh sang cho em đọc ạ. Kính nhờ Sếp reply (quote) lại ảnh hoặc gửi lại giúp em nhé! 🙏`

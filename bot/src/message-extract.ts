@@ -158,6 +158,14 @@ export function collectCandidateUrls(sources: unknown[]): string[] {
 /** URL media tạm do Zalo trả về; Telegram có thể dùng URL này để tải ảnh/video. */
 export function extractMediaUrl(payload: any): string | null {
   const data = payload?.data ?? {};
+  const msgType = String(data?.msgType ?? "").toLowerCase();
+
+  // BỎ QUA NẾU LÀ TIN NHẮN LINK PREVIEW / RECOMMENDED (chat.recommended, chat.link, share.link)
+  // để tránh nhận nhầm thumbnail OpenGraph của web link thành ảnh do người dùng gửi
+  if (msgType.includes("link") || msgType.includes("recommended")) {
+    return null;
+  }
+
   const content = parseObjectMaybe(data?.content);
   const params = parseObjectMaybe(content?.params || data?.params);
   const attach = parseObjectMaybe(data?.attach || content?.attach);
@@ -358,18 +366,25 @@ export function extractQuote(payload: any): QuotedMessage | null {
   }
 
   const rawType = String(quote.msgType || quote.type || "").toLowerCase();
+  const isLinkPreview = rawType.includes("link") || rawType.includes("recommended");
+  if (isLinkPreview) {
+    mediaUrl = undefined;
+  }
+
   const isPhotoOrImage =
-    rawType.includes("photo") ||
-    rawType.includes("image") ||
-    text.includes("[Hình ảnh]") ||
-    text.includes("[Ảnh]") ||
-    Boolean(mediaUrl && /\.(?:jpg|jpeg|png|webp|gif|bmp|jxl)(?:\?|$)/i.test(mediaUrl)) ||
-    Boolean(mediaUrl && /photo-stal|chat-photo/i.test(mediaUrl));
+    !isLinkPreview &&
+    (rawType.includes("photo") ||
+      rawType.includes("image") ||
+      text.includes("[Hình ảnh]") ||
+      text.includes("[Ảnh]") ||
+      Boolean(mediaUrl && /\.(?:jpg|jpeg|png|webp|gif|bmp|jxl)(?:\?|$)/i.test(mediaUrl)) ||
+      Boolean(mediaUrl && /photo-stal|chat-photo/i.test(mediaUrl)));
 
   const isVideo =
-    rawType.includes("video") ||
-    text.includes("[Video]") ||
-    Boolean(mediaUrl && /\.(?:mp4|mov|avi|mkv|webm)(?:\?|$)/i.test(mediaUrl));
+    !isLinkPreview &&
+    (rawType.includes("video") ||
+      text.includes("[Video]") ||
+      Boolean(mediaUrl && /\.(?:mp4|mov|avi|mkv|webm)(?:\?|$)/i.test(mediaUrl)));
 
   // Trích xuất file đính kèm nếu quote là file tài liệu (PDF, Word, Excel, ZIP, etc.)
   let fileAttachment: FileAttachment | undefined;
@@ -445,6 +460,24 @@ export interface FileAttachment {
   extension?: string;
 }
 
+const DOCUMENT_AND_FILE_EXTENSIONS = /\.(?:pdf|docx?|xlsx?|pptx?|txt|csv|zip|rar|7z|tar(?:\.gz)?|mp3|wma|wav|m4a|flac|ogg)(?:\?|$)/i;
+
+/**
+ * Kiểm tra xem một URL hoặc tên file có phải là file tài liệu / media được Zalo hỗ trợ không.
+ * Ngăn chặn tuyệt đối việc nhận nhầm URL web thông thường (Facebook, YouTube, báo chí...) thành file tài liệu.
+ */
+export function isRecognizedFileOrDocUrl(url?: string | null, fileName = ""): boolean {
+  if (!url || typeof url !== "string") return false;
+  const cleanUrl = (url.split("?")[0] || "").trim();
+  if (DOCUMENT_AND_FILE_EXTENSIONS.test(cleanUrl) || DOCUMENT_AND_FILE_EXTENSIONS.test(fileName)) {
+    return true;
+  }
+  if (url.includes("dlfl.vn") || url.includes("files-cdn.zalo.me")) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Trích xuất file đính kèm (PDF, Word, Excel, TXT, Code, Audio...) từ payload Zalo.
  * Hỗ trợ cả file gửi trực tiếp và file trong tin nhắn được trích dẫn (quote/reply).
@@ -453,8 +486,14 @@ export function extractFileAttachment(payload: any): FileAttachment | null {
   const data = payload?.data ?? {};
   const msgType = String(data?.msgType ?? "").toLowerCase();
 
-  // BỎ QUA NẾU LÀ ẢNH HOẶC VIDEO THUẦN TÚY ĐỂ TRÁNH NHẬN DIỆN NHẦM ẢNH THÀNH FILE TÀI LIỆU
-  if (msgType.includes("photo") || msgType.includes("image") || msgType.includes("video")) {
+  // BỎ QUA NẾU LÀ ẢNH, VIDEO HOẶC LINK CARD THUẦN TÚY ĐỂ TRÁNH NHẬN DIỆN NHẦM THÀNH FILE TÀI LIỆU
+  if (
+    msgType.includes("photo") ||
+    msgType.includes("image") ||
+    msgType.includes("video") ||
+    msgType.includes("link") ||
+    msgType.includes("recommended")
+  ) {
     return null;
   }
 
@@ -494,7 +533,13 @@ export function extractFileAttachment(payload: any): FileAttachment | null {
     }
   }
 
-  if (url) {
+  const hasExplicitFileSize = Number(content?.fileSize || params?.fileSize || attach?.fileSize) > 0;
+  const isExplicitFile =
+    msgType.includes("file") ||
+    hasExplicitFileSize ||
+    isRecognizedFileOrDocUrl(url, name);
+
+  if (url && isExplicitFile) {
     const ext = (name.split(".").pop() || "").toLowerCase();
     return {
       name: name || "Tài liệu",
@@ -510,6 +555,17 @@ export function extractFileAttachment(payload: any): FileAttachment | null {
   if (quoteObj) {
     const quote = (parseObjectMaybe(quoteObj) || (typeof quoteObj === "object" ? quoteObj : null)) as Record<string, any> | null;
     if (quote) {
+      const quoteRawType = String(quote.msgType || quote.type || "").toLowerCase();
+      if (
+        quoteRawType.includes("photo") ||
+        quoteRawType.includes("image") ||
+        quoteRawType.includes("video") ||
+        quoteRawType.includes("link") ||
+        quoteRawType.includes("recommended")
+      ) {
+        return null;
+      }
+
       const quoteUrls = collectCandidateUrls([quote, quote.attach, quote.params, quote.propertyExt, quote.content]);
       let quoteUrl = quoteUrls.length > 0 ? normalizeZaloMediaUrl(quoteUrls[0]) : undefined;
       let quoteFileName = String(
@@ -540,7 +596,14 @@ export function extractFileAttachment(payload: any): FileAttachment | null {
         }
       }
 
-      if (quoteUrl) {
+      const hasQuoteFileSize = Number(quote.fileSize || quote.size || quote.attach?.fileSize || quote.params?.fileSize) > 0;
+      const isQuoteExplicitFile =
+        quoteRawType.includes("file") ||
+        quoteMsg.startsWith("[File]") ||
+        hasQuoteFileSize ||
+        isRecognizedFileOrDocUrl(quoteUrl, quoteFileName);
+
+      if (quoteUrl && isQuoteExplicitFile) {
         const ext = (quoteFileName.split(".").pop() || "").toLowerCase();
         return {
           name: quoteFileName || "Tài liệu",

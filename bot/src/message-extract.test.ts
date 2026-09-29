@@ -285,7 +285,6 @@ test("normalizeZaloMediaUrl: tự động chuẩn hóa URL ảnh .jxl và /jxl/ 
   assert.equal(candidates[0], expectedJpg);
   assert.ok(candidates.includes(jxlUrl));
 
-  // extractMediaUrl tự động trả về JPG chuẩn
   const payload = {
     data: {
       msgType: "chat.photo",
@@ -297,6 +296,69 @@ test("normalizeZaloMediaUrl: tự động chuẩn hóa URL ảnh .jxl và /jxl/ 
   assert.equal(extractMediaUrl(payload), expectedJpg);
 });
 
+test("link preview (chat.recommended & chat.link): KHÔNG nhận nhầm link Facebook thành file tài liệu hoặc ảnh media", () => {
+  const fbPayload = {
+    data: {
+      msgType: "chat.recommended",
+      content: {
+        title: "60 AI Tools You Need to Know",
+        description: "Tổng hợp các công cụ AI",
+        href: "https://www.facebook.com/share/p/1DyLLLMdrr/?mibextid=wwXIfr",
+        thumb: "https://photo-stal-35.zdn.vn/gr/jpg/thumb_preview.jpg",
+      },
+      text: "https://www.facebook.com/share/p/1DyLLLMdrr/?mibextid=wwXIfr\nPhân tích link đi sen chúa",
+    },
+  };
 
+  // extractFileAttachment tuyệt đối không biến link Facebook thành file attachment
+  assert.equal(extractFileAttachment(fbPayload), null);
 
+  // extractMediaUrl tuyệt đối không lấy thumbnail preview làm user media
+  assert.equal(extractMediaUrl(fbPayload), null);
 
+  // extractText vẫn rút được nội dung đầy đủ
+  const text = extractText(fbPayload);
+  assert.ok(text);
+  assert.match(text, /60 AI Tools|facebook\.com/);
+});
+
+test("link preview (chat.link): KHÔNG nhận nhầm link YouTube/báo chí thành file tài liệu hoặc ảnh media", () => {
+  const ytPayload = {
+    data: {
+      msgType: "chat.link",
+      content: {
+        title: "Video hướng dẫn",
+        description: "Xem chi tiết",
+        href: "https://www.youtube.com/watch?v=123456",
+        thumb: "https://photo-stal-20.zdn.vn/gr/jpg/yt_thumb.jpg",
+      },
+    },
+  };
+
+  assert.equal(extractFileAttachment(ytPayload), null);
+  assert.equal(extractMediaUrl(ytPayload), null);
+});
+
+test("quote link preview: KHÔNG nhận nhầm thành mediaType: image hoặc fileAttachment", () => {
+  const quoteFbPayload = {
+    data: {
+      msgType: "chat.quote",
+      content: {
+        msg: "Viết lại bài này đi bot",
+        quote: {
+          msgType: "chat.recommended",
+          title: "Bài viết AI",
+          href: "https://www.facebook.com/share/p/1DyLLLMdrr/",
+          thumb: "https://photo-stal-35.zdn.vn/gr/jpg/thumb.jpg",
+        },
+      },
+    },
+  };
+
+  const quote = extractQuote(quoteFbPayload);
+  assert.ok(quote);
+  assert.equal(quote.fileAttachment, undefined);
+  assert.equal(quote.mediaType, undefined);
+  assert.equal(quote.mediaUrl, undefined);
+  assert.equal(extractFileAttachment(quoteFbPayload), null);
+});
