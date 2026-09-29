@@ -377,7 +377,22 @@ export async function extractTextFromPptx(buffer: Buffer, fileName = "presentati
     }
 
     const slideSections: string[] = [];
-    const maxOcrSlides = 20; // Giới hạn tối đa 20 slides để tránh nghẽn
+
+    // Chọn danh sách slide đại diện để OCR (nếu là bài thuyết trình dạng poster ảnh)
+    // Tối đa 8 slides (7 slide đầu + slide cuối cùng) để vừa bao quát trọn vẹn chủ đề lẫn kết luận, vừa tối ưu tốc độ phản hồi (~40s)
+    const allowedOcrSlideNums = new Set<number>();
+    if (isPicturePresentation) {
+      if (slides.length <= 8) {
+        for (const s of slides) allowedOcrSlideNums.add(s.slideNum);
+      } else {
+        for (let i = 0; i < 7; i++) {
+          if (slides[i]) allowedOcrSlideNums.add(slides[i]!.slideNum);
+        }
+        const lastSlide = slides[slides.length - 1];
+        if (lastSlide) allowedOcrSlideNums.add(lastSlide.slideNum);
+      }
+    }
+
     let ocrCount = 0;
 
     for (const slide of slides) {
@@ -387,7 +402,7 @@ export async function extractTextFromPptx(buffer: Buffer, fileName = "presentati
       }
 
       // Nếu slide không có digital text hoặc là dạng Picture Presentation, quét OCR ảnh slide
-      if ((!content || content.length < 20) && slide.imageFiles.length > 0 && ocrModule && ocrCount < maxOcrSlides) {
+      if ((!content || content.length < 20) && slide.imageFiles.length > 0 && ocrModule && allowedOcrSlideNums.has(slide.slideNum)) {
         try {
           let bestImgPath: string | undefined = slide.imageFiles[0];
           if (slide.imageFiles.length > 1) {
@@ -422,7 +437,10 @@ export async function extractTextFromPptx(buffer: Buffer, fileName = "presentati
     }
 
     if (slideSections.length > 0) {
-      return `=== BÀI THUYẾT TRÌNH POWERPOINT: ${fileName} (${slideFiles.length} SLIDE) ===\n\n${slideSections.join("\n\n---\n\n")}`;
+      const ocrNote = ocrCount > 0
+        ? `\n[Hình thức: Bộ slide trình chiếu poster đồ họa, đã OCR trích xuất nội dung từ ${ocrCount}/${slideFiles.length} slide tiêu biểu]\n`
+        : "";
+      return `=== BÀI THUYẾT TRÌNH POWERPOINT: ${fileName} (${slideFiles.length} SLIDE) ===${ocrNote}\n\n${slideSections.join("\n\n---\n\n")}`;
     }
     return null;
   } catch (err) {
