@@ -132,6 +132,13 @@ test("parseAdminProfileUpdateIntent trích xuất chuẩn xác lệnh cập nh�
   assert.equal(cmdUpdate.gender, "nữ");
   assert.equal(cmdUpdate.pronoun, "Chị");
   assert.ok(cmdUpdate.preferences?.some((p) => p.includes("hoa lan")));
+
+  const teacherUpdate = await parseAdminProfileUpdateIntent("Trien Nguyen DXS là thầy giáo, gọi là Mr Johnny nhé!");
+  assert.ok(teacherUpdate);
+  assert.equal(teacherUpdate.targetQuery, "Trien Nguyen DXS");
+  assert.equal(teacherUpdate.gender, "nam");
+  assert.equal(teacherUpdate.pronoun, "Mr Johnny");
+  assert.ok(teacherUpdate.facts?.includes("thầy giáo"));
 });
 
 test("direct_interactions DB operations work with fresh schema", () => {

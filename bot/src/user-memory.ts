@@ -200,7 +200,12 @@ export function formatUserMemoriesForPrompt(
   if (!memories || memories.length === 0) return "";
 
   const lines: string[] = [];
+  let customPronoun: string | undefined;
+
   for (const m of memories) {
+    if (m.memory_key === "pronoun" && m.memory_value) {
+      customPronoun = m.memory_value.trim();
+    }
     const tag =
       m.category === "preference"
         ? "Sở thích/Phong cách"
@@ -210,9 +215,17 @@ export function formatUserMemoriesForPrompt(
     lines.push(`- [${tag}] ${m.memory_value}`);
   }
 
+  const customPronounNotice = customPronoun
+    ? `\n⚡ QUY TẮC DANH XƯNG BẮT BUỘC ĐÃ ĐƯỢC ADMIN CHỈ ĐỊNH CHO THÀNH VIÊN NÀY:\n` +
+      `- Danh xưng chuẩn: "${customPronoun}"\n` +
+      `- BẮT BUỘC gọi thành viên này là "${customPronoun}" (hoặc "${customPronoun} ${displayName}") khi trả lời, xưng "em" (hoặc xưng theo bot).\n` +
+      `- TUYỆT ĐỐI KHÔNG gọi sai danh xưng đã được Admin chỉ định!\n`
+    : "";
+
   return (
     `[HỒ SƠ & BỘ NHỚ VỀ THÀNH VIÊN ĐANG TRÒ CHUYỆN (@${displayName})]:\n` +
     lines.join("\n") +
+    customPronounNotice +
     `\n(Hãy tinh tế vận dụng các thông tin trên khi phù hợp để cá nhân hóa câu trả lời, không nhắc lại máy móc nếu không liên quan).\n`
   );
 }
@@ -286,13 +299,71 @@ export async function parseAdminProfileUpdateIntent(
 
   // 2. Nhận diện các mẫu câu tự nhiên có thể là ý định cập nhật hồ sơ, xưng hô hoặc nhắn tin cho user
   const hasUpdateKeyword = /(?:lưu|sửa|cập nhật|đổi|chỉnh|note|ghi nhớ|dặn|nhớ|xưng|xưng hô|danh xưng|gọi|hồ sơ|trí nhớ|bộ nhớ|thông tin|profile)\b/iu.test(lower);
-  const hasEntityOrPronoun = /(?:anh|ảnh|chị|em|cô|chú|bác|dì|thím|ông|bà|nam|nữ|con trai|con gái|sở thích|thích|nghề|làm|bạn|khách|thành viên)\b/iu.test(lower);
+  const hasEntityOrPronoun = /(?:anh|ảnh|chị|em|cô|chú|bác|dì|thím|ông|bà|nam|nữ|con trai|con gái|sở thích|thích|nghề|làm|bạn|khách|thành viên|thầy|cô giáo|thầy giáo|giảng viên|bác sĩ|sếp|mr|mrs|ms|chuyên gia)\b/iu.test(lower);
   const hasDirectPattern =
     /(?:là anh|là chị|là em|là nam|là nữ|xưng anh|xưng chị|gọi là anh|gọi là chị|không phải dì|ko phải dì|nhắn tin xin lỗi|nhắn xin lỗi)/iu.test(lower) ||
-    /^(?:bạn|khách|thành viên|user)\s+[^\s,:]+\s+(?:là|thích|mê|làm|chuyên|xưng|gọi)/iu.test(clean);
+    /^(?:bạn|khách|thành viên|user)\s+[^\s,:]+\s+(?:là|thích|mê|làm|chuyên|xưng|gọi)/iu.test(clean) ||
+    /^[^\n,:]+\s+là\s+[^\n,:]+,\s*(?:gọi|xưng)/iu.test(clean);
 
   const isCandidateText = (hasUpdateKeyword && hasEntityOrPronoun) || hasDirectPattern;
   if (!isCandidateText) return null;
+
+  // 2.0. Dạng mô tả danh xưng & vai trò: "<Target> là <Nghề/Vai trò>, gọi/xưng là <Danh xưng>"
+  // Ví dụ: "Trien Nguyen DXS là thầy giáo, gọi là Mr Johnny nhé!", "Lưu bạn Thảo là nữ, gọi bằng chị nhé"
+  const titleAndRoleMatch = clean.match(
+    /^([^\n,:]+?)\s+là\s+([^\n,:]+?),\s*(?:gọi|xưng)\s*(?:là|bằng)?\s*([^\n,.:!]+)/iu
+  );
+  if (titleAndRoleMatch && titleAndRoleMatch[1] && titleAndRoleMatch[2] && titleAndRoleMatch[3]) {
+    let rawTarget = titleAndRoleMatch[1]
+      .trim()
+      .replace(/^(?:lưu|sửa|cập nhật|đổi|chỉnh|dặn|ghi nhớ)\s+(?:trí nhớ|thông tin|hồ sơ)?\s*(?:của\s+)?/iu, "")
+      .replace(/^(?:bạn|khách|thành viên|user)\s+/iu, "")
+      .trim();
+    const rawRole = titleAndRoleMatch[2].trim();
+    let rawTitle = titleAndRoleMatch[3].trim().replace(/\s+(?:nhé|nha|ạ|nhe|đi)$/iu, "").trim();
+
+    const tLow = rawTitle.toLowerCase();
+    if (tLow === "chị" || tLow === "chi") rawTitle = "Chị";
+    else if (tLow === "anh") rawTitle = "Anh";
+    else if (tLow === "em") rawTitle = "Em";
+    else if (tLow === "cô" || tLow === "co") rawTitle = "Cô";
+    else if (tLow === "chú" || tLow === "chu") rawTitle = "Chú";
+    else if (tLow === "bác" || tLow === "bac") rawTitle = "Bác";
+
+    if (rawTarget.length >= 2 && !/^(?:tôi|mình|em|anh|chị|bot|ai)$/i.test(rawTarget)) {
+      const facts: string[] = [];
+      let gender: string | undefined;
+
+      const roleLow = rawRole.toLowerCase();
+      if (/(?:nữ|con gái|phái nữ|bà|cô)/iu.test(roleLow)) {
+        gender = "nữ";
+      } else if (/(?:nam|con trai|phái nam|đàn ông)/iu.test(roleLow)) {
+        gender = "nam";
+      }
+
+      if (rawRole && !/^(?:ai|gì|người|nam|nữ|con trai|con gái)$/iu.test(rawRole)) {
+        facts.push(rawRole);
+      }
+
+      const combined = `${rawRole} ${rawTitle}`.toLowerCase();
+      if (!gender) {
+        if (/(?:thầy|mr|nam|con trai|anh|ông|chú)/i.test(combined)) {
+          gender = "nam";
+        } else if (/(?:cô|mrs|ms|miss|nữ|con gái|chị|bà)/i.test(combined)) {
+          gender = "nữ";
+        }
+      }
+
+      return {
+        targetQuery: rawTarget,
+        gender,
+        pronoun: rawTitle,
+        preferences: [],
+        facts,
+        customNotes: `${rawRole}, gọi là ${rawTitle}`,
+      };
+    }
+  }
 
   // 2.1. Dạng dặn trực tiếp: "Bạn Tuấn thích ...", "Bạn Thảo là nữ xưng chị", "Bạn Nam làm nghề..."
   const directUserMatch = clean.match(
@@ -332,7 +403,7 @@ Hãy bóc tách thành JSON chuẩn (nếu câu này không phải yêu cầu c�
   "isUpdate": true,
   "targetQuery": "Tên hoặc ID người dùng cần xử lý (VD: Trần Văn Tuyến, Tuấn, 123456...)",
   "gender": "nữ" | "nam" | null,
-  "pronoun": "Chị" | "Anh" | "Em" | "Cô" | "Chú" | "Bác" | null,
+  "pronoun": "Danh xưng (VD: Mr Johnny, Thầy Nam, Thầy, Bác sĩ, Chị, Anh... hoặc null nếu không nói)",
   "preferences": ["sở thích 1", ...],
   "facts": ["thông tin/nghề nghiệp 1", ...],
   "customNotes": "ghi chú khác nếu có",
@@ -386,22 +457,53 @@ function parseUpdateContentFast(target: string, content: string): ParsedProfileU
     if (!pronoun) pronoun = "Anh";
   }
 
-  if (/(?:gọi bằng chị|xưng chị|là chị|gọi chị)/i.test(lower)) {
-    pronoun = "Chị";
-    if (!gender) gender = "nữ";
-  } else if (/(?:gọi bằng anh|xưng anh|là anh|gọi anh)/i.test(lower)) {
-    pronoun = "Anh";
-    if (!gender) gender = "nam";
-  } else if (/(?:gọi bằng em|xưng em|là em|gọi em)/i.test(lower)) {
-    pronoun = "Em";
-  } else if (/(?:gọi bằng cô|xưng cô|là cô|gọi cô)/i.test(lower)) {
-    pronoun = "Cô";
-    if (!gender) gender = "nữ";
-  } else if (/(?:gọi bằng chú|xưng chú|là chú|gọi chú)/i.test(lower)) {
-    pronoun = "Chú";
-    if (!gender) gender = "nam";
-  } else if (/(?:gọi bằng bác|xưng bác|là bác|gọi bác)/i.test(lower)) {
-    pronoun = "Bác";
+  // Bóc tách danh xưng tùy biến (Custom title: Mr Johnny, Thầy Nam, Thầy Hoa Văn...)
+  const customPronounMatch = content.match(
+    /(?:gọi bằng|gọi là|xưng là|danh xưng là|gọi)\s+([^\n,.;!]+)/iu
+  );
+  if (customPronounMatch && customPronounMatch[1]) {
+    const rawCandidate = customPronounMatch[1].trim().replace(/\s+(?:nhé|nha|ạ|nhe|đi)$/iu, "").trim();
+    if (rawCandidate && !/^(?:gì|ai|sao|được|lại|tôi|mình)$/iu.test(rawCandidate)) {
+      pronoun = rawCandidate;
+    }
+  }
+
+  // Chuẩn hóa nếu là các đại từ thân tộc cơ bản
+  if (pronoun) {
+    const pLow = pronoun.toLowerCase();
+    if (pLow === "chị" || pLow === "chi") pronoun = "Chị";
+    else if (pLow === "anh") pronoun = "Anh";
+    else if (pLow === "em") pronoun = "Em";
+    else if (pLow === "cô" || pLow === "co") pronoun = "Cô";
+    else if (pLow === "chú" || pLow === "chu") pronoun = "Chú";
+    else if (pLow === "bác" || pLow === "bac") pronoun = "Bác";
+  } else {
+    if (/(?:gọi bằng chị|xưng chị|là chị|gọi chị)/i.test(lower)) {
+      pronoun = "Chị";
+      if (!gender) gender = "nữ";
+    } else if (/(?:gọi bằng anh|xưng anh|là anh|gọi anh)/i.test(lower)) {
+      pronoun = "Anh";
+      if (!gender) gender = "nam";
+    } else if (/(?:gọi bằng em|xưng em|là em|gọi em)/i.test(lower)) {
+      pronoun = "Em";
+    } else if (/(?:gọi bằng cô|xưng cô|là cô|gọi cô)/i.test(lower)) {
+      pronoun = "Cô";
+      if (!gender) gender = "nữ";
+    } else if (/(?:gọi bằng chú|xưng chú|là chú|gọi chú)/i.test(lower)) {
+      pronoun = "Chú";
+      if (!gender) gender = "nam";
+    } else if (/(?:gọi bằng bác|xưng bác|là bác|gọi bác)/i.test(lower)) {
+      pronoun = "Bác";
+    }
+  }
+
+  if (pronoun && !gender) {
+    const pLow = pronoun.toLowerCase();
+    if (/(?:thầy|mr|nam|anh|chú|ông)/i.test(pLow)) {
+      gender = "nam";
+    } else if (/(?:cô|mrs|ms|miss|nữ|chị|bà)/i.test(pLow)) {
+      gender = "nữ";
+    }
   }
 
   const prefMatch = content.match(/(?:thích|sở thích|mê|khoái)\s+([^,.;]+)/i);
@@ -409,9 +511,12 @@ function parseUpdateContentFast(target: string, content: string): ParsedProfileU
     preferences.push(prefMatch[1].trim());
   }
 
-  const factMatch = content.match(/(?:làm nghề|làm|chuyên|nghề nghiệp|công việc)\s+([^,.;]+)/i);
+  const factMatch = content.match(/(?:làm nghề|làm|chuyên|nghề nghiệp|công việc|là)\s+([^,.;]+)/i);
   if (factMatch && factMatch[1]) {
-    facts.push(factMatch[1].trim());
+    const rawFact = factMatch[1].trim();
+    if (!/^(?:gì|ai|được|nam|nữ)$/i.test(rawFact)) {
+      facts.push(rawFact);
+    }
   }
 
   return {

@@ -229,6 +229,13 @@ export function deriveConversationPronouns(params: {
         instruction: `QUY TẮC XƯNG HÔ ĐÃ THIẾT LẬP: Người dùng là bề trên (Dì). BẮT BUỘC xưng 'cháu', gọi người dùng là 'Dì'. Kính trọng, lễ phép.`,
       };
     }
+
+    // Danh xưng riêng tùy chỉnh do Admin chỉ định (VD: Mr Johnny, Thầy Nam, Thầy, Bác sĩ, Sếp...)
+    return {
+      botPronoun: "em",
+      userTitle: pronounMem,
+      instruction: `QUY TẮC XƯNG HÔ ĐÃ ĐƯỢC ADMIN THIẾT LẬP: Danh xưng chỉ định là '${pronounMem}'. BẮT BUỘC xưng 'em', gọi người dùng là '${pronounMem}' một cách lịch sự, kính trọng và thân thiện. TUYỆT ĐỐI KHÔNG gọi sai danh xưng này!`,
+    };
   }
 
   if (genderMem) {
@@ -979,7 +986,7 @@ async function handleAdminUserProfileUpdate(api: any, sender: string, update: Pa
     `📋 Nội dung đã lưu:\n` +
     (res.summary ? `• ${res.summary}\n` : "") +
     (update.customNotes ? `• Ghi chú: ${update.customNotes}\n` : "") +
-    `\n👉 Từ nay khi bạn ${target.displayName} nhắn tin 1:1, Bot sẽ tự động xưng hô chuẩn xác là ${update.pronoun || (update.gender === "nữ" ? "Chị" : "Anh")} và vận dụng các thông tin này! ✨` +
+    `\n👉 Từ nay khi ${target.displayName} nhắn tin 1:1 hoặc tag bot trong nhóm, Bot sẽ tự động xưng hô chuẩn xác là "${update.pronoun || (update.gender === "nữ" ? "Chị" : "Anh")}" và vận dụng các thông tin này! ✨` +
     sendDirectStatus;
 
   await sendDirectText(api, sender, reply);
@@ -1105,7 +1112,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
     const updateIntent = await parseAdminProfileUpdateIntent(rawText);
     if (updateIntent) {
-      const isForced = /(?:làm luôn|thực hiện ngay|gửi luôn|nhắn luôn|ko cần hỏi|không cần hỏi|ko cần xác nhận|không cần xác nhận)/i.test(rawText);
+      const isForced = /(?:ko cần hỏi|không cần hỏi|ko cần xác nhận|không cần xác nhận)/i.test(rawText);
       if (isForced) {
         await handleAdminUserProfileUpdate(api, sender, updateIntent);
         return;

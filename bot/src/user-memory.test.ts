@@ -89,6 +89,27 @@ test("formatUserMemoriesForPrompt định dạng đúng cấu trúc cho system p
   assert.ok(prompt.includes("[HỒ SƠ & BỘ NHỚ VỀ THÀNH VIÊN ĐANG TRÒ CHUYỆN (@Triển)]:"));
   assert.ok(prompt.includes("Arsenal FC"));
   assert.ok(prompt.includes("Chuyên gia AI & BĐS"));
+
+  // Kiểm tra khi có danh xưng riêng (Custom Title)
+  const customMemories: UserMemoryItem[] = [
+    ...sampleMemories,
+    {
+      id: 3,
+      user_id: "u123",
+      thread_id: "g1",
+      user_name: "Trien Nguyen DXS",
+      category: "fact",
+      memory_key: "pronoun",
+      memory_value: "Mr Johnny",
+      source_snippet: "Admin chỉ định",
+      confidence: 1.0,
+      created_at: 1000,
+      updated_at: 1000,
+    },
+  ];
+  const customPrompt = formatUserMemoriesForPrompt(customMemories, "Trien Nguyen DXS");
+  assert.ok(customPrompt.includes("QUY TẮC DANH XƯNG BẮT BUỘC ĐÃ ĐƯỢC ADMIN CHỈ ĐỊNH CHO THÀNH VIÊN NÀY"));
+  assert.ok(customPrompt.includes("Mr Johnny"));
 });
 
 test("CRUD user_memories hoạt động an toàn và chính xác", () => {
@@ -195,6 +216,17 @@ test("deriveConversationPronouns xác định đúng cặp xưng hô đối xứ
   });
   assert.equal(defaultRes.userTitle, "Hoàng");
   assert.equal(defaultRes.botPronoun, "em");
+
+  // 7. Danh xưng tùy chỉnh do Admin chỉ định (Mr Johnny, Thầy Nam, Thầy Hoa Văn...)
+  const customTitleRes = deriveConversationPronouns({
+    isAdmin: false,
+    displayName: "Trien Nguyen DXS",
+    rawText: "em biết anh là ai không",
+    memories: [{ memory_key: "pronoun", memory_value: "Mr Johnny" }],
+  });
+  assert.equal(customTitleRes.userTitle, "Mr Johnny");
+  assert.equal(customTitleRes.botPronoun, "em");
+  assert.ok(customTitleRes.instruction.includes("Mr Johnny"));
 });
 
 test("getRelevantUserMemories ưu tiên đưa ký ức khớp ngữ nghĩa lên đầu", () => {

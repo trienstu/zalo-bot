@@ -1443,6 +1443,19 @@ async function handleHistoryQA(
       quoteTextSection = `\n=== NỘI DUNG ĐƯỢC TRÍCH DẪN (QUOTE TỪ ${options.quote.senderName || "THÀNH VIÊN"}): ===\n"${options.quote.text}"\n`;
     }
 
+    let fastUserMemorySection = "";
+    let fastCustomPronoun = "";
+    if (options?.sender && !isSuperAdmin) {
+      try {
+        const mems = getRelevantUserMemories(options.sender, question, 5);
+        if (mems.length > 0) {
+          fastUserMemorySection = `\n${formatUserMemoriesForPrompt(mems, displayName)}\n`;
+          const pMem = mems.find((m) => (m.memory_key || "").toLowerCase() === "pronoun")?.memory_value?.trim();
+          if (pMem) fastCustomPronoun = pMem;
+        }
+      } catch {}
+    }
+
     const fastSystemPrompt =
       `${getSystemTemporalPrompt()}\n\n` +
       `${personaIntro}\n${customPromptSection}\n` +
@@ -1455,7 +1468,10 @@ async function handleHistoryQA(
       `3. Trả lời trực tiếp, đầy đủ, rõ ràng và chuẩn xác theo đúng ${isSuperAdmin ? "chỉ đạo của Sếp" : "câu hỏi/yêu cầu của thành viên"}.\n` +
       (isSuperAdmin
         ? `4. QUY TẮC XƯNG HÔ VỚI SẾP: BẮT BUỘC xưng 'em', gọi người hỏi là 'Sếp' (hoặc 'Sếp ${displayName}'). Giọng điệu tôn trọng, chu đáo, hỗ trợ đắc lực và chuẩn xác cho Sếp.\n`
+        : fastCustomPronoun
+        ? `4. QUY TẮC DANH XƯNG RIÊNG: Thành viên này đã được Admin chỉ định danh xưng chuẩn là '${fastCustomPronoun}'. BẮT BUỘC xưng 'em' hoặc '${botName}', gọi người hỏi là '${fastCustomPronoun}' (hoặc '${fastCustomPronoun} ${displayName}'). TUYỆT ĐỐI KHÔNG gọi là 'bác', 'anh', 'chị' hay các danh xưng khác trái với '${fastCustomPronoun}'!\n`
         : `4. QUY TẮC XƯNG HÔ: Xưng 'em' hoặc '${botName}', gọi người hỏi là 'anh/chị/bác ${displayName}'. TUYỆT ĐỐI KHÔNG gọi người hỏi là 'Sếp' (danh xưng 'Sếp' chỉ dành riêng cho Quản trị viên tối cao của bot).\n`) +
+      (fastUserMemorySection ? `${fastUserMemorySection}\n` : "") +
       `5. NGUYÊN TẮC TRUNG THỰC - TUYỆT ĐỐI KHÔNG BỊA ĐẶT: Nếu trong hình ảnh/tài liệu không có thông tin chi tiết về điều ${isSuperAdmin ? "Sếp" : "thành viên"} hỏi, BẮT BUỘC phải ${isSuperAdmin ? "báo cáo" : "nói"} rõ là trong ảnh/tài liệu không có chi tiết này. TUYỆT ĐỐI KHÔNG tự suy đoán, bịa đặt sự kiện, sản phẩm, con số hay câu chuyện không có thật.\n` +
       `6. Trả lời chuẩn theo phong cách của bạn (${isSuperAdmin ? "chu đáo, chuyên nghiệp, thông minh" : "hóm hỉnh, chuyên nghiệp, thông minh"}).\n` +
       `7. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
@@ -1778,11 +1794,14 @@ QUY TẮC BẮT BUỘC:
 
     // 1c. Hồ sơ & Trí nhớ dài hạn của thành viên đang hỏi (User Long-term Memory)
     let quoteUserMemorySection = "";
+    let quoteCustomPronoun = "";
     if (options?.sender) {
       try {
         const userMemories = getRelevantUserMemories(options.sender, `${question} ${options.quote.text}`, 8);
         if (userMemories.length > 0) {
           quoteUserMemorySection = formatUserMemoriesForPrompt(userMemories, displayName);
+          const pMem = userMemories.find((m) => (m.memory_key || "").toLowerCase() === "pronoun")?.memory_value?.trim();
+          if (pMem) quoteCustomPronoun = pMem;
         }
       } catch (e) {
         console.warn("[member-assistant] Quote QA getRelevantUserMemories error:", e);
@@ -1834,6 +1853,12 @@ QUY TẮC BẮT BUỘC:
           `     + Người hỏi (${displayName}) chính là SUPER ADMIN / CHỦ NHÂN CỦA BẠN.\n` +
           `     + BẮT BUỘC xưng 'em', gọi người hỏi là 'Sếp' (hoặc 'Sếp ${displayName}').\n` +
           `     + Giọng điệu tôn trọng, chu đáo, hỗ trợ đắc lực và chuẩn xác cho Sếp (Dạ Sếp, Em báo cáo Sếp...). CẤM xưng 'tôi', CẤM gọi Sếp là 'bác' hay 'bạn'.\n`
+        : quoteCustomPronoun
+        ? `   - [NGUYÊN TẮC 4 - DANH XƯNG RIÊNG ĐÃ ĐƯỢC ADMIN CHỈ ĐỊNH]:\n` +
+          `     + Thành viên này có danh xưng riêng là '${quoteCustomPronoun}'.\n` +
+          `     + BẮT BUỘC xưng 'em' hoặc '${botName}', gọi người hỏi là '${quoteCustomPronoun}' (hoặc '${quoteCustomPronoun} ${displayName}').\n` +
+          `     + TUYỆT ĐỐI KHÔNG gọi là 'bác', 'anh', 'chị' hay danh xưng khác trái với '${quoteCustomPronoun}'.\n` +
+          `     + Duyên dáng, mặn mà, hóm hỉnh, tôn trọng nhưng chuẩn xác. CẤM xưng 'tôi', CẤM gọi 'bạn'.\n`
         : `   - [NGUYÊN TẮC 4 - PHONG CÁCH ${botName.toUpperCase()}]:\n` +
           `     + Xưng 'em' hoặc '${botName}', gọi người hỏi là 'anh/chị/bác ${displayName}'.\n` +
           `     + TUYỆT ĐỐI KHÔNG gọi người hỏi là 'Sếp' (danh xưng 'Sếp' chỉ dành riêng cho Quản trị viên tối cao của bot, không áp dụng cho thành viên thông thường).\n` +
@@ -2569,11 +2594,14 @@ QUY TẮC BẮT BUỘC:
 
   // C3. Hồ sơ & Bộ nhớ dài hạn của thành viên đang hỏi (User Long-term Memory)
   let userMemorySection = "";
+  let memberCustomPronoun = "";
   if (options?.sender) {
     try {
       const userMemories = getRelevantUserMemories(options.sender, question, 8);
       if (userMemories.length > 0) {
         userMemorySection = formatUserMemoriesForPrompt(userMemories, displayName);
+        const pMem = userMemories.find((m) => (m.memory_key || "").toLowerCase() === "pronoun")?.memory_value?.trim();
+        if (pMem) memberCustomPronoun = pMem;
       }
     } catch (e) {
       console.warn("[handleHistoryQA] Lỗi getRelevantUserMemories:", e);
@@ -2922,6 +2950,13 @@ QUY TẮC BẮT BUỘC:
         `- BẮT BUỘC ĐI THẲNG VÀO ĐÁP ÁN TRỌNG TÂM NGAY TỪ DÒNG ĐẦU TIÊN (Ví dụ: "Dạ Sếp ${displayName}, đã có lịch thi đấu chính thức...", "Dạ Sếp ${displayName}, giá vàng hôm nay...").\n` +
         `- TUYỆT ĐỐI CẤM mở bài bằng các câu chào báo cáo dài dòng, vòng vo (CẤM các câu kiểu: "em xin báo cáo Sếp về thông tin... như sau ạ", "sau đây em xin báo cáo...").\n` +
         `- CẤM xưng 'tôi', CẤM gọi Sếp là 'bác' hay 'bạn'.\n\n`
+      : memberCustomPronoun
+      ? `4. NGUYÊN TẮC 4: DANH XƯNG RIÊNG ĐÃ ĐƯỢC ADMIN CHỈ ĐỊNH CHO THÀNH VIÊN (@${displayName})\n` +
+        `- Thành viên này đã được Admin thiết lập danh xưng chuẩn là '${memberCustomPronoun}'.\n` +
+        `- BẮT BUỘC xưng 'em' hoặc '${botName}', gọi người hỏi là '${memberCustomPronoun}' (hoặc '${memberCustomPronoun} ${displayName}').\n` +
+        `- TUYỆT ĐỐI KHÔNG gọi là 'bác', 'anh', 'chị' hay danh xưng khác trái với '${memberCustomPronoun}'.\n` +
+        `- Giọng điệu thông minh, hóm hỉnh, mặn mà, lịch thiệp, tôn trọng cộng đồng nhưng chuẩn xác và đáng tin cậy tuyệt đối khi cung cấp kiến thức/số liệu.\n` +
+        `- CẤM xưng 'tôi', CẤM gọi người dùng là 'bạn', CẤM nói giọng robot hành chính khô khan.\n\n`
       : `4. NGUYÊN TẮC 4: PHONG CÁCH ${botName.toUpperCase()} & GIAO TIẾP TỰ NHIÊN (PERSONA & VOICE)\n` +
         `- Xưng 'em' hoặc '${botName}', gọi người hỏi là 'anh/chị/bác ${displayName}'.\n` +
         `- TUYỆT ĐỐI KHÔNG gọi người hỏi là 'Sếp' (danh xưng 'Sếp' chỉ dành riêng cho Quản trị viên tối cao / Chủ nhân của bot, không áp dụng cho thành viên thông thường dù họ có yêu cầu hay tự xưng).\n` +
