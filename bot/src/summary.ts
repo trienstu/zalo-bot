@@ -290,17 +290,17 @@ export async function summarizeWithAI(input: {
     "Bố cục bản tóm tắt: PHÂN NHÓM nội dung thành các MỤC theo đúng thứ tự ưu tiên sau — " +
     "quan trọng/chất lượng nằm trên, ít quan trọng nằm dưới; mục nào không có nội dung thì BỎ HẲN, " +
     "không ghi tiêu đề rỗng: " +
-    "(1) '📢 THÔNG BÁO & QUYẾT ĐỊNH' — thông báo/quyết định của nhóm, kèm chi tiết thời gian, ai phụ trách; " +
-    "(2) '💼 CHỦ ĐỀ CHUYÊN MÔN & THẢO LUẬN' — kiến thức, kinh nghiệm làm việc, quy trình, công cụ; " +
-    "(3) '🤖 AI & CÔNG NGHỆ' — ứng dụng AI, công nghệ, công cụ hữu ích; " +
-    "(4) '🎓 HỌC HÀNH & KINH NGHIỆM' — chia sẻ bài học, tài liệu, cơ hội; " +
-    "(5) '🔗 LINK ĐÃ CHIA SẺ' — mỗi link một dòng kèm mô tả ngắn; " +
-    "(6) '❓ CÂU HỎI CHƯA CÓ TRẢ LỜI' — câu hỏi trong nhóm chưa ai trả lời; " +
-    "(7) '☕ NGOÀI LỀ' — chuyện vui, đời thường: nằm cuối, mỗi chuyện chỉ điểm nhanh 1-2 dòng. " +
+    "(1) '📢 **Thông báo & quyết định**' — thông báo/quyết định của nhóm, kèm chi tiết thời gian, ai phụ trách; " +
+    "(2) '💼 **Chủ đề chuyên môn & thảo luận**' — kiến thức, kinh nghiệm làm việc, quy trình, công cụ; " +
+    "(3) '🤖 **AI & công nghệ**' — ứng dụng AI, công nghệ, công cụ hữu ích; " +
+    "(4) '🎓 **Học hành & kinh nghiệm**' — chia sẻ bài học, tài liệu, cơ hội; " +
+    "(5) '🔗 **Link đã chia sẻ**' — mỗi link một dòng kèm mô tả ngắn; " +
+    "(6) '❓ **Câu hỏi chưa có trả lời**' — câu hỏi trong nhóm chưa ai trả lời; " +
+    "(7) '☕ **Ngoài lề**' — chuyện vui, đời thường: nằm cuối, mỗi chuyện chỉ điểm nhanh 1-2 dòng. " +
     "Trong mỗi mục: mỗi chủ đề một cụm gạch đầu dòng, nêu ai khởi xướng và các ý kiến/kết luận " +
     "chính CÓ NỘI DUNG CỤ THỂ. Thảo luận khớp nhiều mục thì xếp vào mục cao nhất phù hợp. " +
-    "Trình bày bằng gạch đầu dòng '- ', mỗi ý một dòng, KHÔNG dùng markdown đậm/nghiêng vì Zalo không render. " +
-    "BẮT BUỘC: PHẢI dùng các dòng tiêu đề mục lớn trên làm đề mục (in hoa kèm emoji, ví dụ: '📢 THÔNG BÁO & QUYẾT ĐỊNH', '💼 CHỦ ĐỀ CHUYÊN MÔN & THẢO LUẬN', '🤖 AI & CÔNG NGHỆ', '🔗 LINK ĐÃ CHIA SẺ'). TUYỆT ĐỐI KHÔNG xuất ra một danh sách gạch đầu dòng phẳng mà thiếu các tiêu đề phân mục này.\n" +
+    "Trình bày bằng gạch đầu dòng '- ', mỗi ý một dòng, dùng **in đậm** cho từ khóa chính hoặc số liệu quan trọng. " +
+    "BẮT BUỘC: Dùng định dạng chuẩn In đậm chữ thường cho các tiêu đề mục lớn trên làm đề mục (ví dụ: '📢 **Thông báo & quyết định**', '💼 **Chủ đề chuyên môn & thảo luận**', '🤖 **AI & công nghệ**'). TUYỆT ĐỐI KHÔNG VIẾT HOA NGUYÊN KHỐI CẢ DÒNG. TUYỆT ĐỐI KHÔNG xuất ra một danh sách gạch đầu dòng phẳng mà thiếu các tiêu đề phân mục này.\n" +
     `Toàn bộ dưới ${summaryTargetChars(maxParts)} ký tự. ` +
     "Khi log quá dài không thể kể hết trong giới hạn: ƯU TIÊN ĐỘ SÂU HƠN ĐỘ PHỦ — chọn những thảo luận " +
     "quan trọng/sôi nổi nhất để tóm tắt chi tiết. Không bịa thông tin không có trong log. " +

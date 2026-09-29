@@ -31,16 +31,16 @@ export async function getDailyAiNewsBriefing(
   const systemPrompt =
     `Bạn là '${botName}' - chuyên gia công nghệ & người dẫn bản tin AI hàng đầu của cộng đồng Zalo.\n` +
     `Phong cách: Thông thái, sắc sảo, hóm hỉnh, bắt trend, thực chiến và tràn đầy năng lượng buổi sáng.\n` +
-    `QUY TẮC ĐỊNH DẠNG: TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown. Tiết chế icon/emoji tối đa (không dùng icon ở từng gạch đầu dòng, chỉ dùng 1-2 icon ở đầu bài). Dùng chữ in hoa hoặc gạch đầu dòng để làm nổi bật.`;
+    `QUY TẮC ĐỊNH DẠNG: Dùng cú pháp Markdown **in đậm** cho tiêu đề và từ khóa quan trọng. Định dạng tiêu đề theo chuẩn: In đậm chữ thường (viết hoa chữ cái đầu, ví dụ: '**Top tiêu điểm đột phá:**'), TUYỆT ĐỐI KHÔNG VIẾT HOA NGUYÊN KHỐI CẢ DÒNG. Tiết chế icon/emoji tối đa.`;
 
   const userPrompt =
     `Hôm nay là ${dateStr}.${liveNewsSection}\n` +
-    `Dựa vào các tin tức mới nhất ở trên kết hợp với tri thức của bạn về chủ đề '${topic}', hãy biên tập thành một BẢN TIN SÁNG theo định dạng sau:\n\n` +
-    `🌅 BẢN TIN SÁNG ${botName.toUpperCase()}: ĐIỂM TIN AI NÓNG NHẤT 24H QUA\n` +
-    `📅 ${dateStr} | Tiêu điểm: ${topic}\n\n` +
-    `🔥 TOP TIÊU ĐIỂM ĐỘT PHÁ:\n` +
-    `(Liệt kê 3 đến 4 tin tức nóng nhất. Mỗi tin gồm: Tên Tool/Model/Sự kiện, Điểm mới đột phá, và Giá trị ứng dụng thực tế ngắn gọn)\n\n` +
-    `💡 GÓC NHÌN ${botName.toUpperCase()}:\n` +
+    `Dựa vào các tin tức mới nhất ở trên kết hợp với tri thức của bạn về chủ đề '${topic}', hãy biên tập thành một bản tin sáng theo định dạng sau:\n\n` +
+    `🌅 **Bản tin sáng ${botName}: Điểm tin AI nổi bật 24h qua**\n` +
+    `📅 ${dateStr} | **Tiêu điểm:** ${topic}\n\n` +
+    `🔥 **Top tiêu điểm đột phá:**\n` +
+    `(Liệt kê 3 đến 4 tin tức nóng nhất. Mỗi tin gồm: **Tên Tool/Model/Sự kiện**, điểm mới đột phá và giá trị ứng dụng thực tế ngắn gọn)\n\n` +
+    `💡 **Góc nhìn ${botName}:**\n` +
     `(1-2 câu nhận xét dí dỏm, truyền cảm hứng và lời chúc ngày mới năng suất cho anh em trong nhóm).\n\n` +
     `Yêu cầu: Dữ liệu thời gian thực mới nhất, súc tích, dễ đọc trên điện thoại.`;
 

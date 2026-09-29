@@ -1459,7 +1459,8 @@ async function handleHistoryQA(
       `5. NGUYÊN TẮC TRUNG THỰC - TUYỆT ĐỐI KHÔNG BỊA ĐẶT: Nếu trong hình ảnh/tài liệu không có thông tin chi tiết về điều ${isSuperAdmin ? "Sếp" : "thành viên"} hỏi, BẮT BUỘC phải ${isSuperAdmin ? "báo cáo" : "nói"} rõ là trong ảnh/tài liệu không có chi tiết này. TUYỆT ĐỐI KHÔNG tự suy đoán, bịa đặt sự kiện, sản phẩm, con số hay câu chuyện không có thật.\n` +
       `6. Trả lời chuẩn theo phong cách của bạn (${isSuperAdmin ? "chu đáo, chuyên nghiệp, thông minh" : "hóm hỉnh, chuyên nghiệp, thông minh"}).\n` +
       `7. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
-      `   - TUYỆT ĐỐI KHÔNG dùng dấu ** hoặc * để in đậm vì Zalo không hỗ trợ markdown (sẽ hiện nguyên văn hai dấu sao rất xấu). Hãy viết hoa chữ cái đầu hoặc viết hoa tiêu đề để làm nổi bật (ví dụ: '1. NHÂN VẬT CHÍNH:', '2. KHÁCH HÀNG:').\n` +
+      `   - BẮT BUỘC dùng cú pháp Markdown **in đậm** cho tiêu đề, phân mục và từ khóa/số liệu quan trọng.\n` +
+      `   - TIÊU ĐỀ DÙNG IN ĐẬM CHỮ THƯỜNG: Viết hoa chữ cái đầu câu/từ (Sentence/Title Case), TUYỆT ĐỐI KHÔNG VIẾT HOA TOÀN BỘ CẢ DÒNG (ví dụ đúng: '**1. Nhân vật chính:**', '**2. Khách hàng:**' - TUYỆT ĐỐI CẤM viết '1. NHÂN VẬT CHÍNH:').\n` +
       `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Giữ phong cách thanh lịch, gọn gàng. TUYỆT ĐỐI KHÔNG spam icon ở từng dòng hay từng gạch đầu dòng.\n` +
       (targetUrl || /(?:vẽ|ve|tạo|tao|sinh|chỉnh sửa|chinh sua)\s+ảnh/i.test(question) || (options?.quote?.text && /(?:ảnh|hình ảnh|vẽ|codex)/i.test(options.quote.text))
         ? `8. [KỸ NĂNG TẠO & CHỈNH SỬA ẢNH NGHỆ THUẬT (generate_image)]:\n` +
@@ -1826,7 +1827,7 @@ QUY TẮC BẮT BUỘC:
       `   - [NGUYÊN TẮC 1 - DUAL GROUNDING ĐA LĨNH VỰC]:\n` +
       `     + Với dữ liệu đóng nội bộ (file đính kèm, link Google Doc/Sheet, hợp đồng, chính sách, tài liệu): 100% số liệu phải lấy từ văn bản, zero-hallucination. Không tự bịa số liệu hay phương án. Thiếu thì báo thẳng.\n` +
       `     + Với thực thể/thị trường mở (xe cộ, đồ công nghệ, điện thoại, tài chính, dự án, pháp luật, người nổi tiếng): Phân cụm thực thể chuẩn xác, không đánh đồng hay nhầm lẫn chéo giữa các thương hiệu/hãng. Tận dụng dữ liệu báo chí/tìm kiếm để giải đáp toàn diện, không từ chối trả lời.\n` +
-      `   - [NGUYÊN TẮC 2 - ZALO RICH TEXT & MARKDOWN]: Thoải mái dùng Markdown (**in đậm** cho từ khóa/số liệu, [do]đỏ[/do], [xanh]xanh[/xanh], [cam]cam[/cam], gạch đầu dòng '-' hoặc '•') vì hệ thống tự động render màu sắc và kiểu chữ native trên Zalo. Tiết chế icon (tối đa 1-2 icon ở tiêu đề, cấm spam icon ở từng đầu gạch dòng). Bảng biểu dùng Khối thẻ (Card Layout).\n` +
+      `   - [NGUYÊN TẮC 2 - ZALO RICH TEXT & MARKDOWN]: Thoải mái dùng Markdown (**in đậm** cho tiêu đề/từ khóa/số liệu, [do]đỏ[/do], [xanh]xanh[/xanh], [cam]cam[/cam], gạch đầu dòng '-' hoặc '•') vì hệ thống tự động render màu sắc và kiểu chữ native trên Zalo. Tiêu đề mục dùng chuẩn **In đậm chữ thường** (viết hoa chữ cái đầu, ví dụ: '**1. Nội dung cốt lõi:**', tuyệt đối không viết hoa toàn bộ cả dòng). Tiết chế icon (tối đa 1-2 icon ở tiêu đề, cấm spam icon ở từng đầu gạch dòng). Bảng biểu dùng Khối thẻ (Card Layout).\n` +
       `   - [NGUYÊN TẮC 3 - TRẢ LỜI TRỰC TIẾP, DẪN NGUỒN CHUẨN XÁC & GỢI MỞ]: Đi thẳng vào đáp án/kết quả trọng tâm mà người dùng hỏi ngay từ dòng đầu tiên. TUYỆT ĐỐI CẤM mở bài bằng các câu cảm thán rườm rà, đùa cợt hoặc xưng hô làm loãng nội dung ở mọi chủ đề. Với câu hỏi sử dụng dữ liệu thời gian thực (tin tức, sự kiện, văn bản pháp luật, đơn vị hành chính, giá cả, khoa học), BẮT BUỘC kết thúc bằng 1 dòng nguồn uy tín trong dấu ngoặc đơn in nghiêng: *(Nguồn: [Tên cơ quan ban hành / Tổ chức / Nguồn tin uy tín], [thời điểm nếu có]).* Sau khi trả lời xong, có thể để lại 1 câu hỏi gợi mở ngắn gọn hoặc lời chúc tinh tế.\n` +
       (isSuperAdmin
         ? `   - [NGUYÊN TẮC 4 - XƯNG HÔ ĐẶC QUYỀN VỚI SẾP (SUPER ADMIN)]:\n` +
@@ -2904,6 +2905,7 @@ QUY TẮC BẮT BUỘC:
     `     + Tận dụng dữ liệu thời gian thực (Google Search, công cụ tra cứu, bách khoa toàn thư) để phân tích đầy đủ, khách quan, giàu chiều sâu, KHÔNG từ chối trả lời.\n\n` +
     `2. NGUYÊN TẮC 2: ĐỊNH DẠNG TINH HOA ZALO RICH TEXT (ZALO MARKDOWN ENGINE)\n` +
     `   - Hệ thống đã tích hợp bộ chuyển đổi Rich Text native cho Zalo. THOẢI MÁI dùng cú pháp Markdown tiêu chuẩn:\n` +
+    `     + Tiêu đề và đề mục: BẮT BUỘC dùng **In đậm chữ thường** (viết hoa chữ cái đầu, ví dụ: '**1. Thông tin dự án:**', '**• Vị trí kết nối:**', '**Kết luận:**'). TUYỆT ĐỐI KHÔNG VIẾT HOA TOÀN BỘ CẢ DÒNG (CẤM viết '1. THÔNG TIN DỰ ÁN:', 'KẾT LUẬN:').\n` +
     `     + Dùng **in đậm** cho từ khóa chính, số liệu then chốt, tên thực thể.\n` +
     `     + Dùng thẻ màu khi cần: [do]chữ đỏ cảnh báo[/do], [xanh]chữ xanh tích cực[/xanh], [cam]chữ cam nổi bật[/cam].\n` +
     `     + Dùng gạch đầu dòng '- ' cho cấp 1, '• ' cho cấp 2. Số thứ tự '1. ', '2. ' được tự động làm nổi bật.\n` +

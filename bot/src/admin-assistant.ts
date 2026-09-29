@@ -1692,7 +1692,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
           `Nhiệm vụ của bạn:\n` +
           `1. Tóm tắt 3 đến 5 điểm then chốt quan trọng nhất (chính sách, chiết khấu, giá, quỹ căn, thời hạn, điều kiện cốt lõi) theo dạng gạch đầu dòng.\n` +
           `2. Liệt kê 5 đến 8 từ khóa tra cứu quan trọng (bao gồm tên viết tắt, từ đồng nghĩa, thuật ngữ liên quan) cách nhau bởi dấu phẩy.\n` +
-          `3. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown. Tiết chế icon, chỉ dùng 1-2 icon điểm xuyết, không spam icon.\n` +
+          `3. Trình bày gạch đầu dòng rõ ràng, dùng **in đậm** cho từ khóa then chốt/số liệu. Tiêu đề dùng in đậm chữ thường. Tiết chế icon, không spam icon.\n` +
           `Định dạng trả về chính xác:\n` +
           `TÓM TẮT:\n- ý 1\n- ý 2\nTỪ KHÓA: từ 1, từ 2, từ 3`;
 
@@ -1953,7 +1953,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         `Nhiệm vụ của bạn:\n` +
         `1. Tóm tắt 3 đến 5 điểm then chốt quan trọng nhất (chính sách, chiết khấu, giá, thời hạn, điều kiện cốt lõi) theo dạng gạch đầu dòng.\n` +
         `2. Liệt kê 5 đến 8 từ khóa tra cứu quan trọng (bao gồm tên viết tắt, từ đồng nghĩa, thuật ngữ liên quan) cách nhau bởi dấu phẩy.\n` +
-        `3. TUYỆT ĐỐI KHÔNG dùng dấu ** in đậm vì Zalo không hỗ trợ markdown. Tiết chế icon, chỉ dùng 1-2 icon điểm xuyết, không spam icon.\n` +
+        `3. Trình bày gạch đầu dòng rõ ràng, dùng **in đậm** cho từ khóa then chốt/số liệu. Tiêu đề dùng in đậm chữ thường. Tiết chế icon, không spam icon.\n` +
         `Định dạng trả về chính xác:\n` +
         `TÓM TẮT:\n- ý 1\n- ý 2\nTỪ KHÓA: từ 1, từ 2, từ 3`;
 
@@ -2448,7 +2448,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `NHIỆM VỤ CỦA BẠN:\n` +
     `1. Trò chuyện tự nhiên, vui vẻ, giải đáp mọi câu hỏi, tư vấn học tập, công việc, tâm sự, dịch thuật, phân tích hình ảnh/tài liệu khi được gửi tới.\n` +
     `2. QUY TẮC ĐỊNH DẠNG TIN NHẮN ZALO:\n` +
-    `   - Hệ thống đã tích hợp bộ chuyển đổi Rich Text native cho Zalo. THOẢI MÁI dùng cú pháp Markdown: **in đậm** từ khóa chính, số liệu; dùng gạch đầu dòng '- ' hoặc '• '.\n` +
+    `   - Hệ thống đã tích hợp bộ chuyển đổi Rich Text native cho Zalo. THOẢI MÁI dùng cú pháp Markdown: **in đậm** từ khóa chính, số liệu; tiêu đề dùng chuẩn **In đậm chữ thường** (viết hoa chữ cái đầu, không viết hoa nguyên khối); dùng gạch đầu dòng '- ' hoặc '• '.\n` +
     `   - TIẾT CHẾ ICON / EMOJI TỐI ĐA: Giữ văn phong thanh lịch, không chèn icon vào từng gạch đầu dòng, chỉ dùng 1-2 icon ở tiêu đề nếu cần.\n` +
     `3. THÁI ĐỘ & QUY TẮC XƯNG HÔ:\n` +
     `   - ${pronouns.instruction}\n` +
