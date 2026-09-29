@@ -2749,12 +2749,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     }
 
     const defaultFastModel = !isAdmin
-      ? (process.env.USER_DIRECT_GEMINI_MODEL?.trim() || config.geminiModel || "gemini-3.7-flash")
-      : (process.env.ADMIN_DIRECT_GEMINI_MODEL?.trim() || config.geminiModel || "gemini-3.7-flash");
+      ? (process.env.USER_DIRECT_GEMINI_MODEL?.trim() || config.geminiModel || "ag/gemini-3.8-flash-low")
+      : (process.env.ADMIN_DIRECT_GEMINI_MODEL?.trim() || config.geminiModel || "ag/gemini-3.8-flash-low");
 
     const hasMediaInput = Boolean(mediaPart || fileTextContent || hasFile || hasImage);
     const targetModel = hasMediaInput
-      ? (config.geminiModel || "gemini-3.7-flash")
+      ? (config.geminiModel || "ag/gemini-3.7-flash-high")
       : ((needsSearch && canUseGrounding()) ? "gemini-3-flash-preview" : defaultFastModel);
 
     const fullSystemPrompt =

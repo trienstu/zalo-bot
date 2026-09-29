@@ -7,6 +7,7 @@ import {
   type UserMemoryCategory,
 } from "./db/index.js";
 import { callGemini } from "./gemini.js";
+import { config } from "./config.js";
 
 export { getRelevantUserMemories };
 
@@ -151,7 +152,7 @@ Nếu không có thông tin dài hạn đáng nhớ, trả về {"memories": []}
 Hãy trích xuất thông tin đáng nhớ:`;
 
     const rawResponse = await callGemini(promptSystem, promptUser, {
-      model: "ag/gemini-3.1-pro-low",
+      model: config.geminiModel || "ag/gemini-3.8-flash-low",
       temperature: 0.1,
     });
 
@@ -347,7 +348,7 @@ QUY TẮC BẮT BUỘC:
     const rawResponse = await callGemini(
       "Bạn là bộ trích xuất thông tin có cấu trúc cho trợ lý AI Zalo.",
       prompt,
-      { model: "ag/gemini-3.1-pro-low", temperature: 0.1 }
+      { model: config.geminiModel || "ag/gemini-3.8-flash-low", temperature: 0.1 }
     );
     if (!rawResponse) return null;
     const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);

@@ -741,13 +741,13 @@ export async function callGemini(
     (m) => m.mimeType === "application/pdf" || m.mimeType?.includes("pdf")
   );
 
-  let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-3.7-flash";
+  let primaryModel = options?.model?.trim() || config.geminiModel || "ag/gemini-3.8-flash-low";
   if (isSearchEnabled) {
     primaryModel = "gemini-3-flash-preview";
   } else if (hasPdfMedia) {
     primaryModel = "gemini-flash-latest";
   } else if (hasMedia && primaryModel.includes("lite")) {
-    primaryModel = config.geminiModel || "gemini-3.7-flash";
+    primaryModel = config.geminiModel || "ag/gemini-3.8-flash-low";
   }
 
   const effectiveSystemBase = system?.includes("SYSTEM TEMPORAL ANCHOR")
@@ -764,7 +764,7 @@ export async function callGemini(
   const temperature = options?.temperature ?? 0.3;
   const maxTokens = options?.maxTokens;
 
-  // Tầng 1 & 2: Ưu tiên 9Router (Tầng 1: ag/gemini-3.1-pro-low -> Tầng 2: ag/gemini-3.7-flash-high)
+  // Tầng 1 & 2: Ưu tiên 9Router (Tầng 1: primaryModel -> Tầng 2: ag/gemini-3.7-flash-high)
   if (hybridAgentSettings?.nineRouter?.enabled && hybridAgentSettings.nineRouter.apiKey && !isSearchEnabled && !hasPdfMedia) {
     const primaryRouterModel = (primaryModel.startsWith("ag/") || primaryModel.startsWith("cx/"))
       ? primaryModel
@@ -822,8 +822,8 @@ export async function callGemini(
   }
 
   // Tầng 3 (Google AI Studio Native): Ưu tiên số 1 là gemini-3.6-flash (model duy nhất hoạt động 100% không bị 503/429)
-  // Chuẩn hóa model gọi Google API: nếu là các model đang bị bão quá tải/404, đổi ngay sang gemini-3.6-flash
-  const effectiveGooglePrimary = (!primaryModel.startsWith("ag/") && !primaryModel.startsWith("cx/") && (primaryModel.includes("3.7") || primaryModel.includes("3.8") || primaryModel.includes("latest") || primaryModel.includes("2.5") || primaryModel.includes("2.0")))
+  // Chuẩn hóa model gọi Google API: nếu là prefix 9router (ag/, cx/) hoặc các model bị bão quá tải/404, đổi ngay sang gemini-3.6-flash
+  const effectiveGooglePrimary = (primaryModel.startsWith("ag/") || primaryModel.startsWith("cx/") || primaryModel.includes("3.7") || primaryModel.includes("3.8") || primaryModel.includes("latest") || primaryModel.includes("2.5") || primaryModel.includes("2.0"))
     ? "gemini-3.6-flash"
     : primaryModel;
 
@@ -1880,7 +1880,7 @@ async function call9RouterAgentLoop(
   // Chuẩn hóa sang model 9Router tương ứng có prefix hợp lệ
   if (!targetModel.startsWith("ag/") && !targetModel.startsWith("cx/")) {
     if (targetModel.includes("3.1") && targetModel.includes("pro")) {
-      targetModel = "ag/gemini-3.1-pro-low";
+      targetModel = "ag/gemini-3.8-flash-low";
     } else if (targetModel.includes("3.7")) {
       targetModel = "ag/gemini-3.7-flash-high";
     } else if (targetModel.includes("claude") || targetModel.includes("sonnet")) {
@@ -2115,10 +2115,10 @@ export async function callGeminiAgentLoop(
   const allMedia = [...(options?.images || []), ...(options?.mediaParts || [])];
   const hasMedia = allMedia.length > 0;
 
-  let primaryModel = options?.model?.trim() || config.geminiModel || "gemini-flash-latest";
-  if (!primaryModel || primaryModel.includes("2.5-flash") || primaryModel.includes("3.1-flash-lite")) {
-    primaryModel = "gemini-flash-latest";
-  }
+  let rawPrimary = options?.model?.trim() || config.geminiModel || "gemini-3.6-flash";
+  let primaryModel = (rawPrimary.startsWith("ag/") || rawPrimary.startsWith("cx/") || rawPrimary.includes("3.7") || rawPrimary.includes("3.8") || rawPrimary.includes("latest") || rawPrimary.includes("2.5") || rawPrimary.includes("3.1-flash-lite"))
+    ? "gemini-3.6-flash"
+    : rawPrimary;
   const maxTurns = options?.maxTurns || 2;
   const temperature = options?.temperature ?? 0.2;
   const maxTokens = options?.maxTokens;
@@ -2192,12 +2192,12 @@ export async function callGeminiAgentLoop(
           }
 
           if (resp.status === 503 || resp.status === 429) {
-            if (currentModel === "gemini-flash-latest") {
-              console.log(`[gemini-agent] ⚡ Chuyển sang model dự phòng gemini-3.8-flash do ${currentModel} quá tải ${resp.status}...`);
-              currentModel = "gemini-3.8-flash";
-            } else if (currentModel !== "gemini-flash-latest") {
-              console.log(`[gemini-agent] ⚡ Chuyển sang model dự phòng gemini-flash-latest do ${currentModel} quá tải ${resp.status}...`);
-              currentModel = "gemini-flash-latest";
+            if (currentModel === "gemini-3.6-flash") {
+              console.log(`[gemini-agent] ⚡ Chuyển sang model dự phòng gemini-3.1-flash-lite-preview do ${currentModel} quá tải ${resp.status}...`);
+              currentModel = "gemini-3.1-flash-lite-preview";
+            } else if (currentModel !== "gemini-3.6-flash") {
+              console.log(`[gemini-agent] ⚡ Chuyển sang model dự phòng gemini-3.6-flash do ${currentModel} quá tải ${resp.status}...`);
+              currentModel = "gemini-3.6-flash";
             }
             await new Promise((r) => setTimeout(r, 1000));
           }
@@ -2206,10 +2206,10 @@ export async function callGeminiAgentLoop(
           if (apiKeys.length > 1) {
             apiKeyIdx = (apiKeyIdx + 1) % apiKeys.length;
           }
-          if (currentModel === "gemini-flash-latest") {
-            currentModel = "gemini-3.8-flash";
+          if (currentModel === "gemini-3.6-flash") {
+            currentModel = "gemini-3.1-flash-lite-preview";
           } else {
-            currentModel = "gemini-flash-latest";
+            currentModel = "gemini-3.6-flash";
           }
           await new Promise((r) => setTimeout(r, 1000));
         }
@@ -2317,7 +2317,7 @@ export async function callGeminiAgentLoop(
 
     // Nếu đã hết maxTurns mà model vẫn gọi tool, gọi 1 lượt chốt không tool để tổng hợp văn bản
     const finalKey = apiKeys[apiKeyIdx];
-    const finalEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${primaryModel}:generateContent?key=${finalKey}`;
+    const finalEndpoint = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel || primaryModel}:generateContent?key=${finalKey}`;
     const finalBody = {
       system_instruction: system ? { parts: [{ text: system }] } : undefined,
       contents,

@@ -1523,7 +1523,7 @@ async function handleHistoryQA(
       if (needsAgentLoop) {
         const dynamicTimeout = (fileTextContent?.length || 0) > 10_000 ? 150_000 : undefined;
         answer = await callGeminiAgentLoop(fastSystemPrompt, fastUserPrompt, {
-          model: "ag/gemini-3.1-pro-low",
+          model: config.geminiModel || "ag/gemini-3.8-flash-low",
           maxTurns: 3,
           timeoutMs: dynamicTimeout,
           mediaParts: mediaPart ? [mediaPart] : undefined,
@@ -1618,7 +1618,7 @@ QUY TẮC BẮT BUỘC:
 1. Chỉ in: Tên tác phẩm/bài thơ, Tác giả (nếu có), và TOÀN BỘ NỘI DUNG TỪNG DÒNG của bài thơ / văn bản / kịch bản.
 2. TUYỆT ĐỐI KHÔNG có lời chào (@mention, Dạ Sếp, Xin chào), KHÔNG có lời giải thích, KHÔNG có câu kết, KHÔNG bịa đặt giới hạn kỹ thuật.`,
               `Yêu cầu: "${question}". Trích dẫn nếu có: "${options?.quote?.text || ""}".`,
-              { model: "ag/gemini-3.1-pro-low" },
+              { model: config.geminiModel || "ag/gemini-3.8-flash-low" },
             ).catch(() => "");
             if (directContent && directContent.length >= 15) {
               const cleanedDirect = cleanCoreSpeechText(directContent);
@@ -2089,7 +2089,7 @@ QUY TẮC BẮT BUỘC:
           explicitToolRequest: false,
           hasMedia: Boolean(mediaPart),
           fallback: async () => await callGemini(quoteSystemPrompt, quoteUserPrompt, {
-            model: Boolean(mediaPart) ? (config.geminiModel || "ag/gemini-3.7-flash-high") : (config.geminiModel || "ag/gemini-3.1-pro-low"),
+            model: Boolean(mediaPart) ? (config.geminiModel || "ag/gemini-3.7-flash-high") : (config.geminiModel || "ag/gemini-3.8-flash-low"),
             mediaParts: mediaPart ? [mediaPart] : undefined,
             enableSearch: false,
           }),
@@ -2124,7 +2124,7 @@ QUY TẮC BẮT BUỘC:
 1. Chỉ in: Tên tác phẩm/bài thơ, Tác giả (nếu có), và TOÀN BỘ NỘI DUNG TỪNG DÒNG của bài thơ / văn bản / kịch bản.
 2. TUYỆT ĐỐI KHÔNG có lời chào (@mention, Dạ Sếp, Xin chào), KHÔNG có lời giải thích, KHÔNG có câu kết, KHÔNG bịa đặt giới hạn kỹ thuật.`,
               `Yêu cầu: "${question}". Trích dẫn nếu có: "${options?.quote?.text || ""}".`,
-              { model: "ag/gemini-3.1-pro-low" },
+              { model: config.geminiModel || "ag/gemini-3.8-flash-low" },
             ).catch(() => "");
             if (directContent && directContent.length >= 15) {
               const cleanedDirect = cleanCoreSpeechText(directContent);
@@ -3086,8 +3086,8 @@ QUY TẮC BẮT BUỘC:
       }
 
       const chosenModel = Boolean(mediaPart)
-        ? (config.geminiModel || "gemini-3.7-flash")
-        : ((needsSearch && canUseGrounding()) ? "gemini-3-flash-preview" : (config.geminiModel || "gemini-3.7-flash"));
+        ? (config.geminiModel || "ag/gemini-3.7-flash-high")
+        : ((needsSearch && canUseGrounding()) ? "gemini-3-flash-preview" : (config.geminiModel || "ag/gemini-3.8-flash-low"));
       const routingSignals = normalizeExecutionSignals(
         queryPlan ? { ...queryPlan } : null,
         {
@@ -3151,7 +3151,7 @@ QUY TẮC BẮT BUỘC:
 1. Chỉ in: Tên tác phẩm/bài thơ, Tác giả (nếu có), và TOÀN BỘ NỘI DUNG TỪNG DÒNG của bài thơ / văn bản / kịch bản.
 2. TUYỆT ĐỐI KHÔNG có lời chào (@mention, Dạ Sếp, Xin chào), KHÔNG có lời giải thích, KHÔNG có câu kết, KHÔNG bịa đặt giới hạn kỹ thuật.`,
             `Yêu cầu: "${question}". Trích dẫn nếu có: "${options?.quote?.text || ""}".`,
-            { model: "ag/gemini-3.1-pro-low" },
+            { model: config.geminiModel || "ag/gemini-3.8-flash-low" },
           ).catch(() => "");
           if (directContent && directContent.length >= 15) {
             const cleanedDirect = cleanCoreSpeechText(directContent);
