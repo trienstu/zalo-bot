@@ -59,6 +59,7 @@ import { generateMusic } from "./tools/music-generator.js";
 import { runBatchAudioJob } from "./workers/batch-audio-processor.js";
 import { isPresentationVideoRequest, runPresentationVideoJob } from "./workers/presentation-video-processor.js";
 import { isMotionVideoRequest, runMotionVideoJob } from "./workers/motion-video-processor.js";
+import { parseHermesTaskCommand, runHermesTaskJob } from "./workers/hermes-task-runner.js";
 import {
   compressCaveman,
   CAVEMAN_USER_FACING_DIRECTIVE,
@@ -3649,6 +3650,41 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       await sendGroupText(api, threadId, `❌ Đã hủy thao tác [${pending.summary}] theo yêu cầu của ${isSuperAdmin ? "Sếp" : `@${displayName}`}.`);
       return;
     }
+  }
+
+  // 0.5. LỆNH /tasks HOẶC /task: KÍCH HOẠT HERMES AUTONOMOUS TASK RUNNER
+  const taskCmd = parseHermesTaskCommand(rawText);
+  if (taskCmd.isTask) {
+    if (!isSuperAdmin && !event.isSelf) {
+      await sendGroupText(
+        api,
+        threadId,
+        `⚠️ Dạ ${displayName ? `bác @${displayName}` : "bác"}, tính năng tác vụ chuyên sâu /tasks yêu cầu quyền Quản trị viên/Sếp sử dụng ạ.`,
+      );
+      return;
+    }
+
+    if (!taskCmd.taskPrompt) {
+      await sendGroupText(
+        api,
+        threadId,
+        `💡 [Hermes Task Engine]: Cú pháp sử dụng: /tasks <nội dung nhiệm vụ>\n\nVí dụ:\n• /tasks tạo 18 ảnh minh họa về phòng chống ma túy rồi ghép thành file pptx 16:9\n• /tasks cào bảng giá 5 dòng xe điện VinFast rồi xuất file Excel`,
+      );
+      return;
+    }
+
+    void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.LIKE);
+    void runHermesTaskJob({
+      api,
+      sender,
+      isGroup: true,
+      threadId,
+      displayName,
+      userGreeting: isSuperAdmin ? "Sếp" : (displayName ? `bác ${displayName}` : "bác"),
+      userPrompt: taskCmd.taskPrompt,
+      quoteText: event.quote?.text,
+    }).catch((err) => console.error("[member-assistant] Lỗi runHermesTaskJob:", err));
+    return;
   }
 
   const lower = rawText.toLowerCase();

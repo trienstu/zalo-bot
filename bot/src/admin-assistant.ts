@@ -59,6 +59,7 @@ import { transcribeAudioBuffer } from "./audio-transcoder.js";
 import { runBatchAudioJob } from "./workers/batch-audio-processor.js";
 import { isPresentationVideoRequest, runPresentationVideoJob } from "./workers/presentation-video-processor.js";
 import { isMotionVideoRequest, runMotionVideoJob } from "./workers/motion-video-processor.js";
+import { parseHermesTaskCommand, runHermesTaskJob } from "./workers/hermes-task-runner.js";
 
 async function deliverGeneratedToolFileDirect(
   api: any,
@@ -1037,6 +1038,15 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
   // 🔔 THÔNG BÁO CHO ADMIN KHI CÓ TIN NHẮN 1:1 MỚI TỪ KHÁCH (CHỐNG SPAM THEO PHIÊN 10 PHÚT)
   if (!isAdmin && !event.isSelf) {
+    const taskCmd = parseHermesTaskCommand(rawText);
+    if (taskCmd.isTask) {
+      await sendDirectText(
+        api,
+        sender,
+        `⚠️ Dạ ${displayName ? `bác @${displayName}` : "bác"}, tính năng tác vụ chuyên sâu /tasks yêu cầu quyền Quản trị viên/Sếp sử dụng ạ.`,
+      );
+      return;
+    }
     void checkAndNotifyAdminNewDm(api, sender, displayName, rawText, hasFile, event.fileAttachment?.name).catch(() => {});
   }
 
@@ -1090,6 +1100,29 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         await sendDirectText(api, sender, "❌ Đã hủy lệnh theo yêu cầu của Sếp.");
         return;
       }
+    }
+
+    // 0.1. LỆNH /tasks HOẶC /task: KÍCH HOẠT HERMES AUTONOMOUS TASK RUNNER
+    const taskCmd = parseHermesTaskCommand(rawText);
+    if (taskCmd.isTask) {
+      if (!taskCmd.taskPrompt) {
+        await sendDirectText(
+          api,
+          sender,
+          `💡 [Hermes Task Engine]: Cú pháp sử dụng: /tasks <nội dung nhiệm vụ>\n\nVí dụ:\n• /tasks tạo 18 ảnh minh họa về phòng chống ma túy rồi ghép thành file pptx 16:9\n• /tasks cào bảng giá 5 dòng xe điện VinFast rồi xuất file Excel`,
+        );
+        return;
+      }
+      void runHermesTaskJob({
+        api,
+        sender,
+        isGroup: false,
+        displayName,
+        userGreeting: "Sếp",
+        userPrompt: taskCmd.taskPrompt,
+        quoteText: event.quote?.text,
+      }).catch((err) => console.error("[admin-assistant] Lỗi runHermesTaskJob:", err));
+      return;
     }
 
     const dmQuery = isDmSummaryOrErrorQuery(rawText);
