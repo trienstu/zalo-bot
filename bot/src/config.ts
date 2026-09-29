@@ -394,6 +394,9 @@ export const config = {
   fbImageApiKey: process.env.FB_IMAGE_API_KEY?.trim() || "",
   fbImageModel: process.env.FB_IMAGE_MODEL?.trim() || "",
 
+  /** Apify API Token dùng để cào chi tiết bài viết và bình luận Facebook */
+  apifyApiToken: process.env.APIFY_API_TOKEN?.trim() || "",
+
   /** Cloudflare Workers AI (REST API) - 3 vệ tinh: LLM Fallback, Voice-to-Text Whisper, Image Gen FLUX.1 */
   cloudflareAccountId: process.env.CLOUDFLARE_ACCOUNT_ID?.trim() || "",
   cloudflareApiToken: process.env.CLOUDFLARE_API_TOKEN?.trim() || "",

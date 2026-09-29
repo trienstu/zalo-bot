@@ -52,6 +52,16 @@ export function getPromptModuleRealEstate(): string {
   + In đậm các số liệu quan trọng, trình bày gạch đầu dòng rõ ràng, mạch lạc, tối ưu hiển thị trên giao diện chat Zalo.\n`;
 }
 
+export function getPromptModuleFacebookAnalysis(): string {
+  return `\n- KỸ NĂNG XỬ LÝ LINK BÀI VIẾT VÀ BÌNH LUẬN FACEBOOK (facebook_post_lookup):
+  + Khi người dùng gửi đường link bài viết Facebook (facebook.com, fb.com, fb.watch...) kèm câu hỏi, yêu cầu tóm tắt, viết lại bài hoặc xuất dữ liệu:
+    * BẮT BUỘC SỬ DỤNG CÔNG CỤ 'facebook_post_lookup' để đọc trọn vẹn nội dung bài gốc và các bình luận (đặc biệt là bình luận của chính tác giả chứa link tài liệu/chi tiết bổ sung).
+    * NẾU NGƯỜI DÙNG YÊU CẦU TẢI / XUẤT / TRÍCH XUẤT BÌNH LUẬN RA EXCEL:
+      - Đặt tham số 'exportCommentsToExcel: true' và 'maxComments: 100' (hoặc số lượng yêu cầu). Hệ thống sẽ tự động đóng gói toàn bộ bình luận vào file Excel .xlsx và gửi trực tiếp đính kèm lên Zalo cho người dùng!
+    * NẾU NGƯỜI DÙNG YÊU CẦU TÓM TẮT / VIẾT LẠI THÀNH BÀI POST HOÀN CHỈNH / ĐỌC NỘI DUNG:
+      - Kết hợp nhuần nhuyễn nội dung bài gốc VÀ các bình luận bổ sung của tác giả (chứa link tài nguyên, phần 2, thông tin giải thích) để viết thành một bài post độc lập, mạch lạc, đầy đủ các liên kết tham khảo mà không bị thiếu thông tin!\n`;
+}
+
 export function buildDynamicSystemPromptModules(params: {
   question: string;
   quoteText?: string;
@@ -100,6 +110,14 @@ export function buildDynamicSystemPromptModules(params: {
   // 5. Module dự án Bất Động Sản
   if (isRealEstateProjectProfileQuery(question)) {
     extraModules += getPromptModuleRealEstate();
+  }
+
+  // 6. Module xử lý bài viết và bình luận Facebook
+  if (
+    /(?:facebook\.com|fb\.com|fb\.watch)/i.test(combinedText) ||
+    /(?:bình\s*luận|comment|cmt|bài\s*post|bài\s*viết)\s+facebook/iu.test(combinedText)
+  ) {
+    extraModules += getPromptModuleFacebookAnalysis();
   }
 
   return extraModules;

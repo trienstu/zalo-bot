@@ -58,7 +58,7 @@ if (modeArg === "both" || modeArg === "ocr") {
 
   // 2. Chạy review nếu không phải chế độ preview-only
   if (!isPreviewOnly) {
-    const ocrArgs = ["-y", "@alibaba-group/open-code-review", "review", "--model", "gemini-3.5-flash"];
+    const ocrArgs = ["-y", "@alibaba-group/open-code-review", "review", "--model", "gemini-3.5-flash-lite"];
     if (commitArg) {
       ocrArgs.push("-c", commitArg);
     }

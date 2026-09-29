@@ -1,4 +1,5 @@
 import { rankEvidence, isJunkOrBettingDomain, type EvidenceSourceType, type SearchIntent } from "../search-evidence.js";
+import { isFacebookUrl, crawlFacebookEnrichedPost, formatFacebookEnrichedPost } from "./facebook-scraper.js";
 
 /**
  * Vertical Tools for Zalo Bot Agent Loop.
@@ -374,6 +375,26 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
  * Cleans tags, scripts, styles, and extracts readable text up to maxChars.
  */
 export async function fetchUrl(url: string, maxChars = 3000): Promise<{ title: string; content: string; url: string }> {
+  // Tự động định tuyến URL Facebook sang Apify Facebook Scraper để bóc tách bài viết + comment đầy đủ
+  if (isFacebookUrl(url)) {
+    try {
+      const enriched = await crawlFacebookEnrichedPost(url, { maxComments: 20 });
+      if (enriched) {
+        const formatted = formatFacebookEnrichedPost(enriched);
+        const title = enriched.post.authorName
+          ? `Bài viết Facebook của ${enriched.post.authorName}`
+          : "Bài viết Facebook";
+        return {
+          title,
+          content: formatted.slice(0, Math.max(maxChars, 6000)),
+          url,
+        };
+      }
+    } catch (fbErr) {
+      console.warn(`[vertical-tools] Lỗi cào Facebook cho URL ${url}:`, fbErr);
+    }
+  }
+
   try {
     const res = await fetch(url, {
       headers: {

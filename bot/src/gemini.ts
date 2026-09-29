@@ -12,6 +12,11 @@ import {
   githubSearch,
 } from "./tools/vertical-tools.js";
 import {
+  crawlFacebookEnrichedPost,
+  formatFacebookEnrichedPost,
+  exportFacebookCommentsToExcel,
+} from "./tools/facebook-scraper.js";
+import {
   generateWordDoc,
   generateExcelFile,
   generateTextFile,
@@ -1285,6 +1290,19 @@ const AGENT_TOOLS_DECLARATION = {
       },
     },
     {
+      name: "facebook_post_lookup",
+      description: "Đọc chi tiết bài viết Facebook (caption, tác giả, lượt like/share/cmt, ảnh/video) và trích xuất bình luận (đặc biệt là bình luận của chính tác giả chứa link tài liệu và top bình luận nổi bật). Có thể tùy chọn trích xuất toàn bộ bình luận ra file Excel (.xlsx) gửi trực tiếp lên Zalo khi người dùng yêu cầu.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          url: { type: "STRING", description: "Đường link bài viết Facebook (facebook.com, fb.com, fb.watch...)" },
+          exportCommentsToExcel: { type: "BOOLEAN", description: "Đặt là true nếu người dùng yêu cầu tải, xuất hoặc trích xuất bình luận ra file Excel (.xlsx)" },
+          maxComments: { type: "INTEGER", description: "Số lượng bình luận cần cào (mặc định 25 cho đọc/tóm tắt bài, hoặc 100-500 khi xuất file Excel)" },
+        },
+        required: ["url"],
+      },
+    },
+    {
       name: "wiki_lookup",
       description: "Tra cứu bách khoa toàn thư Wikipedia về thực thể, công nghệ, nhân vật, lịch sử hoặc khái niệm.",
       parameters: {
@@ -1662,6 +1680,46 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
       if (!url) return { error: "Thiếu URL cần đọc" };
       return await fetchUrl(url, 2500);
     }
+    case "facebook_post_lookup": {
+      const url = String(args?.url || "").trim();
+      if (!url) return { error: "Thiếu URL Facebook cần xử lý" };
+      const exportExcel = Boolean(args?.exportCommentsToExcel);
+      const maxComments = typeof args?.maxComments === "number"
+        ? Math.min(Math.max(args.maxComments, 5), 1000)
+        : (exportExcel ? 100 : 25);
+
+      const enriched = await crawlFacebookEnrichedPost(url, { maxComments });
+      if (!enriched) {
+        return { error: "Không thể lấy dữ liệu từ link Facebook này (có thể là bài viết trong nhóm kín, bài viết riêng tư hoặc link không hợp lệ)." };
+      }
+
+      if (exportExcel && enriched.allComments.length > 0) {
+        const excelResult = await exportFacebookCommentsToExcel(enriched.allComments, {
+          postTitle: enriched.post.text ? enriched.post.text.slice(0, 50) : "binh_luan_fb",
+          postUrl: url,
+          postAuthor: enriched.post.authorName,
+        });
+
+        if (!excelResult?.success) {
+          return { error: excelResult?.error || "Không thể xuất bình luận ra file Excel." };
+        }
+
+        return {
+          ...excelResult,
+          fileType: "xlsx",
+          summary: `Đã trích xuất thành công ${excelResult.totalComments} bình luận từ bài viết của ${enriched.post.authorName || "tác giả"} ra file Excel.`,
+          post: enriched.post,
+        };
+      }
+
+      return {
+        post: enriched.post,
+        authorComments: enriched.authorComments,
+        linkComments: enriched.linkComments,
+        topComments: enriched.topComments,
+        formattedContent: formatFacebookEnrichedPost(enriched),
+      };
+    }
     case "wiki_lookup": {
       const q = String(args?.query || "").trim();
       if (!q) return { error: "Thiếu từ khóa tra cứu" };
@@ -2017,7 +2075,8 @@ async function call9RouterAgentLoop(
         (fnName === "generate_file" ||
           fnName === "create_voice" ||
           fnName === "generate_image" ||
-          fnName === "generate_music") &&
+          fnName === "generate_music" ||
+          (fnName === "facebook_post_lookup" && result?.filePath)) &&
         result?.success &&
         options?.onFileGenerated
       ) {
@@ -2274,7 +2333,7 @@ export async function callGeminiAgentLoop(
           }
           options?.onToolCall?.(fc.name, fc.args || {});
           const result = await executeAgentTool(fc.name, fc.args || {});
-          if ((fc.name === "generate_file" || fc.name === "create_voice" || fc.name === "generate_image" || fc.name === "generate_music") && result?.success && options?.onFileGenerated) {
+          if ((fc.name === "generate_file" || fc.name === "create_voice" || fc.name === "generate_image" || fc.name === "generate_music" || (fc.name === "facebook_post_lookup" && result?.filePath)) && result?.success && options?.onFileGenerated) {
             try {
               await options.onFileGenerated({
                 ...result,
