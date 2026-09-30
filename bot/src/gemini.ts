@@ -49,7 +49,8 @@ import {
 import { fetchWeatherData } from "./weather.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
 import { callCloudflareLlm, isCloudflareConfigured, generateCloudflareImage } from "./cloudflare-ai.js";
-import { generateCodexImage, isCodexImageConfigured, prepareImageDataUrl } from "./codex-image.js";
+import { generateCodexImage, isCodexImageConfigured, isMuseImageConfigured, prepareImageDataUrl } from "./codex-image.js";
+import { generateAiVideo, isMuseVideoConfigured } from "./tools/video-generator.js";
 import {
   canUseGrounding,
   incrementGroundingUsage,
@@ -1865,8 +1866,38 @@ const AGENT_TOOLS_DECLARATION = {
           },
           model: {
             type: "STRING",
-            enum: ["gemini", "codex", "auto"],
-            description: "Chỉ định model vẽ ảnh: Nếu người dùng đích danh yêu cầu 'codex' hoặc 'gemini', BẮT BUỘC chọn đúng model đó. Nếu không chỉ định model, chọn 'gemini' nếu vẽ tranh màu nước, vẽ tay, nghệ thuật; chọn 'codex' nếu ảnh chụp thật 8K, render 3D; hoặc chọn 'auto'.",
+            enum: ["gemini", "codex", "muse", "auto"],
+            description: "Chỉ định model vẽ ảnh: Nếu người dùng đích danh yêu cầu 'muse', 'codex' hoặc 'gemini', BẮT BUỘC chọn đúng model đó. Nếu không chỉ định model, chọn 'gemini' nếu vẽ tranh màu nước, vẽ tay, nghệ thuật; chọn 'codex' nếu ảnh chụp thật 8K, render 3D; chọn 'muse' nếu yêu cầu dùng Muse; hoặc chọn 'auto'.",
+          },
+        },
+        required: ["prompt"],
+      },
+    },
+    {
+      name: "generate_video",
+      description:
+        "Tạo video AI ngắn sinh động (5 giây hoặc 10 giây, tỉ lệ 16:9 hoặc 9:16) bằng mô hình Muse Video AI. BẮT BUỘC DÙNG khi người dùng yêu cầu: tạo video, làm video, sinh video AI, biến ảnh thành video (Image-to-Video), làm clip động theo mô tả hoặc ý tưởng.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          prompt: {
+            type: "STRING",
+            description:
+              "Mô tả chi tiết chuyển động phân cảnh, hành động nhân vật/vật thể, góc máy, ánh sáng và bối cảnh của video cần tạo (bằng tiếng Việt hoặc tiếng Anh).",
+          },
+          duration: {
+            type: "INTEGER",
+            enum: [5, 10],
+            description: "Thời lượng video (giây): 5 hoặc 10 (mặc định 5s)",
+          },
+          aspectRatio: {
+            type: "STRING",
+            enum: ["16:9", "9:16"],
+            description: "Tỉ lệ khung hình video: 16:9 (ngang) hoặc 9:16 (dọc điện thoại / tiktok / story). Mặc định '16:9'.",
+          },
+          imageUrl: {
+            type: "STRING",
+            description: "URL hoặc đường dẫn ảnh tham chiếu nếu muốn tạo video từ ảnh có sẵn (Image-to-Video).",
           },
         },
         required: ["prompt"],
@@ -2180,8 +2211,8 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
       const isCodex = config.imageProvider === "codex";
       const requestedModel = args?.model ? String(args.model).trim() : undefined;
       if (isCodex) {
-        if (!isCodexImageConfigured()) {
-          return { error: "Tính năng tạo/sửa ảnh AI (Codex / Gemini) chưa được cấu hình NINE_ROUTER_API_KEY trong file .env." };
+        if (!isCodexImageConfigured() && !isMuseImageConfigured()) {
+          return { error: "Tính năng tạo/sửa ảnh AI (Codex / Gemini / Muse) chưa được cấu hình NINE_ROUTER_API_KEY hoặc MUSE_API_KEY trong file .env." };
         }
         const imgRes = await generateCodexImage(prompt, {
           aspectRatio,
@@ -2229,6 +2260,41 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
         }
         return { error: imgRes.error || "Lỗi tạo ảnh với Cloudflare" };
       }
+    }
+    case "generate_video": {
+      const prompt = String(args?.prompt || "").trim();
+      if (!prompt) return { error: "Thiếu mô tả prompt video cần tạo" };
+      const duration = args?.duration === 10 ? 10 : 5;
+      const aspectRatio = (args?.aspectRatio || "16:9") as any;
+      const imageUrl = args?.imageUrl ? String(args.imageUrl).trim() : undefined;
+
+      if (!isMuseVideoConfigured()) {
+        return { error: "Tính năng tạo video AI (Muse) chưa được cấu hình MUSE_API_KEY trong file .env." };
+      }
+
+      console.log(`[gemini-agent] 🎬 Bắt đầu tạo video AI (${duration}s, ${aspectRatio}): "${prompt.slice(0, 60)}"...`);
+      const vidRes = await generateAiVideo(prompt, {
+        duration,
+        aspectRatio,
+        imageUrl,
+      });
+
+      if (vidRes.success && vidRes.filePath) {
+        const shortNote = prompt.length <= 40 ? ` ("${prompt}" - ${duration}s, ${aspectRatio})` : ` (${duration}s, ${aspectRatio})`;
+        const caption = `🎬 Video AI theo yêu cầu đây ạ!${shortNote} ✨\n🤖 Model: ${vidRes.tierUsed || "Muse Video"}`;
+        return {
+          success: true,
+          filePath: vidRes.filePath,
+          fileName: path.basename(vidRes.filePath),
+          fileSize: vidRes.fileSize || (fs.existsSync(vidRes.filePath) ? fs.statSync(vidRes.filePath).size : 0),
+          duration,
+          caption,
+          isVideo: true,
+          prompt,
+          tierUsed: vidRes.tierUsed,
+        };
+      }
+      return { error: vidRes.error || "Lỗi tạo video với Muse" };
     }
     default:
       return { error: `Công cụ ${name} không tồn tại` };
@@ -2430,6 +2496,7 @@ async function call9RouterAgentLoop(
         (fnName === "generate_file" ||
           fnName === "create_voice" ||
           fnName === "generate_image" ||
+          fnName === "generate_video" ||
           fnName === "generate_music" ||
           (fnName === "download_media_video" && result?.filePath) ||
           (fnName === "facebook_post_lookup" && result?.filePath)) &&
@@ -2440,6 +2507,7 @@ async function call9RouterAgentLoop(
           await options.onFileGenerated({
             ...result,
             isMusic: fnName === "generate_music",
+            isVideo: fnName === "generate_video" || Boolean(result?.isVideo),
           });
         } catch (fileErr) {
           console.warn(`[9router-agent] onFileGenerated for ${fnName} error:`, fileErr);
@@ -2694,11 +2762,12 @@ export async function callGeminiAgentLoop(
           }
           options?.onToolCall?.(fc.name, fc.args || {});
           const result = await executeAgentTool(fc.name, fc.args || {});
-          if ((fc.name === "generate_file" || fc.name === "create_voice" || fc.name === "generate_image" || fc.name === "generate_music" || (fc.name === "download_media_video" && result?.filePath) || (fc.name === "facebook_post_lookup" && result?.filePath)) && result?.success && options?.onFileGenerated) {
+          if ((fc.name === "generate_file" || fc.name === "create_voice" || fc.name === "generate_image" || fc.name === "generate_video" || fc.name === "generate_music" || (fc.name === "download_media_video" && result?.filePath) || (fc.name === "facebook_post_lookup" && result?.filePath)) && result?.success && options?.onFileGenerated) {
             try {
               await options.onFileGenerated({
                 ...result,
                 isMusic: fc.name === "generate_music",
+                isVideo: fc.name === "generate_video" || Boolean(result?.isVideo),
               });
             } catch (fileErr) {
               console.warn(`[gemini-agent] onFileGenerated for ${fc.name} error:`, fileErr);

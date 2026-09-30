@@ -102,6 +102,17 @@ async function deliverGeneratedToolFileDirect(
     return;
   }
 
+  const isVideo = Boolean(file.isVideo) || /\.(mp4|mov|mkv)$/i.test(file.filePath);
+  if (isVideo) {
+    await sendDirectFile(
+      api,
+      sender,
+      file.filePath,
+      file.caption || `🎬 ${botName} gửi video AI [${file.fileName}] cho ${userGreeting}!`,
+    );
+    return;
+  }
+
   const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
   await sendDirectFile(
     api,
@@ -2867,6 +2878,15 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
               api,
               sender,
               `🎨 ${isAdmin ? `Em đang ${verb} cho Sếp` : `Em đang ${verb}`}: "${promptPreview}..."... ${userGreeting} chờ em xíu nhé! ✨`,
+            );
+          }
+          if (toolName === "generate_video") {
+            const promptPreview = String(args?.prompt || "").slice(0, 45);
+            const userGreeting = isAdmin ? "Sếp" : pronouns.userTitle;
+            void sendDirectText(
+              api,
+              sender,
+              `🎬 ${isAdmin ? "Em đang tạo video AI cho Sếp" : "Em đang tạo video AI"}: "${promptPreview}..." (khoảng 40-60s)... ${userGreeting} chờ em xíu nhé! ✨`,
             );
           }
         },

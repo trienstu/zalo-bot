@@ -115,6 +115,17 @@ async function deliverGeneratedToolFile(
     return;
   }
 
+  const isVideo = Boolean(file.isVideo) || /\.(mp4|mov|mkv)$/i.test(file.filePath);
+  if (isVideo) {
+    await sendGroupFile(
+      api,
+      threadId,
+      file.filePath,
+      file.caption || `🎬 ${botName} gửi video AI [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`,
+    );
+    return;
+  }
+
   const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
   await sendGroupFile(
     api,
@@ -1562,6 +1573,16 @@ async function handleHistoryQA(
                 );
               }
             }
+            if (toolName === "generate_video") {
+              const promptPreview = String(args?.prompt || "").slice(0, 45);
+              if (options?.api) {
+                void sendGroupText(
+                  options.api,
+                  threadId,
+                  `🎬 ${isSuperAdmin ? "Em đang tạo video AI cho Sếp" : `${botName} đang tạo video AI`}: "${promptPreview}..." (khoảng 40-60s)... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em xíu nhé! ✨`,
+                );
+              }
+            }
           },
           onFileGenerated: async (file) => {
             try {
@@ -2916,6 +2937,9 @@ QUY TẮC BẮT BUỘC:
     `     + ĐẶC BIỆT KHI NGƯỜI DÙNG BẢO 'dựa vào prompt của bác xyz ở trên', 'theo prompt này', 'vẽ ảnh' (kèm quote), hoặc 'ok tạo đi e' / 'làm lại cái nãy': BẮT BUỘC ĐỌC KỸ LỊCH SỬ CHAT VÀ NỘI DUNG QUOTE, TRÍCH XUẤT ĐẦY ĐỦ Ý TƯỞNG/PROMPT ĐÓ ra và GỌI TOOL 'generate_image' NGAY LẬP TỨC. TUYỆT ĐỐI CẤM để prompt là 'dựa vào prompt của bác...' cộc lốc!\n` +
     `     + NẾU là chỉnh sửa/thay đổi trên ảnh có sẵn: Đặt isEdit=true và truyền imageUrl nếu có.\n` +
     `     + TUYỆT ĐỐI CẤM bịa đặt bằng chữ 'em đang nạp lệnh / đang vẽ ảnh / đã gửi ảnh' khi chưa thực sự gọi tool 'generate_image'!\n` +
+    `   - [KỸ NĂNG TẠO VIDEO AI (generate_video)]:\n` +
+    `     + Khi người dùng yêu cầu tạo video, làm clip, biến ảnh thành video (Image-to-Video), hoặc sinh video AI theo ý tưởng/mô tả: BẮT BUỘC GỌI TOOL 'generate_video'.\n` +
+    `     + duration: 5 hoặc 10 (mặc định 5s), aspectRatio: '16:9' (ngang) hoặc '9:16' (dọc). Truyền imageUrl nếu là biến ảnh thành video.\n` +
     `   - KỸ NĂNG VẼ BIỂU ĐỒ, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
     `     + Khi người dùng yêu cầu vẽ biểu đồ số liệu, đồ thị, sơ đồ, poster lịch thi đấu, bảng xếp hạng hoặc yêu cầu làm lại/sửa lại biểu đồ: BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM in code Python ra chat!\n` +
     `     + Với lịch thi đấu/bảng sự kiện/roadmap: Dùng PIL vẽ Infographic Poster Card Layout nền tối (burgundy/navy), thẻ bo góc, badge nổi bật ([CHÍNH THỨC], [GIAO HỮU]), tiêu đề vàng kim #FFD700. Với số liệu: Dùng matplotlib dark theme.\n` +
@@ -3057,6 +3081,16 @@ QUY TẮC BẮT BUỘC:
                 options.api,
                 threadId,
                 `🎨 ${isSuperAdmin ? `Em đang ${verb} cho Sếp` : `${botName} đang ${verb}`}: "${promptPreview}..."... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em xíu nhé! ✨`,
+              );
+            }
+          }
+          if (toolName === "generate_video") {
+            const promptPreview = String(args?.prompt || "").slice(0, 45);
+            if (options?.api) {
+              void sendGroupText(
+                options.api,
+                threadId,
+                `🎬 ${isSuperAdmin ? "Em đang tạo video AI cho Sếp" : `${botName} đang tạo video AI`}: "${promptPreview}..." (khoảng 40-60s)... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em xíu nhé! ✨`,
               );
             }
           }

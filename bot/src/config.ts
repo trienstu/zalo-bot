@@ -408,6 +408,10 @@ export const config = {
   imageProvider: (process.env.IMAGE_PROVIDER?.trim() || "codex").toLowerCase(),
   codexImageModel: process.env.CODEX_IMAGE_MODEL?.trim() || "cx/gpt-image-2.5",
 
+  /** Cấu hình Muse.ai API (Video & Image generation qua muse2api) */
+  museApiBaseUrl: (process.env.MUSE_API_BASE_URL?.trim() || "http://127.0.0.1:18610/v1").replace(/\/+$/, ""),
+  museApiKey: process.env.MUSE_API_KEY?.trim() || "m2a_398d2b7cced70701a4a770db892d86e6",
+
   /**
    * Thư mục ảnh bản tin công khai (bản WebP nhẹ) để nginx serve thẳng cho
    * bahub.vn/ban-tin. Mặc định ./data/public/bt — trên VPS `data` là symlink

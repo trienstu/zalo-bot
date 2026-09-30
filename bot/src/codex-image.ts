@@ -338,12 +338,139 @@ async function requestGeminiMultimodalImage(
   }
 }
 
-export type ResolvedImagePreference = "gemini" | "codex";
+/**
+ * Kiểm tra xem Muse Image API đã được cấu hình hay chưa
+ */
+export function isMuseImageConfigured(): boolean {
+  return Boolean(config.museApiKey);
+}
+
+/**
+ * Gửi yêu cầu sinh ảnh hoặc sửa ảnh qua Muse API (muse2api)
+ */
+async function requestMuseImage(
+  prompt: string,
+  targetRatio: AspectRatioOption,
+  timeoutMs: number,
+  targetPath: string,
+  fileName: string,
+  imageDataUrl?: string | null,
+): Promise<{ success: boolean; filePath: string; fileName: string; fileSize: number; error?: string }> {
+  try {
+    const baseUrl = config.museApiBaseUrl || "http://127.0.0.1:18610/v1";
+    const apiKey = config.museApiKey;
+    if (!apiKey) {
+      return {
+        success: false,
+        filePath: "",
+        fileName: "",
+        fileSize: 0,
+        error: "Chưa cấu hình MUSE_API_KEY",
+      };
+    }
+
+    const endpoint = imageDataUrl ? `${baseUrl}/images/edits` : `${baseUrl}/images/generations`;
+    const payload: Record<string, any> = {
+      model: "muse-image",
+      prompt,
+      size: targetRatio,
+    };
+    if (imageDataUrl) {
+      payload.image = imageDataUrl;
+    }
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errBody = await response.text().catch(() => "");
+      return {
+        success: false,
+        filePath: "",
+        fileName: "",
+        fileSize: 0,
+        error: `HTTP ${response.status}: ${errBody.slice(0, 200)}`,
+      };
+    }
+
+    const resJson = (await response.json()) as any;
+    const item = resJson?.data?.[0];
+    let mediaUrl = item?.url;
+    let b64Data = item?.b64_json;
+
+    if (!mediaUrl && !b64Data) {
+      return {
+        success: false,
+        filePath: "",
+        fileName: "",
+        fileSize: 0,
+        error: resJson?.error?.message || "Muse API không trả về dữ liệu ảnh",
+      };
+    }
+
+    let buffer: Buffer;
+    if (b64Data) {
+      buffer = Buffer.from(b64Data, "base64");
+    } else {
+      const fullUrl = mediaUrl.startsWith("http")
+        ? mediaUrl
+        : `${baseUrl.replace(/\/v1\/?$/, "")}${mediaUrl.startsWith("/") ? "" : "/"}${mediaUrl}`;
+      const imgFetch = await fetch(fullUrl, {
+        signal: AbortSignal.timeout(30_000),
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+      });
+      if (!imgFetch.ok) {
+        return {
+          success: false,
+          filePath: "",
+          fileName: "",
+          fileSize: 0,
+          error: `Không thể tải ảnh từ Muse URL: ${fullUrl} (HTTP ${imgFetch.status})`,
+        };
+      }
+      const arrayBuf = await imgFetch.arrayBuffer();
+      buffer = Buffer.from(arrayBuf);
+    }
+
+    // Kiểm tra định dạng nếu là webp thì đổi đuôi file cho chuẩn
+    const isWebp = buffer.length > 12 && buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP";
+    const actualPath = isWebp && targetPath.endsWith(".png") ? targetPath.replace(/\.png$/, ".webp") : targetPath;
+    const actualFileName = isWebp && fileName.endsWith(".png") ? fileName.replace(/\.png$/, ".webp") : fileName;
+
+    fs.writeFileSync(actualPath, buffer);
+    return {
+      success: true,
+      filePath: actualPath,
+      fileName: actualFileName,
+      fileSize: buffer.length,
+    };
+  } catch (err: any) {
+    const msg = err?.name === "TimeoutError" ? `Hết thời gian chờ Muse (${timeoutMs}ms)` : err?.message || String(err);
+    return {
+      success: false,
+      filePath: "",
+      fileName: "",
+      fileSize: 0,
+      error: msg,
+    };
+  }
+}
+
+export type ResolvedImagePreference = "gemini" | "codex" | "muse";
 
 /**
  * Phân cấp nhận diện ý định model vẽ/sửa ảnh:
- * Cấp 1 (Ưu tiên cao nhất): Người dùng chỉ định đích danh engine trong text prompt ("bằng codex", "dùng gemini")
- * Cấp 2: Chỉ định qua options/tool calling từ LLM
+ * Cấp 1 (Ưu tiên cao nhất): Người dùng chỉ định đích danh engine trong text prompt ("bằng muse", "dùng codex", "dùng gemini")
+ * Cấp 2: Chỉ định qua options/tool calling từ LLM (model = "muse" | "codex" | "gemini")
  * Cấp 3: Định tuyến theo phong cách mỹ thuật khi không có chỉ định engine (màu nước/vẽ tay -> Gemini; tả thực/8K -> Codex)
  * Cấp 4: Mặc định Codex (chất lượng cao)
  */
@@ -355,16 +482,20 @@ export function resolveImageModelPreference(
   const rawModel = (explicitModel || "").toLowerCase().trim();
 
   // Cấp 1 (Ưu tiên cao nhất): Người dùng gõ trực tiếp tên engine trong prompt
+  const promptHasMuse = /\b(?:muse|muse2api|muse\.ai)\b/i.test(promptLower);
   const promptHasCodex = /\b(?:codex|gpt-image)\b/i.test(promptLower);
   const promptHasGemini = /\b(?:gemini|google\s*image)\b/i.test(promptLower);
 
-  if (promptHasCodex && !promptHasGemini) return "codex";
-  if (promptHasGemini && !promptHasCodex) return "gemini";
+  if (promptHasMuse && !promptHasCodex && !promptHasGemini) return "muse";
+  if (promptHasCodex && !promptHasGemini && !promptHasMuse) return "codex";
+  if (promptHasGemini && !promptHasCodex && !promptHasMuse) return "gemini";
 
   // Cấp 2: Chỉ định qua options hoặc tool calling
+  const optionIsMuse = rawModel === "muse" || rawModel.includes("muse");
   const optionIsCodex = rawModel === "codex" || rawModel.includes("codex") || rawModel.includes("gpt-image");
   const optionIsGemini = rawModel === "gemini" || rawModel.includes("gemini");
 
+  if (optionIsMuse) return "muse";
   if (optionIsCodex && !optionIsGemini) return "codex";
   if (optionIsGemini && !optionIsCodex) return "gemini";
 
@@ -380,21 +511,24 @@ export function resolveImageModelPreference(
 }
 
 /**
- * Chuẩn hóa tên model gọi vào 9Router:
+ * Chuẩn hóa tên model gọi vào 9Router / Muse:
  * - Các alias "codex", "auto", undefined -> Map sang config.codexImageModel || "cx/gpt-image-2.5"
  * - Alias "gemini" -> Map sang "ag/gemini-3.1-flash-image"
+ * - Alias "muse" -> Map sang "muse-image"
  * - Nếu là model ID đầy đủ (bắt đầu bằng "cx/" hoặc "ag/") -> Giữ nguyên model ID đó
  */
 export function normalizeImageModelId(
   rawRequestedModel?: string,
-): { geminiModel: string; codexModel: string } {
+): { geminiModel: string; codexModel: string; museModel: string } {
   const defaultCodex = config.codexImageModel || "cx/gpt-image-2.5";
   const defaultGemini = "ag/gemini-3.1-flash-image";
+  const defaultMuse = "muse-image";
 
   const raw = (rawRequestedModel || "").trim();
 
   let codexModel = defaultCodex;
   let geminiModel = defaultGemini;
+  let museModel = defaultMuse;
 
   if (raw.startsWith("cx/")) {
     codexModel = raw;
@@ -402,14 +536,17 @@ export function normalizeImageModelId(
     geminiModel = raw;
   }
 
-  return { geminiModel, codexModel };
+  return { geminiModel, codexModel, museModel };
 }
 
 /**
  * Sinh hoặc sửa ảnh chất lượng cao với chuỗi Cascade Fallback đa tầng tự động:
- * - Hỗ trợ cả OpenAI Codex (cx/gpt-image-2.5) và Google Gemini (ag/gemini-3.1-flash-image)
- * - Tự động định tuyến thông minh theo yêu cầu người dùng hoặc phong cách vẽ (màu nước, vẽ tay -> Gemini; tả thực, 8K -> Codex)
- * - Tầng dự phòng cuối Cloudflare FLUX.1-schnell (dành cho tạo mới)
+ * - Hỗ trợ cả OpenAI Codex (cx/gpt-image-2.5), Google Gemini (ag/gemini-3.1-flash-image) và Muse AI (muse-image)
+ * - Tự động định tuyến thông minh theo yêu cầu người dùng hoặc phong cách vẽ:
+ *     + Nhắc đích danh Muse -> Ưu tiên gọi Muse
+ *     + Màu nước, vẽ tay -> Ưu tiên Gemini
+ *     + Tả thực, 8K hoặc mặc định -> Ưu tiên Codex
+ * - Chuỗi Fallback đa tầng (Tier 1 -> Tier 2 -> Tier 3: Muse -> Tier 4: Cloudflare FLUX)
  */
 export async function generateCodexImage(
   prompt: string,
@@ -423,13 +560,14 @@ export async function generateCodexImage(
   const imageDataUrl = options?.image ? prepareImageDataUrl(options.image) : null;
   const isEdit = Boolean(options?.isEdit || imageDataUrl);
 
-  if (!apiKey) {
+  // Nếu không có NINE_ROUTER_API_KEY mà có MUSE_API_KEY thì vẫn có thể chạy qua Muse
+  if (!apiKey && !isMuseImageConfigured()) {
     return {
       success: false,
       filePath: "",
       fileName: "",
       fileSize: 0,
-      error: "Chưa cấu hình NINE_ROUTER_API_KEY để gọi Image Generator",
+      error: "Chưa cấu hình NINE_ROUTER_API_KEY hoặc MUSE_API_KEY để gọi Image Generator",
     };
   }
 
@@ -443,24 +581,78 @@ export async function generateCodexImage(
 
     // 1. Nhận diện ý định model theo thứ bậc ưu tiên (Tên engine > Phong cách mỹ thuật > Mặc định)
     const preferredEngine = resolveImageModelPreference(prompt, options?.model);
+    const prefersMuse = preferredEngine === "muse";
     const prefersGemini = preferredEngine === "gemini";
     const prefersCodex = preferredEngine === "codex";
 
     const { geminiModel, codexModel } = normalizeImageModelId(options?.model);
 
-    // 2. Làm giàu & dịch visual prompt sang tiếng Anh
-    const finalPrompt = await enhanceVisualPrompt(prompt, ratio, baseUrl, apiKey, isEdit);
+    // 2. Làm giàu & dịch visual prompt sang tiếng Anh (nếu có 9Router)
+    const finalPrompt = apiKey
+      ? await enhanceVisualPrompt(prompt, ratio, baseUrl, apiKey, isEdit)
+      : prompt.trim();
     const targetSize = mapAspectRatioToSize(ratio);
     const opLabel = isEdit ? "sửa ảnh" : "sinh ảnh";
 
     // ==========================================
-    // NHÁNH A: ƯU TIÊN GOOGLE GEMINI (SIÊU TỐC ~12S / MÀU NƯỚC / VẼ TAY)
+    // NHÁNH A: ƯU TIÊN MUSE (KHI PROMPT HOẶC MODEL CHỈ ĐỊNH ĐÍCH DANH MUSE)
     // ==========================================
-    if (prefersGemini) {
+    if (prefersMuse && isMuseImageConfigured()) {
+      console.log(`[codex-image] 🎨 [Ưu tiên Muse] Đang ${opLabel} với Muse (size: ${ratio}${imageDataUrl ? ", có ảnh tham chiếu" : ""})...`);
+      const museTimeout = Math.min(timeoutMs, 65_000);
+      const museRes = await requestMuseImage(finalPrompt, ratio, museTimeout, targetPath, fileName, imageDataUrl);
+      if (museRes.success) {
+        console.log(`[codex-image] ✅ [Muse: muse-image] ${opLabel} thành công: ${museRes.filePath} (${(museRes.fileSize / 1024).toFixed(1)} KB)`);
+        return {
+          success: true,
+          filePath: museRes.filePath,
+          fileName: museRes.fileName,
+          fileSize: museRes.fileSize,
+          translatedPrompt: finalPrompt,
+          tierUsed: "Muse (muse-image)",
+        };
+      }
+
+      console.warn(`[codex-image] ⚠️ [Muse: muse-image] Không thành công: ${museRes.error}. Đang tự động chuyển sang Codex (${codexModel})...`);
+
+      if (apiKey) {
+        // Fallback sang Codex
+        const codexTimeout = isEdit ? Math.max(timeoutMs, 100_000) : Math.min(timeoutMs, 65_000);
+        const codexRes = await requestRouterImage(codexModel, finalPrompt, targetSize, baseUrl, apiKey, codexTimeout, targetPath, fileName, imageDataUrl);
+        if (codexRes.success) {
+          return {
+            success: true,
+            filePath: targetPath,
+            fileName,
+            fileSize: codexRes.fileSize,
+            translatedPrompt: finalPrompt,
+            tierUsed: `Codex (${codexModel})`,
+          };
+        }
+
+        // Fallback sang Gemini
+        const geminiTimeout = 40_000;
+        const geminiRes = isEdit
+          ? await requestGeminiMultimodalImage(geminiModel, finalPrompt, baseUrl, apiKey, geminiTimeout, targetPath, fileName, imageDataUrl)
+          : await requestRouterImage(geminiModel, finalPrompt, targetSize, baseUrl, apiKey, geminiTimeout, targetPath, fileName);
+        if (geminiRes.success) {
+          return {
+            success: true,
+            filePath: targetPath,
+            fileName,
+            fileSize: geminiRes.fileSize,
+            translatedPrompt: finalPrompt,
+            tierUsed: `Gemini (${geminiModel})`,
+          };
+        }
+      }
+    } else if (prefersGemini && apiKey) {
+      // ==========================================
+      // NHÁNH B: ƯU TIÊN GOOGLE GEMINI (SIÊU TỐC ~12S / MÀU NƯỚC / VẼ TAY)
+      // ==========================================
       console.log(`[codex-image] 🎨 [Ưu tiên Gemini] Đang ${opLabel} với Gemini (${geminiModel}, multimodal: ${Boolean(imageDataUrl)})...`);
       const geminiTimeout = isEdit ? 45_000 : 35_000;
       
-      // Với Gemini: dùng endpoint chat/completions đa phương thức
       const geminiRes = isEdit
         ? await requestGeminiMultimodalImage(geminiModel, finalPrompt, baseUrl, apiKey, geminiTimeout, targetPath, fileName, imageDataUrl)
         : await requestRouterImage(geminiModel, finalPrompt, targetSize, baseUrl, apiKey, geminiTimeout, targetPath, fileName);
@@ -479,7 +671,7 @@ export async function generateCodexImage(
 
       console.warn(`[codex-image] ⚠️ [Gemini: ${geminiModel}] Không thành công: ${geminiRes.error}. Đang tự động chuyển sang Codex (${codexModel})...`);
 
-      // Fallback sang Codex
+      // Fallback Tier 2: Codex
       const codexTimeout = isEdit ? Math.max(timeoutMs, 100_000) : Math.min(timeoutMs, 65_000);
       const codexRes = await requestRouterImage(codexModel, finalPrompt, targetSize, baseUrl, apiKey, codexTimeout, targetPath, fileName, imageDataUrl);
       if (codexRes.success) {
@@ -493,45 +685,83 @@ export async function generateCodexImage(
           tierUsed: `Codex (${codexModel})`,
         };
       }
+
+      // Fallback Tier 3: Muse Image
+      if (isMuseImageConfigured()) {
+        console.log(`[codex-image] 🔄 Đang chuyển tiếp sang Tier dự phòng 3 (Muse Image)...`);
+        const museTimeout = Math.min(timeoutMs, 65_000);
+        const museRes = await requestMuseImage(finalPrompt, ratio, museTimeout, targetPath, fileName, imageDataUrl);
+        if (museRes.success) {
+          console.log(`[codex-image] ✅ [Dự phòng Muse: muse-image] ${opLabel} thành công: ${museRes.filePath}`);
+          return {
+            success: true,
+            filePath: museRes.filePath,
+            fileName: museRes.fileName,
+            fileSize: museRes.fileSize,
+            translatedPrompt: finalPrompt,
+            tierUsed: "Muse (muse-image)",
+          };
+        }
+      }
     } else {
       // ==========================================
-      // NHÁNH B: ƯU TIÊN OPENAI CODEX (MẶC ĐỊNH / TẢ THỰC 8K / INPAINTING)
+      // NHÁNH C: ƯU TIÊN OPENAI CODEX (MẶC ĐỊNH / TẢ THỰC 8K / INPAINTING)
       // ==========================================
-      const codexTag = prefersCodex ? "Ưu tiên Codex" : "Mặc định Codex";
-      console.log(`[codex-image] 🎨 [${codexTag}] Đang gửi lệnh ${opLabel} tới Codex (${codexModel}, size: ${targetSize}${imageDataUrl ? ", có ảnh tham chiếu" : ""})...`);
-      const codexTimeout = isEdit ? Math.max(timeoutMs, 100_000) : Math.min(timeoutMs, 65_000);
-      const codexRes = await requestRouterImage(codexModel, finalPrompt, targetSize, baseUrl, apiKey, codexTimeout, targetPath, fileName, imageDataUrl);
+      if (apiKey) {
+        const codexTag = prefersCodex ? "Ưu tiên Codex" : "Mặc định Codex";
+        console.log(`[codex-image] 🎨 [${codexTag}] Đang gửi lệnh ${opLabel} tới Codex (${codexModel}, size: ${targetSize}${imageDataUrl ? ", có ảnh tham chiếu" : ""})...`);
+        const codexTimeout = isEdit ? Math.max(timeoutMs, 100_000) : Math.min(timeoutMs, 65_000);
+        const codexRes = await requestRouterImage(codexModel, finalPrompt, targetSize, baseUrl, apiKey, codexTimeout, targetPath, fileName, imageDataUrl);
 
-      if (codexRes.success) {
-        console.log(`[codex-image] ✅ [Codex: ${codexModel}] ${opLabel} thành công: ${targetPath} (${(codexRes.fileSize / 1024).toFixed(1)} KB)`);
-        return {
-          success: true,
-          filePath: targetPath,
-          fileName,
-          fileSize: codexRes.fileSize,
-          translatedPrompt: finalPrompt,
-          tierUsed: `Codex (${codexModel})`,
-        };
+        if (codexRes.success) {
+          console.log(`[codex-image] ✅ [Codex: ${codexModel}] ${opLabel} thành công: ${targetPath} (${(codexRes.fileSize / 1024).toFixed(1)} KB)`);
+          return {
+            success: true,
+            filePath: targetPath,
+            fileName,
+            fileSize: codexRes.fileSize,
+            translatedPrompt: finalPrompt,
+            tierUsed: `Codex (${codexModel})`,
+          };
+        }
+
+        console.warn(`[codex-image] ⚠️ [Codex: ${codexModel}] Không thành công: ${codexRes.error}. Đang tự động chuyển sang Gemini (${geminiModel})...`);
+
+        // Fallback Tier 2: Gemini Multimodal
+        const geminiTimeout = 40_000;
+        const geminiRes = isEdit
+          ? await requestGeminiMultimodalImage(geminiModel, finalPrompt, baseUrl, apiKey, geminiTimeout, targetPath, fileName, imageDataUrl)
+          : await requestRouterImage(geminiModel, finalPrompt, targetSize, baseUrl, apiKey, geminiTimeout, targetPath, fileName);
+
+        if (geminiRes.success) {
+          console.log(`[codex-image] ✅ [Dự phòng Gemini: ${geminiModel}] ${opLabel} thành công: ${targetPath} (${(geminiRes.fileSize / 1024).toFixed(1)} KB)`);
+          return {
+            success: true,
+            filePath: targetPath,
+            fileName,
+            fileSize: geminiRes.fileSize,
+            translatedPrompt: finalPrompt,
+            tierUsed: `Gemini (${geminiModel})`,
+          };
+        }
       }
 
-      console.warn(`[codex-image] ⚠️ [Codex: ${codexModel}] Không thành công: ${codexRes.error}. Đang tự động chuyển sang Gemini (${geminiModel})...`);
-
-      // Fallback sang Gemini Multimodal
-      const geminiTimeout = 40_000;
-      const geminiRes = isEdit
-        ? await requestGeminiMultimodalImage(geminiModel, finalPrompt, baseUrl, apiKey, geminiTimeout, targetPath, fileName, imageDataUrl)
-        : await requestRouterImage(geminiModel, finalPrompt, targetSize, baseUrl, apiKey, geminiTimeout, targetPath, fileName);
-
-      if (geminiRes.success) {
-        console.log(`[codex-image] ✅ [Dự phòng Gemini: ${geminiModel}] ${opLabel} thành công: ${targetPath} (${(geminiRes.fileSize / 1024).toFixed(1)} KB)`);
-        return {
-          success: true,
-          filePath: targetPath,
-          fileName,
-          fileSize: geminiRes.fileSize,
-          translatedPrompt: finalPrompt,
-          tierUsed: `Gemini (${geminiModel})`,
-        };
+      // Fallback Tier 3: Muse Image
+      if (isMuseImageConfigured()) {
+        console.log(`[codex-image] 🔄 Đang chuyển tiếp sang Tier dự phòng 3 (Muse Image)...`);
+        const museTimeout = Math.min(timeoutMs, 65_000);
+        const museRes = await requestMuseImage(finalPrompt, ratio, museTimeout, targetPath, fileName, imageDataUrl);
+        if (museRes.success) {
+          console.log(`[codex-image] ✅ [Dự phòng Muse: muse-image] ${opLabel} thành công: ${museRes.filePath}`);
+          return {
+            success: true,
+            filePath: museRes.filePath,
+            fileName: museRes.fileName,
+            fileSize: museRes.fileSize,
+            translatedPrompt: finalPrompt,
+            tierUsed: "Muse (muse-image)",
+          };
+        }
       }
     }
 
