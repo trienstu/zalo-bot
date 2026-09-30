@@ -4,6 +4,11 @@ export type KnowledgeCategory =
   | "business_real_estate"
   | "tips_workflow"
   | "news_insight"
+  | "trading_signals"
+  | "technical_analysis"
+  | "macro_news"
+  | "risk_psychology"
+  | "shared_files"
   | "general";
 
 export interface TrackedChat {
@@ -28,6 +33,8 @@ export interface TelegramRawMessage {
   message_text: string;
   media_type: "none" | "photo" | "video" | "document";
   media_caption: string;
+  file_name?: string | null;
+  file_size?: number | null;
   reply_to_msg_id: number | null;
   date: number; // Unix timestamp (giây) của tin nhắn trên Telegram
   created_at: number; // Epoch ms khi lưu vào DB

@@ -2,20 +2,20 @@ import { callGeminiJson } from "../gemini.js";
 import { saveKnowledgeItem } from "./db.js";
 import type { TelegramRawMessage, KnowledgeCategory } from "./types.js";
 
-const SYSTEM_PROMPT = `Bạn là chuyên gia chắt lọc và hệ thống hóa tri thức từ các cuộc thảo luận trên Telegram.
+const SYSTEM_PROMPT = `Bạn là chuyên gia chắt lọc và hệ thống hóa tri thức từ các cuộc thảo luận trên Telegram (bao gồm công nghệ, kinh doanh và tài chính/trading).
 Nhiệm vụ của bạn:
 1. Đọc kỹ dòng tin nhắn thảo luận trong nhóm.
-2. Bỏ qua hoàn toàn: tin nhắn chào hỏi, tin nhắn quá ngắn (ok, cảm ơn, vâng, icon...), tin rao vặt spam vô nghĩa.
+2. Bỏ qua hoàn toàn: tin nhắn chào hỏi, tin nhắn quá ngắn (ok, cảm ơn, vâng, icon...), tin rao vặt spam vô nghĩa, khoe lãi/lỗ suông không kèm phân tích.
 3. Gom các trao đổi hữu ích thành các "Đơn vị tri thức" (Knowledge Items) có giá trị cao, dùng để lưu trữ vào tài liệu Word tra cứu lâu dài.
 
 Mỗi đơn vị tri thức BẮT BUỘC có cấu trúc JSON sau:
 {
-  "category": "ai_prompt" | "tools_tech" | "business_real_estate" | "tips_workflow" | "news_insight" | "general",
+  "category": "ai_prompt" | "tools_tech" | "business_real_estate" | "tips_workflow" | "news_insight" | "trading_signals" | "technical_analysis" | "macro_news" | "risk_psychology" | "shared_files" | "general",
   "title": "Tiêu đề ngắn gọn, chuẩn chuyên môn (khoảng 8 - 15 từ)",
   "summary": "Tóm tắt bản chất vấn đề, kiến thức hoặc giải pháp được bàn luận (2 - 4 câu)",
   "key_takeaways": [
-    "Điểm cốt lõi 1 (kinh nghiệm thực chiến/bước làm cụ thể)",
-    "Điểm cốt lõi 2",
+    "Điểm cốt lõi 1 (nếu là KÈO TRADING: ghi rõ [Mã] Vị thế | Entry | SL | TP | Lý do)",
+    "Điểm cốt lõi 2 (bước làm/kinh nghiệm/chỉ báo quan sát)",
     "Điểm cốt lõi 3"
   ],
   "useful_links": ["https://..."],
@@ -24,9 +24,14 @@ Mỗi đơn vị tri thức BẮT BUỘC có cấu trúc JSON sau:
 }
 
 Quy ước danh mục:
+- "trading_signals": Kèo giao dịch, setup vào lệnh cụ thể (Mã tài sản, Buy/Sell/Long/Short, Vùng Entry, Cắt lỗ SL, Chốt lời TP, Khung thời gian).
+- "technical_analysis": Phân tích kỹ thuật (Price Action, SMC, FVG, Order Block, Wyckoff, Kháng cự/Hỗ trợ, mô hình nến, RSI, MACD, Volume).
+- "macro_news": Tin tức vĩ mô tác động giá (Lãi suất Fed, CPI, chính sách ngân hàng, dữ liệu On-chain, dòng tiền cá voi).
+- "risk_psychology": Tâm lý giao dịch, kỷ luật, quản lý vốn (Risk Management), bài học thua lỗ/cắt lỗ thực chiến.
+- "shared_files": Giới thiệu hoặc chia sẻ file tài liệu, sách trading, slide, bảng tính, code indicator hay.
 - "ai_prompt": Cách viết prompt, mẹo dùng ChatGPT/Claude/Midjourney/Gemini, kỹ thuật AI Prompting.
 - "tools_tech": Giới thiệu phần mềm, GitHub repo, tool tự động hóa, extension, API hay.
-- "business_real_estate": Kinh nghiệm kinh doanh, đầu tư, kiến thức Bất động sản, tài chính.
+- "business_real_estate": Kinh nghiệm kinh doanh, đầu tư, kiến thức Bất động sản, tài chính doanh nghiệp.
 - "tips_workflow": Thủ thuật tối ưu công việc, quy trình làm việc hiệu quả, mẹo văn phòng.
 - "news_insight": Phân tích xu hướng thị trường, góc nhìn chuyên gia về sự kiện công nghệ/kinh tế.
 - "general": Các kiến thức hữu ích tổng hợp khác.
@@ -88,6 +93,11 @@ export async function classifyAndExtractKnowledge(
         "business_real_estate",
         "tips_workflow",
         "news_insight",
+        "trading_signals",
+        "technical_analysis",
+        "macro_news",
+        "risk_psychology",
+        "shared_files",
         "general",
       ].includes(item.category)
         ? (item.category as KnowledgeCategory)

@@ -312,6 +312,18 @@ function ensureWebSchema(database: Database.Database): void {
       filter_days       INTEGER DEFAULT 7,
       created_at        INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS telegram_crawl_requests (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id           TEXT NOT NULL,
+      action            TEXT NOT NULL,
+      item_limit        INTEGER NOT NULL DEFAULT 100,
+      status            TEXT NOT NULL DEFAULT 'pending',
+      result_json       TEXT,
+      error_message     TEXT,
+      created_at        INTEGER NOT NULL,
+      completed_at      INTEGER
+    );
   `);
 
   try {

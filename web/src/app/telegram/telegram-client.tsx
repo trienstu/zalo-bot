@@ -24,6 +24,11 @@ import { Badge, Card, CardTitle, Button, Input, Stat } from "@/components/ui";
 
 const CATEGORIES = [
   { id: "all", label: "Tất cả", icon: "🌐" },
+  { id: "trading_signals", label: "Kèo & Setup", icon: "🎯" },
+  { id: "technical_analysis", label: "PT Kỹ Thuật", icon: "📊" },
+  { id: "macro_news", label: "Vĩ Mô & Dòng Tiền", icon: "🌐" },
+  { id: "risk_psychology", label: "Quản Trị Rủi Ro", icon: "🛡️" },
+  { id: "shared_files", label: "File & Tài Liệu", icon: "📁" },
   { id: "ai_prompt", label: "AI & Prompt", icon: "🤖" },
   { id: "tools_tech", label: "Công Cụ & Tech", icon: "🛠️" },
   { id: "business_real_estate", label: "Kinh Doanh & BĐS", icon: "📈" },
@@ -47,6 +52,10 @@ export function TelegramClient() {
   const [rawMessages, setRawMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+
+  // Trạng thái quét tin nhắn & file cũ
+  const [scanningChatId, setScanningChatId] = useState<string | null>(null);
+  const [scanMessage, setScanMessage] = useState<string>("");
 
   // Bộ lọc
   const [selectedCategory, setSelectedCategory] = useState("all");
@@ -114,10 +123,65 @@ export function TelegramClient() {
     }
   };
 
-  const handleExportWord = () => {
+  const handleTriggerScan = async (chatId: string, action: "scan_history" | "scan_files") => {
+    setScanningChatId(chatId);
+    setScanMessage("Đang gửi yêu cầu quét tới bot...");
+
+    try {
+      const res = await fetch("/api/telegram/chats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId, action, limit: action === "scan_files" ? 50 : 100 }),
+      });
+      const data = await res.json();
+      if (!data.ok || !data.requestId) {
+        setScanMessage(data.error || "Lỗi khi kích hoạt quét");
+        setTimeout(() => setScanningChatId(null), 3000);
+        return;
+      }
+
+      const reqId = data.requestId;
+      setScanMessage(action === "scan_files" ? "Đang quét các file tài liệu trong nhóm..." : "Đang kéo tin nhắn cũ & AI đang chắt lọc tri thức...");
+
+      const pollTimer = setInterval(async () => {
+        try {
+          const sRes = await fetch("/api/telegram/chats", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "check_status", requestId: reqId }),
+          });
+          const sData = await sRes.json();
+          if (sData.ok && sData.status) {
+            const st = sData.status.status;
+            if (st === "completed") {
+              clearInterval(pollTimer);
+              const result = JSON.parse(sData.status.result_json || "{}");
+              setScanMessage(`✅ Thành công! Đã quét ${result.fetched || result.filesFound || 0} mục & tạo ${result.knowledgeCreated || 0} bài học mới.`);
+              setTimeout(() => {
+                setScanningChatId(null);
+                fetchData();
+              }, 2500);
+            } else if (st === "error") {
+              clearInterval(pollTimer);
+              setScanMessage(`❌ Lỗi: ${sData.status.error_message || "Không thể quét nhóm"}`);
+              setTimeout(() => setScanningChatId(null), 3500);
+            }
+          }
+        } catch {
+          // ignore network polling hiccups
+        }
+      }, 2000);
+    } catch (err: any) {
+      setScanMessage(`Lỗi kết nối: ${err.message}`);
+      setTimeout(() => setScanningChatId(null), 3000);
+    }
+  };
+
+  const handleExportWord = (overrideCategory?: string) => {
     setExporting(true);
+    const cat = overrideCategory || selectedCategory;
     const params = new URLSearchParams();
-    if (selectedCategory !== "all") params.set("category", selectedCategory);
+    if (cat !== "all") params.set("category", cat);
     if (selectedDays !== "0") params.set("days", selectedDays);
     if (selectedChat !== "all") params.set("chatId", selectedChat);
     if (searchQuery.trim()) params.set("search", searchQuery.trim());
@@ -131,40 +195,89 @@ export function TelegramClient() {
   return (
     <div className="space-y-6">
       {/* Header trang & Nút xuất Word nổi bật */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-[var(--color-border)] pb-5">
-        <div>
-          <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
-              <Send className="h-5 w-5" />
+      <div className="flex flex-col gap-4 border-b border-[var(--color-border)] pb-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                <Send className="h-5 w-5" />
+              </div>
+              <h1 className="text-xl font-bold tracking-tight text-[var(--color-text)]">
+                Tri Thức & Tài Liệu Telegram
+              </h1>
             </div>
-            <h1 className="text-xl font-bold tracking-tight text-[var(--color-text)]">
-              Tri Thức & Tài Liệu Telegram
-            </h1>
+            <p className="mt-1 text-xs text-[var(--color-muted)]">
+              Tự động thu thập thảo luận từ các group Telegram, tinh lọc tri thức bằng AI và đóng gói file Word (.docx) chuyên nghiệp
+            </p>
           </div>
-          <p className="mt-1 text-xs text-[var(--color-muted)]">
-            Tự động thu thập thảo luận từ các group Telegram, tinh lọc tri thức bằng AI và đóng gói file Word (.docx) chuyên nghiệp
-          </p>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              onClick={fetchData}
+              disabled={loading}
+              className="flex items-center gap-1.5 h-8 px-3 text-xs"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              Làm mới
+            </Button>
+
+            <Button
+              onClick={() => handleExportWord()}
+              disabled={exporting || knowledgeItems.length === 0}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20 font-medium px-4 h-8 text-xs"
+            >
+              <Download className="h-4 w-4" />
+              {exporting ? "Đang tạo file..." : `Xuất File Word (.docx) [${knowledgeItems.length}]`}
+            </Button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            onClick={fetchData}
-            disabled={loading}
-            className="flex items-center gap-1.5 h-8 px-3 text-xs"
+        {/* Thanh phím tắt Xuất Word theo từng chuyên đề */}
+        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-[var(--color-border)]/50">
+          <span className="text-[11px] font-semibold text-[var(--color-muted)]">Xuất Word Chuyên Đề:</span>
+          <button
+            onClick={() => handleExportWord("trading_signals")}
+            disabled={exporting}
+            className="px-2.5 py-1 rounded-lg bg-[var(--color-surface)] hover:bg-purple-500/10 border border-[var(--color-border)] hover:border-purple-500/30 text-xs text-purple-300 transition-colors flex items-center gap-1 disabled:opacity-50"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            Làm mới
-          </Button>
-
-          <Button
-            onClick={handleExportWord}
-            disabled={exporting || knowledgeItems.length === 0}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20 font-medium px-4 h-8 text-xs"
+            🎯 Kèo & Setup
+          </button>
+          <button
+            onClick={() => handleExportWord("technical_analysis")}
+            disabled={exporting}
+            className="px-2.5 py-1 rounded-lg bg-[var(--color-surface)] hover:bg-blue-500/10 border border-[var(--color-border)] hover:border-blue-500/30 text-xs text-blue-300 transition-colors flex items-center gap-1 disabled:opacity-50"
           >
-            <Download className="h-4 w-4" />
-            {exporting ? "Đang tạo file..." : `Xuất File Word (.docx) [${knowledgeItems.length}]`}
-          </Button>
+            📊 PT Kỹ Thuật
+          </button>
+          <button
+            onClick={() => handleExportWord("macro_news")}
+            disabled={exporting}
+            className="px-2.5 py-1 rounded-lg bg-[var(--color-surface)] hover:bg-red-500/10 border border-[var(--color-border)] hover:border-red-500/30 text-xs text-red-300 transition-colors flex items-center gap-1 disabled:opacity-50"
+          >
+            🌐 Vĩ Mô & Dòng Tiền
+          </button>
+          <button
+            onClick={() => handleExportWord("risk_psychology")}
+            disabled={exporting}
+            className="px-2.5 py-1 rounded-lg bg-[var(--color-surface)] hover:bg-amber-500/10 border border-[var(--color-border)] hover:border-amber-500/30 text-xs text-amber-300 transition-colors flex items-center gap-1 disabled:opacity-50"
+          >
+            🛡️ Quản Trị Rủi Ro
+          </button>
+          <button
+            onClick={() => handleExportWord("shared_files")}
+            disabled={exporting}
+            className="px-2.5 py-1 rounded-lg bg-[var(--color-surface)] hover:bg-emerald-500/10 border border-[var(--color-border)] hover:border-emerald-500/30 text-xs text-emerald-300 transition-colors flex items-center gap-1 disabled:opacity-50"
+          >
+            📁 File Tài Liệu
+          </button>
+          <button
+            onClick={() => handleExportWord("all")}
+            disabled={exporting}
+            className="px-2.5 py-1 rounded-lg bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/30 text-xs text-blue-300 font-medium transition-colors flex items-center gap-1 disabled:opacity-50"
+          >
+            📄 Toàn Bộ Tri Thức
+          </button>
         </div>
       </div>
 
@@ -414,13 +527,14 @@ export function TelegramClient() {
                   <th className="px-4 py-3">Loại</th>
                   <th className="px-4 py-3 text-center">Tin Nhắn</th>
                   <th className="px-4 py-3 text-center">Tri Thức Trích Xuất</th>
+                  <th className="px-4 py-3 text-center">Quét Lịch Sử & File Cũ</th>
                   <th className="px-4 py-3 text-right">Trạng Thái Theo Dõi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--color-border)]">
                 {chats.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-[var(--color-muted)]">
+                    <td colSpan={6} className="px-4 py-8 text-center text-[var(--color-muted)]">
                       Chưa có nhóm nào được ghi nhận. Vui lòng kết nối tài khoản Telegram trước.
                     </td>
                   </tr>
@@ -441,6 +555,35 @@ export function TelegramClient() {
                       </td>
                       <td className="px-4 py-3 text-center font-semibold text-blue-400">
                         {(c.knowledge_count || 0).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {scanningChatId === c.chat_id ? (
+                          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/20 text-[11px] animate-pulse">
+                            <RefreshCw className="h-3 w-3 animate-spin" />
+                            <span>{scanMessage || "Đang quét..."}</span>
+                          </div>
+                        ) : (
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              onClick={() => handleTriggerScan(c.chat_id, "scan_history")}
+                              disabled={Boolean(scanningChatId)}
+                              title="Quét 100 tin nhắn cũ gần nhất và trích xuất tri thức bằng AI"
+                              className="rounded-lg px-2 py-1 text-[11px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20 transition-colors disabled:opacity-50 flex items-center gap-1"
+                            >
+                              <RefreshCw className="h-3 w-3" />
+                              Quét tin cũ
+                            </button>
+                            <button
+                              onClick={() => handleTriggerScan(c.chat_id, "scan_files")}
+                              disabled={Boolean(scanningChatId)}
+                              title="Quét và phân loại toàn bộ file tài liệu, sách, slide trong nhóm"
+                              className="rounded-lg px-2 py-1 text-[11px] font-medium bg-purple-500/10 text-purple-400 border border-purple-500/20 hover:bg-purple-500/20 transition-colors disabled:opacity-50 flex items-center gap-1"
+                            >
+                              <FileText className="h-3 w-3" />
+                              Quét File
+                            </button>
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <button

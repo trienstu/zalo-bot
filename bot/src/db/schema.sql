@@ -716,3 +716,18 @@ CREATE TABLE IF NOT EXISTS telegram_exports (
 
 CREATE INDEX IF NOT EXISTS idx_tg_exports_time ON telegram_exports(created_at DESC);
 
+-- Yêu cầu quét tin nhắn cũ / quét file từ Web Dashboard gửi sang Bot Userbot
+CREATE TABLE IF NOT EXISTS telegram_crawl_requests (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  chat_id           TEXT NOT NULL,
+  action            TEXT NOT NULL, -- 'scan_history' | 'scan_files'
+  item_limit        INTEGER NOT NULL DEFAULT 100,
+  status            TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'processing' | 'completed' | 'error'
+  result_json       TEXT,
+  error_message     TEXT,
+  created_at        INTEGER NOT NULL,
+  completed_at      INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_tg_crawl_pending ON telegram_crawl_requests(status, created_at);
+

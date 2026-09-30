@@ -1,12 +1,13 @@
-import { TelegramClient } from "telegram";
+import { TelegramClient, Api } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 import { NewMessage } from "telegram/events/index.js";
 import { config } from "../config.js";
-import { getBotState, setBotState } from "../db/index.js";
+import { getBotState, setBotState, getDb } from "../db/index.js";
 import {
   upsertTrackedChat,
   saveRawTelegramMessage,
   saveRawTelegramMessagesBatch,
+  saveKnowledgeItem,
 } from "./db.js";
 import { classifyAndExtractKnowledge } from "./classifier.js";
 import type { TelegramRawMessage } from "./types.js";
@@ -132,6 +133,9 @@ export async function startUserbot(): Promise<{ success: boolean; message: strin
       }
     }, new NewMessage({}));
 
+    // 3. Khởi chạy luồng kiểm tra yêu cầu quét từ Web Dashboard
+    setInterval(() => void consumePendingTelegramCrawlRequests(), 3000);
+
     isConnecting = false;
     return { success: true, message: `Userbot đã kết nối thành công: ${userbotMe?.name}` };
   } catch (err: any) {
@@ -216,9 +220,19 @@ export async function fetchAndClassifyChatHistory(
     // 1. Kéo tin nhắn từ Telegram
     const rawMessages = await clientInstance.getMessages(chatId, { limit });
     const batch: TelegramRawMessage[] = [];
+    const now = Date.now();
 
     for (const m of rawMessages) {
-      if (!m || !m.text) continue;
+      if (!m) continue;
+      const file = (m as any).file;
+      const doc = (m.media as any)?.document;
+      const fileName = file?.name || null;
+      const fileSize = Number(file?.size || doc?.size || 0);
+
+      // Nếu không có cả text lẫn file thì bỏ qua
+      const msgText = String(m.text || "").trim();
+      if (!msgText && !fileName) continue;
+
       const sender = (m.sender as any) || {};
       const senderName = [sender.firstName, sender.lastName].filter(Boolean).join(" ") || sender.title || null;
 
@@ -228,12 +242,14 @@ export async function fetchAndClassifyChatHistory(
         sender_id: m.senderId ? String(m.senderId) : null,
         sender_name: senderName,
         sender_username: sender.username || null,
-        message_text: String(m.text || "").trim(),
+        message_text: msgText || `[Tài liệu đính kèm: ${fileName}]`,
         media_type: (m.media as any)?.photo ? "photo" : (m.media as any)?.document ? "document" : "none",
-        media_caption: "",
+        media_caption: msgText,
+        file_name: fileName,
+        file_size: fileSize || null,
         reply_to_msg_id: m.replyToMsgId ? Number(m.replyToMsgId) : null,
-        date: Number(m.date || Math.floor(Date.now() / 1000)),
-        created_at: Date.now(),
+        date: Number(m.date || Math.floor(now / 1000)),
+        created_at: now,
       });
     }
 
@@ -247,5 +263,132 @@ export async function fetchAndClassifyChatHistory(
   } catch (err: any) {
     console.error(`[telegram-userbot] Lỗi kéo tin nhắn nhóm ${chatId}:`, err);
     throw err;
+  }
+}
+
+/**
+ * Quét toàn bộ file tài liệu (PDF, Word, Excel, Slide, Zip...) trong nhóm
+ */
+export async function scanGroupFiles(
+  chatId: string,
+  limit = 50,
+): Promise<{ filesFound: number; knowledgeCreated: number }> {
+  if (!clientInstance?.connected) {
+    throw new Error("Telegram Userbot chưa online, không thể quét file");
+  }
+
+  try {
+    const rawMessages = await clientInstance.getMessages(chatId, {
+      filter: new Api.InputMessagesFilterDocument(),
+      limit,
+    });
+
+    let filesFound = 0;
+    let knowledgeCreated = 0;
+    const now = Date.now();
+
+    for (const m of rawMessages) {
+      if (!m || !m.media) continue;
+      const file = (m as any).file;
+      const doc = (m.media as any)?.document;
+      const fileName = file?.name || "Tài liệu không tên";
+      const fileSize = Number(file?.size || doc?.size || 0);
+      const fileSizeMb = (fileSize / (1024 * 1024)).toFixed(2);
+      const sender = (m.sender as any) || {};
+      const senderName = [sender.firstName, sender.lastName].filter(Boolean).join(" ") || sender.title || "Thành viên";
+      const caption = String(m.text || "").trim();
+
+      // Lưu tin thô
+      saveRawTelegramMessage({
+        chat_id: chatId,
+        message_id: Number(m.id),
+        sender_id: m.senderId ? String(m.senderId) : null,
+        sender_name: senderName,
+        sender_username: sender.username || null,
+        message_text: caption || `[Tài liệu: ${fileName}]`,
+        media_type: "document",
+        media_caption: caption,
+        file_name: fileName,
+        file_size: fileSize,
+        reply_to_msg_id: m.replyToMsgId ? Number(m.replyToMsgId) : null,
+        date: Number(m.date || Math.floor(now / 1000)),
+        created_at: now,
+      });
+      filesFound++;
+
+      // Lưu thành đơn vị tri thức chuyên mục shared_files
+      saveKnowledgeItem({
+        chat_id: chatId,
+        category: "shared_files",
+        title: `Tài liệu: ${fileName} (${fileSizeMb} MB)`,
+        summary: `Tài liệu chia sẻ bởi ${senderName} vào ngày ${new Date(Number(m.date || 0) * 1000).toLocaleDateString("vi-VN")}.${caption ? " Chú thích kèm theo: " + caption : ""}`,
+        key_takeaways: [
+          `Tên tài liệu: ${fileName}`,
+          `Kích thước: ${fileSizeMb} MB`,
+          `Người chia sẻ: ${senderName}`,
+          caption ? `Mô tả: ${caption}` : "Tài liệu đính kèm nhóm",
+        ],
+        original_quotes: caption,
+        useful_links: [],
+        raw_message_ids: [Number(m.id)],
+        date_range: new Date(Number(m.date || 0) * 1000).toISOString().slice(0, 10),
+        created_at: now,
+        updated_at: now,
+      });
+      knowledgeCreated++;
+    }
+
+    return { filesFound, knowledgeCreated };
+  } catch (err: any) {
+    console.error(`[telegram-userbot] Lỗi quét file nhóm ${chatId}:`, err);
+    throw err;
+  }
+}
+
+/**
+ * Xử lý các yêu cầu quét tin nhắn cũ / quét file từ Web Dashboard gửi sang
+ */
+export async function consumePendingTelegramCrawlRequests(): Promise<void> {
+  if (!clientInstance?.connected) return;
+
+  const db = getDb();
+  const pending = db
+    .prepare(`
+      SELECT * FROM telegram_crawl_requests 
+      WHERE status = 'pending' 
+      ORDER BY created_at ASC 
+      LIMIT 1
+    `)
+    .get() as any;
+
+  if (!pending) return;
+
+  const reqId = pending.id;
+  db.prepare(`UPDATE telegram_crawl_requests SET status = 'processing' WHERE id = ?`).run(reqId);
+
+  try {
+    const limit = pending.item_limit || 100;
+    let result: any = null;
+
+    if (pending.action === "scan_files") {
+      result = await scanGroupFiles(pending.chat_id, limit);
+    } else {
+      result = await fetchAndClassifyChatHistory(pending.chat_id, limit);
+    }
+
+    db.prepare(`
+      UPDATE telegram_crawl_requests 
+      SET status = 'completed', result_json = ?, completed_at = ? 
+      WHERE id = ?
+    `).run(JSON.stringify(result), Date.now(), reqId);
+
+    console.log(`[telegram-userbot] ✅ Hoàn thành yêu cầu ${pending.action} cho chat ${pending.chat_id}:`, result);
+  } catch (err: any) {
+    console.error(`[telegram-userbot] ❌ Lỗi xử lý yêu cầu ${pending.action}:`, err);
+    db.prepare(`
+      UPDATE telegram_crawl_requests 
+      SET status = 'error', error_message = ?, completed_at = ? 
+      WHERE id = ?
+    `).run(String(err?.message || err), Date.now(), reqId);
   }
 }

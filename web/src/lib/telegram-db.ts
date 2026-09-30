@@ -62,6 +62,28 @@ export function setChatTrackingStatusWeb(chatId: string, isTracked: boolean) {
   `).run(isTracked ? 1 : 0, Date.now(), chatId);
 }
 
+export function createCrawlRequestWeb(params: {
+  chatId: string;
+  action: "scan_history" | "scan_files";
+  limit?: number;
+}): number {
+  const db = getDb();
+  const res = db
+    .prepare(`
+      INSERT INTO telegram_crawl_requests (chat_id, action, item_limit, status, created_at)
+      VALUES (?, ?, ?, 'pending', ?)
+    `)
+    .run(params.chatId, params.action, params.limit || 50, Date.now());
+  return Number(res.lastInsertRowid);
+}
+
+export function getCrawlRequestStatusWeb(requestId: number) {
+  const db = getDb();
+  return db
+    .prepare(`SELECT * FROM telegram_crawl_requests WHERE id = ?`)
+    .get(requestId) as any;
+}
+
 export function listKnowledgeItemsWeb(filter?: {
   chatId?: string;
   category?: string;

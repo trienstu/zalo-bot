@@ -59,8 +59,38 @@ const CATEGORY_META: Record<
     icon: "📰",
     color: "7030A0",
   },
-  general: {
+  trading_signals: {
     order: 6,
+    label: "KÈO GIAO DỊCH, SETUP & TÍN HIỆU THỊ TRƯỜNG (TRADING SIGNALS)",
+    icon: "🎯",
+    color: "7030A0",
+  },
+  technical_analysis: {
+    order: 7,
+    label: "PHÂN TÍCH KỸ THUẬT & CHỈ BÁO THỰC CHIẾN (PRICE ACTION, SMC, INDICATORS)",
+    icon: "📊",
+    color: "1F497D",
+  },
+  macro_news: {
+    order: 8,
+    label: "VĨ MÔ, TIN TỨC KINH TẾ & DÒNG TIỀN (MACRO & FLOWS)",
+    icon: "🌐",
+    color: "C00000",
+  },
+  risk_psychology: {
+    order: 9,
+    label: "TÂM LÝ GIAO DỊCH & QUẢN TRỊ RỦI RO (RISK MANAGEMENT & PSYCHOLOGY)",
+    icon: "🛡️",
+    color: "B25900",
+  },
+  shared_files: {
+    order: 10,
+    label: "TÀI LIỆU, SÁCH & FILE ĐÍNH KÈM CHIA SẺ TRONG NHÓM",
+    icon: "📁",
+    color: "375623",
+  },
+  general: {
+    order: 11,
     label: "THẢO LUẬN & KIẾN THỨC TỔNG HỢP HỮU ÍCH",
     icon: "💡",
     color: "595959",
