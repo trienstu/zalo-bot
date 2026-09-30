@@ -380,6 +380,32 @@ export function resolveImageModelPreference(
 }
 
 /**
+ * Chuẩn hóa tên model gọi vào 9Router:
+ * - Các alias "codex", "auto", undefined -> Map sang config.codexImageModel || "cx/gpt-image-2.5"
+ * - Alias "gemini" -> Map sang "ag/gemini-3.1-flash-image"
+ * - Nếu là model ID đầy đủ (bắt đầu bằng "cx/" hoặc "ag/") -> Giữ nguyên model ID đó
+ */
+export function normalizeImageModelId(
+  rawRequestedModel?: string,
+): { geminiModel: string; codexModel: string } {
+  const defaultCodex = config.codexImageModel || "cx/gpt-image-2.5";
+  const defaultGemini = "ag/gemini-3.1-flash-image";
+
+  const raw = (rawRequestedModel || "").trim();
+
+  let codexModel = defaultCodex;
+  let geminiModel = defaultGemini;
+
+  if (raw.startsWith("cx/")) {
+    codexModel = raw;
+  } else if (raw.startsWith("ag/")) {
+    geminiModel = raw;
+  }
+
+  return { geminiModel, codexModel };
+}
+
+/**
  * Sinh hoặc sửa ảnh chất lượng cao với chuỗi Cascade Fallback đa tầng tự động:
  * - Hỗ trợ cả OpenAI Codex (cx/gpt-image-2.5) và Google Gemini (ag/gemini-3.1-flash-image)
  * - Tự động định tuyến thông minh theo yêu cầu người dùng hoặc phong cách vẽ (màu nước, vẽ tay -> Gemini; tả thực, 8K -> Codex)
@@ -420,8 +446,7 @@ export async function generateCodexImage(
     const prefersGemini = preferredEngine === "gemini";
     const prefersCodex = preferredEngine === "codex";
 
-    const geminiModel = "ag/gemini-3.1-flash-image";
-    const codexModel = (options?.model && !prefersGemini ? options.model : null) || config.codexImageModel || "cx/gpt-image-2.5";
+    const { geminiModel, codexModel } = normalizeImageModelId(options?.model);
 
     // 2. Làm giàu & dịch visual prompt sang tiếng Anh
     const finalPrompt = await enhanceVisualPrompt(prompt, ratio, baseUrl, apiKey, isEdit);

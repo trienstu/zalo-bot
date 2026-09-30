@@ -97,4 +97,35 @@ test("resolveImageModelPreference tuân thủ phân cấp ưu tiên (Explicit En
   );
 });
 
+test("normalizeImageModelId chuẩn hóa chính xác alias sang model ID 9Router", async () => {
+  const { normalizeImageModelId } = await import("./codex-image.js");
+  const { config } = await import("./config.js");
+  const expectedCodex = config.codexImageModel || "cx/gpt-image-2.5";
+
+  // 1. Alias "codex" phải map sang ID có prefix "cx/"
+  const codexRes = normalizeImageModelId("codex");
+  assert.equal(codexRes.codexModel, expectedCodex);
+  assert.equal(codexRes.geminiModel, "ag/gemini-3.1-flash-image");
+
+  // 2. Alias "gemini" phải map sang ID có prefix "ag/"
+  const geminiRes = normalizeImageModelId("gemini");
+  assert.equal(geminiRes.geminiModel, "ag/gemini-3.1-flash-image");
+  assert.equal(geminiRes.codexModel, expectedCodex);
+
+  // 3. Alias "auto" hoặc undefined
+  const autoRes = normalizeImageModelId("auto");
+  assert.equal(autoRes.codexModel, expectedCodex);
+
+  const emptyRes = normalizeImageModelId(undefined);
+  assert.equal(emptyRes.codexModel, expectedCodex);
+  assert.equal(emptyRes.geminiModel, "ag/gemini-3.1-flash-image");
+
+  // 4. Model ID cụ thể có prefix giữ nguyên
+  const customCx = normalizeImageModelId("cx/custom-image-model");
+  assert.equal(customCx.codexModel, "cx/custom-image-model");
+
+  const customAg = normalizeImageModelId("ag/gemini-3.8-flash-image");
+  assert.equal(customAg.geminiModel, "ag/gemini-3.8-flash-image");
+});
+
 
