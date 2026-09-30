@@ -57,6 +57,54 @@ export function prepareVideoImageDataUrl(input: string | Buffer | null | undefin
 }
 
 /**
+ * Phát hiện loại media dựa trên header magic bytes nhị phân
+ */
+export function detectMediaTypeFromBuffer(buffer: Buffer): { isVideo: boolean; format: string } {
+  if (!buffer || buffer.length < 16) {
+    return { isVideo: false, format: "unknown_too_small" };
+  }
+
+  // 1. Nhận diện các định dạng ảnh phổ biến (để loại trừ ngay lập tức)
+  // JPEG: FF D8 FF
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return { isVideo: false, format: "jpeg" };
+  }
+  // PNG: 89 50 4E 47
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+    return { isVideo: false, format: "png" };
+  }
+  // WebP: RIFF .... WEBP
+  if (buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "WEBP") {
+    return { isVideo: false, format: "webp" };
+  }
+  // GIF: GIF87a / GIF89a
+  if (buffer.toString("ascii", 0, 3) === "GIF") {
+    return { isVideo: false, format: "gif" };
+  }
+
+  // 2. Nhận diện các định dạng video chuẩn
+  // MP4 / ISO Base Media File Format: ftyp box ở byte thứ 4..8 (hoặc moov/mdat/skip/wide)
+  const boxType = buffer.toString("ascii", 4, 8);
+  if (boxType === "ftyp" || boxType === "moov" || boxType === "mdat" || boxType === "skip" || boxType === "wide") {
+    return { isVideo: true, format: "mp4" };
+  }
+  // WebM / MKV: 1A 45 DF A3 (EBML)
+  if (buffer[0] === 0x1a && buffer[1] === 0x45 && buffer[2] === 0xdf && buffer[3] === 0xa3) {
+    return { isVideo: true, format: "webm" };
+  }
+  // AVI: RIFF .... AVI
+  if (buffer.toString("ascii", 0, 4) === "RIFF" && buffer.toString("ascii", 8, 12) === "AVI ") {
+    return { isVideo: true, format: "avi" };
+  }
+  // MPEG transport / program stream
+  if (buffer[0] === 0x00 && buffer[1] === 0x00 && buffer[2] === 0x01 && (buffer[3] === 0xba || buffer[3] === 0xb3)) {
+    return { isVideo: true, format: "mpeg" };
+  }
+
+  return { isVideo: false, format: "unknown" };
+}
+
+/**
  * Sinh video AI (Text-to-Video hoặc Image-to-Video) qua Muse2API
  */
 export async function generateAiVideo(
@@ -151,7 +199,22 @@ export async function generateAiVideo(
         console.log(`[video-generator] 🔄 Task [${taskId}] tiến độ: ${progress}% (status: ${status})`);
 
         if (status === "completed" || status === "succeeded") {
-          videoUrl = pollData?.result?.url || pollData?.url || pollData?.video?.url || "";
+          // Phòng thủ: Kiểm tra xem engine có trả về nhầm hình ảnh thumbnail không
+          if (pollData?.result?.kind === "image") {
+            return {
+              success: false,
+              error: "Engine tạo video trả về tệp hình ảnh thay vì video (vui lòng thử lại)",
+            };
+          }
+          const candidateUrl = pollData?.result?.url || pollData?.url || pollData?.video?.url || "";
+          if (/\.(jpe?g|png|webp|gif)(\?.*)?$/i.test(candidateUrl)) {
+            return {
+              success: false,
+              error: "Engine tạo video trả về tệp định dạng ảnh thay vì video",
+            };
+          }
+
+          videoUrl = candidateUrl;
           break;
         }
 
@@ -189,11 +252,29 @@ export async function generateAiVideo(
       };
     }
 
+    const contentType = mediaRes.headers.get("content-type") || "";
+    if (contentType.startsWith("image/")) {
+      return {
+        success: false,
+        error: `Máy chủ trả về loại nội dung hình ảnh (${contentType}) thay vì luồng video`,
+      };
+    }
+
     const arrayBuffer = await mediaRes.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
+
+    // 4. Kiểm tra Magic Bytes nhị phân: Bắt buộc phải là video, không được là ảnh
+    const detected = detectMediaTypeFromBuffer(buffer);
+    if (!detected.isVideo) {
+      return {
+        success: false,
+        error: `Tệp tải về không phải luồng video hợp lệ (phát hiện định dạng: ${detected.format})`,
+      };
+    }
+
     fs.writeFileSync(targetPath, buffer);
 
-    console.log(`[video-generator] ✅ Video đã tạo thành công: ${targetPath} (${(buffer.length / 1024 / 1024).toFixed(2)} MB)`);
+    console.log(`[video-generator] ✅ Video đã tạo thành công: ${targetPath} (${(buffer.length / 1024 / 1024).toFixed(2)} MB, format: ${detected.format})`);
 
     return {
       success: true,

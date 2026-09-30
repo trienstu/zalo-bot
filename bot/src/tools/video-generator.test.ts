@@ -4,6 +4,7 @@ import {
   prepareVideoImageDataUrl,
   isMuseVideoConfigured,
   generateAiVideo,
+  detectMediaTypeFromBuffer,
 } from "./video-generator.js";
 import { checkIsVideoRequest } from "./file-generator.js";
 
@@ -57,6 +58,38 @@ test("checkIsVideoRequest nhận diện chính xác các ý định tạo video 
   assert.equal(checkIsVideoRequest("làm lại cẩn thận hơn", quoteWithVideo), true);
 });
 
+test("detectMediaTypeFromBuffer nhận diện chính xác định dạng video và chặn ảnh", () => {
+  // 1. JPEG image header: FF D8 FF
+  const jpegBuf = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01]);
+  const jpegRes = detectMediaTypeFromBuffer(jpegBuf);
+  assert.equal(jpegRes.isVideo, false);
+  assert.equal(jpegRes.format, "jpeg");
+
+  // 2. PNG image header: 89 50 4E 47
+  const pngBuf = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52]);
+  const pngRes = detectMediaTypeFromBuffer(pngBuf);
+  assert.equal(pngRes.isVideo, false);
+  assert.equal(pngRes.format, "png");
+
+  // 3. WebP image header: RIFF....WEBP
+  const webpBuf = Buffer.from("RIFFxxxxWEBPVP8 ");
+  const webpRes = detectMediaTypeFromBuffer(webpBuf);
+  assert.equal(webpRes.isVideo, false);
+  assert.equal(webpRes.format, "webp");
+
+  // 4. MP4 video header: 00 00 00 20 ftyp mp42
+  const mp4Buf = Buffer.from([0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70, 0x6d, 0x70, 0x34, 0x32, 0x00, 0x00, 0x00, 0x00]);
+  const mp4Res = detectMediaTypeFromBuffer(mp4Buf);
+  assert.equal(mp4Res.isVideo, true);
+  assert.equal(mp4Res.format, "mp4");
+
+  // 5. WebM video header: 1A 45 DF A3
+  const webmBuf = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01, 0x42, 0xf7, 0x81, 0x01, 0x42, 0xf2, 0x81]);
+  const webmRes = detectMediaTypeFromBuffer(webmBuf);
+  assert.equal(webmRes.isVideo, true);
+  assert.equal(webmRes.format, "webm");
+});
+
 test("generateAiVideo trả về lỗi an toàn khi không có MUSE_API_KEY", async () => {
   const { config } = await import("../config.js");
   const originalKey = config.museApiKey;
@@ -69,3 +102,4 @@ test("generateAiVideo trả về lỗi an toàn khi không có MUSE_API_KEY", as
     (config as any).museApiKey = originalKey;
   }
 });
+
