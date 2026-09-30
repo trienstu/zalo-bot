@@ -17,6 +17,7 @@ import {
 import ExcelJS from "exceljs";
 import PptxGenJS from "pptxgenjs";
 import { checkIsMusicRequest } from "./music-generator.js";
+import { getPPTMasterConfig, renderPPTMasterPresentation } from "./pptmaster-bridge.js";
 
 const GENERATED_FILES_DIR = path.resolve(process.cwd(), "data", "generated-files");
 
@@ -854,7 +855,30 @@ export async function generatePowerPointFile(
   title: string,
   slides: SlideContent[],
   themeName: ThemeName = "navy",
+  options?: { enableNarration?: boolean; voiceHint?: string; voiceStyle?: string },
 ): Promise<GeneratedFileResult> {
+  // 1. Ưu tiên render chuẩn PowerPoint DrawingML qua PPT Master
+  try {
+    const pptmasterConfig = getPPTMasterConfig();
+    if (pptmasterConfig.isAvailable) {
+      const sanitizedSlides = sanitizeSlideList(slides, title);
+      const effectiveSlides = sanitizedSlides.length > 0 ? sanitizedSlides : slides;
+      const res = await renderPPTMasterPresentation({
+        fileName,
+        title,
+        slides: effectiveSlides,
+        themeName,
+        enableNarration: options?.enableNarration,
+        voiceHint: options?.voiceHint,
+        voiceStyle: options?.voiceStyle,
+      });
+      return res;
+    }
+  } catch (err: any) {
+    console.warn("[file-generator] PPT Master engine gặp sự cố, fallback sang PptxGenJS:", err?.message || err);
+  }
+
+  // 2. Fallback sang PptxGenJS
   try {
     ensureOutputDir();
     cleanOldGeneratedFiles(24);

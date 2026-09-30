@@ -32,6 +32,7 @@ import {
   type ThemeName,
 } from "./tools/file-generator.js";
 import { renderPresentationVideoFromSlides } from "./workers/presentation-video-processor.js";
+import { renderDecree30Document } from "./tools/pptmaster-bridge.js";
 import {
   synthesizeSpeech,
   synthesizeDialogue,
@@ -2092,8 +2093,25 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
         if (slides.length === 0 && content) {
           slides = parseMarkdownToSlides(content, title);
         }
-        const result = await generatePowerPointFile(fileName, title, slides, theme);
+        const enableNarration = Boolean(args?.enableNarration || args?.withAudio || args?.narration);
+        const voiceHint = args?.voiceHint ? String(args.voiceHint).trim() : undefined;
+        const result = await generatePowerPointFile(fileName, title, slides, theme, {
+          enableNarration,
+          voiceHint,
+        });
         return result;
+      } else if (fileType === "nd30" || fileType === "van_ban") {
+        if (args?.nd30Data && typeof args.nd30Data === "object") {
+          const result = await renderDecree30Document({
+            fileName,
+            data: args.nd30Data,
+          });
+          return result;
+        } else {
+          const blocks = parseMarkdownToWordBlocks(content, title);
+          const result = await generateWordDoc(fileName, title, blocks);
+          return result;
+        }
       } else if (fileType === "xlsx") {
         if (Array.isArray(args?.sheets) && args.sheets.length > 0) {
           const result = await generateExcelFile(fileName, args.sheets as any, theme);
