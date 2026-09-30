@@ -641,3 +641,78 @@ CREATE TABLE IF NOT EXISTS direct_interactions (
 CREATE INDEX IF NOT EXISTS idx_direct_interactions_user ON direct_interactions(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_direct_interactions_status ON direct_interactions(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_direct_interactions_time ON direct_interactions(created_at DESC);
+
+-- -------------------------------------------------------------
+-- HỆ THỐNG THU THẬP & PHÂN LOẠI TRI THỨC TELEGRAM (USERBOT)
+-- -------------------------------------------------------------
+
+-- Danh sách các nhóm/kênh Telegram được theo dõi
+CREATE TABLE IF NOT EXISTS telegram_tracked_chats (
+  chat_id           TEXT PRIMARY KEY,
+  title             TEXT NOT NULL,
+  username          TEXT,
+  chat_type         TEXT NOT NULL DEFAULT 'supergroup', -- 'group' | 'supergroup' | 'channel'
+  is_tracked        INTEGER NOT NULL DEFAULT 1,         -- 1 = đang theo dõi, 0 = tạm dừng
+  last_message_id   INTEGER NOT NULL DEFAULT 0,
+  total_messages    INTEGER NOT NULL DEFAULT 0,
+  joined_at         INTEGER NOT NULL,
+  updated_at        INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tg_chats_tracked ON telegram_tracked_chats(is_tracked);
+
+-- Kho lưu trữ tin nhắn thô từ các group Telegram
+CREATE TABLE IF NOT EXISTS telegram_messages (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  chat_id           TEXT NOT NULL,
+  message_id        INTEGER NOT NULL,
+  sender_id         TEXT,
+  sender_name       TEXT,
+  sender_username   TEXT,
+  message_text      TEXT NOT NULL,
+  media_type        TEXT DEFAULT 'none', -- 'none' | 'photo' | 'video' | 'document'
+  media_caption     TEXT DEFAULT '',
+  reply_to_msg_id   INTEGER,
+  date              INTEGER NOT NULL,    -- unix timestamp của tin nhắn gốc
+  created_at        INTEGER NOT NULL,    -- thời điểm lưu vào DB
+  UNIQUE(chat_id, message_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tg_messages_chat_date ON telegram_messages(chat_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_tg_messages_created ON telegram_messages(created_at DESC);
+
+-- Tri thức được AI tinh lọc & phân loại từ các cuộc thảo luận
+CREATE TABLE IF NOT EXISTS telegram_knowledge_items (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  chat_id           TEXT NOT NULL,
+  category          TEXT NOT NULL, -- 'ai_prompt' | 'tools_tech' | 'business_real_estate' | 'tips_workflow' | 'news_insight' | 'general'
+  title             TEXT NOT NULL,
+  summary           TEXT NOT NULL,
+  key_takeaways     TEXT NOT NULL DEFAULT '[]', -- JSON array of strings
+  original_quotes   TEXT DEFAULT '',
+  useful_links      TEXT NOT NULL DEFAULT '[]', -- JSON array of URLs
+  raw_message_ids   TEXT NOT NULL DEFAULT '[]', -- JSON array of message_ids
+  date_range        TEXT NOT NULL DEFAULT '',
+  created_at        INTEGER NOT NULL,
+  updated_at        INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tg_knowledge_chat ON telegram_knowledge_items(chat_id);
+CREATE INDEX IF NOT EXISTS idx_tg_knowledge_cat ON telegram_knowledge_items(category);
+CREATE INDEX IF NOT EXISTS idx_tg_knowledge_time ON telegram_knowledge_items(created_at DESC);
+
+-- Lịch sử các đợt xuất file Word (.docx)
+CREATE TABLE IF NOT EXISTS telegram_exports (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  title             TEXT NOT NULL,
+  file_name         TEXT NOT NULL,
+  file_path         TEXT NOT NULL,
+  file_size         INTEGER NOT NULL DEFAULT 0,
+  item_count        INTEGER NOT NULL DEFAULT 0,
+  filter_category   TEXT DEFAULT 'all',
+  filter_days       INTEGER DEFAULT 7,
+  created_at        INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tg_exports_time ON telegram_exports(created_at DESC);
+

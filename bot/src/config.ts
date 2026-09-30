@@ -317,6 +317,12 @@ export const config = {
   /** message_thread_id của forum topic. Để trống nếu đích là channel/chat thường. */
   telegramForwardTopicId: readOptionalPositiveInt("TELEGRAM_FORWARD_TOPIC_ID"),
 
+  /** Telegram Client API (Userbot MTProto) để thu thập tin nhắn từ các group Telegram */
+  telegramUserbotEnabled: readBool("TELEGRAM_USERBOT_ENABLED", false),
+  telegramAppId: readOptionalPositiveInt("TELEGRAM_APP_ID") || 0,
+  telegramAppHash: process.env.TELEGRAM_APP_HASH?.trim() || "",
+  telegramSessionString: process.env.TELEGRAM_SESSION_STRING?.trim() || "",
+
   /** Timeout chờ duyệt cleanup qua Telegram (brainstorm: 48h). */
   approvalTimeoutHours: readInt("APPROVAL_TIMEOUT_HOURS", 48),
 

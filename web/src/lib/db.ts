@@ -257,6 +257,61 @@ function ensureWebSchema(database: Database.Database): void {
       updated_at        INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_bot_friends_allow ON bot_friends(allow_direct);
+
+    CREATE TABLE IF NOT EXISTS telegram_tracked_chats (
+      chat_id           TEXT PRIMARY KEY,
+      title             TEXT NOT NULL,
+      username          TEXT,
+      chat_type         TEXT NOT NULL DEFAULT 'supergroup',
+      is_tracked        INTEGER NOT NULL DEFAULT 1,
+      last_message_id   INTEGER NOT NULL DEFAULT 0,
+      total_messages    INTEGER NOT NULL DEFAULT 0,
+      joined_at         INTEGER NOT NULL,
+      updated_at        INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS telegram_messages (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id           TEXT NOT NULL,
+      message_id        INTEGER NOT NULL,
+      sender_id         TEXT,
+      sender_name       TEXT,
+      sender_username   TEXT,
+      message_text      TEXT NOT NULL,
+      media_type        TEXT DEFAULT 'none',
+      media_caption     TEXT DEFAULT '',
+      reply_to_msg_id   INTEGER,
+      date              INTEGER NOT NULL,
+      created_at        INTEGER NOT NULL,
+      UNIQUE(chat_id, message_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS telegram_knowledge_items (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id           TEXT NOT NULL,
+      category          TEXT NOT NULL,
+      title             TEXT NOT NULL,
+      summary           TEXT NOT NULL,
+      key_takeaways     TEXT NOT NULL DEFAULT '[]',
+      original_quotes   TEXT DEFAULT '',
+      useful_links      TEXT NOT NULL DEFAULT '[]',
+      raw_message_ids   TEXT NOT NULL DEFAULT '[]',
+      date_range        TEXT NOT NULL DEFAULT '',
+      created_at        INTEGER NOT NULL,
+      updated_at        INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS telegram_exports (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      title             TEXT NOT NULL,
+      file_name         TEXT NOT NULL,
+      file_path         TEXT NOT NULL,
+      file_size         INTEGER NOT NULL DEFAULT 0,
+      item_count        INTEGER NOT NULL DEFAULT 0,
+      filter_category   TEXT DEFAULT 'all',
+      filter_days       INTEGER DEFAULT 7,
+      created_at        INTEGER NOT NULL
+    );
   `);
 
   try {

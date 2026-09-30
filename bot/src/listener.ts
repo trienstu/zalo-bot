@@ -1528,6 +1528,25 @@ export async function runListener(): Promise<void> {
   }
   setInterval(() => void checkDailyAiNewsBriefingLoop(), 60000);
 
+  // Khởi động Telegram Userbot nếu có cấu hình hoặc session
+  try {
+    const { getStoredSessionString, startUserbot } = await import("./telegram-collector/client.js");
+    if (config.telegramUserbotEnabled || getStoredSessionString()) {
+      startUserbot()
+        .then((res) => {
+          if (res.success) {
+            console.log(`[listener] ${res.message}`);
+          } else {
+            console.log(`[listener] Telegram Userbot: ${res.message}`);
+          }
+        })
+        .catch((e) => {
+          console.warn(`[listener] Không thể khởi động Telegram Userbot: ${String(e)}`);
+        });
+    }
+  } catch (e) {
+    // Không ảnh hưởng đến Zalo listener
+  }
 }
 
 

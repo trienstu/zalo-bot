@@ -33,6 +33,7 @@ import {
   ChevronDown,
   Terminal,
   FolderGit2,
+  Send,
 } from "lucide-react";
 import { BotSwitcher } from "@/components/bot-switcher";
 
@@ -49,6 +50,7 @@ interface GroupItem {
 const NAV = [
   { href: "/", label: "Tổng quan", shortLabel: "Tổng quan", icon: LayoutDashboard },
   { href: "/hub", label: "Kho Kiến Thức", shortLabel: "Kiến thức", icon: Sparkles },
+  { href: "/telegram", label: "Tri Thức Telegram", shortLabel: "Telegram", icon: Send },
   { href: "/repos", label: "Kho GitHub Repo", shortLabel: "GitHub", icon: FolderGit2 },
   { href: "/members", label: "Thành viên", shortLabel: "Thành viên", icon: Users },
   { href: "/friends", label: "Bạn bè & Chat 1:1", shortLabel: "Bạn bè", icon: UserCheck },
