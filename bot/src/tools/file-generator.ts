@@ -831,9 +831,23 @@ export function sanitizeSlideList(rawSlides: any[], defaultTitle: string): Slide
       else layout = "bullets";
     }
 
+    const isGeneric = !slideTitle || /^(nội dung|slide|phần)\s*\d*$/i.test(slideTitle.trim());
+    let resolvedTitle = slideTitle;
+    if (isGeneric) {
+      if (raw.kicker && raw.kicker.trim().length > 3) {
+        resolvedTitle = raw.kicker.trim();
+      } else if (raw.col1Title && raw.col1Title.trim().length > 3) {
+        resolvedTitle = raw.col1Title.trim();
+      } else if (idx === 0) {
+        resolvedTitle = defaultTitle;
+      } else {
+        resolvedTitle = `Nội Dung ${cleanedSlides.length + 1}`;
+      }
+    }
+
     cleanedSlides.push({
       ...raw,
-      title: slideTitle || (idx === 0 ? defaultTitle : `Nội Dung ${cleanedSlides.length + 1}`),
+      title: resolvedTitle,
       layout,
       bullets: finalBullets.length > 0 ? finalBullets : raw.bullets,
     });

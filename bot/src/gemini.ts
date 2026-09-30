@@ -2084,7 +2084,12 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
     case "generate_file": {
       const fileType = String(args?.fileType || "md").toLowerCase().trim();
       const fileName = String(args?.fileName || "tai_lieu").trim();
-      const title = String(args?.title || "Tài liệu").trim();
+      const rawTitle = String(args?.title || "").trim();
+      let title = rawTitle;
+      if (!title || title.toLowerCase() === "tài liệu") {
+        title = fileName.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+        if (title.toLowerCase() === "tai lieu") title = "Báo Cáo Trình Chiếu";
+      }
       const content = String(args?.content || "").trim();
       const theme = (args?.theme || "navy") as ThemeName;
 

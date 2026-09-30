@@ -45,3 +45,31 @@ test("getPPTMasterConfig nhận diện môi trường cấu hình chính xác", 
   assert.ok(typeof config.pythonBin === "string", "pythonBin phải là string");
   assert.ok(typeof config.rootDir === "string", "rootDir phải là string");
 });
+
+test("wrapTextToLines ngắt dòng chính xác và không bị tràn text", async () => {
+  const { wrapTextToLines } = await import("./pptmaster-bridge.js");
+  const longSentence = "Tổ hợp căn hộ cao cấp ven sông Sài Gòn với quy mô 622 căn hộ";
+  const lines = wrapTextToLines(longSentence, 25, 3);
+  assert.ok(lines.length >= 2, "Văn bản dài phải được tách thành ít nhất 2 dòng");
+  lines.forEach((l) => {
+    assert.ok(l.length <= 28, `Độ dài dòng "${l}" không được vượt quá giới hạn`);
+  });
+});
+
+test("generateSlideSVG cho two_content bọc dòng trong cột và không đè nhau", () => {
+  const theme = getTheme("navy");
+  const slide2Col: SlideContent = {
+    layout: "two_content",
+    title: "Vị Trí & Liên Kết",
+    col1Title: "Vị Trí Ven Sông",
+    col1Bullets: ["Mặt tiền đường Vĩnh Phú 29 khu vực Lái Thiêu ven sông Sài Gòn"],
+    col2Title: "Hạ Tầng Giao Thông",
+    col2Bullets: ["Kết nối trực tiếp trục huyết mạch Đông Bắc về trung tâm"],
+  };
+
+  const svg = generateSlideSVG(slide2Col, 2, 5, theme);
+  assert.ok(svg.includes("col_left"), "Phải có group col_left");
+  assert.ok(svg.includes("col_right"), "Phải có group col_right");
+  assert.ok(!svg.includes("dominant-baseline"), "Không chứa dominant-baseline");
+});
+
