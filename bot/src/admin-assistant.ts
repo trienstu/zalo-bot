@@ -619,7 +619,7 @@ function cleanDraftedPost(text: string): string {
 const userLastDirectInteractionMap = new Map<string, number>();
 const DM_SESSION_GAP_MS = 10 * 60 * 1000; // 10 phút không tương tác được tính là phiên mới
 
-async function notifyAdmins(api: any, message: string, excludeUserId?: string): Promise<void> {
+export async function notifyAdmins(api: any, message: string, excludeUserId?: string): Promise<void> {
   const adminIds = getAllAdminUserIds();
   for (const adminId of adminIds) {
     if (excludeUserId && adminId === excludeUserId) continue;
@@ -1250,6 +1250,15 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         userPrompt: taskCmd.taskPrompt,
         quoteText: inheritedQuote,
       }).catch((err) => console.error("[admin-assistant] Lỗi runHermesTaskJob:", err));
+      return;
+    }
+
+    // 🖥️ BÁO CÁO SỨC KHỎE MÁY CHỦ & TIẾN TRÌNH BOT
+    if (/^(?:\/health|\/server|\/status|báo cáo máy chủ|sức khỏe máy chủ|tình trạng máy chủ|check server|kiểm tra máy chủ)/i.test(rawText)) {
+      const { getSystemMetrics, formatSystemReport } = await import("./system-monitor.js");
+      const metrics = await getSystemMetrics();
+      const report = formatSystemReport(metrics, "BÁO CÁO SỨC KHỎE MÁY CHỦ THỰC THỜI");
+      await sendDirectText(api, sender, report);
       return;
     }
 

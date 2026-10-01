@@ -87,6 +87,13 @@ import {
 import { handleAdminDirectInteraction } from "./admin-assistant.js";
 import { ThreadType } from "zca-js";
 import { transcribeCloudflareAudio, isCloudflareConfigured } from "./cloudflare-ai.js";
+import { initSystemMonitoring } from "./system-monitor.js";
+import {
+  initHostAssistant,
+  handleGroupMentions,
+  handleAdminActivity,
+  checkAndNotifyCustomerUrgency,
+} from "./host-assistant.js";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -907,6 +914,16 @@ export async function runListener(): Promise<void> {
       console.log(`[listener] 💬 Nhận tin nhắn 1:1 từ [${displayName}] (${targetUserId}): "${text}" (isSelf=${Boolean(payload?.isSelf)})`);
 
       if (targetUserId) {
+        if (text && !payload?.isSelf) {
+          void checkAndNotifyCustomerUrgency(api, {
+            threadId: targetUserId,
+            sender: targetUserId,
+            displayName,
+            text,
+            isGroup: false,
+          }).catch(() => {});
+        }
+
         void threadMutex
           .runExclusive(targetUserId, `dm_${targetUserId}`, async () => {
             await handleAdminDirectInteraction(api, {
@@ -982,6 +999,32 @@ export async function runListener(): Promise<void> {
           isSelf: Boolean(payload?.isSelf),
           now: Date.now(),
         });
+
+        // Ghi nhận hoạt động Admin trong nhóm (hủy cảnh báo tag) và kiểm tra tag/độ gấp
+        handleAdminActivity(threadId, sender);
+
+        const mentions = Array.isArray(payload?.data?.mentions) ? payload.data.mentions : [];
+        if (mentions.length > 0) {
+          handleGroupMentions(api, {
+            threadId,
+            sender,
+            displayName,
+            text,
+            mentions,
+            msgId: String(payload?.data?.msgId ?? ""),
+          });
+        }
+
+        if (!payload?.isSelf) {
+          void checkAndNotifyCustomerUrgency(api, {
+            threadId,
+            sender,
+            displayName,
+            text,
+            isGroup: true,
+          }).catch(() => {});
+        }
+
         // Kiểm duyệt từ khoá cấm: KHÔNG tự xử lý tin của chính bot (isSelf). Fire-and-forget
         // để không chặn vòng nhận event; lỗi nuốt bên trong moderateMessage.
         if (!payload?.isSelf) {
@@ -1562,6 +1605,14 @@ export async function runListener(): Promise<void> {
     }
   } catch (e) {
     // Không ảnh hưởng đến Zalo listener
+  }
+
+  // GIAI ĐOẠN 1: Khởi động Giám sát máy chủ (System Monitor) & Phụ tá thông minh (Host Assistant)
+  try {
+    initSystemMonitoring(api);
+    initHostAssistant(api);
+  } catch (e) {
+    console.warn(`[listener] Khởi động System Monitoring & Host Assistant lỗi: ${String(e)}`);
   }
 }
 

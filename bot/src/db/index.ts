@@ -174,9 +174,21 @@ function runColumnMigrations(database: Database.Database): void {
       tasks_json    TEXT DEFAULT '[]',
       created_at    INTEGER NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_direct_interactions_user ON direct_interactions(user_id, created_at);
-    CREATE INDEX IF NOT EXISTS idx_direct_interactions_status ON direct_interactions(status, created_at);
-    CREATE INDEX IF NOT EXISTS idx_direct_interactions_time ON direct_interactions(created_at DESC);
+    CREATE TABLE IF NOT EXISTS admin_mention_alerts (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id      TEXT NOT NULL,
+      group_name    TEXT NOT NULL DEFAULT '',
+      message_id    TEXT NOT NULL,
+      sender_id     TEXT NOT NULL,
+      sender_name   TEXT NOT NULL DEFAULT '',
+      text          TEXT NOT NULL DEFAULT '',
+      admin_id      TEXT NOT NULL,
+      created_at    INTEGER NOT NULL,
+      status        TEXT NOT NULL DEFAULT 'pending',
+      notified_at   INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_mention_alerts_status ON admin_mention_alerts(status, created_at);
+    CREATE INDEX IF NOT EXISTS idx_mention_alerts_group ON admin_mention_alerts(group_id, admin_id);
   `);
 }
 
@@ -4393,5 +4405,107 @@ export function setUserCustomProfile(params: {
     summary: summaryParts.join(", "),
   };
 }
+
+// =========================================================================
+// QUẢN LÝ NHẮC NHỞ ADMIN KHI BỊ TAG TRONG NHÓM (SMART HOST ALERTING)
+// =========================================================================
+
+export interface AdminMentionAlertInput {
+  groupId: string;
+  groupName: string;
+  messageId: string;
+  senderId: string;
+  senderName: string;
+  text: string;
+  adminId: string;
+  createdAt: number;
+}
+
+export interface AdminMentionAlertRow {
+  id: number;
+  group_id: string;
+  group_name: string;
+  message_id: string;
+  sender_id: string;
+  sender_name: string;
+  text: string;
+  admin_id: string;
+  created_at: number;
+  status: "pending" | "answered" | "notified";
+  notified_at: number | null;
+}
+
+export function saveAdminMentionAlert(input: AdminMentionAlertInput): void {
+  const db = getDb();
+  try {
+    db.prepare(`
+      INSERT INTO admin_mention_alerts
+        (group_id, group_name, message_id, sender_id, sender_name, text, admin_id, created_at, status)
+      VALUES
+        (@groupId, @groupName, @messageId, @senderId, @senderName, @text, @adminId, @createdAt, 'pending')
+    `).run(input);
+  } catch (e) {
+    console.warn("[db] saveAdminMentionAlert error:", e);
+  }
+}
+
+export function markAdminMentionsAnswered(groupId: string, adminId: string): void {
+  const db = getDb();
+  try {
+    db.prepare(`
+      UPDATE admin_mention_alerts
+      SET status = 'answered'
+      WHERE group_id = ? AND admin_id = ? AND status = 'pending'
+    `).run(groupId, adminId);
+  } catch (e) {
+    console.warn("[db] markAdminMentionsAnswered error:", e);
+  }
+}
+
+export function getPendingAdminMentionAlerts(minAgeMs: number, maxAgeMs: number): AdminMentionAlertRow[] {
+  const db = getDb();
+  const now = Date.now();
+  const maxCreatedAt = now - minAgeMs;
+  const minCreatedAt = now - maxAgeMs;
+  try {
+    return db.prepare(`
+      SELECT * FROM admin_mention_alerts
+      WHERE status = 'pending' AND created_at <= ? AND created_at >= ?
+      ORDER BY created_at ASC
+    `).all(maxCreatedAt, minCreatedAt) as AdminMentionAlertRow[];
+  } catch (e) {
+    console.warn("[db] getPendingAdminMentionAlerts error:", e);
+    return [];
+  }
+}
+
+export function markAdminMentionNotified(id: number): void {
+  const db = getDb();
+  try {
+    db.prepare(`
+      UPDATE admin_mention_alerts
+      SET status = 'notified', notified_at = ?
+      WHERE id = ?
+    `).run(Date.now(), id);
+  } catch (e) {
+    console.warn("[db] markAdminMentionNotified error:", e);
+  }
+}
+
+export function hasAdminRepliedInGroup(groupId: string, adminId: string, sinceTs: number): boolean {
+  const db = getDb();
+  try {
+    const row = db.prepare(`
+      SELECT 1 FROM group_messages
+      WHERE thread_id = ? AND zalo_user_id = ? AND created_at > ?
+      LIMIT 1
+    `).get(groupId, adminId, sinceTs);
+    return Boolean(row);
+  } catch (e) {
+    console.warn("[db] hasAdminRepliedInGroup error:", e);
+    return false;
+  }
+}
+
 
 
