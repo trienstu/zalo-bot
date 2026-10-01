@@ -139,10 +139,10 @@ export function isMotionVideoRequest(text: string, quoteText = ""): boolean {
 
   // 5. Cụm từ nhận diện trực tiếp
   const directTerms =
-    /\b(?:video|clip)\s+(?:tiktok|shorts|reels|chuyển\s*động|motion|so\s*sánh|tin\s*nóng|thời\s*sự|remotion|karaoke|nhảy\s*chữ)\b/iu.test(
+    /\b(?:video|clip)\s+(?:tiktok|shorts|reels|vox|explainer|chuyển\s*động|motion|so\s*sánh|tin\s*nóng|thời\s*sự|remotion|karaoke|nhảy\s*chữ)\b/iu.test(
       qLower,
     ) ||
-    /\b(?:tiktok|shorts|reels|motion|remotion)\s+(?:video|clip)\b/iu.test(qLower);
+    /\b(?:tiktok|shorts|reels|vox|explainer|motion|remotion)\s+(?:video|clip)\b/iu.test(qLower);
   if (directTerms) return true;
 
   // 6. Mệnh lệnh tạo video kết hợp với từ khóa thể loại
@@ -152,7 +152,7 @@ export function isMotionVideoRequest(text: string, quoteText = ""): boolean {
     );
 
   const mentionsMotionGenre =
-    /\b(?:tiktok|shorts|reels|chuyển\s*động|motion|so\s*sánh|versus|vs|đối\s*đầu|tin\s*nóng|thời\s*sự|breaking\s*news|remotion|karaoke|nhảy\s*chữ|bản\s*tin)\b/iu.test(
+    /\b(?:tiktok|shorts|reels|vox|explainer|chuyển\s*động|motion|so\s*sánh|versus|vs|đối\s*đầu|tin\s*nóng|thời\s*sự|breaking\s*news|remotion|karaoke|nhảy\s*chữ|bản\s*tin)\b/iu.test(
       combined,
     );
 
@@ -163,7 +163,7 @@ export function isMotionVideoRequest(text: string, quoteText = ""): boolean {
   // 7. Nhận diện từ tin nhắn trích dẫn nếu bot vừa đề xuất
   if (quoteLower) {
     const isQuotingProposal =
-      /(?:video\s+tiktok|video\s+shorts|remotion|video\s+chuyển\s*động|video\s+so\s*sánh)/iu.test(
+      /(?:video\s+tiktok|video\s+shorts|video\s+vox|remotion|video\s+chuyển\s*động|video\s+so\s*sánh)/iu.test(
         quoteLower,
       );
     const isAffirmation =
@@ -186,7 +186,7 @@ export function determineMotionVideoGenre(text: string, quoteText = ""): MotionV
   if (/(?:^|[^\p{L}\p{N}])(?:tin\s*nóng|thời\s*sự|breaking\s*news|bản\s*tin|sáng\s*nay|hôm\s*nay|thị\s*trường)(?=[^\p{L}\p{N}]|$)/iu.test(combined)) {
     return "breaking_news";
   }
-  if (/(?:^|[^\p{L}\p{N}])(?:thuyết\s*trình|16:9|ngang|keynote|báo\s*cáo\s*dự\s*án|kiến\s*trúc)(?=[^\p{L}\p{N}]|$)/iu.test(combined)) {
+  if (/(?:^|[^\p{L}\p{N}])(?:vox|explainer|thuyết\s*trình|16:9|ngang|keynote|báo\s*cáo\s*dự\s*án|kiến\s*trúc)(?=[^\p{L}\p{N}]|$)/iu.test(combined)) {
     return "landscape";
   }
   if (/(?:^|[^\p{L}\p{N}])(?:tiktok|shorts|reels|kể\s*chuyện|story|karaoke|nhảy\s*chữ|sai\s*lầm|bí\s*mật|viral)(?=[^\p{L}\p{N}]|$)/iu.test(combined)) {

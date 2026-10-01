@@ -9,7 +9,7 @@ async function main() {
   const args = process.argv.slice(2);
   let inputFile = "";
   let outputFile = "";
-  let themeName = "navy";
+  let themeName = "";
   let enableNarration = false;
 
   for (let i = 0; i < args.length; i++) {
@@ -42,6 +42,15 @@ async function main() {
   if (!fs.existsSync(distBridgePath)) {
     console.error(`Error: Không tìm thấy module bridge tại ${distBridgePath}. Cần chạy npm run build trước.`);
     process.exit(1);
+  }
+
+  if (!themeName || themeName === "auto") {
+    const rawContent = JSON.stringify(slidesData).toLowerCase();
+    if (/(?:bất\s*động\s*sản|căn\s*hộ|resort|riverside|serena|địa\s*ốc|villa|biệt\s*thự|luxury|cao\s*cấp|vàng|gold|đầu\s*tư)/i.test(rawContent)) {
+      themeName = "luxury";
+    } else {
+      themeName = "navy";
+    }
   }
 
   const { renderPPTMasterPresentation } = await import(distBridgePath);

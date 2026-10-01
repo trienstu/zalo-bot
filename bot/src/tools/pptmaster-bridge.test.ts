@@ -71,3 +71,46 @@ test("generateSlideSVG cho two_content bọc dòng trong cột và không đè n
   assert.ok(!svg.includes("dominant-baseline"), "Không chứa dominant-baseline");
 });
 
+test("generateSlideSVG cho two_content hỗ trợ định dạng left / right của LLM", () => {
+  const theme = getTheme("luxury");
+  const slideFromLlm: SlideContent = {
+    layout: "two_content",
+    title: "Tọa Độ Kim Cương",
+    left: {
+      title: "Lợi Thế Tọa Độ Ven Sông",
+      bullets: ["Cách bờ sông Sài Gòn chỉ 200m", "Vi khí hậu mát mẻ quanh năm"],
+    },
+    right: {
+      title: "Mạng Lưới Tiện Ích Ngoại Khu",
+      bullets: ["Liền kề Bệnh viện Quốc tế Hạnh Phúc", "5 phút đến TTTM Giga Mall"],
+    },
+  };
+
+  const svg = generateSlideSVG(slideFromLlm, 3, 8, theme);
+  assert.ok(svg.includes("Lợi Thế Tọa Độ Ven Sông"), "Phải trích xuất được left.title");
+  assert.ok(svg.includes("Mạng Lưới Tiện Ích Ngoại Khu"), "Phải trích xuất được right.title");
+  assert.ok(svg.includes("Cách bờ sông Sài Gòn chỉ 200m"), "Phải trích xuất được bullet bên trái");
+  assert.ok(svg.includes("Liền kề Bệnh viện Quốc tế Hạnh Phúc"), "Phải trích xuất được bullet bên phải");
+  assert.ok(!svg.includes("Khía cạnh chính"), "Không được fallback về tiêu đề mặc định khi đã có left.title");
+});
+
+test("generateSlideSVG dùng theme.primary cho tiêu đề và nhãn để không bị tàng hình trên nền sáng", () => {
+  const theme = getTheme("navy");
+  const slideCover: SlideContent = {
+    layout: "title",
+    title: "Tiêu Đề Báo Cáo Chiến Lược",
+    subtitle: "Thuyết minh chi tiết",
+  };
+  const svgCover = generateSlideSVG(slideCover, 0, 3, theme);
+  assert.ok(svgCover.includes(`fill="#${theme.primary}"`), "Tiêu đề trang bìa phải dùng màu primary để rõ nét");
+
+  const slideStats: SlideContent = {
+    layout: "stats",
+    title: "Chỉ Số Trọng Yếu",
+    stats: [{ value: "1.175 Tỷ", label: "Tổng vốn đầu tư" }],
+  };
+  const svgStats = generateSlideSVG(slideStats, 1, 3, theme);
+  assert.ok(svgStats.includes(`fill="#${theme.primary}"`), "Tiêu đề và nhãn stat card phải dùng màu primary");
+});
+
+

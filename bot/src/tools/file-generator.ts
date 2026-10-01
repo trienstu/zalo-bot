@@ -369,16 +369,16 @@ export interface ColorTheme {
 
 export const COLOR_THEMES: Record<ThemeName, ColorTheme> = {
   navy: {
-    primary: "0F2027",
-    accent: "203A43",
+    primary: "0F172A",
+    accent: "0284C7",
     headerText: "FFFFFF",
-    bgLight: "F2F5F9",
-    border: "D0D7DE",
+    bgLight: "F0F9FF",
+    border: "CBD5E1",
     cardBg: "FFFFFF",
     canvasBg: "F8FAFC",
-    darkText: "1A202C",
-    mutedText: "718096",
-    highlight: "2C5364",
+    darkText: "0F172A",
+    mutedText: "64748B",
+    highlight: "38BDF8",
   },
   blue: {
     primary: "1E3A8A",
@@ -454,7 +454,7 @@ export const COLOR_THEMES: Record<ThemeName, ColorTheme> = {
   },
   luxury: {
     primary: "1C1917",
-    accent: "B45309",
+    accent: "D97706",
     headerText: "FFFFFF",
     bgLight: "FEF3C7",
     border: "FDE68A",
@@ -462,7 +462,7 @@ export const COLOR_THEMES: Record<ThemeName, ColorTheme> = {
     canvasBg: "FAFAF9",
     darkText: "292524",
     mutedText: "78716C",
-    highlight: "D97706",
+    highlight: "F59E0B",
   },
 };
 
@@ -488,7 +488,7 @@ export interface SlideStat {
 }
 
 export interface SlideContent {
-  layout?: "title" | "bullets" | "table" | "two_content" | "three_column" | "timeline" | "stats";
+  layout?: "title" | "bullets" | "table" | "two_content" | "three_column" | "timeline" | "steps" | "stats";
   title: string;
   subtitle?: string;
   kicker?: string;
@@ -503,6 +503,11 @@ export interface SlideContent {
   col2Bullets?: string[];
   col3Title?: string;
   col3Bullets?: string[];
+  left?: { title?: string; bullets?: string[] };
+  right?: { title?: string; bullets?: string[] };
+  column1?: { title?: string; bullets?: string[] };
+  column2?: { title?: string; bullets?: string[] };
+  columns?: Array<{ title?: string; bullets?: string[] }>;
   steps?: SlideStep[];
   stats?: SlideStat[];
 }

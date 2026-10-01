@@ -13,6 +13,8 @@ test("isMotionVideoRequest nhận diện chính xác các yêu cầu làm video 
   assert.equal(isMotionVideoRequest("làm video tin nóng thị trường chứng khoán sáng nay"), true);
   assert.equal(isMotionVideoRequest("xuất video chuyển động Remotion tóm tắt nội dung này"), true);
   assert.equal(isMotionVideoRequest("làm video clip tiktok về kiến trúc bot zalo"), true);
+  assert.equal(isMotionVideoRequest("làm video vox về tệ nạn ma túy"), true);
+  assert.equal(isMotionVideoRequest("tạo video explainer phân tích thị trường bất động sản"), true);
 
   // 2. Chống nhận nhầm khi chỉ là khiếu nại, tải link, tóm tắt video
   assert.equal(isMotionVideoRequest("sao bot lại tự làm video thế?"), false);
@@ -41,6 +43,7 @@ test("determineMotionVideoGenre phân loại chính xác 5 thể loại video", 
 
   assert.equal(determineMotionVideoGenre("làm video thuyết trình 16:9 báo cáo dự án"), "landscape");
   assert.equal(determineMotionVideoGenre("dựng video ngang keynote cho ban giám đốc"), "landscape");
+  assert.equal(determineMotionVideoGenre("làm video vox phân tích kinh tế"), "landscape");
 
   assert.equal(determineMotionVideoGenre("làm video tiktok 3 bí mật của AI Agent"), "tiktok_story");
   assert.equal(determineMotionVideoGenre("dựng video shorts phụ đề karaoke nhảy chữ"), "tiktok_story");

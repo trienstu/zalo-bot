@@ -189,32 +189,58 @@ export function generateSlideSVG(
 
   // 1. Slide Bìa (Title Slide)
   if (layout === "title" || index === 0) {
-    const titleLines = wrapTextToLines(displayTitle, 32, 2);
-    const titleStartY = titleLines.length > 1 ? 250 : 270;
-    const titleSvg = renderSvgTextLines(titleLines, 125, titleStartY, 48, 38, theme.headerText, "bold");
+    const titleLines = wrapTextToLines(displayTitle, 30, 2);
+    const titleStartY = titleLines.length > 1 ? 245 : 270;
+    const titleSvg = renderSvgTextLines(titleLines, 120, titleStartY, 48, 38, theme.primary, "bold");
 
-    const subtitleStartY = titleStartY + titleLines.length * 48 + 18;
+    const subtitleStartY = titleStartY + titleLines.length * 48 + 20;
     const subtitleLines = wrapTextToLines(
       subtitle || "Tài liệu thuyết trình được tối ưu bởi AI Zalo Assistant",
-      52,
-      2,
+      48,
+      3,
     );
-    const subtitleSvg = renderSvgTextLines(subtitleLines, 125, subtitleStartY, 28, 20, theme.darkText);
+    const subtitleSvg = renderSvgTextLines(subtitleLines, 120, subtitleStartY, 28, 19, theme.darkText);
 
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720" font-family="Arial">
   <rect id="bg" x="0" y="0" width="1280" height="720" fill="#${theme.canvasBg}"/>
-  <rect id="accent_bar" x="90" y="160" width="10" height="380" fill="#${theme.accent}" rx="5"/>
+  <!-- Decorative Right Feature Panel -->
+  <rect x="740" y="100" width="450" height="520" fill="#${theme.bgLight}" rx="24" stroke="#${theme.border}" stroke-width="1.5"/>
+  <rect x="780" y="145" width="370" height="6" fill="#${theme.accent}" rx="3"/>
+  <text x="780" y="195" font-size="22" font-weight="bold" fill="#${theme.primary}">TỔNG HỢP CHIẾN LƯỢC</text>
+  <text x="780" y="225" font-size="14" fill="#${theme.mutedText}">Hệ thống phân tích dữ liệu chuyên sâu 2026</text>
+  
+  <!-- Right side 3 feature badges -->
+  <rect x="780" y="260" width="370" height="85" fill="#${theme.cardBg}" rx="12" stroke="#${theme.border}" stroke-width="1"/>
+  <circle cx="818" cy="302" r="18" fill="#${theme.bgLight}" stroke="#${theme.accent}" stroke-width="1.5"/>
+  <text x="818" y="308" font-size="14" font-weight="bold" fill="#${theme.accent}" text-anchor="middle">01</text>
+  <text x="850" y="295" font-size="15" font-weight="bold" fill="#${theme.primary}">Phân tích số liệu thực chứng</text>
+  <text x="850" y="318" font-size="12" fill="#${theme.mutedText}">Xác minh nguồn tin và chỉ số then chốt</text>
+
+  <rect x="780" y="365" width="370" height="85" fill="#${theme.cardBg}" rx="12" stroke="#${theme.border}" stroke-width="1"/>
+  <circle cx="818" cy="407" r="18" fill="#${theme.bgLight}" stroke="#${theme.accent}" stroke-width="1.5"/>
+  <text x="818" y="413" font-size="14" font-weight="bold" fill="#${theme.accent}" text-anchor="middle">02</text>
+  <text x="850" y="400" font-size="15" font-weight="bold" fill="#${theme.primary}">Đánh giá đa chiều &amp; Khách quan</text>
+  <text x="850" y="423" font-size="12" fill="#${theme.mutedText}">Tổng hợp ưu nhược điểm và tiềm năng</text>
+
+  <rect x="780" y="470" width="370" height="85" fill="#${theme.cardBg}" rx="12" stroke="#${theme.border}" stroke-width="1"/>
+  <circle cx="818" cy="512" r="18" fill="#${theme.bgLight}" stroke="#${theme.accent}" stroke-width="1.5"/>
+  <text x="818" y="518" font-size="14" font-weight="bold" fill="#${theme.accent}" text-anchor="middle">03</text>
+  <text x="850" y="505" font-size="15" font-weight="bold" fill="#${theme.primary}">Định dạng DrawingML Vector</text>
+  <text x="850" y="528" font-size="12" fill="#${theme.mutedText}">Chuẩn PowerPoint sắc nét mọi độ phân giải</text>
+
+  <!-- Left Hero Content -->
+  <rect id="accent_bar" x="90" y="160" width="8" height="380" fill="#${theme.accent}" rx="4"/>
   <g id="badge">
-    <rect x="125" y="160" width="260" height="40" fill="#${theme.cardBg}" rx="8" stroke="#${theme.accent}" stroke-width="1.5"/>
-    <text x="145" y="185" font-size="13" font-weight="bold" fill="#${theme.accent}">${escapeXml(kicker.toUpperCase())}</text>
+    <rect x="120" y="160" width="280" height="42" fill="#${theme.bgLight}" rx="10" stroke="#${theme.accent}" stroke-width="1.5"/>
+    <text x="145" y="187" font-size="13" font-weight="bold" fill="#${theme.accent}">${escapeXml(kicker.toUpperCase())}</text>
   </g>
   <g id="title_group">
     ${titleSvg}
     ${subtitleSvg}
   </g>
   <g id="footer_badge">
-    <rect x="125" y="470" width="460" height="50" fill="#${theme.cardBg}" rx="10" stroke="#${theme.border}" stroke-width="1"/>
-    <text x="150" y="501" font-size="14" fill="#${theme.accent}">✦ Nền tảng PPT Master DrawingML chuẩn PowerPoint</text>
+    <rect x="120" y="510" width="560" height="46" fill="#${theme.cardBg}" rx="10" stroke="#${theme.border}" stroke-width="1"/>
+    <text x="145" y="539" font-size="13" font-weight="bold" fill="#${theme.accent}">✦ Báo cáo tự động chuẩn hóa bởi Sen Chúa AI Assistant</text>
   </g>
 </svg>`;
   }
@@ -224,7 +250,7 @@ export function generateSlideSVG(
   <g id="header">
     <rect x="80" y="42" width="6" height="62" fill="#${theme.accent}" rx="3"/>
     <text x="100" y="62" font-size="12" font-weight="bold" fill="#${theme.accent}">${escapeXml(kicker.toUpperCase())}</text>
-    <text x="100" y="96" font-size="26" font-weight="bold" fill="#${theme.headerText}">${escapeXml(truncateText(displayTitle, 55))}</text>
+    <text x="100" y="96" font-size="26" font-weight="bold" fill="#${theme.primary}">${escapeXml(truncateText(displayTitle, 55))}</text>
   </g>
   <g id="footer">
     <line x1="80" y1="660" x2="1200" y2="660" stroke="#${theme.border}" stroke-width="1"/>
@@ -245,17 +271,18 @@ export function generateSlideSVG(
 
       // Label (1-2 dòng)
       const labelLines = wrapTextToLines(st.label, maxTextChars, 2);
-      const labelSvg = renderSvgTextLines(labelLines, textX, 310, 22, 16, theme.headerText, "bold");
+      const labelSvg = renderSvgTextLines(labelLines, textX, 310, 22, 16, theme.primary, "bold");
 
       // Desc (2-4 dòng)
       const descStartY = 310 + labelLines.length * 22 + 10;
       const descLines = wrapTextToLines(st.desc || "", maxTextChars, 4);
-      const descSvg = renderSvgTextLines(descLines, textX, descStartY, 20, 13, theme.darkText);
+      const descSvg = renderSvgTextLines(descLines, textX, descStartY, 20, 13, theme.mutedText);
 
       cardsSvg += `
       <g id="stat_card_${idx + 1}">
         <rect x="${cardX}" y="150" width="${cardW}" height="460" fill="#${theme.cardBg}" rx="14" stroke="#${theme.border}" stroke-width="1.5"/>
-        <rect x="${textX}" y="180" width="${cardW - 44}" height="4" fill="#${theme.accent}" rx="2"/>
+        <rect x="${cardX}" y="150" width="${cardW}" height="6" fill="#${theme.accent}" rx="3"/>
+        <rect x="${textX}" y="180" width="${cardW - 44}" height="4" fill="#${theme.bgLight}" rx="2"/>
         <text x="${textX}" y="255" font-size="38" font-weight="bold" fill="#${theme.accent}">${escapeXml(truncateText(st.value, 12))}</text>
         ${labelSvg}
         ${descSvg}
@@ -282,7 +309,7 @@ export function generateSlideSVG(
 
       // Title (1-2 dòng)
       const titleLines = wrapTextToLines(st.title, maxTextChars, 2);
-      const titleSvg = renderSvgTextLines(titleLines, textX, 275, 22, 17, theme.headerText, "bold");
+      const titleSvg = renderSvgTextLines(titleLines, textX, 275, 22, 17, theme.primary, "bold");
 
       // Desc (2-5 dòng)
       const descStartY = 275 + titleLines.length * 22 + 10;
@@ -292,7 +319,8 @@ export function generateSlideSVG(
       stepsSvg += `
       <g id="step_card_${idx + 1}">
         <rect x="${cardX}" y="160" width="${cardW}" height="450" fill="#${theme.cardBg}" rx="12" stroke="#${theme.border}" stroke-width="1.5"/>
-        <circle cx="${cardX + 45}" cy="210" r="22" fill="#${theme.primary}" stroke="#${theme.accent}" stroke-width="2"/>
+        <rect x="${cardX}" y="160" width="${cardW}" height="5" fill="#${theme.accent}" rx="2"/>
+        <circle cx="${cardX + 45}" cy="210" r="22" fill="#${theme.bgLight}" stroke="#${theme.accent}" stroke-width="2"/>
         <text x="${cardX + 45}" y="217" font-size="16" font-weight="bold" fill="#${theme.accent}" text-anchor="middle">${idx + 1}</text>
         ${titleSvg}
         ${descSvg}
@@ -327,7 +355,7 @@ export function generateSlideSVG(
       const rowY = 210 + rIdx * 65;
       const isEven = rIdx % 2 === 1;
       if (isEven) {
-        tableSvg += `<rect x="80" y="${rowY}" width="1120" height="65" fill="#${theme.canvasBg}" opacity="0.4"/>`;
+        tableSvg += `<rect x="80" y="${rowY}" width="1120" height="65" fill="#${theme.bgLight}" opacity="0.6"/>`;
       }
       r.slice(0, headers.length).forEach((cell, cIdx) => {
         tableSvg += `<text x="${95 + cIdx * colW}" y="${rowY + 38}" font-size="14" fill="#${theme.darkText}">${escapeXml(truncateText(String(cell), 22))}</text>`;
@@ -344,11 +372,16 @@ export function generateSlideSVG(
   }
 
   // 5. Slide 2 Cột (Two Content)
-  if (layout === "two_content" || (slide.col1Bullets && slide.col2Bullets)) {
-    const col1Title = slide.col1Title || "Khía cạnh chính";
-    const col2Title = slide.col2Title || "Chi tiết bổ sung";
-    const b1 = slide.col1Bullets || [];
-    const b2 = slide.col2Bullets || [];
+  const isTwoCol = layout === "two_content" ||
+    Boolean(slide.col1Bullets && slide.col2Bullets) ||
+    Boolean(slide.left || slide.right) ||
+    Boolean(slide.columns && slide.columns.length >= 2);
+
+  if (isTwoCol) {
+    const col1Title = slide.col1Title || slide.left?.title || slide.column1?.title || slide.columns?.[0]?.title || "Khía cạnh chính";
+    const col2Title = slide.col2Title || slide.right?.title || slide.column2?.title || slide.columns?.[1]?.title || "Chi tiết bổ sung";
+    const b1 = slide.col1Bullets || slide.left?.bullets || slide.column1?.bullets || slide.columns?.[0]?.bullets || [];
+    const b2 = slide.col2Bullets || slide.right?.bullets || slide.column2?.bullets || slide.columns?.[1]?.bullets || [];
 
     const renderColumnBullets = (bulletsList: string[], startX: number) => {
       let bulletsSvg = "";
@@ -361,7 +394,7 @@ export function generateSlideSVG(
         const lines = wrapTextToLines(item, maxChars, 3);
         if (lines.length === 0) return;
 
-        bulletsSvg += `\n      <circle cx="${bulletX}" cy="${currentY - 5}" r="4" fill="#${theme.accent}"/>`;
+        bulletsSvg += `\n      <circle cx="${bulletX}" cy="${currentY - 5}" r="5" fill="#${theme.accent}"/>`;
         bulletsSvg += `\n      ${renderSvgTextLines(lines, textX, currentY, 22, 14, theme.darkText)}`;
         currentY += lines.length * 22 + 16;
       });
@@ -376,13 +409,15 @@ export function generateSlideSVG(
   ${headerSvg}
   <g id="col_left">
     <rect x="80" y="150" width="540" height="470" fill="#${theme.cardBg}" rx="14" stroke="#${theme.border}" stroke-width="1.5"/>
-    <text x="115" y="195" font-size="20" font-weight="bold" fill="#${theme.accent}">${escapeXml(truncateText(col1Title, 35))}</text>
+    <rect x="80" y="150" width="540" height="6" fill="#${theme.accent}" rx="3"/>
+    <text x="115" y="195" font-size="20" font-weight="bold" fill="#${theme.primary}">${escapeXml(truncateText(col1Title, 35))}</text>
     <line x1="115" y1="212" x2="585" y2="212" stroke="#${theme.border}" stroke-width="1"/>
     ${c1Svg}
   </g>
   <g id="col_right">
     <rect x="660" y="150" width="540" height="470" fill="#${theme.cardBg}" rx="14" stroke="#${theme.border}" stroke-width="1.5"/>
-    <text x="695" y="195" font-size="20" font-weight="bold" fill="#${theme.accent}">${escapeXml(truncateText(col2Title, 35))}</text>
+    <rect x="660" y="150" width="540" height="6" fill="#${theme.accent}" rx="3"/>
+    <text x="695" y="195" font-size="20" font-weight="bold" fill="#${theme.primary}">${escapeXml(truncateText(col2Title, 35))}</text>
     <line x1="695" y1="212" x2="1165" y2="212" stroke="#${theme.border}" stroke-width="1"/>
     ${c2Svg}
   </g>
@@ -405,7 +440,8 @@ export function generateSlideSVG(
     bulletsSvg += `
     <g id="bullet_item_${bIdx + 1}">
       <rect x="80" y="${cardY}" width="1120" height="${cardHeight}" fill="#${theme.cardBg}" rx="10" stroke="#${theme.border}" stroke-width="1"/>
-      <circle cx="120" cy="${cardY + Math.floor(cardHeight / 2)}" r="14" fill="#${theme.primary}"/>
+      <rect x="80" y="${cardY}" width="6" height="${cardHeight}" fill="#${theme.accent}" rx="3"/>
+      <circle cx="120" cy="${cardY + Math.floor(cardHeight / 2)}" r="14" fill="#${theme.bgLight}" stroke="#${theme.accent}" stroke-width="1.5"/>
       <text x="120" y="${cardY + Math.floor(cardHeight / 2) + 5}" font-size="14" font-weight="bold" fill="#${theme.accent}" text-anchor="middle">${bIdx + 1}</text>
       ${textSvg}
     </g>`;
@@ -414,10 +450,10 @@ export function generateSlideSVG(
   let takeawaySvg = "";
   if (takeaway) {
     const takeawayLines = wrapTextToLines(takeaway, 72, 2);
-    const takeawayTextSvg = renderSvgTextLines(takeawayLines, 235, takeawayLines.length > 1 ? 595 : 605, 20, 13.5, theme.headerText);
+    const takeawayTextSvg = renderSvgTextLines(takeawayLines, 235, takeawayLines.length > 1 ? 595 : 605, 20, 13.5, theme.primary);
     takeawaySvg = `
     <g id="takeaway_box">
-      <rect x="80" y="575" width="1120" height="55" fill="#${theme.primary}" rx="8" stroke="#${theme.accent}" stroke-width="1"/>
+      <rect x="80" y="575" width="1120" height="55" fill="#${theme.bgLight}" rx="10" stroke="#${theme.accent}" stroke-width="1.5"/>
       <text x="110" y="608" font-size="14" font-weight="bold" fill="#${theme.accent}">💡 ĐIỂM CỐT LÕI: </text>
       ${takeawayTextSvg}
     </g>`;
