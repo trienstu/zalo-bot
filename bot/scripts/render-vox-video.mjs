@@ -68,9 +68,12 @@ async function main() {
     const targetAudioPath = path.join(publicDir, audioBasename);
     console.log(`🎙️ [Vox Engine] Đang sinh giọng đọc thuyết minh (${narrationText.length} ký tự)...`);
 
-    const chunkTtsPath = path.resolve(repoRoot, "scripts", "chunk_tts.py");
-    const vpsChunkTts = "/home/ubuntu/shared-assets/templates/chunk_tts.py";
-    const ttsScript = fs.existsSync(vpsChunkTts) ? vpsChunkTts : (fs.existsSync(chunkTtsPath) ? chunkTtsPath : null);
+    const candidateTts = [
+      "/home/ubuntu/shared-assets/templates/chunk_tts.py",
+      "/home/ubuntu/shared-assets/chunk_tts.py",
+      path.resolve(__dirname, "../../scripts/chunk_tts.py"),
+    ];
+    const ttsScript = candidateTts.find((p) => fs.existsSync(p)) || null;
 
     let ttsSuccess = false;
     if (ttsScript) {
