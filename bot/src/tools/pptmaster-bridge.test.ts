@@ -113,4 +113,97 @@ test("generateSlideSVG dùng theme.primary cho tiêu đề và nhãn để khôn
   assert.ok(svgStats.includes(`fill="#${theme.primary}"`), "Tiêu đề và nhãn stat card phải dùng màu primary");
 });
 
+test("parseStatsFromBullets phân tích chính xác chuỗi có dấu gạch đứng | hoặc dấu hai chấm :", async () => {
+  const { parseStatsFromBullets } = await import("./pptmaster-bridge.js");
+  const bullets = [
+    "50 Tr/m² | Mức giá dự kiến | Giai đoạn 1",
+    "Quy mô: 622 căn",
+    "1.175 Tỷ: Tổng vốn đầu tư",
+    "10.000 m² diện tích khuôn viên xanh",
+  ];
+
+  const parsed = parseStatsFromBullets(bullets);
+  assert.strictEqual(parsed.length, 4, "Phải phân tích được cả 4 dòng");
+  assert.strictEqual(parsed[0]?.value, "50 Tr/m²");
+  assert.strictEqual(parsed[0]?.label, "Mức giá dự kiến");
+  assert.strictEqual(parsed[0]?.desc, "Giai đoạn 1");
+
+  assert.strictEqual(parsed[1]?.value, "622 căn");
+  assert.strictEqual(parsed[1]?.label, "Quy mô");
+
+  assert.strictEqual(parsed[2]?.value, "1.175 Tỷ");
+  assert.strictEqual(parsed[2]?.label, "Tổng vốn đầu tư");
+
+  assert.strictEqual(parsed[3]?.value, "10.000 m²");
+  assert.ok(parsed[3]?.label.includes("diện tích"));
+});
+
+test("generateSlideSVG tự động chia 2 cột (auto-split) khi layout: two_content chỉ có mảng bullets chung", () => {
+  const theme = getTheme("navy");
+  const slide2ColBullets: SlideContent = {
+    layout: "two_content",
+    title: "Phân Tích Đa Chiều Dự Án",
+    bullets: [
+      "Ý 1: Vị trí ven sông mát mẻ",
+      "Ý 2: Pháp lý hoàn chỉnh phê duyệt 1/500",
+      "Ý 3: Mật độ xây dựng thấp chỉ 30%",
+      "Ý 4: Tiện ích nội khu chuẩn resort",
+    ],
+  };
+
+  const svg = generateSlideSVG(slide2ColBullets, 1, 4, theme);
+  assert.ok(svg.includes("col_left"), "Phải có cột bên trái");
+  assert.ok(svg.includes("col_right"), "Phải có cột bên phải");
+  assert.ok(svg.includes("Ý 1: Vị trí ven sông"), "Cột trái phải có bullet 1");
+  assert.ok(svg.includes("Ý 2: Pháp lý hoàn chỉnh"), "Cột trái phải có bullet 2");
+  assert.ok(svg.includes("Ý 3: Mật độ xây dựng"), "Cột phải phải có bullet 3");
+  assert.ok(svg.includes("Ý 4: Tiện ích nội khu"), "Cột phải phải có bullet 4");
+});
+
+test("generateSlideSVG tự động parse stats khi layout: stats nhưng Hermes chỉ gửi mảng bullets", () => {
+  const theme = getTheme("emerald");
+  const slideStatsFromBullets: SlideContent = {
+    layout: "stats",
+    title: "Chỉ Số Tài Chính Dự Kiến",
+    bullets: [
+      "50 Tr/m² | Mức giá dự kiến",
+      "622 Căn | Quy mô dự án",
+      "1.175 Tỷ | Tổng vốn đầu tư",
+    ],
+  };
+
+  const svg = generateSlideSVG(slideStatsFromBullets, 2, 5, theme);
+  assert.ok(svg.includes("stat_card_1"), "Phải render stat_card_1");
+  assert.ok(svg.includes("50 Tr/m²"), "Phải chứa giá trị 50 Tr/m²");
+  assert.ok(svg.includes("Mức giá dự kiến"), "Phải chứa nhãn Mức giá dự kiến");
+  assert.ok(svg.includes("622 Căn"), "Phải chứa giá trị 622 Căn");
+  assert.ok(svg.includes("1.175 Tỷ"), "Phải chứa giá trị 1.175 Tỷ");
+});
+
+test("generateSlideSVG hỗ trợ layout split_image và image", () => {
+  const theme = getTheme("luxury");
+  const slideSplitImage: SlideContent = {
+    layout: "split_image",
+    title: "Phối Cảnh Căn Hộ",
+    bullets: ["Thiết kế hiện đại", "Ban công đón gió sông"],
+    imageCaption: "Phối cảnh tổng thể dự án",
+  };
+
+  const svgSplit = generateSlideSVG(slideSplitImage, 3, 6, theme);
+  assert.ok(svgSplit.includes("col_content"), "Phải có cột nội dung");
+  assert.ok(svgSplit.includes("col_image"), "Phải có cột ảnh");
+  assert.ok(svgSplit.includes("Phối cảnh tổng thể dự án"), "Phải chứa caption ảnh");
+
+  const slideHeroImage: SlideContent = {
+    layout: "image",
+    title: "Mặt Bằng Tầng Điển Hình",
+    imageCaption: "Bố trí căn hộ 2 phòng ngủ",
+  };
+
+  const svgHero = generateSlideSVG(slideHeroImage, 4, 6, theme);
+  assert.ok(svgHero.includes("hero_image"), "Phải có khung hero_image");
+  assert.ok(svgHero.includes("Bố trí căn hộ 2 phòng ngủ"), "Phải chứa caption ảnh");
+});
+
+
 

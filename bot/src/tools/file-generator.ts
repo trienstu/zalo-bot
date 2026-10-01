@@ -488,7 +488,7 @@ export interface SlideStat {
 }
 
 export interface SlideContent {
-  layout?: "title" | "bullets" | "table" | "two_content" | "three_column" | "timeline" | "steps" | "stats";
+  layout?: "title" | "bullets" | "table" | "two_content" | "three_column" | "timeline" | "steps" | "stats" | "image" | "split_image";
   title: string;
   subtitle?: string;
   kicker?: string;
@@ -508,6 +508,9 @@ export interface SlideContent {
   column1?: { title?: string; bullets?: string[] };
   column2?: { title?: string; bullets?: string[] };
   columns?: Array<{ title?: string; bullets?: string[] }>;
+  image?: string;
+  imageUrl?: string;
+  imageCaption?: string;
   steps?: SlideStep[];
   stats?: SlideStat[];
 }

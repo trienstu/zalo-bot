@@ -155,6 +155,69 @@ function renderSvgTextLines(
 }
 
 /**
+ * Tự động phân tích các dòng bullets thành cấu trúc stats { value, label, desc }
+ */
+export function parseStatsFromBullets(bullets: string[]): Array<{ value: string; label: string; desc?: string }> {
+  if (!Array.isArray(bullets) || bullets.length === 0) return [];
+  const stats: Array<{ value: string; label: string; desc?: string }> = [];
+
+  for (const raw of bullets) {
+    if (!raw || typeof raw !== "string") continue;
+    const text = raw.trim();
+    if (!text) continue;
+
+    // Pattern 1: Dấu gạch đứng "50 Tr/m² | Mức giá dự kiến | Giai đoạn 1"
+    if (text.includes("|")) {
+      const parts = text.split("|").map((p) => p.trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        stats.push({
+          value: parts[0]!,
+          label: parts[1]!,
+          desc: parts.slice(2).join(" • ") || undefined,
+        });
+        continue;
+      }
+    }
+
+    // Pattern 2: Dấu hai chấm "Giá bán: 50 Tr/m²" hoặc "50 Tr/m²: Giá bán"
+    const colonIdx = text.indexOf(":");
+    if (colonIdx > 0 && colonIdx < text.length - 1) {
+      const p1 = text.slice(0, colonIdx).trim();
+      const p2 = text.slice(colonIdx + 1).trim();
+      const valRegex = /^[\d.,%$€₫¥+~><\-]+(\s*(tỷ|triệu|tr|m2|m²|ha|căn|năm|tháng|%|k|usd))?$/i;
+      if (valRegex.test(p1) && p1.length <= 15) {
+        stats.push({ value: p1, label: p2 });
+        continue;
+      } else if (valRegex.test(p2) && p2.length <= 15) {
+        stats.push({ value: p2, label: p1 });
+        continue;
+      } else if (p1.length < p2.length && p1.length <= 20) {
+        stats.push({ value: p1, label: truncateText(p2, 30), desc: p2 });
+        continue;
+      }
+    }
+
+    // Pattern 3: Số liệu đứng đầu dòng (ví dụ: "622 căn hộ cao cấp ven sông")
+    const firstWordMatch = text.match(/^([~><+-]?[\d.,]+%?(\s*(tỷ|triệu|tr|m2|m²|ha|căn|k))?)\s+(.*)$/i);
+    if (firstWordMatch && firstWordMatch[1] && firstWordMatch[4]) {
+      stats.push({
+        value: firstWordMatch[1].trim(),
+        label: truncateText(firstWordMatch[4].trim(), 30),
+        desc: firstWordMatch[4].trim(),
+      });
+    } else {
+      stats.push({
+        value: "✦",
+        label: truncateText(text, 25),
+        desc: text,
+      });
+    }
+  }
+
+  return stats;
+}
+
+/**
  * Sinh mã nguồn SVG 1280x720 tuân thủ DrawingML cho từng SlideContent
  */
 export function generateSlideSVG(
@@ -258,9 +321,15 @@ export function generateSlideSVG(
     <text x="1170" y="682" font-size="12" font-weight="bold" fill="#${theme.accent}">${slideNum} / ${totalSlides}</text>
   </g>`;
 
-  // 2. Slide Thống Kê / KPI (Stats)
-  if (layout === "stats" && Array.isArray(slide.stats) && slide.stats.length > 0) {
-    const stats = slide.stats.slice(0, 4);
+  // 2. Slide Thống Kê / KPI (Stats) - Hỗ trợ auto-parse từ bullets nếu thiếu stats
+  const effectiveStats = Array.isArray(slide.stats) && slide.stats.length > 0
+    ? slide.stats
+    : (layout === "stats" && Array.isArray(slide.bullets) && slide.bullets.length > 0
+      ? parseStatsFromBullets(slide.bullets)
+      : []);
+
+  if (layout === "stats" && effectiveStats.length > 0) {
+    const stats = effectiveStats.slice(0, 4);
     const cardW = Math.floor((1120 - (stats.length - 1) * 25) / stats.length);
     let cardsSvg = "";
 
@@ -371,7 +440,96 @@ export function generateSlideSVG(
 </svg>`;
   }
 
-  // 5. Slide 2 Cột (Two Content)
+  // 5. Slide Chia Đôi với Ảnh (Split Image)
+  const isSplitImage = layout === "split_image" || (layout === "two_content" && Boolean(slide.image || slide.imageUrl));
+  if (isSplitImage) {
+    const colTitle = slide.col1Title || slide.left?.title || slide.title || "Chi tiết phân tích";
+    let bulletsList = slide.col1Bullets || slide.left?.bullets || slide.bullets || [];
+    const imgSrc = slide.image || slide.imageUrl || "";
+    const imgCaption = slide.imageCaption || "Hình ảnh minh họa thực tế";
+
+    const renderColumnBullets = (list: string[], startX: number) => {
+      let bulletsSvg = "";
+      let currentY = 255;
+      const bulletX = startX + 18;
+      const textX = startX + 38;
+      const maxChars = 34;
+
+      list.slice(0, 5).forEach((item) => {
+        const lines = wrapTextToLines(item, maxChars, 3);
+        if (lines.length === 0) return;
+        bulletsSvg += `\n      <circle cx="${bulletX}" cy="${currentY - 5}" r="5" fill="#${theme.accent}"/>`;
+        bulletsSvg += `\n      ${renderSvgTextLines(lines, textX, currentY, 22, 14, theme.darkText)}`;
+        currentY += lines.length * 22 + 16;
+      });
+      return bulletsSvg;
+    };
+
+    const bulletsSvg = renderColumnBullets(bulletsList, 95);
+
+    let rightPanelSvg = "";
+    if (imgSrc && (fs.existsSync(imgSrc) || imgSrc.startsWith("data:image/"))) {
+      rightPanelSvg = `
+    <rect x="660" y="150" width="540" height="470" fill="#${theme.cardBg}" rx="14" stroke="#${theme.border}" stroke-width="1.5"/>
+    <image href="${escapeXml(imgSrc)}" x="675" y="165" width="510" height="400" preserveAspectRatio="xMidYMid slice"/>
+    <text x="675" y="595" font-size="13" font-style="italic" fill="#${theme.mutedText}">📷 ${escapeXml(truncateText(imgCaption, 50))}</text>`;
+    } else {
+      rightPanelSvg = `
+    <rect x="660" y="150" width="540" height="470" fill="#${theme.cardBg}" rx="14" stroke="#${theme.border}" stroke-width="1.5"/>
+    <rect x="660" y="150" width="540" height="6" fill="#${theme.accent}" rx="3"/>
+    <circle cx="930" cy="340" r="45" fill="#${theme.bgLight}" stroke="#${theme.border}" stroke-width="1.5"/>
+    <text x="930" y="352" font-size="36" text-anchor="middle">🖼️</text>
+    <text x="930" y="420" font-size="16" font-weight="bold" fill="#${theme.primary}" text-anchor="middle">${escapeXml(truncateText(imgCaption, 40))}</text>
+    <text x="930" y="445" font-size="13" fill="#${theme.mutedText}" text-anchor="middle">Khu vực hiển thị đồ họa trực quan</text>`;
+    }
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720" font-family="Arial">
+  <rect id="bg" x="0" y="0" width="1280" height="720" fill="#${theme.canvasBg}"/>
+  ${headerSvg}
+  <g id="col_content">
+    <rect x="80" y="150" width="540" height="470" fill="#${theme.cardBg}" rx="14" stroke="#${theme.border}" stroke-width="1.5"/>
+    <rect x="80" y="150" width="540" height="6" fill="#${theme.accent}" rx="3"/>
+    <text x="115" y="195" font-size="20" font-weight="bold" fill="#${theme.primary}">${escapeXml(truncateText(colTitle, 35))}</text>
+    <line x1="115" y1="212" x2="585" y2="212" stroke="#${theme.border}" stroke-width="1"/>
+    ${bulletsSvg}
+  </g>
+  <g id="col_image">
+    ${rightPanelSvg}
+  </g>
+</svg>`;
+  }
+
+  // 6. Slide Toàn Cảnh Ảnh (Full Hero Image)
+  if (layout === "image") {
+    const imgSrc = slide.image || slide.imageUrl || "";
+    const imgCaption = slide.imageCaption || slide.subtitle || displayTitle;
+
+    let centerImageSvg = "";
+    if (imgSrc && (fs.existsSync(imgSrc) || imgSrc.startsWith("data:image/"))) {
+      centerImageSvg = `
+    <rect x="80" y="145" width="1120" height="475" fill="#${theme.cardBg}" rx="14" stroke="#${theme.border}" stroke-width="1.5"/>
+    <image href="${escapeXml(imgSrc)}" x="95" y="160" width="1090" height="420" preserveAspectRatio="xMidYMid slice"/>
+    <text x="95" y="605" font-size="13" font-style="italic" fill="#${theme.mutedText}">📷 ${escapeXml(truncateText(imgCaption, 80))}</text>`;
+    } else {
+      centerImageSvg = `
+    <rect x="80" y="145" width="1120" height="475" fill="#${theme.cardBg}" rx="14" stroke="#${theme.border}" stroke-width="1.5"/>
+    <rect x="80" y="145" width="1120" height="6" fill="#${theme.accent}" rx="3"/>
+    <circle cx="640" cy="350" r="50" fill="#${theme.bgLight}" stroke="#${theme.border}" stroke-width="1.5"/>
+    <text x="640" y="365" font-size="42" text-anchor="middle">🖼️</text>
+    <text x="640" y="440" font-size="18" font-weight="bold" fill="#${theme.primary}" text-anchor="middle">${escapeXml(truncateText(imgCaption, 60))}</text>
+    <text x="640" y="470" font-size="14" fill="#${theme.mutedText}" text-anchor="middle">Hình ảnh trực quan minh họa báo cáo</text>`;
+    }
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" width="1280" height="720" font-family="Arial">
+  <rect id="bg" x="0" y="0" width="1280" height="720" fill="#${theme.canvasBg}"/>
+  ${headerSvg}
+  <g id="hero_image">
+    ${centerImageSvg}
+  </g>
+</svg>`;
+  }
+
+  // 7. Slide 2 Cột (Two Content) - Hỗ trợ auto-split từ mảng bullets nếu b1/b2 rỗng
   const isTwoCol = layout === "two_content" ||
     Boolean(slide.col1Bullets && slide.col2Bullets) ||
     Boolean(slide.left || slide.right) ||
@@ -380,8 +538,15 @@ export function generateSlideSVG(
   if (isTwoCol) {
     const col1Title = slide.col1Title || slide.left?.title || slide.column1?.title || slide.columns?.[0]?.title || "Khía cạnh chính";
     const col2Title = slide.col2Title || slide.right?.title || slide.column2?.title || slide.columns?.[1]?.title || "Chi tiết bổ sung";
-    const b1 = slide.col1Bullets || slide.left?.bullets || slide.column1?.bullets || slide.columns?.[0]?.bullets || [];
-    const b2 = slide.col2Bullets || slide.right?.bullets || slide.column2?.bullets || slide.columns?.[1]?.bullets || [];
+    let b1 = slide.col1Bullets || slide.left?.bullets || slide.column1?.bullets || slide.columns?.[0]?.bullets || [];
+    let b2 = slide.col2Bullets || slide.right?.bullets || slide.column2?.bullets || slide.columns?.[1]?.bullets || [];
+
+    // Tự động phân chia 2 cột nếu LLM truyền toàn bộ vào mảng bullets chung
+    if (b1.length === 0 && b2.length === 0 && Array.isArray(slide.bullets) && slide.bullets.length > 0) {
+      const mid = Math.ceil(slide.bullets.length / 2);
+      b1 = slide.bullets.slice(0, mid);
+      b2 = slide.bullets.slice(mid);
+    }
 
     const renderColumnBullets = (bulletsList: string[], startX: number) => {
       let bulletsSvg = "";
@@ -424,7 +589,7 @@ export function generateSlideSVG(
 </svg>`;
   }
 
-  // 6. Slide Danh Sách Ý Chính (Bullets - Mặc định)
+  // 8. Slide Danh Sách Ý Chính (Bullets - Mặc định)
   const bullets = slide.bullets || ["Chưa có nội dung chi tiết"];
   let bulletsSvg = "";
   const maxBullets = takeaway ? 4 : 5;
