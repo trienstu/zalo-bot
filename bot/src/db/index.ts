@@ -4168,6 +4168,54 @@ export function findDirectUserByNameOrId(query: string): DirectUserProfile[] {
   }
 }
 
+/**
+ * Tra cứu lịch sử tin nhắn 1:1 của một người dùng cụ thể (theo tên hoặc ID)
+ */
+export function getDirectInteractionsByUser(
+  query: string,
+  limit = 20,
+): { user: DirectUserProfile | null; interactions: DirectInteractionRecord[] } {
+  try {
+    const clean = query.trim();
+    if (!clean) return { user: null, interactions: [] };
+    const db = getDb();
+
+    // 1. Tìm thông tin hồ sơ người dùng
+    const candidates = findDirectUserByNameOrId(clean);
+    const user = candidates[0] || null;
+
+    let rows: DirectInteractionRecord[] = [];
+    if (user) {
+      rows = db
+        .prepare(
+          `SELECT id, user_id as userId, display_name as displayName, user_message as userMessage,
+                  bot_reply as botReply, status, error_detail as errorDetail, tasks_json as tasksJson, created_at as createdAt
+           FROM direct_interactions
+           WHERE user_id = ? OR LOWER(display_name) LIKE ?
+           ORDER BY id DESC
+           LIMIT ?`
+        )
+        .all(user.userId, `%${clean.toLowerCase()}%`, limit) as DirectInteractionRecord[];
+    } else {
+      rows = db
+        .prepare(
+          `SELECT id, user_id as userId, display_name as displayName, user_message as userMessage,
+                  bot_reply as botReply, status, error_detail as errorDetail, tasks_json as tasksJson, created_at as createdAt
+           FROM direct_interactions
+           WHERE user_id = ? OR LOWER(display_name) LIKE ?
+           ORDER BY id DESC
+           LIMIT ?`
+        )
+        .all(clean, `%${clean.toLowerCase()}%`, limit) as DirectInteractionRecord[];
+    }
+
+    return { user, interactions: rows };
+  } catch (e) {
+    console.warn("[db] getDirectInteractionsByUser error:", e);
+    return { user: null, interactions: [] };
+  }
+}
+
 export function getAllDirectUsersWithProfiles(limit = 50): DirectUserProfile[] {
   try {
     const db = getDb();

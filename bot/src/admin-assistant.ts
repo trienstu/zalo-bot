@@ -25,6 +25,7 @@ import {
   getAllDirectUsersWithProfiles,
   setUserCustomProfile,
   getDirectConversationHistory,
+  getDirectInteractionsByUser,
 } from "./db/index.js";
 import { sendDirectText, sendDirectFile, sendDirectVoice, sendGroupText, sendReaction, sendTyping, Reactions } from "./zalo/client.js";
 import { ocrImage } from "./jobs/ocr.js";
@@ -862,6 +863,92 @@ async function handleDirectUsersListReport(api: any, sender: string): Promise<vo
   await sendDirectText(api, sender, report);
 }
 
+/**
+ * Nhận diện ý định tra cứu / báo cáo tin nhắn 1:1 với một người dùng cụ thể
+ */
+export function isUserMessagesReportQuery(text: string): string | null {
+  const clean = text.trim();
+  if (!clean) return null;
+
+  // Lệnh rõ ràng: /tinnhan <user>, /chatlog <user>, /lichsu <user>
+  const cmdMatch = clean.match(/^[!/](?:tinnhan|chatlog|lichsuchat|tinnhankhach)\s+([^\s]+)/i);
+  if (cmdMatch && cmdMatch[1]) {
+    return cmdMatch[1].trim();
+  }
+
+  // Câu hỏi tự nhiên:
+  // "Báo cáo tin nhắn với Trần Văn Tuyến"
+  // "Xem tin nhắn với Trần Văn Tuyến"
+  // "Lịch sử chat với Trần Văn Tuyến"
+  // "Tin nhắn của Trần Văn Tuyến"
+  // "Nội dung chat với anh Tuyến"
+  const naturalMatch = clean.match(
+    /(?:báo\s*cáo|xem|kiểm\s*tra|lịch\s*sử|nội\s*dung|tổng\s*hợp)\s+(?:tin\s*nhắn|đoạn\s*chat|cuộc\s*trò\s*chuyện|tương\s*tác|trao\s*đổi)\s+(?:với|của|giữa\s*bot\s*và)\s+([^\n?,.:]+?)(?:\s+hôm\s+nay|\s+gần\s+đây|\s+nhé|[?,.]|$)/iu
+  ) || clean.match(
+    /(?:tin\s*nhắn|đoạn\s*chat|lịch\s*sử\s*chat|trao\s*đổi)\s+(?:với|của)\s+([^\n?,.:]+?)(?:\s+hôm\s+nay|\s+gần\s+đây|\s+nhé|[?,.]|$)/iu
+  );
+
+  if (naturalMatch && naturalMatch[1]) {
+    let candidate = naturalMatch[1].trim();
+    candidate = candidate.replace(/^(?:bạn|khách|thành\s*viên|anh|chị|em|user)\s+/iu, "").trim();
+    if (candidate.length >= 2 && !/^(?:tôi|mình|tất\s*cả|ai|hôm\s*nay|nhóm)$/iu.test(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Báo cáo chi tiết lịch sử tin nhắn 1:1 với một người dùng cụ thể
+ */
+async function handleUserMessagesReport(api: any, sender: string, targetQuery: string): Promise<void> {
+  const { user, interactions } = getDirectInteractionsByUser(targetQuery, 15);
+  const targetName = user?.displayName || targetQuery;
+
+  if (interactions.length === 0) {
+    let msg = `📋 BÁO CÁO TIN NHẮN 1:1 VỚI "${targetName}":\n\n` +
+      `Hiện tại hệ thống CHƯA GHI NHẬN lượt nhắn tin riêng 1:1 nào giữa bot và "${targetName}".\n`;
+    if (user && user.source === "group_member") {
+      msg += `\n💡 Thông tin thêm: "${user.displayName}" là thành viên nhóm "${user.groupName || "Zalo"}" (có ${user.interactionCount} tin nhắn trong nhóm, hoạt động gần nhất: ${user.lastActiveAt ? new Date(user.lastActiveAt).toLocaleString("vi-VN") : "chưa rõ"}).`;
+    }
+    await sendDirectText(api, sender, msg);
+    return;
+  }
+
+  const userDisplayName = user?.displayName || interactions[0]?.displayName || targetQuery;
+  const userId = user?.userId || interactions[0]?.userId || "Chưa rõ";
+  const total = interactions.length;
+  const failureCount = interactions.filter((it) => it.status === "failed").length;
+
+  let report =
+    `📋 BÁO CÁO TIN NHẮN 1:1 VỚI ${userDisplayName.toUpperCase()} (ID: ${userId}):\n\n` +
+    `• Tổng số tin nhắn ghi nhận: ${total} lượt gần nhất\n` +
+    `• Trạng thái xử lý: ${failureCount > 0 ? `⚠️ Có ${failureCount} ca lỗi` : `✅ Hoạt động tốt`}\n` +
+    (user?.groupName ? `• Nhóm sinh hoạt chung: ${user.groupName}\n` : "") +
+    `\n📜 CHI TIẾT CÁC LƯỢT TRÒ CHUYỆN GẦN NHẤT:\n`;
+
+  const chronoSorted = [...interactions].reverse();
+  chronoSorted.forEach((it, idx) => {
+    const timeStr = new Date(it.createdAt).toLocaleString("vi-VN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      day: "2-digit",
+      month: "2-digit",
+    });
+    const statusTag = it.status === "failed" ? " ⚠️[LỖI]" : "";
+    report += `\n${idx + 1}. [${timeStr}]${statusTag}:\n`;
+    report += `   👤 ${userDisplayName}: "${it.userMessage}"\n`;
+    const cleanReply = (it.botReply || "").replace(/\n+/g, " ").trim();
+    report += `   🤖 Bot: "${cleanReply.slice(0, 160)}${cleanReply.length > 160 ? "..." : ""}"\n`;
+    if (it.status === "failed" && it.errorDetail) {
+      report += `   ⚠️ Chi tiết lỗi: ${it.errorDetail}\n`;
+    }
+  });
+
+  await sendDirectText(api, sender, report);
+}
+
 async function handleSingleUserProfileReport(api: any, sender: string, targetQuery: string): Promise<void> {
   const candidates = findDirectUserByNameOrId(targetQuery);
   if (candidates.length === 0) {
@@ -1156,6 +1243,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       return;
     } else if (dmQuery.type === "summary") {
       await handleDmSummaryReport(api, sender, dmQuery.hours);
+      return;
+    }
+
+    const userMessagesTarget = isUserMessagesReportQuery(rawText);
+    if (userMessagesTarget) {
+      await handleUserMessagesReport(api, sender, userMessagesTarget);
       return;
     }
 

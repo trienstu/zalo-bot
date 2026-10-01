@@ -1,5 +1,6 @@
 import { rankEvidence, isJunkOrBettingDomain, type EvidenceSourceType, type SearchIntent } from "../search-evidence.js";
 import { isFacebookUrl, crawlFacebookEnrichedPost, formatFacebookEnrichedPost } from "./facebook-scraper.js";
+import { config } from "../config.js";
 
 /**
  * Vertical Tools for Zalo Bot Agent Loop.
@@ -371,10 +372,131 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
 }
 
 /**
+ * Kiểm tra xem một URL có phải là liên kết YouTube hợp lệ không
+ */
+export function isYouTubeUrl(url: string): boolean {
+  if (!url || typeof url !== "string") return false;
+  return /(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/|v\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i.test(url.trim());
+}
+
+/**
+ * Trích xuất Video ID 11 ký tự từ link YouTube
+ */
+export function extractYouTubeVideoId(url: string): string | null {
+  if (!url || typeof url !== "string") return null;
+  const match = url.trim().match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/|v\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
+  return match ? match[1]! : null;
+}
+
+/**
+ * Trích xuất toàn diện metadata và phụ đề/transcript của video YouTube (bỏ qua chặn IP VPS)
+ */
+export async function fetchYouTubeContent(
+  url: string,
+  maxChars = 15000,
+): Promise<{ title: string; content: string; url: string } | null> {
+  const videoId = extractYouTubeVideoId(url);
+  if (!videoId) return null;
+
+  let title = "Video YouTube";
+  let author = "YouTube Creator";
+  let description = "";
+  let duration = "";
+  let transcript = "";
+
+  // 1. Lấy metadata nhanh qua YouTube oEmbed (luôn nhanh 100ms, không bao giờ bị chặn IP)
+  try {
+    const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`;
+    const oeRes = await fetch(oembedUrl, {
+      signal: AbortSignal.timeout(6000),
+      headers: { "User-Agent": "Mozilla/5.0" },
+    });
+    if (oeRes.ok) {
+      const oeData = (await oeRes.json()) as any;
+      if (oeData.title) title = oeData.title;
+      if (oeData.author_name) author = oeData.author_name;
+    }
+  } catch (oeErr) {
+    console.warn("[vertical-tools] oEmbed fetch error:", oeErr);
+  }
+
+  // 2. Lấy Phụ đề / Transcript chi tiết qua Apify johnvc~YoutubeTranscripts
+  const token = config.apifyApiToken?.split(",")[0]?.trim();
+  if (token) {
+    try {
+      console.log(`[vertical-tools] 🎬 Đang trích xuất phụ đề YouTube cho [${videoId}] qua Apify...`);
+      const apifyUrl = "https://api.apify.com/v2/acts/johnvc~YoutubeTranscripts/run-sync-get-dataset-items?timeout=50";
+      const apifyRes = await fetch(apifyUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          youtube_url: `https://www.youtube.com/watch?v=${videoId}`,
+          languages: ["vi", "en"],
+          transcript_type: "any",
+        }),
+        signal: AbortSignal.timeout(60_000),
+      });
+
+      if (apifyRes.ok) {
+        const items = (await apifyRes.json()) as any[];
+        if (Array.isArray(items) && items.length > 0) {
+          const item = items[0];
+          if (item.title) title = item.title;
+          if (item.channel_name) author = item.channel_name;
+          if (item.description) description = item.description;
+          if (item.duration_human) duration = item.duration_human;
+
+          if (item.non_timestamped && typeof item.non_timestamped === "string") {
+            transcript = item.non_timestamped.trim();
+          } else if (Array.isArray(item.timestamped) && item.timestamped.length > 0) {
+            transcript = item.timestamped.map((s: any) => s.text).filter(Boolean).join(" ");
+          }
+        }
+      }
+    } catch (apifyErr) {
+      console.warn(`[vertical-tools] Lỗi trích xuất phụ đề YouTube từ Apify cho ${videoId}:`, apifyErr);
+    }
+  }
+
+  let fullContent = `🎬 TIÊU ĐỀ VIDEO: ${title}\n📺 KÊNH / TÁC GIẢ: ${author}\n`;
+  if (duration) fullContent += `⏱️ THỜI LƯỢNG: ${duration}\n`;
+  if (description) {
+    fullContent += `\n📝 MÔ TẢ TỔNG QUAN TỪ TÁC GIẢ:\n${description.slice(0, 1500)}\n`;
+  }
+
+  if (transcript) {
+    fullContent += `\n📜 TOÀN BỘ PHỤ ĐỀ / NỘI DUNG NÓI TRONG VIDEO (TRANSCRIPT):\n${transcript.slice(0, maxChars)}`;
+  } else {
+    fullContent += `\n⚠️ LƯU Ý: Video này hiện không có phụ đề (CC/Subtitles) khả dụng trên YouTube, thông tin tóm tắt dựa trên mô tả và nội dung chính của video.`;
+  }
+
+  return {
+    title: `${title} - ${author}`,
+    content: fullContent,
+    url: `https://www.youtube.com/watch?v=${videoId}`,
+  };
+}
+
+/**
  * 2. Fetch URL content and strip HTML
  * Cleans tags, scripts, styles, and extracts readable text up to maxChars.
  */
 export async function fetchUrl(url: string, maxChars = 3000): Promise<{ title: string; content: string; url: string }> {
+  // Tự động định tuyến URL YouTube sang trích xuất phụ đề (transcript) & metadata chuyên sâu (tránh bị chặn IP VPS)
+  if (isYouTubeUrl(url)) {
+    try {
+      const ytResult = await fetchYouTubeContent(url, Math.max(maxChars, 15000));
+      if (ytResult) {
+        return ytResult;
+      }
+    } catch (ytErr) {
+      console.warn(`[vertical-tools] Lỗi trích xuất YouTube cho URL ${url}:`, ytErr);
+    }
+  }
+
   // Tự động định tuyến URL Facebook sang Apify Facebook Scraper để bóc tách bài viết + comment đầy đủ
   if (isFacebookUrl(url)) {
     try {

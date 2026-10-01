@@ -278,3 +278,34 @@ test("findDirectUserByNameOrId tìm thấy thành viên trong group_members", as
   db.prepare("DELETE FROM group_members WHERE zalo_user_id = ?").run(testUid);
   db.prepare("DELETE FROM bot_groups WHERE group_id = ?").run(testGid);
 });
+
+test("isUserMessagesReportQuery nhận diện chuẩn xác ý định xem tin nhắn theo tên người dùng", async () => {
+  const { isUserMessagesReportQuery } = await import("./admin-assistant.js");
+  assert.equal(isUserMessagesReportQuery("Báo cáo tin nhắn với Trần Văn Tuyến"), "Trần Văn Tuyến");
+  assert.equal(isUserMessagesReportQuery("Xem tin nhắn với anh Tuyến nhé"), "Tuyến");
+  assert.equal(isUserMessagesReportQuery("lịch sử chat với bạn Thảo Nguyên"), "Thảo Nguyên");
+  assert.equal(isUserMessagesReportQuery("tin nhắn của Trần Văn Tuyến hôm nay"), "Trần Văn Tuyến");
+  assert.equal(isUserMessagesReportQuery("/tinnhan 7562597848104391036"), "7562597848104391036");
+  assert.equal(isUserMessagesReportQuery("hôm nay thời tiết thế nào"), null);
+  assert.equal(isUserMessagesReportQuery("báo cáo tin nhắn 1:1 hôm nay"), null); // Lệnh tổng quan chung
+});
+
+test("getDirectInteractionsByUser truy vấn đúng tin nhắn 1:1 của người dùng cụ thể", async () => {
+  const { getDirectInteractionsByUser, getDb } = await import("./db/index.js");
+  const db = getDb();
+  const testUid = "test_user_msg_user_777";
+
+  db.prepare(
+    "INSERT INTO direct_interactions (user_id, display_name, user_message, bot_reply, status, error_detail, tasks_json, created_at) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(testUid, "Nguyễn Văn TestMsg", "Chào bot nha", "Chào bạn!", "success", null, "[]", Date.now());
+
+  const res = getDirectInteractionsByUser("Nguyễn Văn TestMsg", 5);
+  assert.ok(res.interactions.length > 0);
+  assert.equal(res.interactions[0]?.userId, testUid);
+  assert.equal(res.interactions[0]?.userMessage, "Chào bot nha");
+
+  // Dọn dẹp
+  db.prepare("DELETE FROM direct_interactions WHERE user_id = ?").run(testUid);
+});
+

@@ -49,3 +49,18 @@ test("downloadMediaVideo: từ chối xử lý khi URL rỗng", async () => {
   assert.equal(res.success, false);
   assert.match(res.error || "", /hợp lệ/);
 });
+
+test("isYouTubeUrl & extractYouTubeVideoId nhận diện chính xác các định dạng URL YouTube", async () => {
+  const { isYouTubeUrl, extractYouTubeVideoId } = await import("./vertical-tools.js");
+  assert.equal(isYouTubeUrl("https://www.youtube.com/watch?v=hPtpf0rmL5M"), true);
+  assert.equal(isYouTubeUrl("https://youtu.be/hPtpf0rmL5M"), true);
+  assert.equal(isYouTubeUrl("https://youtube.com/shorts/hPtpf0rmL5M?feature=share"), true);
+  assert.equal(isYouTubeUrl("https://www.youtube.com/embed/hPtpf0rmL5M"), true);
+  assert.equal(isYouTubeUrl("https://facebook.com/watch?v=123"), false);
+
+  assert.equal(extractYouTubeVideoId("https://www.youtube.com/watch?v=hPtpf0rmL5M"), "hPtpf0rmL5M");
+  assert.equal(extractYouTubeVideoId("https://youtu.be/hPtpf0rmL5M"), "hPtpf0rmL5M");
+  assert.equal(extractYouTubeVideoId("https://youtube.com/shorts/hPtpf0rmL5M"), "hPtpf0rmL5M");
+  assert.equal(extractYouTubeVideoId("https://google.com"), null);
+});
+
