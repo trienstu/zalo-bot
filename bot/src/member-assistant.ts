@@ -43,6 +43,7 @@ import { buildDynamicSystemPromptModules } from "./prompt-modules.js";
 import fs from "node:fs";
 import { config, defaultBotName } from "./config.js";
 import { finalizeGroundedAnswer } from "./search-evidence.js";
+import { incidentTracker } from "./incident-tracker.js";
 import { answerWithHybridRouting } from "./hybrid-agent.js";
 import { normalizeExecutionSignals, selectResponseMode } from "./hybrid-routing.js";
 import { isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
@@ -1863,10 +1864,12 @@ QUY TẮC BẮT BUỘC:
       customPromptSection = `\n=== CHỈ THỊ RIÊNG CỦA ADMIN: ===\n${groupSettings.customPrompt.trim()}\n`;
     }
 
+    const incidentContext = incidentTracker.getRecentIncidentPrompt(threadId);
     const quoteSystemPrompt =
       `${getSystemTemporalPrompt()}\n\n` +
       `BẠN ĐANG TƯƠNG TÁC TRỰC TIẾP TRONG NHÓM: "${currentGroupName}" (ID: ${threadId}).\n` +
       `${personaIntro}\n${customPromptSection}\n` +
+      (incidentContext ? `${incidentContext}\n\n` : "") +
       (isSystemArchitectureQuery(`${question} ${options.quote.text}`)
         ? `${getSystemArchitectureProfile({ botName, isSuperAdmin })}\n\n`
         : "") +
@@ -3026,10 +3029,11 @@ QUY TẮC BẮT BUỘC:
     searchInstruction +
     directAnswerInstruction;
 
+  const incidentContext = incidentTracker.getRecentIncidentPrompt(threadId);
   const isCavemanGroup = Boolean(groupSettings.cavemanMode);
   const effectiveSystemPrompt = isCavemanGroup
-    ? `${systemPrompt}\n\n${CAVEMAN_USER_FACING_DIRECTIVE}`
-    : systemPrompt;
+    ? `${systemPrompt}\n\n${CAVEMAN_USER_FACING_DIRECTIVE}${incidentContext ? `\n\n${incidentContext}` : ""}`
+    : (incidentContext ? `${systemPrompt}\n\n${incidentContext}` : systemPrompt);
 
   const imageRefSection = (options?.imageUrl || targetUrl)
     ? `\n[ẢNH THAM CHIẾU / ĐÍNH KÈM HIỆN TẠI]: "${options?.imageUrl || targetUrl}". Khi người dùng yêu cầu chỉnh sửa, thay đổi chi tiết hoặc biến thể từ ảnh này, hãy gọi 'generate_image' với imageUrl="${options?.imageUrl || targetUrl}" và isEdit=true.\n`

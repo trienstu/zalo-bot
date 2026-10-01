@@ -52,6 +52,7 @@ import { getSystemTemporalPrompt } from "./temporal.js";
 import { callCloudflareLlm, isCloudflareConfigured, generateCloudflareImage } from "./cloudflare-ai.js";
 import { generateCodexImage, isCodexImageConfigured, isMuseImageConfigured, prepareImageDataUrl } from "./codex-image.js";
 import { generateAiVideo, isMuseVideoConfigured } from "./tools/video-generator.js";
+import { incidentTracker } from "./incident-tracker.js";
 import {
   canUseGrounding,
   incrementGroundingUsage,
@@ -2247,9 +2248,10 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
           const ratioTag = aspectRatio !== "1:1" ? ` (${aspectRatio})` : "";
           const shortNote = prompt.length <= 40 ? ` ("${prompt}"${ratioTag})` : "";
           const modelTag = imgRes.tierUsed ? `\n🤖 Model: ${imgRes.tierUsed}` : "";
-          const caption = isEdit
+          const fallbackNote = imgRes.fallbackNotice ? `\n\n${imgRes.fallbackNotice}` : "";
+          const caption = (isEdit
             ? `🎨 Ảnh sau khi chỉnh sửa đây ạ!${shortNote} ✨${modelTag}`
-            : `🎨 Ảnh theo yêu cầu đây ạ!${shortNote} ✨${modelTag}`;
+            : `🎨 Ảnh theo yêu cầu đây ạ!${shortNote} ✨${modelTag}`) + fallbackNote;
           return {
             success: true,
             filePath: imgRes.filePath,
@@ -2317,6 +2319,14 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
           tierUsed: vidRes.tierUsed,
         };
       }
+      incidentTracker.recordIncident({
+        threadId: args?.threadId || "global",
+        action: "video_generation",
+        targetProvider: "Muse Video",
+        status: "failed",
+        errorReason: vidRes.error || "Lỗi tạo video với Muse",
+        userPrompt: prompt,
+      });
       return { error: vidRes.error || "Lỗi tạo video với Muse" };
     }
     default:

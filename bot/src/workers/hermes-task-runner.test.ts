@@ -48,6 +48,30 @@ test("parseHermesTaskCommand recognizes list and recent subcommands", () => {
   assert.equal(res3.subCommand, "list");
 });
 
+test("parseHermesTaskCommand recognizes natural language status queries", () => {
+  const res1 = parseHermesTaskCommand("kiểm tra trạng thái tác vụ");
+  assert.equal(res1.isTask, true);
+  assert.equal(res1.subCommand, "status");
+
+  const res2 = parseHermesTaskCommand("đang chạy tác vụ gì thế");
+  assert.equal(res2.isTask, true);
+  assert.equal(res2.subCommand, "status");
+
+  const res3 = parseHermesTaskCommand("tiến độ tác vụ nãy giờ tới đâu rồi?");
+  assert.equal(res3.isTask, true);
+  assert.equal(res3.subCommand, "status");
+});
+
+test("parseHermesTaskCommand recognizes natural language list queries", () => {
+  const res1 = parseHermesTaskCommand("xem lịch sử tác vụ hôm nay");
+  assert.equal(res1.isTask, true);
+  assert.equal(res1.subCommand, "list");
+
+  const res2 = parseHermesTaskCommand("danh sách các tác vụ gần đây");
+  assert.equal(res2.isTask, true);
+  assert.equal(res2.subCommand, "list");
+});
+
 test("parseHermesTaskCommand rejects non-task messages", () => {
   const res1 = parseHermesTaskCommand("hôm nay thời tiết thế nào");
   assert.equal(res1.isTask, false);

@@ -25,12 +25,43 @@ const HERMES_STATE_JSON = process.env.HERMES_STATE_JSON || "/home/ubuntu/.hermes
 const SHARED_DIR = "/home/ubuntu/shared-assets";
 
 /**
- * Kiểm tra xem tin nhắn có phải lệnh /tasks hoặc /task hay không
+ * Nhận diện câu hỏi ngôn ngữ tự nhiên về trạng thái hoặc lịch sử tác vụ Hermes
+ */
+export function parseNaturalTaskStatusQuery(text: string): "status" | "list" | null {
+  const clean = (text || "").trim().toLowerCase();
+  if (!clean) return null;
+
+  // Lịch sử / danh sách tác vụ
+  if (
+    /(?:danh sách|lịch sử|history)\s*(?:các\s*)?(?:tác vụ|task)/i.test(clean) ||
+    /(?:tác vụ|task)\s*(?:gần đây|vừa làm|đã làm|hôm nay)/i.test(clean)
+  ) {
+    return "list";
+  }
+
+  // Trạng thái / tiến độ tác vụ đang chạy
+  if (
+    /(?:tiến độ|trạng thái|status)\s*(?:của\s*)?(?:các\s*)?(?:tác vụ|task|hermes)/i.test(clean) ||
+    /(?:đang|có)\s*(?:chạy|làm|thực hiện)\s*(?:tác vụ|task|việc|cái gì)/i.test(clean) ||
+    /(?:tác vụ|task)\s*(?:nãy giờ|hiện tại|đang chạy|vừa rồi)?\s*(?:tới đâu|thế nào|xong chưa|chạy xong chưa)/i.test(clean)
+  ) {
+    return "status";
+  }
+
+  return null;
+}
+
+/**
+ * Kiểm tra xem tin nhắn có phải lệnh /tasks, /task hoặc câu hỏi trạng thái tự nhiên hay không
  */
 export function parseHermesTaskCommand(text: string): HermesTaskCommand {
   const trimmed = (text || "").trim();
   const match = trimmed.match(/^[\/!](?:tasks?)\b\s*([\s\S]*)$/i);
   if (!match) {
+    const natural = parseNaturalTaskStatusQuery(trimmed);
+    if (natural) {
+      return { isTask: true, subCommand: natural, taskPrompt: "" };
+    }
     return { isTask: false, taskPrompt: "" };
   }
 

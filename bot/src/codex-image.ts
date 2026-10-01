@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { config, hybridAgentSettings } from "./config.js";
 import { generateCloudflareImage, isCloudflareConfigured } from "./cloudflare-ai.js";
+import { incidentTracker } from "./incident-tracker.js";
 
 const GENERATED_IMAGES_DIR = path.resolve(process.cwd(), "data", "generated-images");
 
@@ -15,6 +16,7 @@ export interface CodexImageResult {
   error?: string;
   translatedPrompt?: string;
   tierUsed?: string;
+  fallbackNotice?: string;
 }
 
 export function isCodexImageConfigured(): boolean {
@@ -51,6 +53,7 @@ export interface CodexImageOptions {
   /** Image input for Image-to-Image / Editing (Data URL, raw Base64, Buffer, or local file path) */
   image?: string | Buffer | null;
   isEdit?: boolean;
+  threadId?: string;
 }
 
 /**
@@ -620,6 +623,15 @@ export async function generateCodexImage(
         const codexTimeout = isEdit ? Math.max(timeoutMs, 100_000) : Math.min(timeoutMs, 65_000);
         const codexRes = await requestRouterImage(codexModel, finalPrompt, targetSize, baseUrl, apiKey, codexTimeout, targetPath, fileName, imageDataUrl);
         if (codexRes.success) {
+          incidentTracker.recordIncident({
+            threadId: options?.threadId || "global",
+            action: "image_generation",
+            targetProvider: "Muse (muse-image)",
+            status: "fallback_triggered",
+            fallbackProvider: `Codex (${codexModel})`,
+            errorReason: museRes.error || "Timeout quá 65 giây",
+            userPrompt: prompt,
+          });
           return {
             success: true,
             filePath: targetPath,
@@ -627,6 +639,7 @@ export async function generateCodexImage(
             fileSize: codexRes.fileSize,
             translatedPrompt: finalPrompt,
             tierUsed: `Codex (${codexModel})`,
+            fallbackNotice: `⚠️ Lưu ý: Máy chủ Muse phản hồi chậm/timeout (>65s), bot đã tự động kích hoạt Codex (${codexModel}) để hoàn thành ảnh ngay cho bác.`,
           };
         }
 
@@ -636,6 +649,15 @@ export async function generateCodexImage(
           ? await requestGeminiMultimodalImage(geminiModel, finalPrompt, baseUrl, apiKey, geminiTimeout, targetPath, fileName, imageDataUrl)
           : await requestRouterImage(geminiModel, finalPrompt, targetSize, baseUrl, apiKey, geminiTimeout, targetPath, fileName);
         if (geminiRes.success) {
+          incidentTracker.recordIncident({
+            threadId: options?.threadId || "global",
+            action: "image_generation",
+            targetProvider: "Muse (muse-image)",
+            status: "fallback_triggered",
+            fallbackProvider: `Gemini (${geminiModel})`,
+            errorReason: `${museRes.error} -> Codex error: ${codexRes.error}`,
+            userPrompt: prompt,
+          });
           return {
             success: true,
             filePath: targetPath,
@@ -643,6 +665,7 @@ export async function generateCodexImage(
             fileSize: geminiRes.fileSize,
             translatedPrompt: finalPrompt,
             tierUsed: `Gemini (${geminiModel})`,
+            fallbackNotice: `⚠️ Lưu ý: Máy chủ Muse và Codex đều phản hồi chậm, bot đã tự động kích hoạt Gemini (${geminiModel}) để hoàn thành ảnh cho bác.`,
           };
         }
       }
@@ -676,6 +699,15 @@ export async function generateCodexImage(
       const codexRes = await requestRouterImage(codexModel, finalPrompt, targetSize, baseUrl, apiKey, codexTimeout, targetPath, fileName, imageDataUrl);
       if (codexRes.success) {
         console.log(`[codex-image] ✅ [Dự phòng Codex: ${codexModel}] ${opLabel} thành công: ${targetPath}`);
+        incidentTracker.recordIncident({
+          threadId: options?.threadId || "global",
+          action: "image_generation",
+          targetProvider: `Gemini (${geminiModel})`,
+          status: "fallback_triggered",
+          fallbackProvider: `Codex (${codexModel})`,
+          errorReason: geminiRes.error || "Gemini Image lỗi",
+          userPrompt: prompt,
+        });
         return {
           success: true,
           filePath: targetPath,
@@ -683,6 +715,7 @@ export async function generateCodexImage(
           fileSize: codexRes.fileSize,
           translatedPrompt: finalPrompt,
           tierUsed: `Codex (${codexModel})`,
+          fallbackNotice: `⚠️ Lưu ý: Model Gemini phản hồi không thành công, bot đã tự động kích hoạt Codex (${codexModel}) hoàn thành ảnh cho bác.`,
         };
       }
 
@@ -693,6 +726,15 @@ export async function generateCodexImage(
         const museRes = await requestMuseImage(finalPrompt, ratio, museTimeout, targetPath, fileName, imageDataUrl);
         if (museRes.success) {
           console.log(`[codex-image] ✅ [Dự phòng Muse: muse-image] ${opLabel} thành công: ${museRes.filePath}`);
+          incidentTracker.recordIncident({
+            threadId: options?.threadId || "global",
+            action: "image_generation",
+            targetProvider: `Gemini (${geminiModel})`,
+            status: "fallback_triggered",
+            fallbackProvider: "Muse (muse-image)",
+            errorReason: `${geminiRes.error} -> Codex error: ${codexRes.error}`,
+            userPrompt: prompt,
+          });
           return {
             success: true,
             filePath: museRes.filePath,
@@ -700,6 +742,7 @@ export async function generateCodexImage(
             fileSize: museRes.fileSize,
             translatedPrompt: finalPrompt,
             tierUsed: "Muse (muse-image)",
+            fallbackNotice: `⚠️ Lưu ý: Model Gemini và Codex đều không thành công, bot đã kích hoạt Muse hoàn thành ảnh cho bác.`,
           };
         }
       }
@@ -735,6 +778,15 @@ export async function generateCodexImage(
 
         if (geminiRes.success) {
           console.log(`[codex-image] ✅ [Dự phòng Gemini: ${geminiModel}] ${opLabel} thành công: ${targetPath} (${(geminiRes.fileSize / 1024).toFixed(1)} KB)`);
+          incidentTracker.recordIncident({
+            threadId: options?.threadId || "global",
+            action: "image_generation",
+            targetProvider: `Codex (${codexModel})`,
+            status: "fallback_triggered",
+            fallbackProvider: `Gemini (${geminiModel})`,
+            errorReason: codexRes.error || "Codex Image lỗi",
+            userPrompt: prompt,
+          });
           return {
             success: true,
             filePath: targetPath,
@@ -742,6 +794,7 @@ export async function generateCodexImage(
             fileSize: geminiRes.fileSize,
             translatedPrompt: finalPrompt,
             tierUsed: `Gemini (${geminiModel})`,
+            fallbackNotice: `⚠️ Lưu ý: Model Codex phản hồi chậm/lỗi, bot đã tự động kích hoạt Gemini (${geminiModel}) hoàn thành ảnh cho bác.`,
           };
         }
       }
@@ -753,6 +806,15 @@ export async function generateCodexImage(
         const museRes = await requestMuseImage(finalPrompt, ratio, museTimeout, targetPath, fileName, imageDataUrl);
         if (museRes.success) {
           console.log(`[codex-image] ✅ [Dự phòng Muse: muse-image] ${opLabel} thành công: ${museRes.filePath}`);
+          incidentTracker.recordIncident({
+            threadId: options?.threadId || "global",
+            action: "image_generation",
+            targetProvider: `Codex (${codexModel})`,
+            status: "fallback_triggered",
+            fallbackProvider: "Muse (muse-image)",
+            errorReason: "Codex và Gemini đều lỗi, chuyển sang Muse",
+            userPrompt: prompt,
+          });
           return {
             success: true,
             filePath: museRes.filePath,
@@ -760,6 +822,7 @@ export async function generateCodexImage(
             fileSize: museRes.fileSize,
             translatedPrompt: finalPrompt,
             tierUsed: "Muse (muse-image)",
+            fallbackNotice: `⚠️ Lưu ý: Model Codex và Gemini đều phản hồi chậm, bot đã kích hoạt Muse hoàn thành ảnh cho bác.`,
           };
         }
       }
@@ -773,6 +836,15 @@ export async function generateCodexImage(
       const cfRes = await generateCloudflareImage(prompt, { aspectRatio: ratio, timeoutMs: 25_000 });
       if (cfRes.success && cfRes.filePath) {
         console.log(`[codex-image] ✅ [Cloudflare FLUX] Dự phòng cuối thành công: ${cfRes.filePath}`);
+        incidentTracker.recordIncident({
+          threadId: options?.threadId || "global",
+          action: "image_generation",
+          targetProvider: preferredEngine,
+          status: "fallback_triggered",
+          fallbackProvider: "Cloudflare (FLUX.1-schnell)",
+          errorReason: "Các tầng trên đều lỗi/timeout",
+          userPrompt: prompt,
+        });
         return {
           success: true,
           filePath: cfRes.filePath,
@@ -780,9 +852,19 @@ export async function generateCodexImage(
           fileSize: cfRes.fileSize,
           translatedPrompt: cfRes.translatedPrompt || finalPrompt,
           tierUsed: "Cloudflare (FLUX.1-schnell)",
+          fallbackNotice: `⚠️ Lưu ý: Các model chính đều phản hồi chậm, bot đã tự động kích hoạt Cloudflare FLUX hoàn thành ảnh cho bác.`,
         };
       }
     }
+
+    incidentTracker.recordIncident({
+      threadId: options?.threadId || "global",
+      action: "image_generation",
+      targetProvider: preferredEngine,
+      status: "failed",
+      errorReason: "Tất cả các tầng tạo ảnh đều thất bại",
+      userPrompt: prompt,
+    });
 
     return {
       success: false,

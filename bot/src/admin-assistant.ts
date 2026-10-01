@@ -48,6 +48,7 @@ import {
 } from "./google-sync.js";
 import { config } from "./config.js";
 import { getSystemArchitectureProfile, isSystemArchitectureQuery } from "./system-architecture.js";
+import { incidentTracker } from "./incident-tracker.js";
 import { buildDynamicSystemPromptModules } from "./prompt-modules.js";
 import type { QueryPlanResult } from "./query-planner.js";
 import { answerWithHybridRouting } from "./hybrid-agent.js";
@@ -2952,8 +2953,10 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       ? (config.geminiModel || "ag/gemini-3.7-flash-high")
       : ((needsSearch && canUseGrounding()) ? "gemini-3-flash-preview" : defaultFastModel);
 
+    const incidentContext = incidentTracker.getRecentIncidentPrompt(sender);
     const fullSystemPrompt =
       systemPrompt +
+      (incidentContext ? `\n\n${incidentContext}\n\n` : "") +
       (isSystemArchitectureQuery(`${rawText} ${event.quote?.text || ""}`)
         ? `\n\n${getSystemArchitectureProfile({ botName: defaultBotName, isSuperAdmin: isAdmin })}\n\n`
         : "") +
