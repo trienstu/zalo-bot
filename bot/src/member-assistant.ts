@@ -60,7 +60,7 @@ import { generateMusic } from "./tools/music-generator.js";
 import { runBatchAudioJob } from "./workers/batch-audio-processor.js";
 import { isPresentationVideoRequest, runPresentationVideoJob } from "./workers/presentation-video-processor.js";
 import { isMotionVideoRequest, runMotionVideoJob } from "./workers/motion-video-processor.js";
-import { parseHermesTaskCommand, runHermesTaskJob } from "./workers/hermes-task-runner.js";
+import { parseHermesTaskCommand, runHermesTaskJob, handleHermesTaskStatusQuery, handleHermesTaskListQuery } from "./workers/hermes-task-runner.js";
 import {
   compressCaveman,
   CAVEMAN_USER_FACING_DIRECTIVE,
@@ -3699,11 +3699,27 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       return;
     }
 
+    if (taskCmd.subCommand === "status") {
+      await handleHermesTaskStatusQuery(api, threadId, true);
+      return;
+    }
+    if (taskCmd.subCommand === "list") {
+      await handleHermesTaskListQuery(api, threadId, true);
+      return;
+    }
+
     if (!taskCmd.taskPrompt) {
       await sendGroupText(
         api,
         threadId,
-        `💡 [Hermes Task Engine]: Cú pháp sử dụng: /tasks <nội dung nhiệm vụ>\n\nVí dụ:\n• /tasks tạo 18 ảnh minh họa về phòng chống ma túy rồi ghép thành file pptx 16:9\n• /tasks cào bảng giá 5 dòng xe điện VinFast rồi xuất file Excel`,
+        `💡 [Hermes Task Engine]: Hướng dẫn sử dụng:\n\n` +
+        `• /tasks <nội dung>: Ra lệnh thực thi tác vụ đa bước tự chủ (Slide PPTX, Video có tiếng, Excel, Word, Cào dữ liệu...)\n` +
+        `• /tasks status: Kiểm tra trạng thái tác vụ đang chạy ngầm\n` +
+        `• /tasks list: Xem lịch sử các tác vụ và file thành phẩm gần nhất\n\n` +
+        `Ví dụ:\n` +
+        `• /tasks tạo 6 slide phân tích tiềm năng bất động sản Thủ Đức\n` +
+        `• /tasks tạo video người que câu chuyện ngụ ngôn Thầy bói xem voi\n` +
+        `• /tasks cào bảng giá 5 dòng xe điện VinFast rồi xuất file Excel`,
       );
       return;
     }
