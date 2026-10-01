@@ -155,15 +155,28 @@ export function TelegramClient() {
     }
   };
 
-  const handleTriggerScan = async (chatId: string, action: "scan_history" | "scan_files") => {
+  const handleTriggerScan = async (
+    chatId: string,
+    action: "scan_history" | "scan_files" | "scan_all_history",
+    customLimit?: number,
+  ) => {
     setScanningChatId(chatId);
     setScanMessage("Đang gửi yêu cầu quét tới bot...");
 
     try {
+      const targetLimit =
+        customLimit !== undefined
+          ? customLimit
+          : action === "scan_all_history"
+          ? 0
+          : action === "scan_files"
+          ? 50
+          : 100;
+
       const res = await fetch("/api/telegram/chats", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatId, action, limit: action === "scan_files" ? 50 : 100 }),
+        body: JSON.stringify({ chatId, action, limit: targetLimit }),
       });
       const data = await res.json();
       if (!data.ok || !data.requestId) {
@@ -173,7 +186,13 @@ export function TelegramClient() {
       }
 
       const reqId = data.requestId;
-      setScanMessage(action === "scan_files" ? "Đang quét các file tài liệu trong nhóm..." : "Đang kéo tin nhắn cũ & AI đang chắt lọc tri thức...");
+      setScanMessage(
+        action === "scan_all_history"
+          ? "Đang quét toàn bộ tin nhắn từ trước đến nay..."
+          : action === "scan_files"
+          ? "Đang quét các file tài liệu trong nhóm..."
+          : `Đang kéo ${targetLimit} tin nhắn cũ & AI đang chắt lọc...`,
+      );
 
       const pollTimer = setInterval(async () => {
         try {
@@ -185,7 +204,12 @@ export function TelegramClient() {
           const sData = await sRes.json();
           if (sData.ok && sData.status) {
             const st = sData.status.status;
-            if (st === "completed") {
+            if (st === "processing") {
+              const resObj = JSON.parse(sData.status.result_json || "{}");
+              if (resObj.statusText) {
+                setScanMessage(`⏳ ${resObj.statusText}`);
+              }
+            } else if (st === "completed") {
               clearInterval(pollTimer);
               const result = JSON.parse(sData.status.result_json || "{}");
               setScanMessage(`✅ Thành công! Đã quét ${result.fetched || result.filesFound || 0} mục & tạo ${result.knowledgeCreated || 0} bài học mới.`);
@@ -666,16 +690,25 @@ export function TelegramClient() {
                         ) : (
                           <div className="inline-flex items-center gap-1.5">
                             <button
-                              onClick={() => handleTriggerScan(c.chat_id, "scan_history")}
+                              onClick={() => handleTriggerScan(c.chat_id, "scan_history", 100)}
                               disabled={Boolean(scanningChatId)}
-                              title="Quét 100 tin nhắn cũ gần nhất và trích xuất tri thức bằng AI"
+                              title="Quét nhanh 100 tin nhắn cũ gần nhất"
                               className="rounded-lg px-2 py-1 text-[11px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20 transition-colors disabled:opacity-50 flex items-center gap-1"
                             >
                               <RefreshCw className="h-3 w-3" />
-                              Quét tin cũ
+                              Quét 100 tin
                             </button>
                             <button
-                              onClick={() => handleTriggerScan(c.chat_id, "scan_files")}
+                              onClick={() => handleTriggerScan(c.chat_id, "scan_all_history", 0)}
+                              disabled={Boolean(scanningChatId)}
+                              title="Quét toàn bộ tin nhắn từ trước đến nay của nhóm và chắt lọc tri thức"
+                              className="rounded-lg px-2 py-1 text-[11px] font-medium bg-amber-500/10 text-amber-300 border border-amber-500/25 hover:bg-amber-500/20 transition-colors disabled:opacity-50 flex items-center gap-1"
+                            >
+                              <Sparkles className="h-3 w-3 text-amber-400" />
+                              Quét tất cả
+                            </button>
+                            <button
+                              onClick={() => handleTriggerScan(c.chat_id, "scan_files", 50)}
                               disabled={Boolean(scanningChatId)}
                               title="Quét và phân loại toàn bộ file tài liệu, sách, slide trong nhóm"
                               className="rounded-lg px-2 py-1 text-[11px] font-medium bg-purple-500/10 text-purple-400 border border-purple-500/20 hover:bg-purple-500/20 transition-colors disabled:opacity-50 flex items-center gap-1"

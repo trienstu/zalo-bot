@@ -210,56 +210,122 @@ export async function syncJoinedChats(): Promise<number> {
  */
 export async function fetchAndClassifyChatHistory(
   chatId: string,
-  limit = 100,
+  targetLimit = 100,
+  onProgress?: (progress: { fetched: number; knowledgeCreated: number; statusText: string }) => void,
 ): Promise<{ fetched: number; knowledgeCreated: number }> {
   if (!clientInstance?.connected) {
     throw new Error("Telegram Userbot chưa online, không thể tải tin nhắn");
   }
 
   try {
-    // 1. Kéo tin nhắn từ Telegram
-    const rawMessages = await clientInstance.getMessages(chatId, { limit });
-    const batch: TelegramRawMessage[] = [];
-    const now = Date.now();
+    let totalFetched = 0;
+    let totalKnowledgeCreated = 0;
+    let offsetId = 0;
+    const isScanAll = targetLimit <= 0 || targetLimit >= 100000;
+    const effectiveMax = isScanAll ? Infinity : targetLimit;
+    const BATCH_SIZE = 100;
+    let hasMore = true;
 
-    for (const m of rawMessages) {
-      if (!m) continue;
-      const file = (m as any).file;
-      const doc = (m.media as any)?.document;
-      const fileName = file?.name || null;
-      const fileSize = Number(file?.size || doc?.size || 0);
+    while (hasMore && totalFetched < effectiveMax) {
+      const currentLimit = Math.min(BATCH_SIZE, effectiveMax - totalFetched);
+      const queryOptions: any = { limit: currentLimit };
+      if (offsetId > 0) {
+        queryOptions.offsetId = offsetId;
+      }
 
-      // Nếu không có cả text lẫn file thì bỏ qua
-      const msgText = String(m.text || "").trim();
-      if (!msgText && !fileName) continue;
+      const rawMessages = await clientInstance.getMessages(chatId, queryOptions);
+      if (!rawMessages || rawMessages.length === 0) {
+        hasMore = false;
+        break;
+      }
 
-      const sender = (m.sender as any) || {};
-      const senderName = [sender.firstName, sender.lastName].filter(Boolean).join(" ") || sender.title || null;
+      const batch: TelegramRawMessage[] = [];
+      const now = Date.now();
+      let minMsgIdInBatch = Infinity;
 
-      batch.push({
-        chat_id: chatId,
-        message_id: Number(m.id),
-        sender_id: m.senderId ? String(m.senderId) : null,
-        sender_name: senderName,
-        sender_username: sender.username || null,
-        message_text: msgText || `[Tài liệu đính kèm: ${fileName}]`,
-        media_type: (m.media as any)?.photo ? "photo" : (m.media as any)?.document ? "document" : "none",
-        media_caption: msgText,
-        file_name: fileName,
-        file_size: fileSize || null,
-        reply_to_msg_id: m.replyToMsgId ? Number(m.replyToMsgId) : null,
-        date: Number(m.date || Math.floor(now / 1000)),
-        created_at: now,
-      });
+      for (const m of rawMessages) {
+        if (!m) continue;
+        const msgId = Number(m.id);
+        if (msgId < minMsgIdInBatch) {
+          minMsgIdInBatch = msgId;
+        }
+
+        const file = (m as any).file;
+        const doc = (m.media as any)?.document;
+        const fileName = file?.name || null;
+        const fileSize = Number(file?.size || doc?.size || 0);
+
+        // Nếu không có cả text lẫn file thì bỏ qua
+        const msgText = String(m.text || "").trim();
+        if (!msgText && !fileName) continue;
+
+        const sender = (m.sender as any) || {};
+        const senderName =
+          [sender.firstName, sender.lastName].filter(Boolean).join(" ") ||
+          sender.title ||
+          null;
+
+        batch.push({
+          chat_id: chatId,
+          message_id: msgId,
+          sender_id: m.senderId ? String(m.senderId) : null,
+          sender_name: senderName,
+          sender_username: sender.username || null,
+          message_text: msgText || `[Tài liệu đính kèm: ${fileName}]`,
+          media_type: (m.media as any)?.photo
+            ? "photo"
+            : (m.media as any)?.document
+            ? "document"
+            : "none",
+          media_caption: msgText,
+          file_name: fileName,
+          file_size: fileSize || null,
+          reply_to_msg_id: m.replyToMsgId ? Number(m.replyToMsgId) : null,
+          date: Number(m.date || Math.floor(now / 1000)),
+          created_at: now,
+        });
+      }
+
+      if (batch.length > 0) {
+        const fetched = saveRawTelegramMessagesBatch(batch);
+        totalFetched += fetched;
+
+        // Phân loại và trích xuất tri thức bằng AI theo từng đợt
+        const created = await classifyAndExtractKnowledge(chatId, batch);
+        totalKnowledgeCreated += created;
+      }
+
+      // Cập nhật offsetId cho đợt tiếp theo
+      if (minMsgIdInBatch !== Infinity && minMsgIdInBatch > 0) {
+        if (offsetId === minMsgIdInBatch) {
+          hasMore = false;
+          break;
+        }
+        offsetId = minMsgIdInBatch;
+      } else {
+        hasMore = false;
+        break;
+      }
+
+      if (onProgress) {
+        onProgress({
+          fetched: totalFetched,
+          knowledgeCreated: totalKnowledgeCreated,
+          statusText: `Đang quét... Đã lưu ${totalFetched} tin, tạo ${totalKnowledgeCreated} bài học`,
+        });
+      }
+
+      // Nếu số tin trả về ít hơn yêu cầu => đã tới mốc đầu tiên của nhóm
+      if (rawMessages.length < currentLimit) {
+        hasMore = false;
+        break;
+      }
+
+      // Nghỉ nhẹ 400ms giữa các trang để chống Rate Limit của Telegram
+      await new Promise((r) => setTimeout(r, 400));
     }
 
-    // 2. Lưu vào DB
-    const fetched = saveRawTelegramMessagesBatch(batch);
-
-    // 3. Phân loại và trích xuất tri thức bằng AI
-    const knowledgeCreated = await classifyAndExtractKnowledge(chatId, batch);
-
-    return { fetched, knowledgeCreated };
+    return { fetched: totalFetched, knowledgeCreated: totalKnowledgeCreated };
   } catch (err: any) {
     console.error(`[telegram-userbot] Lỗi kéo tin nhắn nhóm ${chatId}:`, err);
     throw err;
@@ -367,13 +433,22 @@ export async function consumePendingTelegramCrawlRequests(): Promise<void> {
   db.prepare(`UPDATE telegram_crawl_requests SET status = 'processing' WHERE id = ?`).run(reqId);
 
   try {
-    const limit = pending.item_limit || 100;
+    const rawLimit = pending.item_limit;
+    // Nếu action là scan_all_history thì targetLimit = 0 (quét toàn bộ lịch sử)
+    const limit = pending.action === "scan_all_history" ? 0 : rawLimit ?? 100;
     let result: any = null;
 
     if (pending.action === "scan_files") {
-      result = await scanGroupFiles(pending.chat_id, limit);
+      result = await scanGroupFiles(pending.chat_id, limit || 50);
     } else {
-      result = await fetchAndClassifyChatHistory(pending.chat_id, limit);
+      result = await fetchAndClassifyChatHistory(pending.chat_id, limit, (prog) => {
+        try {
+          db.prepare(`UPDATE telegram_crawl_requests SET result_json = ? WHERE id = ?`).run(
+            JSON.stringify(prog),
+            reqId,
+          );
+        } catch {}
+      });
     }
 
     db.prepare(`

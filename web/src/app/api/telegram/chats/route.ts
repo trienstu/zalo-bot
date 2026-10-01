@@ -31,17 +31,35 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Thiếu chatId" }, { status: 400 });
     }
 
-    // 2. Yêu cầu quét tin nhắn cũ hoặc quét file
-    if (action === "scan_history" || action === "scan_files") {
+    // 2. Yêu cầu quét tin nhắn cũ, quét file hoặc quét toàn bộ lịch sử
+    if (action === "scan_history" || action === "scan_files" || action === "scan_all_history") {
+      const parsedLimit = limit !== undefined && limit !== null && limit !== "" ? Number(limit) : undefined;
+      const effectiveLimit =
+        parsedLimit !== undefined
+          ? parsedLimit
+          : action === "scan_all_history"
+          ? 0
+          : action === "scan_files"
+          ? 50
+          : 100;
+
       const newReqId = createCrawlRequestWeb({
         chatId,
         action,
-        limit: Number(limit) || (action === "scan_files" ? 50 : 100),
+        limit: effectiveLimit,
       });
+
+      const actionText =
+        action === "scan_all_history"
+          ? "quét toàn bộ lịch sử nhóm"
+          : action === "scan_files"
+          ? "quét file tài liệu"
+          : `quét ${effectiveLimit} tin nhắn cũ`;
+
       return NextResponse.json({
         ok: true,
         requestId: newReqId,
-        message: `Đã xếp hàng yêu cầu ${action === "scan_files" ? "quét file tài liệu" : "quét tin nhắn cũ"}.`,
+        message: `Đã xếp hàng yêu cầu ${actionText}.`,
       });
     }
 

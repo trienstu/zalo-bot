@@ -64,16 +64,17 @@ export function setChatTrackingStatusWeb(chatId: string, isTracked: boolean) {
 
 export function createCrawlRequestWeb(params: {
   chatId: string;
-  action: "scan_history" | "scan_files";
+  action: "scan_history" | "scan_files" | "scan_all_history";
   limit?: number;
 }): number {
   const db = getDb();
+  const limitValue = params.limit !== undefined ? params.limit : (params.action === "scan_all_history" ? 0 : 100);
   const res = db
     .prepare(`
       INSERT INTO telegram_crawl_requests (chat_id, action, item_limit, status, created_at)
       VALUES (?, ?, ?, 'pending', ?)
     `)
-    .run(params.chatId, params.action, params.limit || 50, Date.now());
+    .run(params.chatId, params.action, limitValue, Date.now());
   return Number(res.lastInsertRowid);
 }
 
