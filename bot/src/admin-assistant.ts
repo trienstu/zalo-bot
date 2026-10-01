@@ -1262,6 +1262,20 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       return;
     }
 
+    // 📊 BÁO CÁO INSIGHT TRI THỨC NHÓM & XUẤT FILE WORD (GIAI ĐOẠN 2)
+    if (/^(?:\/insight|\/report|báo cáo nhóm|insight nhóm|báo cáo ngày|tổng hợp nhóm|báo cáo 24h)/i.test(rawText)) {
+      await sendDirectText(
+        api,
+        sender,
+        "⏳ Dạ Sếp, em đang quét toàn bộ tin nhắn thảo luận của các nhóm trong 24h qua và bóc tách insight chuyên sâu, xuất file Word (.docx) cho Sếp ngay đây ạ...",
+      );
+      const { runDailyGroupInsightJob } = await import("./group-insight.js");
+      void runDailyGroupInsightJob(api, { targetAdminId: sender, isPast24h: true }).catch((err) => {
+        console.error("[admin-assistant] Lỗi runDailyGroupInsightJob:", err);
+      });
+      return;
+    }
+
     const dmQuery = isDmSummaryOrErrorQuery(rawText);
     if (dmQuery.type === "errors") {
       await handleDmErrorReport(api, sender, dmQuery.hours);

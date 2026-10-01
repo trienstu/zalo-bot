@@ -11,6 +11,7 @@ import {
 } from "./db/index.js";
 import { sendDirectText } from "./zalo/client.js";
 import { notifyAdmins } from "./admin-assistant.js";
+import { checkDailyInsightCronLoop } from "./group-insight.js";
 
 // =========================================================================
 // 1. THEO DÕI & NHẮC NHỞ ADMIN KHI BỊ TAG QUÁ 10-15 PHÚT CHƯA TRẢ LỜI
@@ -354,4 +355,9 @@ export function initHostAssistant(api: any): void {
   setTimeout(() => {
     void checkRestartCatchUp(api);
   }, 3_000);
+
+  // Vòng lặp kiểm tra xuất báo cáo Insight nhóm lúc 01:00 sáng
+  setInterval(() => {
+    void checkDailyInsightCronLoop(api);
+  }, 30_000);
 }
