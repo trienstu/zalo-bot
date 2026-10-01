@@ -8,12 +8,21 @@ Tự động sinh video người que hoạt hình độ phân giải cao 1280x72
 
 import os
 import sys
+
+# Tự động chuyển sang venv của Hermes nếu system python thiếu PIL
+try:
+    from PIL import Image, ImageDraw, ImageFont
+except ImportError:
+    hermes_py = '/home/ubuntu/.hermes/hermes-agent/venv/bin/python'
+    if os.path.exists(hermes_py) and sys.executable != hermes_py:
+        os.execv(hermes_py, [hermes_py] + sys.argv)
+    raise
+
 import math
 import json
 import shutil
 import argparse
 import subprocess
-from PIL import Image, ImageDraw, ImageFont
 
 W, H, FPS = 1280, 720, 30
 GROUND_Y = 560
