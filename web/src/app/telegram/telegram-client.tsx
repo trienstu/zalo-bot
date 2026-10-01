@@ -19,6 +19,11 @@ import {
   Clock,
   Tag,
   Quote,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  Check,
+  Share2,
 } from "lucide-react";
 import { Badge, Card, CardTitle, Button, Input, Stat } from "@/components/ui";
 
@@ -62,6 +67,33 @@ export function TelegramClient() {
   const [selectedDays, setSelectedDays] = useState("7");
   const [selectedChat, setSelectedChat] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Trạng thái mở rộng xem nội dung gốc & xuất word từng bài
+  const [expandedOriginalIds, setExpandedOriginalIds] = useState<Record<number, boolean>>({});
+  const [copiedChatId, setCopiedChatId] = useState<string | null>(null);
+  const [exportingItemId, setExportingItemId] = useState<number | null>(null);
+
+  const toggleOriginal = (id: number) => {
+    setExpandedOriginalIds((prev) => ({
+      ...prev,
+      [id]: !prev[id],
+    }));
+  };
+
+  const handleExportSingleWord = (itemId: number) => {
+    setExportingItemId(itemId);
+    window.location.href = `/api/telegram/export-word?itemId=${itemId}`;
+    setTimeout(() => setExportingItemId(null), 2500);
+  };
+
+  const handleCopyShareLink = (chatId: string) => {
+    if (typeof window !== "undefined") {
+      const url = `${window.location.origin}/telegram/share/${chatId}`;
+      navigator.clipboard.writeText(url);
+      setCopiedChatId(chatId);
+      setTimeout(() => setCopiedChatId(null), 2000);
+    }
+  };
 
   const fetchData = async () => {
     setLoading(true);
@@ -414,6 +446,36 @@ export function TelegramClient() {
                   <option key={c.chat_id} value={c.chat_id}>{c.title}</option>
                 ))}
               </select>
+
+              {selectedChat !== "all" && (
+                <div className="flex items-center gap-1.5">
+                  <a
+                    href={`/telegram/share/${selectedChat}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded-lg bg-blue-500/10 border border-blue-500/25 px-2.5 py-1.5 text-xs text-blue-400 hover:bg-blue-500/20 transition-colors"
+                  >
+                    <span>Xem trang chia sẻ</span>
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                  <button
+                    onClick={() => handleCopyShareLink(selectedChat)}
+                    className="inline-flex items-center gap-1 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)] px-2.5 py-1.5 text-xs text-[var(--color-text)] hover:text-white transition-colors"
+                  >
+                    {copiedChatId === selectedChat ? (
+                      <>
+                        <Check className="h-3 w-3 text-emerald-400" />
+                        <span className="text-emerald-400">Đã copy link</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3 w-3" />
+                        <span>Copy link nhóm</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -479,13 +541,51 @@ export function TelegramClient() {
                         <span>"{item.original_quotes}"</span>
                       </div>
                     )}
+
+                    {/* Accordion xem nội dung thảo luận gốc của tác giả */}
+                    {item.original_content && item.original_content.trim() && (
+                      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)]/60 overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => toggleOriginal(item.id)}
+                          className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors"
+                        >
+                          <span className="flex items-center gap-1.5 text-blue-400">
+                            <MessageSquare className="h-3.5 w-3.5" />
+                            {expandedOriginalIds[item.id] ? "Thu gọn nội dung thảo luận gốc" : "Xem nội dung thảo luận gốc từ nhóm"}
+                          </span>
+                          {expandedOriginalIds[item.id] ? (
+                            <ChevronUp className="h-4 w-4 text-[var(--color-muted)]" />
+                          ) : (
+                            <ChevronDown className="h-4 w-4 text-[var(--color-muted)]" />
+                          )}
+                        </button>
+                        {expandedOriginalIds[item.id] && (
+                          <div className="p-3 border-t border-[var(--color-border)] bg-black/25 text-xs text-[var(--color-text)]/90 font-mono whitespace-pre-wrap leading-relaxed max-h-72 overflow-y-auto">
+                            {item.original_content}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Footer của Card */}
-                  <div className="pt-3 border-t border-[var(--color-border)] flex items-center justify-between text-[11px] text-[var(--color-muted)]">
-                    <span className="truncate max-w-[200px]" title={item.chat_title}>
-                      📍 {item.chat_title || "Group Telegram"}
-                    </span>
+                  <div className="pt-3 border-t border-[var(--color-border)] flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--color-muted)]">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate max-w-[150px]" title={item.chat_title}>
+                        📍 {item.chat_title || "Group Telegram"}
+                      </span>
+                      <button
+                        onClick={() => handleExportSingleWord(item.id)}
+                        disabled={exportingItemId === item.id}
+                        className="inline-flex items-center gap-1 rounded-md bg-[var(--color-surface-2)] hover:bg-blue-600 hover:text-white border border-[var(--color-border)] px-2 py-0.5 text-[11px] text-[var(--color-text)] transition-colors"
+                        title="Xuất file Word riêng cho bài học này (gồm tóm tắt + thảo luận gốc)"
+                      >
+                        <FileText className="h-3 w-3 text-blue-400" />
+                        <span>{exportingItemId === item.id ? "Đang xuất..." : "Xuất Word"}</span>
+                      </button>
+                    </div>
+
                     {item.useful_links && item.useful_links.length > 0 && (
                       <a
                         href={item.useful_links[0]}
@@ -528,13 +628,14 @@ export function TelegramClient() {
                   <th className="px-4 py-3 text-center">Tin Nhắn</th>
                   <th className="px-4 py-3 text-center">Tri Thức Trích Xuất</th>
                   <th className="px-4 py-3 text-center">Quét Lịch Sử & File Cũ</th>
+                  <th className="px-4 py-3 text-center">Kho Tri Thức & Link Share</th>
                   <th className="px-4 py-3 text-right">Trạng Thái Theo Dõi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--color-border)]">
                 {chats.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-[var(--color-muted)]">
+                    <td colSpan={7} className="px-4 py-8 text-center text-[var(--color-muted)]">
                       Chưa có nhóm nào được ghi nhận. Vui lòng kết nối tài khoản Telegram trước.
                     </td>
                   </tr>
@@ -584,6 +685,37 @@ export function TelegramClient() {
                             </button>
                           </div>
                         )}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <div className="inline-flex items-center gap-1.5">
+                          <a
+                            href={`/telegram/share/${c.chat_id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            title="Mở trang kho tri thức riêng của nhóm này"
+                            className="rounded-lg px-2 py-1 text-[11px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20 transition-colors flex items-center gap-1"
+                          >
+                            <span>Mở trang</span>
+                            <ExternalLink className="h-3 w-3" />
+                          </a>
+                          <button
+                            onClick={() => handleCopyShareLink(c.chat_id)}
+                            title="Sao chép link chia sẻ công khai cho thành viên nhóm"
+                            className="rounded-lg px-2 py-1 text-[11px] font-medium bg-[var(--color-surface-2)] text-[var(--color-text)] hover:text-white hover:bg-slate-700 transition-colors flex items-center gap-1"
+                          >
+                            {copiedChatId === c.chat_id ? (
+                              <>
+                                <Check className="h-3 w-3 text-emerald-400" />
+                                <span className="text-emerald-400">Đã copy</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="h-3 w-3" />
+                                <span>Copy Link</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-right">
                         <button

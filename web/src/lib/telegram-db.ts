@@ -84,6 +84,106 @@ export function getCrawlRequestStatusWeb(requestId: number) {
     .get(requestId) as any;
 }
 
+export function ensureTelegramKnowledgeSchemaWeb(): void {
+  const db = getDb();
+  try {
+    db.exec(`ALTER TABLE telegram_knowledge_items ADD COLUMN original_content TEXT DEFAULT ''`);
+  } catch {}
+}
+
+export function backfillOriginalContentWeb(): number {
+  ensureTelegramKnowledgeSchemaWeb();
+  const db = getDb();
+  const items = db
+    .prepare(`
+      SELECT id, chat_id, raw_message_ids 
+      FROM telegram_knowledge_items 
+      WHERE (original_content IS NULL OR TRIM(original_content) = '')
+        AND raw_message_ids IS NOT NULL AND raw_message_ids != '[]'
+    `)
+    .all() as any[];
+
+  let updated = 0;
+  for (const it of items) {
+    const msgIds = safeParseJson(it.raw_message_ids, []);
+    if (!Array.isArray(msgIds) || msgIds.length === 0) continue;
+
+    const placeholders = msgIds.map(() => "?").join(",");
+    const msgs = db
+      .prepare(`
+        SELECT sender_name, message_text, date 
+        FROM telegram_messages 
+        WHERE chat_id = ? AND message_id IN (${placeholders})
+        ORDER BY date ASC
+      `)
+      .all(it.chat_id, ...msgIds) as any[];
+
+    if (msgs.length > 0) {
+      const fullText = msgs
+        .map((m) => {
+          const sender = m.sender_name || "Thành viên";
+          const time = new Date(m.date * 1000).toLocaleString("vi-VN");
+          return `[${time}] ${sender}:\n${m.message_text.trim()}`;
+        })
+        .join("\n\n---\n\n");
+
+      db.prepare(`UPDATE telegram_knowledge_items SET original_content = ? WHERE id = ?`).run(fullText, it.id);
+      updated++;
+    }
+  }
+  return updated;
+}
+
+export function getTrackedChatByIdWeb(chatId: string) {
+  const db = getDb();
+  return db
+    .prepare(`
+      SELECT 
+        c.*,
+        COUNT(DISTINCT m.id) as message_count,
+        COUNT(DISTINCT k.id) as knowledge_count
+      FROM telegram_tracked_chats c
+      LEFT JOIN telegram_messages m ON m.chat_id = c.chat_id
+      LEFT JOIN telegram_knowledge_items k ON k.chat_id = c.chat_id
+      WHERE c.chat_id = ?
+      GROUP BY c.chat_id
+    `)
+    .get(chatId) as any;
+}
+
+export function getKnowledgeItemByIdWeb(id: number) {
+  ensureTelegramKnowledgeSchemaWeb();
+  const db = getDb();
+  const r = db
+    .prepare(`
+      SELECT 
+        k.*,
+        c.title as chat_title
+      FROM telegram_knowledge_items k
+      LEFT JOIN telegram_tracked_chats c ON c.chat_id = k.chat_id
+      WHERE k.id = ?
+    `)
+    .get(id) as any;
+
+  if (!r) return null;
+  return {
+    id: r.id,
+    chat_id: r.chat_id,
+    category: r.category,
+    title: r.title,
+    summary: r.summary,
+    key_takeaways: safeParseJson(r.key_takeaways, []),
+    original_quotes: r.original_quotes || "",
+    original_content: r.original_content || "",
+    useful_links: safeParseJson(r.useful_links, []),
+    raw_message_ids: safeParseJson(r.raw_message_ids, []),
+    date_range: r.date_range,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+    chat_title: r.chat_title || "Nhóm Telegram",
+  };
+}
+
 export function listKnowledgeItemsWeb(filter?: {
   chatId?: string;
   category?: string;
@@ -92,6 +192,7 @@ export function listKnowledgeItemsWeb(filter?: {
   limit?: number;
   offset?: number;
 }) {
+  ensureTelegramKnowledgeSchemaWeb();
   const db = getDb();
   const conditions: string[] = [];
   const params: any = {};
@@ -110,12 +211,12 @@ export function listKnowledgeItemsWeb(filter?: {
     params.cutoff = cutoff;
   }
   if (filter?.search && filter.search.trim()) {
-    conditions.push("(k.title LIKE @search OR k.summary LIKE @search OR k.key_takeaways LIKE @search)");
+    conditions.push("(k.title LIKE @search OR k.summary LIKE @search OR k.key_takeaways LIKE @search OR k.original_content LIKE @search)");
     params.search = `%${filter.search.trim()}%`;
   }
 
   const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-  const limit = Math.min(filter?.limit || 50, 200);
+  const limit = Math.min(filter?.limit || 50, 500);
   const offset = filter?.offset || 0;
 
   params.limit = limit;
@@ -147,6 +248,7 @@ export function listKnowledgeItemsWeb(filter?: {
     summary: r.summary,
     key_takeaways: safeParseJson(r.key_takeaways, []),
     original_quotes: r.original_quotes || "",
+    original_content: r.original_content || "",
     useful_links: safeParseJson(r.useful_links, []),
     raw_message_ids: safeParseJson(r.raw_message_ids, []),
     date_range: r.date_range,

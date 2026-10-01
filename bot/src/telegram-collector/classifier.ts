@@ -80,6 +80,11 @@ export async function classifyAndExtractKnowledge(
     const rawJson = await callGeminiJson(SYSTEM_PROMPT, userPrompt, 4000);
     const parsed = parseKnowledgeItemsJson(rawJson);
 
+    const messageMap = new Map<number, TelegramRawMessage>();
+    for (const m of messages) {
+      messageMap.set(Number(m.message_id), m);
+    }
+
     let savedCount = 0;
     const now = Date.now();
     const dateRange = dateRangeStr || new Date().toISOString().slice(0, 10);
@@ -103,6 +108,23 @@ export async function classifyAndExtractKnowledge(
         ? (item.category as KnowledgeCategory)
         : "general";
 
+      const rawIds: number[] = Array.isArray(item.raw_message_ids) ? item.raw_message_ids.map(Number) : [];
+      let originalContent = "";
+      if (rawIds.length > 0) {
+        const matchedMsgs = rawIds
+          .map((id) => messageMap.get(id))
+          .filter(Boolean) as TelegramRawMessage[];
+        if (matchedMsgs.length > 0) {
+          originalContent = matchedMsgs
+            .map((m) => {
+              const sender = m.sender_name || m.sender_username || "Thành viên";
+              const time = new Date(m.date * 1000).toLocaleString("vi-VN");
+              return `[${time}] ${sender}:\n${m.message_text.trim()}`;
+            })
+            .join("\n\n---\n\n");
+        }
+      }
+
       saveKnowledgeItem({
         chat_id: chatId,
         category: validCategory,
@@ -110,8 +132,9 @@ export async function classifyAndExtractKnowledge(
         summary: item.summary.trim(),
         key_takeaways: Array.isArray(item.key_takeaways) ? item.key_takeaways : [],
         original_quotes: item.original_quotes?.trim() || "",
+        original_content: originalContent,
         useful_links: Array.isArray(item.useful_links) ? item.useful_links : [],
-        raw_message_ids: Array.isArray(item.raw_message_ids) ? item.raw_message_ids : [],
+        raw_message_ids: rawIds,
         date_range: dateRange,
         created_at: now,
         updated_at: now,

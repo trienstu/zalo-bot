@@ -690,6 +690,7 @@ CREATE TABLE IF NOT EXISTS telegram_knowledge_items (
   summary           TEXT NOT NULL,
   key_takeaways     TEXT NOT NULL DEFAULT '[]', -- JSON array of strings
   original_quotes   TEXT DEFAULT '',
+  original_content  TEXT NOT NULL DEFAULT '',
   useful_links      TEXT NOT NULL DEFAULT '[]', -- JSON array of URLs
   raw_message_ids   TEXT NOT NULL DEFAULT '[]', -- JSON array of message_ids
   date_range        TEXT NOT NULL DEFAULT '',

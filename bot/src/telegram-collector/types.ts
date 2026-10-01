@@ -48,6 +48,7 @@ export interface TelegramKnowledgeItem {
   summary: string;
   key_takeaways: string[];
   original_quotes?: string;
+  original_content?: string;
   useful_links: string[];
   raw_message_ids: number[];
   date_range: string;

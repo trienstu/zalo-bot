@@ -256,6 +256,16 @@ function AppShellInner({
     return `${pathname}?${qs.toString()}`;
   };
 
+  // 0. TRANG CHIA SẺ TRI THỨC TELEGRAM CÔNG KHAI (/telegram/share)
+  const isTelegramSharePage = pathname.startsWith("/telegram/share");
+  if (isTelegramSharePage) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+        {children}
+      </div>
+    );
+  }
+
   // 1. TRANG CÔNG KHAI THUẦN TÚY: Kho Kiến Thức (/hub) & Kho GitHub Repo (/repos)
   const isPublicResourcePage =
     pathname === "/hub" ||

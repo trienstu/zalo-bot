@@ -21,6 +21,7 @@ export interface KnowledgeItemForWord {
   summary: string;
   key_takeaways: string[];
   original_quotes?: string;
+  original_content?: string;
   useful_links: string[];
   raw_message_ids: number[];
   date_range: string;
@@ -345,6 +346,72 @@ export async function generateTelegramKnowledgeDocxBuffer(
         );
       }
 
+      if (item.original_content && item.original_content.trim()) {
+        const origLines = item.original_content.trim().split("\n");
+        const origParagraphs: Paragraph[] = [
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: "💬 NỘI DUNG THẢO LUẬN GỐC TỪ NHÓM:",
+                font: "Times New Roman",
+                size: 20,
+                bold: true,
+                color: "4B5563",
+              }),
+            ],
+            spacing: { after: 80 },
+          }),
+        ];
+
+        for (const line of origLines) {
+          origParagraphs.push(
+            new Paragraph({
+              children: [
+                new TextRun({
+                  text: line || " ",
+                  font: "Times New Roman",
+                  size: 19,
+                  color: "374151",
+                }),
+              ],
+              spacing: { after: 40 },
+            }),
+          );
+        }
+
+        const origBox = new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: [
+            new TableRow({
+              children: [
+                new TableCell({
+                  shading: {
+                    type: ShadingType.CLEAR,
+                    fill: "F9FAFB",
+                  },
+                  borders: {
+                    left: { style: BorderStyle.SINGLE, size: 24, color: "9CA3AF" },
+                    top: { style: BorderStyle.NONE, size: 0, color: "auto" },
+                    bottom: { style: BorderStyle.NONE, size: 0, color: "auto" },
+                    right: { style: BorderStyle.NONE, size: 0, color: "auto" },
+                  },
+                  margins: {
+                    top: 100,
+                    bottom: 100,
+                    left: 160,
+                    right: 160,
+                  },
+                  children: origParagraphs,
+                }),
+              ],
+            }),
+          ],
+        });
+
+        docChildren.push(origBox);
+        docChildren.push(new Paragraph({ spacing: { after: 100 } }));
+      }
+
       if (item.useful_links && item.useful_links.length > 0) {
         docChildren.push(
           new Paragraph({
@@ -405,3 +472,318 @@ export async function generateTelegramKnowledgeDocxBuffer(
 
   return Packer.toBuffer(doc);
 }
+
+export async function generateSingleTelegramKnowledgeDocxBuffer(
+  item: KnowledgeItemForWord,
+): Promise<Buffer> {
+  const meta = CATEGORY_META[item.category] || CATEGORY_META.general;
+  const docChildren: (Paragraph | Table)[] = [];
+
+  // Header Tiêu đề
+  docChildren.push(
+    new Paragraph({
+      heading: HeadingLevel.TITLE,
+      children: [
+        new TextRun({
+          text: item.title,
+          font: "Times New Roman",
+          size: 32,
+          bold: true,
+          color: "1F497D",
+        }),
+      ],
+      spacing: { before: 100, after: 120 },
+    }),
+  );
+
+  // Thông tin Metadata (Chủ đề, Nhóm, Thời gian)
+  const sourceInfo = item.chat_title ? `Tại nhóm: ${item.chat_title}` : "Telegram Group";
+  const dateInfo = item.date_range ? ` • Mốc thảo luận: ${item.date_range}` : "";
+  const createdDate = item.created_at ? new Date(item.created_at).toLocaleDateString("vi-VN") : "";
+
+  docChildren.push(
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: `${meta.icon} ${meta.label}`,
+          font: "Times New Roman",
+          size: 20,
+          bold: true,
+          color: meta.color,
+        }),
+        new TextRun({
+          text: ` | 📍 ${sourceInfo}${dateInfo}${createdDate ? ` • Lưu: ${createdDate}` : ""}`,
+          font: "Times New Roman",
+          size: 19,
+          italics: true,
+          color: "7F7F7F",
+        }),
+      ],
+      spacing: { after: 180 },
+    }),
+  );
+
+  // Phân cách
+  docChildren.push(
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: "_________________________________________________________________________________",
+          color: "D9D9D9",
+          size: 14,
+        }),
+      ],
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 180 },
+    }),
+  );
+
+  // 1. Tóm tắt cốt lõi
+  docChildren.push(
+    new Paragraph({
+      heading: HeadingLevel.HEADING_2,
+      children: [
+        new TextRun({
+          text: "📌 TÓM TẮT CỐT LÕI (AI SYNTHESIS)",
+          font: "Times New Roman",
+          size: 24,
+          bold: true,
+          color: "203864",
+        }),
+      ],
+      spacing: { before: 100, after: 80 },
+    }),
+  );
+
+  docChildren.push(
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: item.summary,
+          font: "Times New Roman",
+          size: 22,
+          color: "262626",
+        }),
+      ],
+      spacing: { after: 140 },
+    }),
+  );
+
+  // 2. Bài học & Takeaways
+  if (item.key_takeaways && item.key_takeaways.length > 0) {
+    const takeawayParagraphs: Paragraph[] = [
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: "🎯 BÀI HỌC CỐT LÕI & CÁCH ÁP DỤNG THỰC TẾ:",
+            font: "Times New Roman",
+            size: 20,
+            bold: true,
+            color: "1F497D",
+          }),
+        ],
+        spacing: { after: 80 },
+      }),
+    ];
+
+    for (const kw of item.key_takeaways) {
+      takeawayParagraphs.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: `• ${kw}`,
+              font: "Times New Roman",
+              size: 20,
+              color: "333333",
+            }),
+          ],
+          spacing: { after: 40 },
+        }),
+      );
+    }
+
+    const calloutTable = new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [
+        new TableRow({
+          children: [
+            new TableCell({
+              shading: {
+                type: ShadingType.CLEAR,
+                fill: "F2F5F9",
+              },
+              borders: {
+                left: { style: BorderStyle.SINGLE, size: 24, color: "1F497D" },
+                top: { style: BorderStyle.NONE, size: 0, color: "auto" },
+                bottom: { style: BorderStyle.NONE, size: 0, color: "auto" },
+                right: { style: BorderStyle.NONE, size: 0, color: "auto" },
+              },
+              margins: {
+                top: 120,
+                bottom: 120,
+                left: 180,
+                right: 180,
+              },
+              children: takeawayParagraphs,
+            }),
+          ],
+        }),
+      ],
+    });
+
+    docChildren.push(calloutTable);
+    docChildren.push(new Paragraph({ spacing: { after: 120 } }));
+  }
+
+  // 3. Trích dẫn nếu có
+  if (item.original_quotes && item.original_quotes.trim()) {
+    docChildren.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: `💬 Trích dẫn thực tế: "${item.original_quotes.trim()}"`,
+            font: "Times New Roman",
+            size: 20,
+            italics: true,
+            color: "595959",
+          }),
+        ],
+        spacing: { after: 120 },
+      }),
+    );
+  }
+
+  // 4. Nội dung thảo luận gốc từ nhóm
+  if (item.original_content && item.original_content.trim()) {
+    docChildren.push(
+      new Paragraph({
+        heading: HeadingLevel.HEADING_2,
+        children: [
+          new TextRun({
+            text: "💬 NỘI DUNG THẢO LUẬN GỐC TỪ NHÓM TELEGRAM",
+            font: "Times New Roman",
+            size: 24,
+            bold: true,
+            color: "374151",
+          }),
+        ],
+        spacing: { before: 140, after: 80 },
+      }),
+    );
+
+    const origLines = item.original_content.trim().split("\n");
+    const origParagraphs: Paragraph[] = [];
+
+    for (const line of origLines) {
+      origParagraphs.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: line || " ",
+              font: "Times New Roman",
+              size: 20,
+              color: "1F2937",
+            }),
+          ],
+          spacing: { after: 40 },
+        }),
+      );
+    }
+
+    const origBox = new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [
+        new TableRow({
+          children: [
+            new TableCell({
+              shading: {
+                type: ShadingType.CLEAR,
+                fill: "F9FAFB",
+              },
+              borders: {
+                left: { style: BorderStyle.SINGLE, size: 24, color: "9CA3AF" },
+                top: { style: BorderStyle.NONE, size: 0, color: "auto" },
+                bottom: { style: BorderStyle.NONE, size: 0, color: "auto" },
+                right: { style: BorderStyle.NONE, size: 0, color: "auto" },
+              },
+              margins: {
+                top: 120,
+                bottom: 120,
+                left: 180,
+                right: 180,
+              },
+              children: origParagraphs,
+            }),
+          ],
+        }),
+      ],
+    });
+
+    docChildren.push(origBox);
+    docChildren.push(new Paragraph({ spacing: { after: 120 } }));
+  }
+
+  // 5. Liên kết hữu ích
+  if (item.useful_links && item.useful_links.length > 0) {
+    docChildren.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: "🔗 Liên kết hữu ích đính kèm: ",
+            font: "Times New Roman",
+            size: 20,
+            bold: true,
+            color: "0070C0",
+          }),
+          new TextRun({
+            text: item.useful_links.join(" | "),
+            font: "Times New Roman",
+            size: 20,
+            color: "0070C0",
+            underline: {},
+          }),
+        ],
+        spacing: { after: 140 },
+      }),
+    );
+  }
+
+  // 6. Footer
+  const exportTime = new Date().toLocaleString("vi-VN");
+  docChildren.push(
+    new Paragraph({
+      children: [
+        new TextRun({
+          text: `Trích xuất từ Hệ thống Quản trị Tri thức Telegram • ${exportTime}`,
+          font: "Times New Roman",
+          size: 16,
+          italics: true,
+          color: "8C8C8C",
+        }),
+      ],
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 200 },
+    }),
+  );
+
+  const doc = new Document({
+    sections: [
+      {
+        properties: {
+          page: {
+            margin: {
+              top: 1440,
+              bottom: 1440,
+              left: 1440,
+              right: 1440,
+            },
+          },
+        },
+        children: docChildren,
+      },
+    ],
+  });
+
+  return Packer.toBuffer(doc);
+}
+

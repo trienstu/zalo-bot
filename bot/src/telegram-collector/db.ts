@@ -182,20 +182,77 @@ export function getMessagesForClassification(
 }
 
 /**
+ * Đảm bảo schema có cột original_content
+ */
+export function ensureTelegramKnowledgeSchema(): void {
+  const db = getDb();
+  try {
+    db.exec(`ALTER TABLE telegram_knowledge_items ADD COLUMN original_content TEXT DEFAULT ''`);
+  } catch {}
+}
+
+/**
+ * Tự động đồng bộ nội dung gốc từ telegram_messages cho các bài viết chưa có original_content
+ */
+export function backfillOriginalContentForItems(): number {
+  ensureTelegramKnowledgeSchema();
+  const db = getDb();
+  const items = db
+    .prepare(`
+      SELECT id, chat_id, raw_message_ids 
+      FROM telegram_knowledge_items 
+      WHERE (original_content IS NULL OR TRIM(original_content) = '')
+        AND raw_message_ids IS NOT NULL AND raw_message_ids != '[]'
+    `)
+    .all() as any[];
+
+  let updated = 0;
+  for (const it of items) {
+    const msgIds = safeParseJson(it.raw_message_ids, []);
+    if (!Array.isArray(msgIds) || msgIds.length === 0) continue;
+
+    const placeholders = msgIds.map(() => "?").join(",");
+    const msgs = db
+      .prepare(`
+        SELECT sender_name, message_text, date 
+        FROM telegram_messages 
+        WHERE chat_id = ? AND message_id IN (${placeholders})
+        ORDER BY date ASC
+      `)
+      .all(it.chat_id, ...msgIds) as any[];
+
+    if (msgs.length > 0) {
+      const fullText = msgs
+        .map((m) => {
+          const sender = m.sender_name || "Thành viên";
+          const time = new Date(m.date * 1000).toLocaleString("vi-VN");
+          return `[${time}] ${sender}:\n${m.message_text.trim()}`;
+        })
+        .join("\n\n---\n\n");
+
+      db.prepare(`UPDATE telegram_knowledge_items SET original_content = ? WHERE id = ?`).run(fullText, it.id);
+      updated++;
+    }
+  }
+  return updated;
+}
+
+/**
  * Lưu kết quả tri thức AI đã tinh lọc
  */
 export function saveKnowledgeItem(item: Omit<TelegramKnowledgeItem, "id">): number {
+  ensureTelegramKnowledgeSchema();
   const db = getDb();
   const now = Date.now();
   const res = db
     .prepare(`
       INSERT INTO telegram_knowledge_items (
         chat_id, category, title, summary, key_takeaways,
-        original_quotes, useful_links, raw_message_ids,
+        original_quotes, original_content, useful_links, raw_message_ids,
         date_range, created_at, updated_at
       ) VALUES (
         @chat_id, @category, @title, @summary, @key_takeaways,
-        @original_quotes, @useful_links, @raw_message_ids,
+        @original_quotes, @original_content, @useful_links, @raw_message_ids,
         @date_range, @created_at, @updated_at
       )
     `)
@@ -206,6 +263,7 @@ export function saveKnowledgeItem(item: Omit<TelegramKnowledgeItem, "id">): numb
       summary: item.summary,
       key_takeaways: JSON.stringify(item.key_takeaways || []),
       original_quotes: item.original_quotes || "",
+      original_content: item.original_content || "",
       useful_links: JSON.stringify(item.useful_links || []),
       raw_message_ids: JSON.stringify(item.raw_message_ids || []),
       date_range: item.date_range || "",
@@ -213,6 +271,42 @@ export function saveKnowledgeItem(item: Omit<TelegramKnowledgeItem, "id">): numb
       updated_at: item.updated_at || now,
     });
   return Number(res.lastInsertRowid);
+}
+
+/**
+ * Lấy chi tiết 1 bài học tri thức theo ID
+ */
+export function getKnowledgeItemById(id: number): TelegramKnowledgeItem | null {
+  ensureTelegramKnowledgeSchema();
+  const db = getDb();
+  const r = db
+    .prepare(`
+      SELECT 
+        k.*,
+        c.title as chat_title
+      FROM telegram_knowledge_items k
+      LEFT JOIN telegram_tracked_chats c ON c.chat_id = k.chat_id
+      WHERE k.id = ?
+    `)
+    .get(id) as any;
+
+  if (!r) return null;
+  return {
+    id: r.id,
+    chat_id: r.chat_id,
+    category: r.category as KnowledgeCategory,
+    title: r.title,
+    summary: r.summary,
+    key_takeaways: safeParseJson(r.key_takeaways, []),
+    original_quotes: r.original_quotes || "",
+    original_content: r.original_content || "",
+    useful_links: safeParseJson(r.useful_links, []),
+    raw_message_ids: safeParseJson(r.raw_message_ids, []),
+    date_range: r.date_range,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+    chat_title: r.chat_title || "Nhóm Telegram",
+  };
 }
 
 /**
@@ -226,6 +320,7 @@ export function listKnowledgeItems(filter?: {
   limit?: number;
   offset?: number;
 }): { items: TelegramKnowledgeItem[]; total: number } {
+  ensureTelegramKnowledgeSchema();
   const db = getDb();
   const conditions: string[] = [];
   const params: any = {};
@@ -244,7 +339,7 @@ export function listKnowledgeItems(filter?: {
     params.cutoff = cutoff;
   }
   if (filter?.search && filter.search.trim()) {
-    conditions.push("(k.title LIKE @search OR k.summary LIKE @search OR k.key_takeaways LIKE @search)");
+    conditions.push("(k.title LIKE @search OR k.summary LIKE @search OR k.key_takeaways LIKE @search OR k.original_content LIKE @search)");
     params.search = `%${filter.search.trim()}%`;
   }
 
@@ -281,6 +376,7 @@ export function listKnowledgeItems(filter?: {
     summary: r.summary,
     key_takeaways: safeParseJson(r.key_takeaways, []),
     original_quotes: r.original_quotes || "",
+    original_content: r.original_content || "",
     useful_links: safeParseJson(r.useful_links, []),
     raw_message_ids: safeParseJson(r.raw_message_ids, []),
     date_range: r.date_range,
