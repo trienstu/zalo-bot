@@ -17,6 +17,7 @@ import {
   listGroups,
   syncFriends,
   sendGroupText,
+  sendGroupFile,
   sendDirectText,
   sendDirectFile,
   sleep,
@@ -718,35 +719,50 @@ export async function runListener(): Promise<void> {
       })();
     }
 
-    // 7. Gửi tin nhắn / file 1:1 theo yêu cầu background hoặc dashboard
+    // 7. Gửi tin nhắn / file 1:1 hoặc nhóm theo yêu cầu background hoặc dashboard
     const directReq = consumeDirectSendRequest();
     if (directReq) {
       void (async () => {
         try {
-          console.log(`[listener] 📤 Đang xử lý DirectSendRequest đến ${directReq.userId}...`);
-          if (directReq.filePath && fs.existsSync(directReq.filePath)) {
-            await sendDirectFile(api, directReq.userId, directReq.filePath, directReq.caption || directReq.text || "");
+          const isGroup = Boolean(directReq.isGroup);
+          console.log(`[listener] 📤 Đang xử lý SendRequest (isGroup=${isGroup}) đến ${directReq.userId}...`);
+
+          const hasFile = Boolean(directReq.filePath && fs.existsSync(directReq.filePath));
+          if (hasFile) {
+            const caption = directReq.caption || directReq.text || "";
+            if (isGroup) {
+              await sendGroupFile(api, directReq.userId, directReq.filePath!, caption);
+            } else {
+              await sendDirectFile(api, directReq.userId, directReq.filePath!, caption);
+            }
           } else if (directReq.text) {
-            await sendDirectText(api, directReq.userId, directReq.text);
+            if (isGroup) {
+              await sendGroupText(api, directReq.userId, directReq.text);
+            } else {
+              await sendDirectText(api, directReq.userId, directReq.text);
+            }
           }
+
           setBotState(
             "direct_send_result",
             JSON.stringify({
               requestId: directReq.requestId,
               userId: directReq.userId,
+              isGroup,
               ok: true,
               sentAt: Date.now(),
             }),
             Date.now(),
           );
-          console.log(`[listener] ✅ Đã gửi DirectSendRequest thành công đến ${directReq.userId}.`);
+          console.log(`[listener] ✅ Đã gửi SendRequest (isGroup=${isGroup}) thành công đến ${directReq.userId}.`);
         } catch (e) {
-          console.warn(`[listener] DirectSendRequest lỗi:`, e);
+          console.warn(`[listener] SendRequest lỗi:`, e);
           setBotState(
             "direct_send_result",
             JSON.stringify({
               requestId: directReq.requestId,
               userId: directReq.userId,
+              isGroup: Boolean(directReq.isGroup),
               ok: false,
               error: String(e),
               failedAt: Date.now(),

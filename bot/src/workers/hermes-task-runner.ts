@@ -1,7 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { Agent } from "undici";
 import { sendDirectFile, sendDirectText, sendGroupFile, sendGroupText } from "../zalo/client.js";
+
+const hermesDispatcher = new Agent({
+  headersTimeout: 900_000, // 15 phút chống rớt socket ngầm khi render video
+  bodyTimeout: 900_000,    // 15 phút
+  connectTimeout: 30_000,
+});
 
 export interface HermesTaskOptions {
   api: any;
@@ -399,7 +406,7 @@ export async function runHermesTaskJob(options: HermesTaskOptions): Promise<void
   const baseUrl = process.env.HERMES_BASE_URL || "http://127.0.0.1:8642/v1";
   const apiKey = process.env.HERMES_API_KEY || "cd83cd617559609546f5ae9f5bc436030c161538f1cd29b83d3e28573e9e69ba";
   const model = process.env.HERMES_MODEL || "hermes-agent";
-  const timeoutMs = 360_000; // 6 phút cho các tác vụ đa bước
+  const timeoutMs = 900_000; // 15 phút cho các tác vụ đa bước và render video
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -423,7 +430,8 @@ export async function runHermesTaskJob(options: HermesTaskOptions): Promise<void
         stream: false,
       }),
       signal: controller.signal,
-    });
+      dispatcher: hermesDispatcher,
+    } as any);
 
     clearTimeout(timer);
 

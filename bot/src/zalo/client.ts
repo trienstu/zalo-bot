@@ -350,10 +350,11 @@ export interface DirectSendRequest {
   caption?: string;
   requestedAt: number;
   requestedBy: string;
+  isGroup?: boolean;
 }
 
 /**
- * Yêu cầu gửi file hoặc tin nhắn trực tiếp 1:1 qua Zalo do background task/dashboard ghi ra file.
+ * Yêu cầu gửi file hoặc tin nhắn trực tiếp 1:1 hoặc nhóm qua Zalo do background task/dashboard ghi ra file.
  */
 export function consumeDirectSendRequest(): DirectSendRequest | null {
   const candidatePaths = [
@@ -389,26 +390,30 @@ export function consumeDirectSendRequest(): DirectSendRequest | null {
     requestId?: unknown;
     userId?: unknown;
     targetId?: unknown;
+    groupId?: unknown;
     text?: unknown;
     filePath?: unknown;
     caption?: unknown;
     requestedAt?: unknown;
     requestedBy?: unknown;
+    isGroup?: unknown;
   };
   const requestId = typeof obj.requestId === "string" && obj.requestId.trim() ? obj.requestId.trim() : `req_${Date.now()}`;
   const userId =
     (typeof obj.userId === "string" && obj.userId.trim()) ||
     (typeof obj.targetId === "string" && obj.targetId.trim()) ||
+    (typeof obj.groupId === "string" && obj.groupId.trim()) ||
     "";
   if (!userId) return null;
 
+  const isGroup = Boolean(obj.isGroup) || Boolean(obj.groupId);
   const text = typeof obj.text === "string" ? obj.text.trim() : "";
   const filePath = typeof obj.filePath === "string" ? obj.filePath.trim() : "";
   const caption = typeof obj.caption === "string" ? obj.caption.trim() : "";
   const requestedAt = typeof obj.requestedAt === "number" ? obj.requestedAt : Date.now();
   const requestedBy = typeof obj.requestedBy === "string" && obj.requestedBy.trim() ? obj.requestedBy.trim() : "system";
 
-  return { requestId, userId, text, filePath, caption, requestedAt, requestedBy };
+  return { requestId, userId, text, filePath, caption, requestedAt, requestedBy, isGroup };
 }
 
 
