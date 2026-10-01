@@ -320,7 +320,14 @@ test("câu lệnh tạo ảnh, vẽ tranh, tạo file hoặc video được kíc
     { q: "vẽ cho anh bức tranh phong cảnh hoàng hôn trên biển Đà Nẵng", expectedTask: "file_generation" },
     { q: "soạn file powerpoint 5 slide chiến lược kinh doanh 2026", expectedTask: "file_generation" },
     { q: "dựng video thuyết trình 5 slide giới thiệu dự án Palm River", expectedTask: "presentation_video" },
+    { q: "làm video slide thuyết trình về báo cáo dự án", expectedTask: "presentation_video" },
     { q: "đọc diễn cảm bài thơ này cho anh nghe", expectedTask: "file_generation" },
+    { q: "/tiktok 3 đột phá của AI Agent", expectedTask: "motion_video" },
+    { q: "/shorts tóm tắt tin tức công nghệ", expectedTask: "motion_video" },
+    { q: "/video so sánh đối đầu iPhone và Samsung", expectedTask: "motion_video" },
+    { q: "/remotion hiệu ứng karaoke pop scale", expectedTask: "motion_video" },
+    { q: "tạo video bằng muse về hoàng hôn trên bãi biển", expectedTask: "muse_video" },
+    { q: "làm video muse phong cảnh anime tuyệt đẹp", expectedTask: "muse_video" },
   ];
 
   for (const item of mediaCases) {
@@ -330,6 +337,21 @@ test("câu lệnh tạo ảnh, vẽ tranh, tạo file hoặc video được kíc
     assert.equal(res.toolIntent, "create", `Failed on: ${item.q}`);
     assert.deepEqual(res.queries, [], `Failed on: ${item.q}`);
   }
+});
+
+test("câu yêu cầu làm video tiktok/shorts không bị cướp quyền bởi affirmative execution", async () => {
+  const { isAffirmativeTaskExecution } = await import("./query-planner.js");
+  
+  // Các câu lệnh làm video dài không được tính là affirmative
+  assert.equal(isAffirmativeTaskExecution("Làm video tiktok về 3 đột phá của AI Agent  Mộc Miên"), false);
+  assert.equal(isAffirmativeTaskExecution("tạo video bằng muse về hoàng hôn"), false);
+  assert.equal(isAffirmativeTaskExecution("làm file excel tính lương cho công ty"), false);
+
+  // Các câu khẳng định ngắn gọn tiếp tục tác vụ trước đó
+  assert.equal(isAffirmativeTaskExecution("ok làm đi"), true);
+  assert.equal(isAffirmativeTaskExecution("làm luôn đi em"), true);
+  assert.equal(isAffirmativeTaskExecution("tiến hành đi"), true);
+  assert.equal(isAffirmativeTaskExecution("triển khai nhé"), true);
 });
 
 test("câu hỏi lý thuyết/thăm dò về tạo ảnh hoặc video KHÔNG bị cướp quyền tạo file", async () => {

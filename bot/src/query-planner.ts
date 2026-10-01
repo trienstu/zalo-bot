@@ -22,6 +22,7 @@ import { isMotionVideoRequest } from "./workers/motion-video-processor.js";
 export type PlannerTaskType =
   | "image_generation"
   | "motion_video"
+  | "muse_video"
   | "presentation_video"
   | "file_generation"
   | "voice_generation"
@@ -72,18 +73,22 @@ export function applyExecutionSignals(
     /(?:^|[^\p{L}\p{N}])(?:làm|tạo|dựng|quay|xuất)\s+(?:video|clip|slide|file).*?(?:có\s+khó|như\s+thế\s+nào|kiếm\s+tiền|phần\s+mềm|bằng\s+app|app\s+gì|dễ\s+không|sao\s+nhỉ|ở\s+đâu|bằng\s+cách\s+nào)/iu.test(question) ||
     /^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|xuất)?\s*(?:được|đc|duoc)?(?:\s+(?:tạo|làm|soạn|xuất))?\s+(?:video|clip|slide|file)\s*(?:không|ko)?\s*(?:hả|nhỉ|hở|ạ|không|ko)\s*[?]?$/iu.test(question.trim());
 
-  if (merged.taskType === "image_generation") {
-    merged.toolIntent = "create";
-    merged.responseMode = "action";
-  } else if (isHypotheticalOrInquiry) {
+  if (isHypotheticalOrInquiry) {
     merged.taskType = "none";
     merged.toolIntent = "none";
     merged.responseMode = "fast";
+  } else if (merged.taskType === "image_generation") {
+    merged.toolIntent = "create";
+    merged.responseMode = "action";
+  } else if (merged.taskType === "muse_video") {
+    merged.toolIntent = "create";
+    merged.responseMode = "action";
   } else if (merged.taskType === "motion_video") {
-    if (!isMotionVideoRequest(question, quoteText)) {
-      merged.taskType = "none";
-      merged.toolIntent = "none";
-      merged.responseMode = "fast";
+    // Nếu có nhắc đến Muse trong câu lệnh làm video, chuyển sang muse_video
+    if (/\b(?:muse|muse2api|muse\.ai)\b/iu.test(`${question} ${quoteText}`)) {
+      merged.taskType = "muse_video";
+      merged.toolIntent = "create";
+      merged.responseMode = "action";
     } else {
       merged.toolIntent = "create";
       merged.responseMode = "action";
@@ -410,6 +415,18 @@ export function normalizeQueryPlanIntent(plan: QueryPlanResult, question: string
 import { isBotStatusOrMetaQuestion } from "./search-evidence.js";
 export { isBotStatusOrMetaQuestion };
 
+/**
+ * Nhận diện câu lệnh xác nhận / giục thực thi tác vụ thuần túy (ví dụ: "ok làm đi", "làm luôn đi em", "triển khai luôn").
+ * CHỈ bắt khi câu ngắn (<= 35 ký tự), có từ xác nhận rõ ràng VÀ TUYỆT ĐỐI KHÔNG chứa từ khóa tạo nội dung media mới.
+ */
+export function isAffirmativeTaskExecution(text: string): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length > 35) return false;
+  const hasAffirmative = /^(?:ok(?:ela|ay|e)?|ừ|uh|u|dạ|da|vâng|vang|dc|được|chốt|nhất trí|duyệt|tiến hành|làm|triển khai)(?:[\s,.:;!-]+(?:soạn|làm|tạo|xuất|viết|triển\s*khai|chốt|triển|lên|vẽ|sinh|chạy|tiến\s*hành))?(?:[\s,.:;!-]+(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|tiếp|nào))*$/iu.test(trimmed);
+  const hasMediaKeyword = /\b(?:video|clip|mp4|slide|powerpoint|pptx|word|docx|excel|xlsx|ảnh|hình|hướng\s*dẫn|bài\s*viết)\b/iu.test(trimmed);
+  return hasAffirmative && !hasMediaKeyword;
+}
+
 export async function planSearchQueries(params: {
   question: string;
   quoteText?: string;
@@ -454,10 +471,37 @@ export async function planSearchQueries(params: {
     }, question, quoteText);
   }
 
-  // Nhận diện câu lệnh yêu cầu thực thi / tạo file / soạn tiếp từ phản hồi trước (ví dụ: "soạn luôn đi", "làm luôn đi", "tạo luôn đi e", "ok tạo đi e")
-  const isAffirmativeTaskExecution =
-    /^(?:ok(?:ela|ay|e)?|ừ|uh|u|dạ|da|vâng|vang|dc|được|chốt|nhất trí|duyệt|tiến hành)?[\s,.:;!-]*(?:soạn|làm|tạo|xuất|viết|triển\s*khai|chốt|triển|lên|vẽ|sinh|chạy|tiến\s*hành)\s*(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|tiếp|nào)?/iu.test(trimmed);
-  if (isAffirmativeTaskExecution) {
+  // 1. Nhận diện các lệnh trực tiếp (Slash commands) cho Motion Video Remotion
+  const isMotionSlash = /^\/(?:video|tiktok|shorts|remotion)(?:\s+.*|$)/i.test(trimmed);
+  if (isMotionSlash) {
+    return applyExecutionSignals({
+      needsSearch: false,
+      intent: "knowledge",
+      queries: [],
+      summaryIntent: "Người dùng gọi lệnh trực tiếp dựng video đồ họa chuyển động Remotion",
+      taskType: "motion_video",
+      responseMode: "action",
+      toolIntent: "create",
+    }, question, quoteText);
+  }
+
+  // 2. Nhận diện câu lệnh tạo video nghệ thuật bằng mô hình Muse Video AI (Image-to-Video hoặc Text-to-Video)
+  const hasMuseKeyword = /\b(?:muse|muse2api|muse\.ai)\b/iu.test(trimmed);
+  const isExplicitMuseVideo = hasMuseKeyword && /\b(?:video|clip|mp4|thước\s*phim)\b/iu.test(trimmed);
+  if (isExplicitMuseVideo) {
+    return applyExecutionSignals({
+      needsSearch: false,
+      intent: "knowledge",
+      queries: [],
+      summaryIntent: "Người dùng yêu cầu tạo video nghệ thuật bằng mô hình Muse Video AI",
+      taskType: "muse_video",
+      responseMode: "action",
+      toolIntent: "create",
+    }, question, quoteText);
+  }
+
+  // 3. Nhận diện câu lệnh xác nhận / giục thực thi tác vụ thuần túy (ví dụ: "ok làm đi", "làm luôn đi em", "triển khai luôn")
+  if (isAffirmativeTaskExecution(trimmed)) {
     const isImgFollowUp = isImageRequest(question, quoteText);
     return applyExecutionSignals({
       needsSearch: false,
@@ -470,7 +514,7 @@ export async function planSearchQueries(params: {
     }, question, quoteText);
   }
 
-  // Nhận diện câu lệnh tạo video đồ họa chuyển động Remotion (TikTok, Shorts, So sánh, Tin tức)
+  // 4. Nhận diện câu lệnh tạo video đồ họa chuyển động Remotion (TikTok, Shorts, So sánh, Tin tức)
   const isMotion = isMotionVideoRequest(question, quoteText);
   if (isMotion) {
     return applyExecutionSignals({
@@ -484,8 +528,7 @@ export async function planSearchQueries(params: {
     }, question, quoteText);
   }
 
-  // Nhận diện câu lệnh tạo file, tạo/sửa ảnh, vẽ tranh, tạo voice hoặc video thuyết trình rõ ràng
-  // Bỏ qua bước gọi LLM tốn 6s của planner vì tác vụ tạo media/ảnh/file không dùng kết quả tìm kiếm RSS/Google
+  // 5. Nhận diện câu lệnh tạo file, tạo/sửa ảnh, vẽ tranh, tạo voice hoặc video thuyết trình rõ ràng
   const isVideo = isPresentationVideoRequest(question, quoteText);
   const isImg = isImageRequest(question, quoteText);
   const isFileOrMedia = checkIsFileOrVoiceGeneration(question, quoteText);
@@ -495,7 +538,7 @@ export async function planSearchQueries(params: {
       intent: "knowledge",
       queries: [],
       summaryIntent: isVideo
-        ? "Người dùng yêu cầu dựng video thuyết trình"
+        ? "Người dùng yêu cầu dựng video thuyết trình slide"
         : isImg
           ? "Người dùng yêu cầu tạo / vẽ / chỉnh sửa hình ảnh"
           : "Người dùng yêu cầu tạo file / âm thanh",
@@ -507,8 +550,21 @@ export async function planSearchQueries(params: {
 
   const executionPlannerContract =
     `4. Phân loại tác vụ hành động (taskType) & Đề xuất thực thi chuẩn mực (ANTI-OVERTHINKING):\n` +
-    `   - taskType: "image_generation" (Tạo ảnh mới, vẽ tranh, vẽ chân dung, phong cảnh, sửa ảnh, biến thể ảnh, hoặc người dùng xác nhận/giục vẽ ảnh từ yêu cầu trước/quote) | "presentation_video" (CHỈ KHI người dùng yêu cầu rõ ràng làm VIDEO/CLIP/MP4/thước phim thuyết trình hoặc bài giảng khổ dọc 9:16 hoặc 16:9) | "file_generation" (Tạo file Word, Excel, PowerPoint slide pptx, HTML, CSV) | "voice_generation" (Đọc giọng, podcast) | "music_generation" (Suno AI) | "python_diagram" (Vẽ biểu đồ/poster) | "none" (Hỏi đáp bình thường).\n` +
-    `     * NGUYÊN TẮC PHÂN BIỆT FILE SLIDE vs VIDEO (QUAN TRỌNG): Các yêu cầu như "tạo file thuyết trình", "tạo slide", "xuất file powerpoint", "làm pptx", "soạn slide dự án" mà KHÔNG có từ khóa video/clip thì BẮT BUỘC gán taskType: "file_generation", mediaFormat: { fileType: "pptx" }! TUYỆT ĐỐI KHÔNG gán "presentation_video" khi không yêu cầu video!\n` +
+    `   - taskType:\n` +
+    `     * "motion_video": Video đồ họa chuyển động Remotion (video ngắn TikTok, Shorts, Reels, video so sánh đối đầu A vs B, video tin nóng / thời sự 24h, video có chữ nhảy karaoke, tóm tắt nội dung có MC đọc thuyết minh).\n` +
+    `     * "muse_video": Video nghệ thuật AI ngắn 5s-10s bằng mô hình Muse Video (nhắc đến 'muse', tạo video nghệ thuật bằng AI, biến ảnh thành clip động Image-to-Video, clip phong cảnh/hành động điện ảnh cử động).\n` +
+    `     * "presentation_video": CHỈ KHI người dùng yêu cầu rõ ràng làm VIDEO/CLIP/MP4 thuyết trình bài giảng lật từng trang slide PowerPoint.\n` +
+    `     * "image_generation": Tạo ảnh mới, vẽ tranh, vẽ chân dung, phong cảnh, sửa ảnh, biến thể ảnh (Gemini Imagen / Codex / Muse Image).\n` +
+    `     * "file_generation": Tạo file tài liệu văn phòng Word .docx, PowerPoint slide .pptx, Excel .xlsx, HTML, CSV (LƯU Ý: Không yêu cầu video thì tạo slide pptx chỉ là file_generation).\n` +
+    `     * "voice_generation": Đọc giọng, podcast audio.\n` +
+    `     * "music_generation": Sáng tác bài hát Suno AI.\n` +
+    `     * "python_diagram": Vẽ biểu đồ/poster bằng Python.\n` +
+    `     * "none": Hỏi đáp, trò chuyện, tư vấn, giải thích kiến thức thông thường.\n\n` +
+    `     * NGUYÊN TẮC PHÂN BIỆT 3 LOẠI VIDEO (QUAN TRỌNG NHẤT):\n` +
+    `       1. Video TikTok, Shorts, Reels, so sánh A vs B, tin tức có MC đọc và chữ nhảy karaoke -> BẮT BUỘC gán "motion_video"!\n` +
+    `       2. Video nghệ thuật bằng AI, biến ảnh thành clip cử động 5s-10s, có nhắc đến 'muse' -> BẮT BUỘC gán "muse_video"!\n` +
+    `       3. Video slide thuyết trình bài giảng lật từng trang slide kèm PowerPoint -> BẮT BUỘC gán "presentation_video"!\n` +
+    `       4. Yêu cầu tạo slide/file pptx mà không nhắc chữ video/clip -> BẮT BUỘC gán "file_generation"!\n\n` +
     `     * NGUYÊN TẮC CHỐNG ẢO GIÁC (ANTI-OVERTHINKING): CHỈ gán taskType khi người dùng có MỆNH LỆNH THỰC THI RÕ RÀNG ("hãy làm...", "tạo cho anh...", "xuất video...", "dựng clip..."). Nếu người dùng chỉ hỏi han, hỏi ý kiến ("làm video có khó không?", "bot biết làm slide không?", "SQLite là gì?"), BẮT BUỘC gán taskType: "none"!\n` +
     `   - mediaFormat: { aspectRatio: "9:16" (nếu có từ "khổ dọc", "shorts", "reels", "tiktok") hoặc "16:9" (nếu có từ "khổ ngang", "youtube", "bài giảng") hoặc "1:1" (vuông), fileType?: "docx"|"pptx"|"xlsx"|"csv"|"html" }\n` +
     `   - responseMode: "fast" cho câu đơn giản/ổn định; "grounded" khi cần dữ liệu kiểm chứng; "deep" cho phân tích nhiều bước; "action" chỉ khi người dùng yêu cầu rõ việc đọc/tạo/chạy công cụ.\n` +
@@ -521,7 +577,7 @@ export async function planSearchQueries(params: {
     `  "intent": "realtime_news" | "fact_check" | "knowledge" | "chat",\n` +
     `  "queries": string[],\n` +
     `  "summaryIntent": string,\n` +
-    `  "taskType": "image_generation" | "presentation_video" | "file_generation" | "voice_generation" | "music_generation" | "python_diagram" | "none",\n` +
+    `  "taskType": "motion_video" | "muse_video" | "presentation_video" | "image_generation" | "file_generation" | "voice_generation" | "music_generation" | "python_diagram" | "none",\n` +
     `  "mediaFormat": { "aspectRatio": "9:16" | "16:9" | "1:1" },\n` +
     `  "responseMode": "fast" | "grounded" | "deep" | "action",\n` +
     `  "complexity": "low" | "medium" | "high",\n` +
