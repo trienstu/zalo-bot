@@ -4,8 +4,24 @@ import { execFileSync, execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, "..");
-const remotionDir = path.resolve(repoRoot, "../remotion-engine");
+
+function findRemotionDir() {
+  const candidateDirs = [
+    "/home/ubuntu/zalo-bot-2/remotion-engine",
+    path.resolve(__dirname, "../../remotion-engine"),
+    path.resolve(__dirname, "../remotion-engine"),
+    path.resolve(process.cwd(), "remotion-engine"),
+    path.resolve(process.cwd(), "../remotion-engine"),
+  ];
+  for (const dir of candidateDirs) {
+    if (fs.existsSync(path.join(dir, "render.mjs"))) {
+      return dir;
+    }
+  }
+  return path.resolve(process.cwd(), "remotion-engine");
+}
+
+const remotionDir = findRemotionDir();
 
 async function main() {
   const args = process.argv.slice(2);
