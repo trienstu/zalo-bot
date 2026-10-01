@@ -109,7 +109,11 @@ export function isMotionVideoRequest(text: string, quoteText = ""): boolean {
     );
   if (isFeedback) return false;
 
-  // 2. Phủ định nếu là yêu cầu tải video từ link
+  // 2. Phủ định nếu là yêu cầu Muse Video (để định tuyến sang Muse AI Video)
+  const mentionsMuse = /\b(?:muse|muse2api|muse\.ai)\b/iu.test(combined);
+  if (mentionsMuse) return false;
+
+  // 3. Phủ định nếu là yêu cầu tải video từ link
   const isVideoDownloadReq =
     /(?:tải|download|lấy|get|rip|down)\s+(?:video|clip|link|mp4)/i.test(qLower) ||
     /https?:\/\/(?:www\.)?(?:tiktok\.com|youtube\.com|youtu\.be|facebook\.com|fb\.watch|douyin\.com|kuaishou\.com)/i.test(
@@ -117,14 +121,14 @@ export function isMotionVideoRequest(text: string, quoteText = ""): boolean {
     );
   if (isVideoDownloadReq) return false;
 
-  // 3. Phủ định tóm tắt video
+  // 4. Phủ định tóm tắt video
   const isVideoSummaryReq =
     /(?:tóm\s*tắt|xem|hiểu|phân\s*tích|review)\s+(?:video|clip|link)\s+(?:này|đó|trên|dưới)/iu.test(
       qLower,
     );
   if (isVideoSummaryReq) return false;
 
-  // 4. Phủ định câu hỏi hoài nghi / thăm dò năng lực
+  // 5. Phủ định câu hỏi hoài nghi / thăm dò năng lực
   const isHypotheticalOrInquiry =
     /^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|xuất)?\s*(?:được|đc|duoc)?(?:\s+(?:tạo|làm|soạn|xuất))?\s+(?:video|clip)\s*(?:không|ko)?\s*(?:hả|nhỉ|hở|ạ|không|ko)\s*[?]?$/iu.test(
       qLower,
@@ -137,7 +141,11 @@ export function isMotionVideoRequest(text: string, quoteText = ""): boolean {
     );
   if (isHypotheticalOrInquiry) return false;
 
-  // 5. Cụm từ nhận diện trực tiếp
+  // 6. Nhận diện các lệnh trực tiếp (Slash commands)
+  const isSlashCommand = /^\/(?:video|tiktok|shorts|remotion)(?:\s+.*|$)/i.test(qLower);
+  if (isSlashCommand) return true;
+
+  // 7. Cụm từ nhận diện trực tiếp
   const directTerms =
     /\b(?:video|clip)\s+(?:tiktok|shorts|reels|vox|explainer|chuyển\s*động|motion|so\s*sánh|tin\s*nóng|thời\s*sự|remotion|karaoke|nhảy\s*chữ)\b/iu.test(
       qLower,
@@ -145,7 +153,7 @@ export function isMotionVideoRequest(text: string, quoteText = ""): boolean {
     /\b(?:tiktok|shorts|reels|vox|explainer|motion|remotion)\s+(?:video|clip)\b/iu.test(qLower);
   if (directTerms) return true;
 
-  // 6. Mệnh lệnh tạo video kết hợp với từ khóa thể loại
+  // 8. Mệnh lệnh tạo video kết hợp với từ khóa thể loại
   const hasDirectVideoCommand =
     /(?:(?:hãy|giúp|nhờ|em)?\s*(?:làm|tạo|dựng|xuất|quay|sản\s*xuất)\s+(?:cho\s*(?:anh|em|tôi|sếp|mình|nhóm)\s*)?(?:(?:1|một)?\s*(?:bản|file|bộ)?\s*)?(?:video|clip|mp4|thước\s*phim))/iu.test(
       qLower,
@@ -160,8 +168,15 @@ export function isMotionVideoRequest(text: string, quoteText = ""): boolean {
     return true;
   }
 
-  // 7. Nhận diện từ tin nhắn trích dẫn nếu bot vừa đề xuất
+  // 9. Nhận diện từ tin nhắn trích dẫn (quote transformation hoặc đồng ý đề xuất)
   if (quoteLower) {
+    const isQuoteTransformation =
+      /(?:làm|tạo|dựng|xuất|quay|chuyển(?:\s+thành)?|biến(?:\s+thành)?)\s+(?:video|clip|mp4|thước\s*phim|tiktok|shorts|reels|remotion)/iu.test(
+        qLower,
+      ) ||
+      /(?:video\s*hóa|làm\s*video|xuất\s*video|tạo\s*video|dựng\s*video)/iu.test(qLower);
+    if (isQuoteTransformation) return true;
+
     const isQuotingProposal =
       /(?:video\s+tiktok|video\s+shorts|video\s+vox|remotion|video\s+chuyển\s*động|video\s+so\s*sánh)/iu.test(
         quoteLower,
@@ -335,10 +350,11 @@ export async function runMotionVideoJob(options: MotionVideoJobOptions): Promise
     const audioFileName = `${jobId}.mp3`;
     const targetAudioPath = path.resolve(remotionPublicDir, audioFileName);
 
-    console.log(`[motion-video] 🎙️ Đang sinh voice thuyết minh AI Studio: "${plan.narrationScript.slice(0, 60)}..."`);
-    await synthesizeSingleAudio(plan.narrationScript, targetAudioPath, "Aoede", {
-      stylePrompt: "Giọng đọc truyền cảm, hiện đại, năng động, chuẩn âm thanh phòng thu",
+    console.log(`[motion-video] 🎙️ Đang sinh voice thuyết minh Google AI Studio: "${plan.narrationScript.slice(0, 60)}..."`);
+    const voiceProvider = await synthesizeSingleAudio(plan.narrationScript, targetAudioPath, "Aoede", {
+      stylePrompt: "Giọng phát thanh viên truyền cảm, phát âm tròn vành rõ chữ, hiện đại và lôi cuốn",
     });
+    console.log(`[motion-video] 🎙️ Đã tạo voice thuyết minh thành công bằng: "${voiceProvider}" (Voice: Aoede)`);
 
     if (!fs.existsSync(targetAudioPath)) {
       throw new Error("Không tìm thấy file audio đã sinh");
@@ -470,6 +486,9 @@ export async function runMotionVideoJob(options: MotionVideoJobOptions): Promise
       };
     }
 
+    // Bổ sung nhạc nền lofi ambient mặc định (auto-ducking)
+    inputProps.bgMusicFile = "music/ambient-lofi.mp3";
+
     // Ghi props ra file tạm
     const propsFilePath = path.resolve(remotionDir, `props-${jobId}.json`);
     fs.writeFileSync(propsFilePath, JSON.stringify(inputProps, null, 2), "utf8");
@@ -511,12 +530,20 @@ export async function runMotionVideoJob(options: MotionVideoJobOptions): Promise
     console.log(`[motion-video] ✅ Render thành công! File: ${finalMp4Path} (${(stats.size / (1024 * 1024)).toFixed(2)} MB)`);
 
     // 5. Gửi file vào Zalo
+    const voiceLabel =
+      voiceProvider === "aistudio"
+        ? "Google AI Studio TTS (Gemini Flash Voice)"
+        : voiceProvider === "google"
+          ? "Google Cloud TTS"
+          : "Edge-TTS Studio";
+
     const caption =
       `🎬 **VIDEO ĐỒ HỌA CHUYỂN ĐỘNG REMOTION**\n` +
       `🏷️ **Thể loại**: ${genreNames[plan.genre]}\n` +
       `📌 **Chủ đề**: ${plan.title}\n` +
       `⏱️ **Thời lượng**: ${durationSec.toFixed(1)}s (Full HD 30fps)\n` +
-      `🎙️ **Thuyết minh**: AI Studio Voice\n\n` +
+      `🎙️ **Thuyết minh**: ${voiceLabel}\n` +
+      `🎵 **Âm nhạc**: Lofi Ambient (Auto-Ducking)\n\n` +
       `Chúc ${userGreeting} xem video vui vẻ ạ! ✨`;
 
     if (isGroup && threadId) {

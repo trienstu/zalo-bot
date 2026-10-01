@@ -23,6 +23,7 @@ export interface VersusComparisonProps {
   optionA?: OptionData;
   optionB?: OptionData;
   audioFile?: string;
+  bgMusicFile?: string;
 }
 
 export const VersusComparison: React.FC<VersusComparisonProps> = ({
@@ -49,6 +50,7 @@ export const VersusComparison: React.FC<VersusComparisonProps> = ({
     ],
   },
   audioFile = "narration.mp3",
+  bgMusicFile = "music/ambient-lofi.mp3",
 }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
@@ -81,6 +83,12 @@ export const VersusComparison: React.FC<VersusComparisonProps> = ({
       : staticFile(audioFile)
     : null;
 
+  const bgMusicSrc = bgMusicFile
+    ? bgMusicFile.startsWith("http") || bgMusicFile.startsWith("data:")
+      ? bgMusicFile
+      : staticFile(bgMusicFile)
+    : null;
+
   return (
     <AbsoluteFill
       style={{
@@ -94,7 +102,22 @@ export const VersusComparison: React.FC<VersusComparisonProps> = ({
       }}
     >
       <GlowBackground primaryColor={optionA.color} secondaryColor={optionB.color} />
-      {audioSrc && <Audio src={audioSrc} />}
+      {/* Background Music with Audio Ducking */}
+      {bgMusicSrc && (
+        <Audio
+          src={bgMusicSrc}
+          loop
+          volume={(f) =>
+            interpolate(
+              f,
+              [0, 30, Math.max(31, durationInFrames - 30), durationInFrames],
+              [0, 0.14, 0.14, 0],
+              { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+            )
+          }
+        />
+      )}
+      {audioSrc && <Audio src={audioSrc} volume={1.0} />}
 
       {/* Top Header */}
       <div style={{ textAlign: "center", zIndex: 10 }}>

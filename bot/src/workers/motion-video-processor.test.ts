@@ -21,13 +21,30 @@ test("isMotionVideoRequest nhận diện chính xác các yêu cầu làm video 
   assert.equal(isMotionVideoRequest("tải video tiktok https://www.tiktok.com/@user/video/123"), false);
   assert.equal(isMotionVideoRequest("tóm tắt video này giúp tôi với"), false);
 
-  // 3. Chống nhận nhầm câu hỏi hoài nghi hoặc thăm dò năng lực
+  // 3. Phủ định tuyệt đối nếu có từ khóa Muse (để dành cho Muse AI Video)
+  assert.equal(isMotionVideoRequest("tạo video bằng muse về hoàng hôn trên biển"), false);
+  assert.equal(isMotionVideoRequest("dùng muse2api biến ảnh này thành video"), false);
+  assert.equal(isMotionVideoRequest("vẽ video muse"), false);
+
+  // 4. Nhận diện các Slash commands trực tiếp
+  assert.equal(isMotionVideoRequest("/tiktok 3 sai lầm của trader"), true);
+  assert.equal(isMotionVideoRequest("/shorts giới thiệu bot sen chúa"), true);
+  assert.equal(isMotionVideoRequest("/video phân tích thị trường vàng"), true);
+  assert.equal(isMotionVideoRequest("/remotion"), true);
+
+  // 5. Chống nhận nhầm câu hỏi hoài nghi hoặc thăm dò năng lực
   const quoteWithVideo = "Repo này dùng để ghép ảnh làm video hoạt họa chuyển động";
   assert.equal(isMotionVideoRequest("@Sen Chúa có thiệt e tự làm được ko đó", quoteWithVideo), false);
   assert.equal(isMotionVideoRequest("có thật bot tự làm được video không?", quoteWithVideo), false);
   assert.equal(isMotionVideoRequest("làm video có khó không nhỉ?", quoteWithVideo), false);
 
-  // 4. Nhận diện phản hồi đồng ý khi bot đề xuất
+  // 6. Nhận diện yêu cầu chuyển đổi trích dẫn (quote transformation)
+  const newsQuote = "Thị trường hôm nay tăng mạnh 20 điểm nhờ nhóm cổ phiếu ngân hàng";
+  assert.equal(isMotionVideoRequest("làm video tiktok", newsQuote), true);
+  assert.equal(isMotionVideoRequest("chuyển thành video shorts", newsQuote), true);
+  assert.equal(isMotionVideoRequest("video hóa đoạn này", newsQuote), true);
+
+  // 7. Nhận diện phản hồi đồng ý khi bot đề xuất
   const quoteProposal = "🎬 Sếp có muốn em xuất bản Video TikTok đồ họa chuyển động không ạ?";
   assert.equal(isMotionVideoRequest("ok triển đi em", quoteProposal), true);
   assert.equal(isMotionVideoRequest("làm luôn đi", quoteProposal), true);

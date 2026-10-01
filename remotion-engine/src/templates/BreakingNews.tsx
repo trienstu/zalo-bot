@@ -18,6 +18,7 @@ export interface BreakingNewsProps {
   keyPoints: string[];
   tickerItems?: string[];
   audioFile?: string;
+  bgMusicFile?: string;
 }
 
 export const BreakingNews: React.FC<BreakingNewsProps> = ({
@@ -36,9 +37,10 @@ export const BreakingNews: React.FC<BreakingNewsProps> = ({
     "DẦU BRENT: $74.2/thùng",
   ],
   audioFile = "narration.mp3",
+  bgMusicFile = "music/ambient-lofi.mp3",
 }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, durationInFrames } = useVideoConfig();
 
   // Flashing red live indicator
   const flashOpacity = 0.6 + 0.4 * Math.sin(frame * 0.2);
@@ -55,6 +57,12 @@ export const BreakingNews: React.FC<BreakingNewsProps> = ({
       : staticFile(audioFile)
     : null;
 
+  const bgMusicSrc = bgMusicFile
+    ? bgMusicFile.startsWith("http") || bgMusicFile.startsWith("data:")
+      ? bgMusicFile
+      : staticFile(bgMusicFile)
+    : null;
+
   return (
     <AbsoluteFill
       style={{
@@ -68,7 +76,22 @@ export const BreakingNews: React.FC<BreakingNewsProps> = ({
       }}
     >
       <GlowBackground primaryColor="#EF4444" secondaryColor="#3B82F6" />
-      {audioSrc && <Audio src={audioSrc} />}
+      {/* Background Music with Audio Ducking */}
+      {bgMusicSrc && (
+        <Audio
+          src={bgMusicSrc}
+          loop
+          volume={(f) =>
+            interpolate(
+              f,
+              [0, 30, Math.max(31, durationInFrames - 30), durationInFrames],
+              [0, 0.14, 0.14, 0],
+              { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+            )
+          }
+        />
+      )}
+      {audioSrc && <Audio src={audioSrc} volume={1.0} />}
 
       {/* Top News Header */}
       <div

@@ -1878,7 +1878,7 @@ const AGENT_TOOLS_DECLARATION = {
     {
       name: "generate_video",
       description:
-        "Tạo video AI ngắn sinh động (5 giây hoặc 10 giây, tỉ lệ 16:9 hoặc 9:16) bằng mô hình Muse Video AI. BẮT BUỘC DÙNG khi người dùng yêu cầu: tạo video, làm video, sinh video AI, biến ảnh thành video (Image-to-Video), làm clip động theo mô tả hoặc ý tưởng.",
+        "Tạo video nghệ thuật AI ngắn (5 giây hoặc 10 giây, tỉ lệ 16:9 hoặc 9:16) bằng mô hình Muse Video AI (Image-to-Video hoặc Text-to-Video). Dùng khi người dùng yêu cầu: tạo video Muse, sinh video nghệ thuật ngắn, biến ảnh thành video cử động, làm clip động 5s-10s theo mô tả bối cảnh. (LƯU Ý: Không dùng tool này nếu người dùng yêu cầu làm video TikTok/Shorts/So sánh có giọng đọc thuyết minh và phụ đề karaoke chuyển động vì đã có Remotion Engine xử lý tự động).",
       parameters: {
         type: "OBJECT",
         properties: {

@@ -17,6 +17,7 @@ export interface VerticalShortsProps {
   subtitle: string;
   points: string[];
   audioFile?: string;
+  bgMusicFile?: string;
   speakerName?: string;
   primaryColor?: string;
   secondaryColor?: string;
@@ -32,6 +33,7 @@ export const VerticalShorts: React.FC<VerticalShortsProps> = ({
     "Tương tác thời gian thực đa phương tiện (Realtime Multimodal)",
   ],
   audioFile,
+  bgMusicFile = "music/ambient-lofi.mp3",
   speakerName = "Sen Chúa AI",
   primaryColor = "#4f46e5",
   secondaryColor = "#ec4899",
@@ -62,6 +64,12 @@ export const VerticalShorts: React.FC<VerticalShortsProps> = ({
       : staticFile(audioFile)
     : null;
 
+  const bgMusicSrc = bgMusicFile
+    ? bgMusicFile.startsWith("http") || bgMusicFile.startsWith("data:")
+      ? bgMusicFile
+      : staticFile(bgMusicFile)
+    : null;
+
   return (
     <AbsoluteFill
       style={{
@@ -77,8 +85,24 @@ export const VerticalShorts: React.FC<VerticalShortsProps> = ({
       {/* Background with Ambient Orbs */}
       <GlowBackground primaryColor={primaryColor} secondaryColor={secondaryColor} />
 
-      {/* Embedded Audio */}
-      {audioSrc && <Audio src={audioSrc} />}
+      {/* Background Music with Audio Ducking */}
+      {bgMusicSrc && (
+        <Audio
+          src={bgMusicSrc}
+          loop
+          volume={(f) =>
+            interpolate(
+              f,
+              [0, 30, Math.max(31, durationInFrames - 30), durationInFrames],
+              [0, 0.14, 0.14, 0],
+              { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+            )
+          }
+        />
+      )}
+
+      {/* Voice Narration Audio */}
+      {audioSrc && <Audio src={audioSrc} volume={1.0} />}
 
       {/* Top Header: Brand + Speaker + Audio Waveform */}
       <div

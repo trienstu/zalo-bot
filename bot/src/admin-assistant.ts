@@ -1276,6 +1276,22 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       return;
     }
 
+    // 🎬 XUẤT BẢN VIDEO ĐỒ HỌA CHUYỂN ĐỘNG REMOTION / TIKTOK / SHORTS (GIAI ĐOẠN 3)
+    if (/^(?:\/tiktok|\/shorts|\/video|\/remotion)(?:\s+.*|$)/i.test(rawText)) {
+      const cleanPrompt = rawText.replace(/^(?:\/tiktok|\/shorts|\/video|\/remotion)\s*/i, "").trim();
+      const effectivePrompt = cleanPrompt || event.quote?.text || "Điểm tin nổi bật và kiến thức quan trọng";
+      void runMotionVideoJob({
+        api,
+        sender,
+        isGroup: false,
+        userGreeting: "Sếp",
+        displayName,
+        userPrompt: effectivePrompt,
+        quoteText: event.quote?.text || "",
+      }).catch((err) => console.error("[admin-assistant] Lỗi runMotionVideoJob qua slash command:", err));
+      return;
+    }
+
     const dmQuery = isDmSummaryOrErrorQuery(rawText);
     if (dmQuery.type === "errors") {
       await handleDmErrorReport(api, sender, dmQuery.hours);

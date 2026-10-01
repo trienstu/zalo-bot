@@ -22,11 +22,13 @@ export interface StoryScene {
 
 export interface TikTokViralStoryProps {
   audioFile?: string;
+  bgMusicFile?: string;
   scenes?: StoryScene[];
 }
 
 export const TikTokViralStory: React.FC<TikTokViralStoryProps> = ({
   audioFile = "narration.mp3",
+  bgMusicFile = "music/ambient-lofi.mp3",
   scenes = [
     {
       hookEmoji: "🚨",
@@ -60,6 +62,12 @@ export const TikTokViralStory: React.FC<TikTokViralStoryProps> = ({
       : staticFile(audioFile)
     : null;
 
+  const bgMusicSrc = bgMusicFile
+    ? bgMusicFile.startsWith("http") || bgMusicFile.startsWith("data:")
+      ? bgMusicFile
+      : staticFile(bgMusicFile)
+    : null;
+
   const framesPerScene = Math.floor(durationInFrames / scenes.length);
 
   return (
@@ -71,7 +79,22 @@ export const TikTokViralStory: React.FC<TikTokViralStoryProps> = ({
       }}
     >
       <GlowBackground primaryColor="#6366f1" secondaryColor="#ec4899" />
-      {audioSrc && <Audio src={audioSrc} />}
+      {/* Background Music with Audio Ducking */}
+      {bgMusicSrc && (
+        <Audio
+          src={bgMusicSrc}
+          loop
+          volume={(f) =>
+            interpolate(
+              f,
+              [0, 30, Math.max(31, durationInFrames - 30), durationInFrames],
+              [0, 0.14, 0.14, 0],
+              { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+            )
+          }
+        />
+      )}
+      {audioSrc && <Audio src={audioSrc} volume={1.0} />}
 
       <Series>
         {scenes.map((scene, idx) => (

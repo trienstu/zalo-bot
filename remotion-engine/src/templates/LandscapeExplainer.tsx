@@ -24,6 +24,7 @@ export interface LandscapeExplainerProps {
   bulletPoints: string[];
   metrics: MetricItem[];
   audioFile?: string;
+  bgMusicFile?: string;
   speakerName?: string;
   primaryColor?: string;
   secondaryColor?: string;
@@ -44,6 +45,7 @@ export const LandscapeExplainer: React.FC<LandscapeExplainerProps> = ({
     { label: "ĐỘ TIN CẬY", value: "99.9%", subtext: "Zero-Downtime Worker" },
   ],
   audioFile,
+  bgMusicFile = "music/ambient-lofi.mp3",
   speakerName = "Ban Dự Án - Bot Sen Chúa",
   primaryColor = "#3b82f6",
   secondaryColor = "#8b5cf6",
@@ -75,6 +77,12 @@ export const LandscapeExplainer: React.FC<LandscapeExplainerProps> = ({
       : staticFile(audioFile)
     : null;
 
+  const bgMusicSrc = bgMusicFile
+    ? bgMusicFile.startsWith("http") || bgMusicFile.startsWith("data:")
+      ? bgMusicFile
+      : staticFile(bgMusicFile)
+    : null;
+
   return (
     <AbsoluteFill
       style={{
@@ -90,8 +98,24 @@ export const LandscapeExplainer: React.FC<LandscapeExplainerProps> = ({
       {/* Background */}
       <GlowBackground primaryColor={primaryColor} secondaryColor={secondaryColor} />
 
-      {/* Embedded Audio */}
-      {audioSrc && <Audio src={audioSrc} />}
+      {/* Background Music with Audio Ducking */}
+      {bgMusicSrc && (
+        <Audio
+          src={bgMusicSrc}
+          loop
+          volume={(f) =>
+            interpolate(
+              f,
+              [0, 30, Math.max(31, durationInFrames - 30), durationInFrames],
+              [0, 0.14, 0.14, 0],
+              { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+            )
+          }
+        />
+      )}
+
+      {/* Voice Narration Audio */}
+      {audioSrc && <Audio src={audioSrc} volume={1.0} />}
 
       {/* Top Header */}
       <div
