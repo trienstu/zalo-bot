@@ -1544,13 +1544,8 @@ async function handleHistoryQA(
           },
           summary: `Chuyển đổi tài liệu sang ${fileTypeLabel}`,
         });
-        return `📄 **KẾ HOẠCH CHUYỂN ĐỔI TÀI LIỆU**:\n\n` +
-          `• **Định dạng đích**: ${fileTypeLabel}\n` +
-          `• **Tài liệu nguồn**: ${fileName || "Tài liệu đính kèm"}\n` +
-          `• **Người yêu cầu**: ${displayName ? `@${displayName}` : "bác"}\n\n` +
-          `👉 Bác ${displayName ? `@${displayName}` : ""} có muốn em tiến hành chuyển đổi và xuất file này gửi vào nhóm không ạ?\n` +
-          `• Nhắn **"ok"** hoặc **"tiến hành"** để em tạo file nhé!\n` +
-          `• Nhắn **"hủy"** hoặc **"thôi"** nếu chưa cần ạ.`;
+        const greeting = isSuperAdmin ? "Sếp" : (displayName ? `@${displayName}` : "bác");
+        return `👉 Dạ ${greeting}, ${isSuperAdmin ? "Sếp" : "bác"} có muốn em chuyển đổi sang ${fileTypeLabel} gửi vào nhóm không ạ? (Nhắn **"ok"** để làm, **"thôi"** để hủy nhé!)`;
       }
 
       console.log(`[member-assistant] ⚡ Kích hoạt Direct Document Conversion sang [${fileType}] từ fileTextContent (${fileTextContent.length} ký tự)...`);
@@ -1973,13 +1968,8 @@ QUY TẮC BẮT BUỘC:
             data: { userPrompt: question, quoteText: options.quote.text || fileTextContent || "", genre },
             summary: `Dựng video Remotion [${genreNames[genre]}]: "${question.slice(0, 50)}"`,
           });
-          return `🎬 **KẾ HOẠCH DỰNG VIDEO REMOTION**:\n\n` +
-            `• **Thể loại**: ${genreNames[genre]}\n` +
-            `• **Chủ đề**: "${question}"\n` +
-            `• **Người yêu cầu**: ${displayName ? `@${displayName}` : "bác"}\n\n` +
-            `👉 Bác ${displayName ? `@${displayName}` : ""} có muốn em tiến hành dựng và xuất video này không ạ?\n` +
-            `• Nhắn **"ok"** hoặc **"tiến hành"** để bắt đầu dựng.\n` +
-            `• Nhắn **"hủy"** hoặc **"thôi"** nếu không cần nhé!`;
+          const greeting = isSuperAdmin ? "Sếp" : (displayName ? `@${displayName}` : "bác");
+          return `👉 Dạ ${greeting}, ${isSuperAdmin ? "Sếp" : "bác"} có muốn em dựng video Remotion [${genreNames[genre]}] gửi vào nhóm không ạ? (Nhắn **"ok"** để làm, **"thôi"** để hủy nhé!)`;
         }
 
         void runMotionVideoJob({
@@ -2005,11 +1995,8 @@ QUY TẮC BẮT BUỘC:
             data: { userPrompt: question, quoteText: options.quote.text || fileTextContent || "" },
             summary: `Dựng video thuyết trình: "${question.slice(0, 50)}"`,
           });
-          return `🎬 **KẾ HOẠCH DỰNG VIDEO THUYẾT TRÌNH**:\n\n` +
-            `• **Đề tài**: "${question}"\n` +
-            `• **Người yêu cầu**: ${displayName ? `@${displayName}` : "bác"}\n` +
-            `• **Dự kiến**: Soạn kịch bản phân cảnh, tạo slide hình ảnh và lồng tiếng AI.\n\n` +
-            `👉 ${isSuperAdmin ? "Sếp" : `@${displayName}`} có xác nhận để Sen Chúa tiến hành dựng video ngay không ạ? (Gõ "ok" hoặc "duyệt" để chạy, "hủy" để dừng)`;
+          const greeting = isSuperAdmin ? "Sếp" : (displayName ? `@${displayName}` : "bác");
+          return `👉 Dạ ${greeting}, ${isSuperAdmin ? "Sếp" : "bác"} có muốn em dựng video thuyết trình gửi vào nhóm không ạ? (Nhắn **"ok"** để làm, **"thôi"** để hủy nhé!)`;
         }
 
         void runPresentationVideoJob({
@@ -2034,12 +2021,8 @@ QUY TẮC BẮT BUỘC:
           data: { userPrompt: question, quoteText: options.quote.text || fileTextContent || "" },
           summary: `Tạo tài liệu / xuất file: "${question.slice(0, 50)}"`,
         });
-        return `📄 **KẾ HOẠCH TẠO TÀI LIỆU / XUẤT FILE**:\n\n` +
-          `• **Yêu cầu**: "${question}"\n` +
-          `• **Người yêu cầu**: ${displayName ? `@${displayName}` : "bác"}\n\n` +
-          `👉 Bác ${displayName ? `@${displayName}` : ""} có muốn em tiến hành soạn thảo và xuất file này gửi vào nhóm không ạ?\n` +
-          `• Nhắn **"ok"** hoặc **"tiến hành"** để em tạo file nhé!\n` +
-          `• Nhắn **"hủy"** hoặc **"thôi"** nếu chưa cần ạ.`;
+        const greeting = isSuperAdmin ? "Sếp" : (displayName ? `@${displayName}` : "bác");
+        return `👉 Dạ ${greeting}, ${isSuperAdmin ? "Sếp" : "bác"} có muốn em tiến hành tạo file này gửi vào nhóm không ạ? (Nhắn **"ok"** để làm, **"thôi"** để hủy nhé!)`;
       }
 
       if (!isFileOrVoiceReq && plan.needsSearch && plan.queries.length > 0) {
@@ -2905,13 +2888,8 @@ QUY TẮC BẮT BUỘC:
             data: { userPrompt: question, quoteText: options?.quote?.text || fileTextContent || "", genre },
             summary: `Dựng video Remotion [${genreNames[genre]}]: "${question.slice(0, 50)}"`,
           });
-          return `🎬 **KẾ HOẠCH DỰNG VIDEO REMOTION**:\n\n` +
-            `• **Thể loại**: ${genreNames[genre]}\n` +
-            `• **Chủ đề**: "${question}"\n` +
-            `• **Người yêu cầu**: ${displayName ? `@${displayName}` : "bác"}\n\n` +
-            `👉 Bác ${displayName ? `@${displayName}` : ""} có muốn em tiến hành dựng và xuất video này không ạ?\n` +
-            `• Nhắn **"ok"** hoặc **"tiến hành"** để bắt đầu dựng.\n` +
-            `• Nhắn **"hủy"** hoặc **"thôi"** nếu không cần nhé!`;
+          const greeting = isSuperAdmin ? "Sếp" : (displayName ? `@${displayName}` : "bác");
+          return `👉 Dạ ${greeting}, ${isSuperAdmin ? "Sếp" : "bác"} có muốn em dựng video Remotion [${genreNames[genre]}] gửi vào nhóm không ạ? (Nhắn **"ok"** để làm, **"thôi"** để hủy nhé!)`;
         }
 
         void runMotionVideoJob({
@@ -2937,11 +2915,8 @@ QUY TẮC BẮT BUỘC:
             data: { userPrompt: question, quoteText: options?.quote?.text || fileTextContent || "" },
             summary: `Dựng video thuyết trình: "${question.slice(0, 50)}"`,
           });
-          return `🎬 **KẾ HOẠCH DỰNG VIDEO THUYẾT TRÌNH**:\n\n` +
-            `• **Đề tài**: "${question}"\n` +
-            `• **Người yêu cầu**: ${displayName ? `@${displayName}` : "bác"}\n` +
-            `• **Dự kiến**: Soạn kịch bản phân cảnh, tạo slide hình ảnh và lồng tiếng AI.\n\n` +
-            `👉 ${isSuperAdmin ? "Sếp" : `@${displayName}`} có xác nhận để Sen Chúa tiến hành dựng video ngay không ạ? (Gõ "ok" hoặc "duyệt" để chạy, "hủy" để dừng)`;
+          const greeting = isSuperAdmin ? "Sếp" : (displayName ? `@${displayName}` : "bác");
+          return `👉 Dạ ${greeting}, ${isSuperAdmin ? "Sếp" : "bác"} có muốn em dựng video thuyết trình gửi vào nhóm không ạ? (Nhắn **"ok"** để làm, **"thôi"** để hủy nhé!)`;
         }
 
         void runPresentationVideoJob({
@@ -2966,12 +2941,8 @@ QUY TẮC BẮT BUỘC:
           data: { userPrompt: question, quoteText: options?.quote?.text || fileTextContent || "" },
           summary: `Tạo tài liệu / xuất file: "${question.slice(0, 50)}"`,
         });
-        return `📄 **KẾ HOẠCH TẠO TÀI LIỆU / XUẤT FILE**:\n\n` +
-          `• **Yêu cầu**: "${question}"\n` +
-          `• **Người yêu cầu**: ${displayName ? `@${displayName}` : "bác"}\n\n` +
-          `👉 Bác ${displayName ? `@${displayName}` : ""} có muốn em tiến hành soạn thảo và xuất file này gửi vào nhóm không ạ?\n` +
-          `• Nhắn **"ok"** hoặc **"tiến hành"** để em tạo file nhé!\n` +
-          `• Nhắn **"hủy"** hoặc **"thôi"** nếu chưa cần ạ.`;
+        const greeting = isSuperAdmin ? "Sếp" : (displayName ? `@${displayName}` : "bác");
+        return `👉 Dạ ${greeting}, ${isSuperAdmin ? "Sếp" : "bác"} có muốn em tiến hành tạo file này gửi vào nhóm không ạ? (Nhắn **"ok"** để làm, **"thôi"** để hủy nhé!)`;
       }
 
       const isFileOrVoiceReq = checkIsFileOrVoiceGeneration(question, options?.quote?.text);
@@ -3776,11 +3747,6 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
       clearPendingAction(threadId, sender);
       void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.OK);
       if (pending.type === "create_presentation_video") {
-        await sendGroupText(
-          api,
-          threadId,
-          `🎬 Dạ ${isSuperAdmin ? "Sếp" : `@${displayName}`}, Sen Chúa đã nhận lệnh xác nhận và đang tiến hành dựng video [${pending.summary}] ngay đây ạ! Video hoàn tất sẽ tự động gửi lên nhóm nhé! ✨`,
-        );
         void runPresentationVideoJob({
           api,
           sender,
@@ -3794,11 +3760,6 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         return;
       }
       if (pending.type === "create_motion_video") {
-        await sendGroupText(
-          api,
-          threadId,
-          `🎬 Dạ ${isSuperAdmin ? "Sếp" : `@${displayName}`}, Sen Chúa đã nhận lệnh xác nhận và đang tiến hành dựng video Remotion [${pending.summary}] ngay đây ạ! Video hoàn tất sẽ tự động gửi lên nhóm nhé! ✨`,
-        );
         void runMotionVideoJob({
           api,
           sender,
@@ -3813,11 +3774,6 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         return;
       }
       if (pending.type === "generate_file") {
-        await sendGroupText(
-          api,
-          threadId,
-          `📄 Dạ ${isSuperAdmin ? "Sếp" : `@${displayName}`}, Sen Chúa đã nhận lệnh xác nhận và đang tiến hành tạo file [${pending.summary}] ngay đây ạ! File hoàn tất sẽ gửi vào nhóm nhé! ✨`,
-        );
         void handleHistoryQA(pending.data.userPrompt, displayName, threadId, {
           api,
           quote: pending.data.quote || event.quote,
@@ -4834,18 +4790,15 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
           },
           summary: `Xuất file Markdown (.md): "${question.slice(0, 50)}"`,
         });
+        const isSuperAdminUser = isUserAdmin(sender);
+        const greeting = isSuperAdminUser ? "Sếp" : (displayName ? `@${displayName}` : "bác");
         await sendGroupReplyWithMention(
           api,
           threadId,
           botName,
           displayName,
           sender,
-          `📄 **KẾ HOẠCH XUẤT FILE MARKDOWN (.md)**:\n\n` +
-          `• **Nội dung**: Xuất tài liệu tóm tắt/hướng dẫn sang file .md để lưu trữ\n` +
-          `• **Người yêu cầu**: ${displayName ? `@${displayName}` : "bác"}\n\n` +
-          `👉 Bác ${displayName ? `@${displayName}` : ""} có muốn em tiến hành xuất file Markdown này gửi vào nhóm không ạ?\n` +
-          `• Nhắn **"ok"** hoặc **"tiến hành"** để em tạo file nhé!\n` +
-          `• Nhắn **"hủy"** hoặc **"thôi"** nếu chưa cần ạ.`,
+          `👉 Dạ ${greeting}, ${isSuperAdminUser ? "Sếp" : "bác"} có muốn em xuất nội dung trên thành file Markdown (.md) gửi vào nhóm không ạ? (Nhắn **"ok"** để làm, **"thôi"** để hủy nhé!)`,
           { quote: buildQuoteObject(event) },
         );
         return;
