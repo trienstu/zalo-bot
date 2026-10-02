@@ -34,6 +34,7 @@ import {
   Terminal,
   FolderGit2,
   Send,
+  Megaphone,
 } from "lucide-react";
 import { BotSwitcher } from "@/components/bot-switcher";
 
@@ -49,6 +50,7 @@ interface GroupItem {
 
 const NAV = [
   { href: "/", label: "Tổng quan", shortLabel: "Tổng quan", icon: LayoutDashboard },
+  { href: "/zalomkt", label: "Zalo Marketing (SĐT)", shortLabel: "Zalo MKT", icon: Megaphone },
   { href: "/hub", label: "Kho Kiến Thức", shortLabel: "Kiến thức", icon: Sparkles },
   { href: "/telegram", label: "Tri Thức Telegram", shortLabel: "Telegram", icon: Send },
   { href: "/repos", label: "Kho GitHub Repo", shortLabel: "GitHub", icon: FolderGit2 },

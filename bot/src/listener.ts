@@ -58,6 +58,7 @@ import { getMorningWeatherBriefing } from "./weather.js";
 import { getDailyAiNewsBriefing } from "./ai-news.js";
 import { syncGroupMembers } from "./member-sync.js";
 import { saveZaloImage } from "./zalo-media.js";
+import { initZaloMktWorker } from "./workers/zalomkt-worker.js";
 import { KICK_LOCK_KEY, KICK_LOCK_STALE_MS } from "./commands/monthly-cleanup.js";
 import { runDailySummarySafe } from "./commands/daily-summary.js";
 import { handleMemberInteraction } from "./member-assistant.js";
@@ -1613,6 +1614,13 @@ export async function runListener(): Promise<void> {
     initHostAssistant(api);
   } catch (e) {
     console.warn(`[listener] Khởi động System Monitoring & Host Assistant lỗi: ${String(e)}`);
+  }
+
+  // Khởi động Zalo Marketing Background Worker (quản lý gửi tin SĐT, cụm ảnh & alias)
+  try {
+    initZaloMktWorker(api);
+  } catch (e) {
+    console.warn(`[listener] Khởi động Zalo Marketing Worker lỗi: ${String(e)}`);
   }
 }
 

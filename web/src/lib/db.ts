@@ -324,6 +324,64 @@ function ensureWebSchema(database: Database.Database): void {
       created_at        INTEGER NOT NULL,
       completed_at      INTEGER
     );
+
+    CREATE TABLE IF NOT EXISTS zalomkt_contacts (
+      phone               TEXT PRIMARY KEY,
+      zalo_uid            TEXT,
+      zalo_name           TEXT NOT NULL DEFAULT '',
+      display_name        TEXT NOT NULL DEFAULT '',
+      gender              INTEGER NOT NULL DEFAULT -1,
+      dob                 INTEGER,
+      sdob                TEXT NOT NULL DEFAULT '',
+      avatar              TEXT NOT NULL DEFAULT '',
+      bio                 TEXT NOT NULL DEFAULT '',
+      status_code         TEXT NOT NULL DEFAULT 'unverified',
+      is_blacklisted      INTEGER NOT NULL DEFAULT 0,
+      total_sent          INTEGER NOT NULL DEFAULT 0,
+      last_sent_at        INTEGER,
+      last_checked_at     INTEGER,
+      ai_tags             TEXT NOT NULL DEFAULT '[]',
+      ai_notes            TEXT NOT NULL DEFAULT '',
+      created_at          INTEGER NOT NULL,
+      updated_at          INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS zalomkt_campaigns (
+      id                  TEXT PRIMARY KEY,
+      title               TEXT NOT NULL,
+      raw_content         TEXT NOT NULL DEFAULT '',
+      images_json         TEXT NOT NULL DEFAULT '[]',
+      status              TEXT NOT NULL DEFAULT 'draft',
+      config_json         TEXT NOT NULL DEFAULT '{}',
+      total_leads         INTEGER NOT NULL DEFAULT 0,
+      sent_count          INTEGER NOT NULL DEFAULT 0,
+      failed_count        INTEGER NOT NULL DEFAULT 0,
+      not_found_count     INTEGER NOT NULL DEFAULT 0,
+      skipped_count       INTEGER NOT NULL DEFAULT 0,
+      created_at          INTEGER NOT NULL,
+      updated_at          INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS zalomkt_campaign_leads (
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      campaign_id         TEXT NOT NULL,
+      phone               TEXT NOT NULL,
+      custom_name         TEXT NOT NULL DEFAULT '',
+      zalo_uid            TEXT,
+      display_name        TEXT NOT NULL DEFAULT '',
+      gender              INTEGER NOT NULL DEFAULT -1,
+      avatar              TEXT NOT NULL DEFAULT '',
+      status              TEXT NOT NULL DEFAULT 'pending',
+      skip_reason         TEXT NOT NULL DEFAULT '',
+      personalized_text   TEXT NOT NULL DEFAULT '',
+      alias_updated       INTEGER NOT NULL DEFAULT 0,
+      alias_name          TEXT NOT NULL DEFAULT '',
+      friend_requested    INTEGER NOT NULL DEFAULT 0,
+      error_message       TEXT NOT NULL DEFAULT '',
+      sent_at             INTEGER,
+      created_at          INTEGER NOT NULL,
+      FOREIGN KEY (campaign_id) REFERENCES zalomkt_campaigns(id) ON DELETE CASCADE
+    );
   `);
 
   try {

@@ -732,3 +732,79 @@ CREATE TABLE IF NOT EXISTS telegram_crawl_requests (
 
 CREATE INDEX IF NOT EXISTS idx_tg_crawl_pending ON telegram_crawl_requests(status, created_at);
 
+-- ============================================================================
+-- ZALO MARKETING & CHĂM SÓC KHÁCH HÀNG TỰ ĐỘNG THEO SĐT (ZALOMKT)
+-- ============================================================================
+
+-- 1. Kho Data Toàn Cục (Global Contacts Hub) lưu trữ trạng thái SĐT, Profile Zalo và Ngày sinh
+CREATE TABLE IF NOT EXISTS zalomkt_contacts (
+  phone               TEXT PRIMARY KEY,
+  zalo_uid            TEXT,
+  zalo_name           TEXT NOT NULL DEFAULT '',
+  display_name        TEXT NOT NULL DEFAULT '',
+  gender              INTEGER NOT NULL DEFAULT -1, -- -1: chưa rõ, 0: nữ, 1: nam
+  dob                 INTEGER,                     -- unix timestamp sinh nhật (nếu public)
+  sdob                TEXT NOT NULL DEFAULT '',    -- dd/mm/yyyy hoặc dd/mm
+  avatar              TEXT NOT NULL DEFAULT '',
+  bio                 TEXT NOT NULL DEFAULT '',
+  status_code         TEXT NOT NULL DEFAULT 'unverified', -- unverified, valid, no_zalo, blocked_stranger, invalid_phone
+  is_blacklisted      INTEGER NOT NULL DEFAULT 0,
+  total_sent          INTEGER NOT NULL DEFAULT 0,
+  last_sent_at        INTEGER,
+  last_checked_at     INTEGER,
+  ai_tags             TEXT NOT NULL DEFAULT '[]',  -- JSON array of tags
+  ai_notes            TEXT NOT NULL DEFAULT '',
+  created_at          INTEGER NOT NULL,
+  updated_at          INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_zalomkt_contacts_status ON zalomkt_contacts(status_code);
+CREATE INDEX IF NOT EXISTS idx_zalomkt_contacts_uid ON zalomkt_contacts(zalo_uid);
+
+-- 2. Bảng Chiến Dịch Marketing (Multi-Campaigns)
+CREATE TABLE IF NOT EXISTS zalomkt_campaigns (
+  id                  TEXT PRIMARY KEY,
+  title               TEXT NOT NULL,
+  raw_content         TEXT NOT NULL DEFAULT '',
+  images_json         TEXT NOT NULL DEFAULT '[]', -- JSON array đường dẫn file ảnh
+  status              TEXT NOT NULL DEFAULT 'draft', -- draft, running, paused, completed, stopped
+  config_json         TEXT NOT NULL DEFAULT '{}', -- min_delay, max_delay, auto_alias, auto_friend, ai_rewrite
+  total_leads         INTEGER NOT NULL DEFAULT 0,
+  sent_count          INTEGER NOT NULL DEFAULT 0,
+  failed_count        INTEGER NOT NULL DEFAULT 0,
+  not_found_count     INTEGER NOT NULL DEFAULT 0,
+  skipped_count       INTEGER NOT NULL DEFAULT 0,
+  created_at          INTEGER NOT NULL,
+  updated_at          INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_zalomkt_campaigns_status ON zalomkt_campaigns(status);
+CREATE INDEX IF NOT EXISTS idx_zalomkt_campaigns_created ON zalomkt_campaigns(created_at DESC);
+
+-- 3. Khách Hàng Thuộc Chiến Dịch (Campaign Leads)
+CREATE TABLE IF NOT EXISTS zalomkt_campaign_leads (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  campaign_id         TEXT NOT NULL,
+  phone               TEXT NOT NULL,
+  custom_name         TEXT NOT NULL DEFAULT '',
+  zalo_uid            TEXT,
+  display_name        TEXT NOT NULL DEFAULT '',
+  gender              INTEGER NOT NULL DEFAULT -1,
+  avatar              TEXT NOT NULL DEFAULT '',
+  status              TEXT NOT NULL DEFAULT 'pending', -- pending, searching, ready, sending, sent, failed, skipped
+  skip_reason         TEXT NOT NULL DEFAULT '',
+  personalized_text   TEXT NOT NULL DEFAULT '',
+  alias_updated       INTEGER NOT NULL DEFAULT 0,
+  alias_name          TEXT NOT NULL DEFAULT '',
+  friend_requested    INTEGER NOT NULL DEFAULT 0,
+  error_message       TEXT NOT NULL DEFAULT '',
+  sent_at             INTEGER,
+  created_at          INTEGER NOT NULL,
+  FOREIGN KEY (campaign_id) REFERENCES zalomkt_campaigns(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_zalomkt_leads_campaign ON zalomkt_campaign_leads(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_zalomkt_leads_camp_phone ON zalomkt_campaign_leads(campaign_id, phone);
+CREATE INDEX IF NOT EXISTS idx_zalomkt_leads_camp_status ON zalomkt_campaign_leads(campaign_id, status);
+
+
