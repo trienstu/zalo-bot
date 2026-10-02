@@ -387,5 +387,19 @@ test("câu hỏi khái niệm, lý thuyết, giải thích không bị ép needs
     assert.deepEqual(res.queries, [], `Failed on: ${q}`);
   }
 });
+test("câu hỏi tra cứu, tìm kiếm hoặc đọc hiểu kèm quote tài liệu KHÔNG bị nhận nhầm thành tạo file", async () => {
+  const { checkIsFileOrVoiceGeneration } = await import("./tools/file-generator.js");
 
+  // Sự cố Bác Trần Thuận: quote tin nhắn xin pdf và hỏi tìm bản dịch tiếng việt
+  const isFile1 = checkIsFileOrVoiceGeneration(
+    "tìm thử bản dịch tiếng việt nha",
+    "có bác nào có pdf quyển start with why hem em xin zí ạ",
+  );
+  assert.equal(isFile1, false);
 
+  // Các câu tra cứu / đọc hiểu / hỏi đáp kèm quote khác
+  assert.equal(checkIsFileOrVoiceGeneration("sách này có hay không em", "bác nào có pdf start with why"), false);
+  assert.equal(checkIsFileOrVoiceGeneration("tóm tắt nội dung giúp anh nhé", "gửi file pdf báo cáo"), false);
+  assert.equal(checkIsFileOrVoiceGeneration("cho mình hỏi tác giả là ai vậy bot", "file pdf start with why"), false);
+  assert.equal(checkIsFileOrVoiceGeneration("giải thích ý nghĩa câu này với nha", "file word hop_dong.docx"), false);
+});

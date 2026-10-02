@@ -209,6 +209,14 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
     return false;
   }
 
+  // 1.6. Chặn tuyệt đối câu hỏi tra cứu, tìm kiếm, đọc hiểu, hỏi đáp thông tin (kể cả khi quote có từ file/pdf/sách)
+  const isInformationOrSearchInquiry =
+    /(?:^|[^\p{L}\p{N}])(?:tìm|tra\s*cứu|tìm\s*kiếm|kiếm|hỏi|cho\s*hỏi|sách\s*này|cuốn\s*này|tác\s*giả|nội\s*dung\s*(?:là|gì)|bản\s*dịch|dịch\s*thuật|giải\s*thích|tóm\s*tắt\s*(?:nội\s*dung|ý\s*chính)?|review|đánh\s*giá)(?=$|[^\p{L}\p{N}])/iu.test(qLower) &&
+    !/(?:xuất|tạo|làm|soạn|in|đóng\s*gói)\s+(?:thành\s+)?(?:file|bản|tệp|word|excel|slide|pdf)/iu.test(qLower);
+  if (isInformationOrSearchInquiry) {
+    return false;
+  }
+
   // 2. Kiểm tra image request (trực tiếp hoặc quote xác nhận tạo ảnh)
   if (isImageRequest(question, quoteText)) return true;
 
@@ -271,18 +279,17 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
     /(?:vào|ra|thành|sang|qua|lên|bằng|về|dưới|dạng)\s+(?:thành\s+)?(?:dạng\s+)?(?:file\s+)?(?:docx|words?|excel|excell|exel|xlsx|bảng\s*tính|pptx|ppt|powerpoint|slide|pdf|csv|txt|md|markdown|html|voice|audio)/iu.test(qLower);
 
   const actionPattern =
-    /(?:tạo|xuất|soạn|làm|dựng|quay|viết|gửi|lưu|thiết\s*kế|chuyển\s*(?:thành|sang|qua|lên|ra)?|đổi\s*(?:thành|sang|qua)?|bật|convert|generate|export|triển\s*khai|đọc\s*(?:giúp|hộ|cho|bằng)?|ngâm(?:\s+thơ)?|thu\s*âm|ghi\s*âm|vẽ(?:\s+lại)?|làm(?:\s+lại)?|thiết\s*kế(?:\s+lại)?|sửa(?:\s+lại)?|chỉnh(?:\s+lại)?|đóng\s*gói|gom|cho\s*vào|bỏ\s*vào|lưu\s*vào|nhét\s*vào|in\s*ra|trả\s*(?:file|cho)?|gửi\s*(?:file|cho)?|đưa\s*(?:file|cho)?|xin\s*(?:file)?|lấy\s*(?:file)?|tải\s*(?:file)?)/iu;
+    /(?:tạo|xuất|soạn|làm|dựng|quay|viết|gửi|lưu|thiết\s*kế|chuyển\s*(?:thành|sang|qua|lên|ra)?|đổi\s*(?:thành|sang|qua)?|bật|convert|generate|export|triển\s*khai|đọc\s*(?:giúp|hộ|cho|bằng)?|ngâm(?:\s+thơ)?|thu\s*âm|ghi\s*âm|vẽ(?:\s+lại)?|làm(?:\s+lại)?|thiết\s*kế(?:\s+lại)?|sửa(?:\s+lại)?|chỉnh(?:\s+lại)?|đóng\s*gói|gom|cho\s*vào|bỏ\s*vào|lưu\s*vào|nhét\s*vào|in\s*ra|trả\s*(?:file|cho)?|gửi\s*(?:file|cho)?|đưa\s*(?:file|cho)?|tải\s*(?:file)?)/iu;
 
   const isAffirmativeFollowUp =
     /^(?:ok(?:ela|ay|e)?|ừ|uh|u|dạ|da|vâng|vang|dc|được|chốt|nhất\s*trí|duyệt|tiến\s*hành)[\s,.:;!-]*(?:soạn|làm|tạo|xuất|viết|triển\s*khai|chốt|triển|lên|đóng\s*gói|gom|trả\s*file|gửi\s*file|lấy\s*file|trả|gửi|lấy|vẽ|sinh)?\s*(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|tiếp|luôn\s*đi|cho\s*mình|cho\s*anh|cho\s*em)?\b/iu.test(qLower.trim()) ||
     /^(?:soạn|làm|tạo|xuất|viết|triển\s*khai|chốt|triển|lên|đóng\s*gói|gom|trả\s*file|gửi\s*file|lấy\s*file|trả|gửi|lấy|vẽ|sinh)\s*(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|tiếp|luôn\s*đi|cho\s*mình|cho\s*anh|cho\s*em)?\b/iu.test(qLower.trim());
 
-  // Hành động nằm trong câu hỏi mới HOẶC nằm trong nội dung trích dẫn (khi câu hỏi mới là tag gọi bot hoặc xác nhận)
+  // Hành động nằm trong câu hỏi mới HOẶC nằm trong nội dung trích dẫn (khi câu hỏi mới là một lệnh xác nhận rõ ràng)
   const isQuotingActionRequest =
     actionPattern.test(quoteLower) &&
     hasFileTargetInQuote &&
-    (qLower.length === 0 ||
-      /(?:ok|oke|ừ|uh|u|dạ|vâng|được|triển|làm|soạn|gửi|nhé|nha|đi|giúp|hộ|em|bot|sen chúa|mộc miên)/iu.test(qLower));
+    isAffirmativeFollowUp;
 
   const hasAction = actionPattern.test(qLower) || isQuotingActionRequest;
 

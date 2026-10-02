@@ -522,35 +522,29 @@ export async function planSearchQueries(params: {
     }, question, quoteText);
   }
 
-  // 4. Nhận diện câu lệnh tạo video đồ họa chuyển động Remotion (TikTok, Shorts, So sánh, Tin tức)
-  const isMotion = !isResourceOrToolInquiry && isMotionVideoRequest(question, quoteText);
-  if (isMotion) {
+  // 3. Fast-Path cho CÂU LỆNH TẠO MEDIA TRỰC TIẾP TỪ QUESTION (TUYỆT ĐỐI KHÔNG BẮT QUOTE CỦA NGƯỜI KHÁC)
+  // Chỉ kích hoạt khi chính câu hỏi của người dùng ra lệnh tạo rõ ràng, không phải câu hỏi thăm dò/tra cứu
+  const isDirectMotion = !isResourceOrToolInquiry && isMotionVideoRequest(question);
+  const isDirectVideo = !isResourceOrToolInquiry && isPresentationVideoRequest(question);
+  const isDirectImg = !isResourceOrToolInquiry && isImageRequest(question);
+  const isDirectFileOrMedia = !isResourceOrToolInquiry && checkIsFileOrVoiceGeneration(question);
+  if (isDirectMotion || isDirectVideo || isDirectImg || isDirectFileOrMedia) {
     return applyExecutionSignals({
       needsSearch: false,
       intent: "knowledge",
       queries: [],
-      summaryIntent: "Người dùng yêu cầu dựng video đồ họa chuyển động Remotion",
-      taskType: "motion_video",
-      responseMode: "action",
-      toolIntent: "create",
-    }, question, quoteText);
-  }
-
-  // 5. Nhận diện câu lệnh tạo file, tạo/sửa ảnh, vẽ tranh, tạo voice hoặc video thuyết trình rõ ràng
-  const isVideo = !isResourceOrToolInquiry && isPresentationVideoRequest(question, quoteText);
-  const isImg = isImageRequest(question, quoteText);
-  const isFileOrMedia = !isResourceOrToolInquiry && checkIsFileOrVoiceGeneration(question, quoteText);
-  if (isVideo || isImg || isFileOrMedia) {
-    return applyExecutionSignals({
-      needsSearch: false,
-      intent: "knowledge",
-      queries: [],
-      summaryIntent: isVideo
-        ? "Người dùng yêu cầu dựng video thuyết trình slide"
-        : isImg
-          ? "Người dùng yêu cầu tạo / vẽ / chỉnh sửa hình ảnh"
-          : "Người dùng yêu cầu tạo file / âm thanh",
-      taskType: isVideo ? "presentation_video" : "file_generation",
+      summaryIntent: isDirectMotion
+        ? "Người dùng yêu cầu dựng video đồ họa chuyển động Remotion"
+        : isDirectVideo
+          ? "Người dùng yêu cầu dựng video thuyết trình slide"
+          : isDirectImg
+            ? "Người dùng yêu cầu tạo / vẽ / chỉnh sửa hình ảnh"
+            : "Người dùng yêu cầu tạo file / âm thanh",
+      taskType: isDirectMotion
+        ? "motion_video"
+        : isDirectVideo
+          ? "presentation_video"
+          : "file_generation",
       responseMode: "action",
       toolIntent: "create",
     }, question, quoteText);
@@ -684,6 +678,9 @@ export async function planSearchQueries(params: {
         : llmQueries;
 
       const taskType: PlannerTaskType = [
+        "image_generation",
+        "motion_video",
+        "muse_video",
         "presentation_video",
         "file_generation",
         "voice_generation",

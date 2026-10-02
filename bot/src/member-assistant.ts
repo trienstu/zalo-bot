@@ -2012,7 +2012,7 @@ QUY TẮC BẮT BUỘC:
         return "";
       }
 
-      const isPhysicalFileReq = (plan.taskType === "file_generation" || plan.taskType === "voice_generation" || plan.taskType === "music_generation" || checkIsFileOrVoiceGeneration(question, options?.quote?.text)) && !isImageRequest(question, options?.quote?.text);
+      const isPhysicalFileReq = (plan.taskType === "file_generation" || plan.taskType === "voice_generation" || plan.taskType === "music_generation") && !isImageRequest(question, options?.quote?.text);
       const isDocConfirmed = Boolean(options?.isConfirmedAction) || isAffirmativeConfirmation(question);
       if (options?.api && isPhysicalFileReq && !isDocConfirmed) {
         setPendingAction(threadId, options?.sender || "", {
@@ -2025,7 +2025,7 @@ QUY TẮC BẮT BUỘC:
         return `👉 Dạ ${greeting}, ${isSuperAdmin ? "Sếp" : "bác"} có muốn em tiến hành tạo file này gửi vào nhóm không ạ? (Nhắn **"ok"** để làm, **"thôi"** để hủy nhé!)`;
       }
 
-      if (!isFileOrVoiceReq && plan.needsSearch && plan.queries.length > 0) {
+      if (!isPhysicalFileReq && plan.needsSearch && plan.queries.length > 0) {
         quoteEvidenceRequired = plan.intent === "fact_check" && isStrictVerificationQuestion(question);
         const searchQueries = plan.queries.slice(0, 2);
         const searchPromises = Promise.all(
@@ -2932,7 +2932,7 @@ QUY TẮC BẮT BUỘC:
         return "";
       }
 
-      const isPhysicalFileReq = (plan.taskType === "file_generation" || plan.taskType === "voice_generation" || plan.taskType === "music_generation" || checkIsFileOrVoiceGeneration(question, options?.quote?.text)) && !isImageRequest(question, options?.quote?.text);
+      const isPhysicalFileReq = (plan.taskType === "file_generation" || plan.taskType === "voice_generation" || plan.taskType === "music_generation") && !isImageRequest(question, options?.quote?.text);
       const isDocConfirmed = Boolean(options?.isConfirmedAction) || isAffirmativeConfirmation(question);
       if (options?.api && isPhysicalFileReq && !isDocConfirmed) {
         setPendingAction(threadId, options?.sender || "", {
@@ -2945,8 +2945,7 @@ QUY TẮC BẮT BUỘC:
         return `👉 Dạ ${greeting}, ${isSuperAdmin ? "Sếp" : "bác"} có muốn em tiến hành tạo file này gửi vào nhóm không ạ? (Nhắn **"ok"** để làm, **"thôi"** để hủy nhé!)`;
       }
 
-      const isFileOrVoiceReq = checkIsFileOrVoiceGeneration(question, options?.quote?.text);
-      planNeedsSearch = Boolean(plan.needsSearch) && !isFileOrVoiceReq;
+      planNeedsSearch = Boolean(plan.needsSearch) && !isPhysicalFileReq;
 
       if (planNeedsSearch && plan.queries.length > 0) {
         evidenceRequired = plan.intent === "fact_check" && isStrictVerificationQuestion(question);
