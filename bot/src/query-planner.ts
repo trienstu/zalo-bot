@@ -422,7 +422,9 @@ export { isBotStatusOrMetaQuestion };
 export function isAffirmativeTaskExecution(text: string): boolean {
   const trimmed = text.trim();
   if (trimmed.length > 35) return false;
-  const hasAffirmative = /^(?:ok(?:ela|ay|e)?|ừ|uh|u|dạ|da|vâng|vang|dc|được|chốt|nhất trí|duyệt|tiến hành|làm|triển khai)(?:[\s,.:;!-]+(?:soạn|làm|tạo|xuất|viết|triển\s*khai|chốt|triển|lên|vẽ|sinh|chạy|tiến\s*hành))?(?:[\s,.:;!-]+(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|tiếp|nào))*$/iu.test(trimmed);
+  const isNegation = /(?:đâu\s+cần|không\s+cần|ko\s+cần|chưa\s+cần|thôi|hủy|bỏ|đừng|rút\s+điện)/iu.test(trimmed);
+  if (isNegation) return false;
+  const hasAffirmative = /^(?:ok(?:ela|ay|e)?|okie|ừ|uh|da|dạ|vâng|vang|dc|được|chốt|nhất\s*trí|duyệt|tiến\s*hành|triển\s*khai|làm|triển)(?:[\s,.:;!-]+(?:soạn|làm|tạo|xuất|viết|triển\s*khai|chốt|triển|lên|vẽ|sinh|chạy|tiến\s*hành))?(?:[\s,.:;!-]+(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|tiếp|nào))*$/iu.test(trimmed);
   const hasMediaKeyword = /\b(?:video|clip|mp4|slide|powerpoint|pptx|word|docx|excel|xlsx|ảnh|hình|hướng\s*dẫn|bài\s*viết)\b/iu.test(trimmed);
   return hasAffirmative && !hasMediaKeyword;
 }
@@ -500,8 +502,14 @@ export async function planSearchQueries(params: {
     }, question, quoteText);
   }
 
+  // 2.5. Phủ định nếu là câu hỏi tra cứu công cụ / repo / thư viện / phần mềm
+  const isResourceOrToolInquiry =
+    /(?:có\s+(?:repo|mã\s*nguồn|thư\s*viện|tool|công\s*cụ|app|ứng\s*dụng|phần\s*mềm|web|site|kênh|hệ\s*thống|cách|phương\s*pháp|ai)\s+(?:nào|gì)|hướng\s*dẫn\s+cách|làm\s*sao\s+để|xin\s+(?:repo|tool|link)|chia\s*sẻ\s+(?:repo|tool|phần\s*mềm))/iu.test(
+      trimmed,
+    );
+
   // 3. Nhận diện câu lệnh xác nhận / giục thực thi tác vụ thuần túy (ví dụ: "ok làm đi", "làm luôn đi em", "triển khai luôn")
-  if (isAffirmativeTaskExecution(trimmed)) {
+  if (!isResourceOrToolInquiry && isAffirmativeTaskExecution(trimmed)) {
     const isImgFollowUp = isImageRequest(question, quoteText);
     return applyExecutionSignals({
       needsSearch: false,
@@ -515,7 +523,7 @@ export async function planSearchQueries(params: {
   }
 
   // 4. Nhận diện câu lệnh tạo video đồ họa chuyển động Remotion (TikTok, Shorts, So sánh, Tin tức)
-  const isMotion = isMotionVideoRequest(question, quoteText);
+  const isMotion = !isResourceOrToolInquiry && isMotionVideoRequest(question, quoteText);
   if (isMotion) {
     return applyExecutionSignals({
       needsSearch: false,
@@ -529,9 +537,9 @@ export async function planSearchQueries(params: {
   }
 
   // 5. Nhận diện câu lệnh tạo file, tạo/sửa ảnh, vẽ tranh, tạo voice hoặc video thuyết trình rõ ràng
-  const isVideo = isPresentationVideoRequest(question, quoteText);
+  const isVideo = !isResourceOrToolInquiry && isPresentationVideoRequest(question, quoteText);
   const isImg = isImageRequest(question, quoteText);
-  const isFileOrMedia = checkIsFileOrVoiceGeneration(question, quoteText);
+  const isFileOrMedia = !isResourceOrToolInquiry && checkIsFileOrVoiceGeneration(question, quoteText);
   if (isVideo || isImg || isFileOrMedia) {
     return applyExecutionSignals({
       needsSearch: false,

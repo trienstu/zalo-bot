@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { callGeminiJson } from "../gemini.js";
 import { synthesizeSingleAudio } from "../tools/voice-generator.js";
 import { sendDirectFile, sendDirectText, sendGroupFile, sendGroupText } from "../zalo/client.js";
+import { registerRenderJob, unregisterRenderJob, getActiveRenderJob } from "./active-render-jobs.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -99,15 +100,25 @@ export function isMotionVideoRequest(text: string, quoteText = ""): boolean {
 
   if (!qLower) return false;
 
-  // 1. Phủ định phản hồi, khiếu nại, góp ý
-  const isFeedback =
+  // 1. Phủ định phản hồi, khiếu nại, góp ý, từ chối, yêu cầu dừng/rút điện
+  const isFeedbackOrCancellation =
     /^(?:sao|sao\s+lại|sao\s+thế|sao\s+vậy|sao\s+tự|tại\s+sao|sao\s+nó)\s+(?:gửi|tạo|làm|ra|xuất|bắn)\s+(?:video|clip)/iu.test(
       qLower,
     ) ||
     /(?:bị\s+lỗi|lỗi\s+rồi|nhận\s+nhầm|sai\s+rồi|đừng\s+làm\s+video|ai\s+mượn\s+làm\s+video)/iu.test(
       qLower,
+    ) ||
+    /(?:đâu\s+cần|không\s+cần|ko\s+cần|chưa\s+cần|thôi\s+khỏi|thôi\s+đừng|rút\s+điện|hủy\s+bỏ|hủy\s+đi|dừng\s+lại|ngừng|đừng\s+tạo|không\s+phải|ai\s+mượn)/iu.test(
+      qLower,
     );
-  if (isFeedback) return false;
+  if (isFeedbackOrCancellation) return false;
+
+  // 1.5. Phủ định nếu là câu hỏi tra cứu tài nguyên / hỏi repo / hỏi công cụ / hỏi cách làm
+  const isResourceOrToolInquiry =
+    /(?:có\s+(?:repo|mã\s*nguồn|thư\s*viện|tool|công\s*cụ|app|ứng\s*dụng|phần\s*mềm|web|site|kênh|hệ\s*thống|cách|phương\s*pháp|ai)\s+(?:nào|gì)|hướng\s*dẫn\s+cách|làm\s*sao\s+để|xin\s+(?:repo|tool|link)|chia\s*sẻ\s+(?:repo|tool|phần\s*mềm))/iu.test(
+      qLower,
+    );
+  if (isResourceOrToolInquiry) return false;
 
   // 2. Phủ định nếu là yêu cầu Muse Video (để định tuyến sang Muse AI Video)
   const mentionsMuse = /\b(?:muse|muse2api|muse\.ai)\b/iu.test(combined);
@@ -145,12 +156,12 @@ export function isMotionVideoRequest(text: string, quoteText = ""): boolean {
   const isSlashCommand = /^\/(?:video|tiktok|shorts|remotion)(?:\s+.*|$)/i.test(qLower);
   if (isSlashCommand) return true;
 
-  // 7. Cụm từ nhận diện trực tiếp
+  // 7. Cụm từ nhận diện trực tiếp có kèm động từ hành động rõ ràng
   const directTerms =
-    /\b(?:video|clip)\s+(?:tiktok|shorts|reels|vox|explainer|chuyển\s*động|motion|so\s*sánh|tin\s*nóng|thời\s*sự|remotion|karaoke|nhảy\s*chữ)\b/iu.test(
+    /(?:^|[^\p{L}\p{N}])(?:làm|tạo|dựng|xuất|quay)\s+(?:video|clip)\s+(?:tiktok|shorts|reels|vox|explainer|chuyển\s*động|motion|so\s*sánh|tin\s*nóng|thời\s*sự|remotion|karaoke|nhảy\s*chữ)\b/iu.test(
       qLower,
     ) ||
-    /\b(?:tiktok|shorts|reels|vox|explainer|motion|remotion)\s+(?:video|clip)\b/iu.test(qLower);
+    /(?:^|[^\p{L}\p{N}])(?:làm|tạo|dựng|xuất|quay)\s+(?:tiktok|shorts|reels|vox|explainer|motion|remotion)\s+(?:video|clip)\b/iu.test(qLower);
   if (directTerms) return true;
 
   // 8. Mệnh lệnh tạo video kết hợp với từ khóa thể loại
@@ -181,8 +192,11 @@ export function isMotionVideoRequest(text: string, quoteText = ""): boolean {
       /(?:video\s+tiktok|video\s+shorts|video\s+vox|remotion|video\s+chuyển\s*động|video\s+so\s*sánh)/iu.test(
         quoteLower,
       );
+    // Sử dụng ranh giới từ chặt chẽ chống bắt nhầm chữ "u" trong tiếng Việt
     const isAffirmation =
-      /(?:ok|oke|ừ|uh|u|dạ|vâng|được|triển|làm\s*đi|xuất\s*đi|làm\s*luôn)/iu.test(qLower);
+      /\b(?:ok(?:ela|ay|e)?|okie|ừ|uh|da|dạ|vâng|được|dc|triển|làm\s*đi|xuất\s*đi|làm\s*luôn|chốt|duyệt|tiến\s*hành)\b/iu.test(
+        qLower,
+      );
     if (isQuotingProposal && isAffirmation) return true;
   }
 
@@ -315,6 +329,21 @@ export async function runMotionVideoJob(options: MotionVideoJobOptions): Promise
   const remotionDir = getRemotionDir();
   const outputDir = ensureOutputDir();
 
+  const currentThreadKey = threadId || sender;
+  const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const abortController = new AbortController();
+
+  registerRenderJob({
+    jobId,
+    threadId: currentThreadKey,
+    userId: sender,
+    type: "motion_video",
+    title: userPrompt.slice(0, 60),
+    abortController,
+    cancelled: false,
+    startTime: Date.now(),
+  });
+
   console.log(`[motion-video] 🎬 Bắt đầu job render Remotion cho: "${userPrompt.slice(0, 60)}"...`);
 
   // Phản hồi tin nhắn chờ
@@ -346,7 +375,6 @@ export async function runMotionVideoJob(options: MotionVideoJobOptions): Promise
       fs.mkdirSync(remotionPublicDir, { recursive: true });
     }
 
-    const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const audioFileName = `${jobId}.mp3`;
     const targetAudioPath = path.resolve(remotionPublicDir, audioFileName);
 
@@ -511,16 +539,44 @@ export async function runMotionVideoJob(options: MotionVideoJobOptions): Promise
       `--concurrency=1`,
     ];
 
-    await execFileAsync("nice", renderArgs, {
-      cwd: remotionDir,
-      timeout: 600000, // 10 phút tối đa cho VPS 1-core
+    let childProcess: ReturnType<typeof execFile> | undefined;
+    const renderPromise = new Promise<void>((resolve, reject) => {
+      childProcess = execFile(
+        "nice",
+        renderArgs,
+        {
+          cwd: remotionDir,
+          signal: abortController.signal,
+          timeout: 600000, // 10 phút tối đa cho VPS 1-core
+        },
+        (error) => {
+          if (error) reject(error);
+          else resolve();
+        },
+      );
     });
+
+    const curJob = getActiveRenderJob(currentThreadKey);
+    if (curJob && childProcess) {
+      curJob.childProcess = childProcess;
+    }
+
+    await renderPromise;
 
     // Xóa file tạm
     try {
       if (fs.existsSync(propsFilePath)) fs.unlinkSync(propsFilePath);
       if (fs.existsSync(targetAudioPath)) fs.unlinkSync(targetAudioPath);
     } catch {}
+
+    const curJobCheck = getActiveRenderJob(currentThreadKey);
+    if (!curJobCheck || curJobCheck.cancelled || abortController.signal.aborted) {
+      console.log(`[motion-video] 🛑 Job render cho thread [${currentThreadKey}] đã bị hủy bởi người dùng. Không gửi file.`);
+      try {
+        if (fs.existsSync(finalMp4Path)) fs.unlinkSync(finalMp4Path);
+      } catch {}
+      return;
+    }
 
     if (!fs.existsSync(finalMp4Path)) {
       throw new Error("File video đầu ra không được tạo thành công");
@@ -554,6 +610,10 @@ export async function runMotionVideoJob(options: MotionVideoJobOptions): Promise
       await sendDirectText(api, sender, caption);
     }
   } catch (err: any) {
+    if (abortController.signal.aborted || err?.name === "AbortError") {
+      console.log(`[motion-video] 🛑 Job render cho thread [${currentThreadKey}] đã được dừng an toàn do lệnh hủy của người dùng.`);
+      return;
+    }
     console.error("[motion-video] ❌ Lỗi xử lý runMotionVideoJob:", err);
     const errMsg = `Dạ ${userGreeting}, quá trình dựng video gặp sự cố: ${err.message || "Lỗi không xác định"}. Em sẽ ghi nhận để khắc phục ạ!`;
     if (isGroup && threadId) {
@@ -561,5 +621,7 @@ export async function runMotionVideoJob(options: MotionVideoJobOptions): Promise
     } else {
       await sendDirectText(api, sender, errMsg);
     }
+  } finally {
+    unregisterRenderJob(currentThreadKey, jobId);
   }
 }

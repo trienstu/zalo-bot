@@ -66,6 +66,14 @@ test("isAffirmativeConfirmation và isCancelConfirmation nhận diện chuẩn x
     "đừng",
     "bỏ qua",
     "dừng",
+    "rút điện á",
+    "rút điện đi em",
+    "đâu cần đâu nào",
+    "thôi khỏi",
+    "thôi khỏi làm",
+    "đừng làm nữa",
+    "dừng lại",
+    "hủy bỏ",
   ];
 
   for (const text of cancelCases) {
@@ -74,6 +82,7 @@ test("isAffirmativeConfirmation và isCancelConfirmation nhận diện chuẩn x
 
   assert.equal(isAffirmativeConfirmation("chưa làm"), false);
   assert.equal(isCancelConfirmation("tiếp tục"), false);
+  assert.equal(isCancelConfirmation("rút kinh nghiệm"), false);
 });
 
 test("isRealEstateProjectProfileQuery nhận diện câu hỏi tư vấn đầu tư / chiến lược dự án BĐS", () => {

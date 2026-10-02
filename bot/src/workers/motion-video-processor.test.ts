@@ -49,6 +49,14 @@ test("isMotionVideoRequest nhận diện chính xác các yêu cầu làm video 
   assert.equal(isMotionVideoRequest("ok triển đi em", quoteProposal), true);
   assert.equal(isMotionVideoRequest("làm luôn đi", quoteProposal), true);
   assert.equal(isMotionVideoRequest(""), false);
+
+  // 8. Chống bắt nhầm chữ 'u' trong tiếng Việt (như 'quá', 'đâu', 'chưa') và chống nhầm câu hỏi repo/tool
+  assert.equal(isMotionVideoRequest("Có repo nào tạo video vox style k"), false);
+  assert.equal(isMotionVideoRequest("có tool nào làm video tiktok tự động không"), false);
+  assert.equal(isMotionVideoRequest("Quá đẹp, ảnh minh họa chất lượng cao", quoteProposal), false);
+  assert.equal(isMotionVideoRequest("rút điện á", quoteProposal), false);
+  assert.equal(isMotionVideoRequest("đâu cần đâu nào", quoteProposal), false);
+  assert.equal(isMotionVideoRequest("thôi khỏi làm", quoteProposal), false);
 });
 
 test("determineMotionVideoGenre phân loại chính xác 5 thể loại video", () => {

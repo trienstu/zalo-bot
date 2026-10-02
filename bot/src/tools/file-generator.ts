@@ -125,7 +125,7 @@ export function isImageRequest(question: string, quoteText = ""): boolean {
   if (/^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo|vẽ)?\s*(?:được|đc|duoc)?(?:\s+(?:vẽ|tạo))?\s+ảnh\s*(?:không|ko)?\s*[?]?$/iu.test(qLower)) return false;
 
   const directImage =
-    /(?:vẽ|ve|tạo|tao|sinh|chỉnh\s*sửa|chinh\s*sua|sửa|edit|làm\s*nét|biến\s*đổi)\s+(?:lại\s+)?(?:cho\s+.*?\s+)?(?:ảnh|hình|bức\s*ảnh|tấm\s*ảnh|tranh|poster|avatar|chân\s*dung)/iu.test(qLower) ||
+    /(?:vẽ|ve|tạo|tao|thiết\s*kế|thiet\s*ke|sinh|chỉnh\s*sửa|chinh\s*sua|sửa|edit|làm\s*nét|biến\s*đổi)\s+(?:lại\s+)?(?:cho\s+.*?\s+)?(?:ảnh|hình|bức\s*ảnh|tấm\s*ảnh|tranh|poster|avatar|chân\s*dung|banner)/iu.test(qLower) ||
     /^[/!](?:taoanh|veanh|draw|suaanh|chinhanh|chinhsuaanh|editanh|editimage|modifyimage|imagine|image)\b/iu.test(qLower) ||
     /(?:dựa\s+(?:vào|theo)|theo)\s+(?:prompt|câu\s*lệnh|ý\s*tưởng|mô\s*tả)\s+.*?(?:vẽ|tạo|ảnh)/iu.test(qLower);
 
@@ -135,7 +135,7 @@ export function isImageRequest(question: string, quoteText = ""): boolean {
   if (quoteLower) {
     const quoteHasImage = /(?:vẽ|tạo|xuất|sinh|trả|sửa)\s+(?:ảnh|hình|tranh|poster)|(?:bức|tấm)\s+ảnh|hệ\s*thống\s*codex|worker\s+kết\s*xuất|gemini.*?image|tool\s+tạo\s*ảnh/iu.test(quoteLower);
     const isAffirmationOrRework =
-      /(?:^|[^\p{L}\p{N}])(?:ok(?:ela|ay|e)?|ừ|uh|u|dạ|vâng|được|dc|triển|chốt|tiến\s*hành)(?=$|[^\p{L}\p{N}])/iu.test(qLower) ||
+      /(?:^|[^\p{L}\p{N}])(?:ok(?:ela|ay|e)?|okie|ừ|uh|da|dạ|vâng|được|dc|triển|chốt|tiến\s*hành)(?=$|[^\p{L}\p{N}])/iu.test(qLower) ||
       /(?:vẽ|tạo|làm|sinh|sửa|chỉnh)\s*(?:lại|tiếp|luôn|ngay|đi|hộ|giúp)/iu.test(qLower);
 
     if (quoteHasImage && isAffirmationOrRework) return true;
@@ -157,6 +157,13 @@ export function checkIsVideoRequest(question: string, quoteText = ""): boolean {
   if (/(?:không\s+yêu\s*cầu|ko\s+yêu\s*cầu|đừng|không\s*cần|ko\s*cần|chưa\s*cần|ai\s+mượn)\s+.*?(?:tạo|làm|sinh|dựng|video)/iu.test(qLower)) return false;
   if (/^(?:em|bot|mày|bác)?\s*(?:có\s+)?(?:biết|làm|tạo)?\s*(?:được|đc|duoc)?(?:\s+(?:tạo|làm))?\s+video\s*(?:không|ko)?\s*[?]?$/iu.test(qLower)) return false;
 
+  // Bỏ qua nếu là câu hỏi tra cứu công cụ / repo / thư viện
+  const isResourceOrToolInquiry =
+    /(?:có\s+(?:repo|mã\s*nguồn|thư\s*viện|tool|công\s*cụ|app|ứng\s*dụng|phần\s*mềm|web|site|kênh|hệ\s*thống|cách|phương\s*pháp|ai)\s+(?:nào|gì)|hướng\s*dẫn\s+cách|làm\s*sao\s+để|xin\s+(?:repo|tool|link)|chia\s*sẻ\s+(?:repo|tool|phần\s*mềm))/iu.test(
+      qLower,
+    );
+  if (isResourceOrToolInquiry) return false;
+
   const directVideo =
     /(?:tạo|tao|làm|lam|sinh|dựng|dung|xuất|xuat|generate|make)\s+(?:cho\s+.*?\s+)?(?:video|clip|thước\s*phim)\s*(?:ai|ngắn)?/iu.test(qLower) ||
     /(?:biến|chuyển|làm)\s+(?:ảnh|hình|tấm\s*ảnh|bức\s*ảnh)\s+(?:này|trên|đó)?\s*(?:thành|thanh)\s+video/iu.test(qLower) ||
@@ -169,7 +176,7 @@ export function checkIsVideoRequest(question: string, quoteText = ""): boolean {
     if (!isQuestionInquiry) {
       const quoteHasVideo = /(?:tạo|làm|sinh|dựng|xuất)\s+(?:video|clip|thước\s*phim)|(?:video|clip)\s+(?:ai|ngắn|hoàn\s*tất|đã\s*tạo|theo\s*yêu\s*cầu)|muse.*?video/iu.test(quoteLower);
       const isAffirmation =
-        /(?:^|[^\p{L}\p{N}])(?:ok(?:ela|ay|e)?|ừ|uh|u|dạ|vâng|được|dc|triển|chốt|tiến\s*hành)(?=$|[^\p{L}\p{N}])/iu.test(qLower) ||
+        /(?:^|[^\p{L}\p{N}])(?:ok(?:ela|ay|e)?|okie|ừ|uh|da|dạ|vâng|được|dc|triển|chốt|tiến\s*hành)(?=$|[^\p{L}\p{N}])/iu.test(qLower) ||
         /(?:tạo|làm|dựng|sinh)\s*(?:lại|tiếp|luôn|ngay|đi|hộ|giúp)/iu.test(qLower);
       if (quoteHasVideo && isAffirmation) return true;
     }
@@ -193,6 +200,15 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
     return false;
   }
 
+  // 1.5. Chặn câu hỏi tra cứu công cụ / repo / thư viện / phần mềm / hướng dẫn cách làm
+  const isResourceOrToolInquiry =
+    /(?:có\s+(?:repo|mã\s*nguồn|thư\s*viện|tool|công\s*cụ|app|ứng\s*dụng|phần\s*mềm|web|site|kênh|hệ\s*thống|cách|phương\s*pháp|ai)\s+(?:nào|gì)|hướng\s*dẫn\s+cách|làm\s*sao\s+để|xin\s+(?:repo|tool|link)|chia\s*sẻ\s+(?:repo|tool|phần\s*mềm))/iu.test(
+      qLower,
+    );
+  if (isResourceOrToolInquiry) {
+    return false;
+  }
+
   // 2. Kiểm tra image request (trực tiếp hoặc quote xác nhận tạo ảnh)
   if (isImageRequest(question, quoteText)) return true;
 
@@ -206,7 +222,7 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
   if (checkIsMusicRequest(question)) return true;
   if (quoteLower && checkIsMusicRequest(quoteText)) {
     const isAffirmation =
-      /(?:ok|oke|ừ|uh|u|dạ|vâng|được|triển|làm\s*đi|tạo\s*đi|sáng\s*tác\s*đi|hát\s*đi|phối\s*đi)/iu.test(qLower);
+      /\b(?:ok(?:ela|ay|e)?|okie|ừ|uh|da|dạ|vâng|được|dc|triển|làm\s*đi|tạo\s*đi|sáng\s*tác\s*đi|hát\s*đi|phối\s*đi)\b/iu.test(qLower);
     if (isAffirmation) return true;
   }
 

@@ -5,6 +5,8 @@ export type PendingActionType =
   | "broadcast"
   | "generate_music"
   | "create_presentation_video"
+  | "create_motion_video"
+  | "generate_file"
   | "kick_member"
   | "admin_command";
 
@@ -61,12 +63,16 @@ export function clearPendingAction(threadId: string, userId: string): void {
 export function isAffirmativeConfirmation(text: string): boolean {
   const clean = text.trim().toLowerCase().replace(/[!.,?]+$/, "").trim();
   return (
-    /^(?:ok|oke|okie|ok em|ok nhé|ok nha|ok a|ok ạ|duyệt|duyet|duyệt đi|tiến hành|tien hanh|tiến hành đi|làm đi|lam di|làm luôn|chấp thuận|chấp nhận|xác nhận|đồng ý|dong y|yes|y|chốt|chot|chốt đi|thực hiện|thuc hien|thực hiện đi|gửi đi|gui di|triển đi|triển|cho đi)$/iu.test(clean) ||
-    /^(?:tiến hành|làm|thực hiện|triển|duyệt)\s+(?:đi|luôn|nhé|nha)$/iu.test(clean)
+    /^(?:ok(?:ela|ay|e)?|okie|ừ|uh|da|dạ|vâng|vang|dc|được|chốt|chot|nhất\s*trí|duyệt|duyet|tiến\s*hành|tien\s*hanh|triển\s*khai|trien\s*khai|triển|trien|làm|lam|chấp\s*thuận|chấp\s*nhận|xác\s*nhận|đồng\s*ý|dong\s*y|yes|y|thực\s*hiện|thuc\s*hien|gửi|cho\s*đi)(?:[\s,.:;!-]+(?:soạn|làm|tạo|xuất|viết|triển|lên|vẽ|sinh|chạy|tiến\s*hành|thực\s*hiện|gửi))?(?:[\s,.:;!-]+(?:luôn|ngay|hộ|giúp|cho|đi|nhé|nha|e|em|tiếp|nào|ạ|a|ơi))*$/iu.test(
+      clean,
+    )
   );
 }
 
 export function isCancelConfirmation(text: string): boolean {
   const clean = text.trim().toLowerCase().replace(/[!.,?]+$/, "").trim();
-  return /^(?:hủy|huy|thôi|thoi|bỏ|bo|không|khong|ko|cancel|đừng|dung|bỏ qua|dừng|dung lai)$/iu.test(clean);
+  return (
+    /^(?:hủy|huy|thôi|thoi|bỏ|bo|không|khong|ko|cancel|đừng|dung|bỏ qua|dừng|dung lai)(?:[\s,.:;!-]+(?:đi|nào|nhé|nha|ạ|a|ơi|thôi|luôn))?$/iu.test(clean) ||
+    /(?:rút\s+điện|đâu\s+cần|không\s+cần|ko\s+cần|thôi\s+khỏi|đừng\s+làm|dừng\s+lại|hủy\s+bỏ|hủy\s+tiến\s*trình)/iu.test(clean)
+  );
 }

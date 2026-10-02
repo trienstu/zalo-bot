@@ -54,13 +54,15 @@ import {
   checkIsVoiceRequest,
   generateMarkdownFile,
   isQuickMarkdownExportRequest,
+  isImageRequest,
 } from "./tools/file-generator.js";
 import { interceptAndExecuteSimulatedTool, extractSpeechFallbackText, sanitizeHallucinatedFileLinks } from "./tools/simulated-tool-interceptor.js";
 import { cleanOutdatedVoicePromisesFromAnswer, cleanCoreSpeechText } from "./tools/voice-generator.js";
 import { generateMusic } from "./tools/music-generator.js";
 import { runBatchAudioJob } from "./workers/batch-audio-processor.js";
 import { isPresentationVideoRequest, runPresentationVideoJob } from "./workers/presentation-video-processor.js";
-import { isMotionVideoRequest, runMotionVideoJob } from "./workers/motion-video-processor.js";
+import { isMotionVideoRequest, runMotionVideoJob, determineMotionVideoGenre, type MotionVideoGenre } from "./workers/motion-video-processor.js";
+import { cancelActiveRenderJob } from "./workers/active-render-jobs.js";
 import { parseHermesTaskCommand, runHermesTaskJob, handleHermesTaskStatusQuery, handleHermesTaskListQuery } from "./workers/hermes-task-runner.js";
 import {
   compressCaveman,
@@ -1255,6 +1257,7 @@ async function handleHistoryQA(
     isSuperAdmin?: boolean;
     mentions?: MemberMessageEvent["mentions"];
     rawText?: string;
+    isConfirmedAction?: boolean;
   },
 ): Promise<string> {
   const db = getDb();
@@ -1525,8 +1528,30 @@ async function handleHistoryQA(
       const isExcel = /(?:excel|xlsx|bảng\s*tính)/i.test(question);
       const isMd = /(?:markdown|\.md\b)/i.test(question);
       const fileType = isExcel ? "xlsx" : isMd ? "md" : "docx";
+      const fileTypeLabel = isExcel ? "Excel (.xlsx)" : isMd ? "Markdown (.md)" : "Word (.docx)";
       const rawTitle = fileName ? fileName.replace(/\.[^.]+$/, "") : "tai_lieu";
       const cleanDocTitle = rawTitle.slice(0, 50).trim() || "Tai_lieu";
+
+      const isConfirmed = Boolean(options?.isConfirmedAction) || isAffirmativeConfirmation(question);
+      if (options?.api && !isConfirmed) {
+        setPendingAction(threadId, options?.sender || "", {
+          type: "generate_file",
+          userName: displayName,
+          data: {
+            userPrompt: question,
+            quoteText: options?.quote?.text || fileTextContent || "",
+            quote: options?.quote,
+          },
+          summary: `Chuyển đổi tài liệu sang ${fileTypeLabel}`,
+        });
+        return `📄 **KẾ HOẠCH CHUYỂN ĐỔI TÀI LIỆU**:\n\n` +
+          `• **Định dạng đích**: ${fileTypeLabel}\n` +
+          `• **Tài liệu nguồn**: ${fileName || "Tài liệu đính kèm"}\n` +
+          `• **Người yêu cầu**: ${displayName ? `@${displayName}` : "bác"}\n\n` +
+          `👉 Bác ${displayName ? `@${displayName}` : ""} có muốn em tiến hành chuyển đổi và xuất file này gửi vào nhóm không ạ?\n` +
+          `• Nhắn **"ok"** hoặc **"tiến hành"** để em tạo file nhé!\n` +
+          `• Nhắn **"hủy"** hoặc **"thôi"** nếu chưa cần ạ.`;
+      }
 
       console.log(`[member-assistant] ⚡ Kích hoạt Direct Document Conversion sang [${fileType}] từ fileTextContent (${fileTextContent.length} ký tự)...`);
       const fileRes = await executeAgentTool("generate_file", {
@@ -1543,7 +1568,6 @@ async function handleHistoryQA(
             ? `📄 ${botName} đã xuất xong file Markdown [${fileRes.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
             : `📄 ${botName} đã chuyển đổi xong file Word [${fileRes.fileName}] đầy đủ bảng biểu cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`;
         await sendGroupFile(options.api, threadId, fileRes.filePath, caption);
-        const fileTypeLabel = isExcel ? "Excel (.xlsx)" : isMd ? "Markdown (.md)" : "Word (.docx)";
         return isSuperAdmin
           ? `Dạ Sếp Trien Nguyen, em đã chuyển đổi toàn bộ nội dung tài liệu đính kèm (bảo lưu nguyên vẹn 100% tất cả các bảng biểu và dữ liệu) sang file ${fileTypeLabel} gửi lên nhóm cho Sếp rồi ạ! Sếp kiểm tra file đính kèm ở trên giúp em nhé! 🙏✨`
           : `Dạ bác @${displayName} ơi, ${botName} đã chuyển đổi toàn bộ dữ liệu tài liệu đính kèm với đầy đủ bảng biểu sang file ${fileTypeLabel} gửi lên nhóm cho bác rồi nhé! 📄✨`;
@@ -1933,6 +1957,31 @@ QUY TẮC BẮT BUỘC:
 
       if (options?.api && plan.taskType === "motion_video" && isMotionVideoRequest(question, options?.quote?.text)) {
         console.log(`[member-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Motion Video (Quote QA): "${question.slice(0, 80)}"`);
+        const isConfirmed = Boolean(options?.isConfirmedAction) || isAffirmativeConfirmation(question);
+        if (!isConfirmed) {
+          const genre = determineMotionVideoGenre(question, options?.quote?.text);
+          const genreNames: Record<MotionVideoGenre, string> = {
+            tiktok_story: "TikTok Viral Story (Phụ đề Karaoke CapCut)",
+            versus: "So Sánh Đối Đầu (A vs B)",
+            breaking_news: "Bản Tin Nóng (Thời sự)",
+            landscape: "Thuyết Trình Dự Án (16:9 Keynote)",
+            spotlight: "Điểm Tin Kiến Thức Dọc (Shorts)",
+          };
+          setPendingAction(threadId, options?.sender || "", {
+            type: "create_motion_video",
+            userName: displayName,
+            data: { userPrompt: question, quoteText: options.quote.text || fileTextContent || "", genre },
+            summary: `Dựng video Remotion [${genreNames[genre]}]: "${question.slice(0, 50)}"`,
+          });
+          return `🎬 **KẾ HOẠCH DỰNG VIDEO REMOTION**:\n\n` +
+            `• **Thể loại**: ${genreNames[genre]}\n` +
+            `• **Chủ đề**: "${question}"\n` +
+            `• **Người yêu cầu**: ${displayName ? `@${displayName}` : "bác"}\n\n` +
+            `👉 Bác ${displayName ? `@${displayName}` : ""} có muốn em tiến hành dựng và xuất video này không ạ?\n` +
+            `• Nhắn **"ok"** hoặc **"tiến hành"** để bắt đầu dựng.\n` +
+            `• Nhắn **"hủy"** hoặc **"thôi"** nếu không cần nhé!`;
+        }
+
         void runMotionVideoJob({
           api: options.api,
           sender: options.sender || "",
@@ -1948,7 +1997,7 @@ QUY TẮC BẮT BUỘC:
 
       if (options?.api && plan.taskType === "presentation_video" && isPresentationVideoRequest(question, options?.quote?.text)) {
         console.log(`[member-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Video (Quote QA): "${question.slice(0, 80)}"`);
-        const isConfirmed = isAffirmativeConfirmation(question) || (options?.quote?.text && /(?:xác nhận|kế hoạch dựng video|tiến hành không|cho em tín hiệu)/i.test(options.quote.text));
+        const isConfirmed = Boolean(options?.isConfirmedAction) || isAffirmativeConfirmation(question) || (options?.quote?.text && /(?:xác nhận|kế hoạch dựng video|tiến hành không|cho em tín hiệu)/i.test(options.quote.text));
         if (!isConfirmed) {
           setPendingAction(threadId, options?.sender || "", {
             type: "create_presentation_video",
@@ -1956,9 +2005,10 @@ QUY TẮC BẮT BUỘC:
             data: { userPrompt: question, quoteText: options.quote.text || fileTextContent || "" },
             summary: `Dựng video thuyết trình: "${question.slice(0, 50)}"`,
           });
-          return `🎬 KẾ HOẠCH DỰNG VIDEO THUYẾT TRÌNH:\n\n` +
-            `• Đề tài: "${question}"\n` +
-            `• Dự kiến: Soạn kịch bản phân cảnh, tạo slide hình ảnh và lồng tiếng AI.\n\n` +
+          return `🎬 **KẾ HOẠCH DỰNG VIDEO THUYẾT TRÌNH**:\n\n` +
+            `• **Đề tài**: "${question}"\n` +
+            `• **Người yêu cầu**: ${displayName ? `@${displayName}` : "bác"}\n` +
+            `• **Dự kiến**: Soạn kịch bản phân cảnh, tạo slide hình ảnh và lồng tiếng AI.\n\n` +
             `👉 ${isSuperAdmin ? "Sếp" : `@${displayName}`} có xác nhận để Sen Chúa tiến hành dựng video ngay không ạ? (Gõ "ok" hoặc "duyệt" để chạy, "hủy" để dừng)`;
         }
 
@@ -1973,6 +2023,23 @@ QUY TẮC BẮT BUỘC:
           quoteText: options.quote.text || fileTextContent || "",
         }).catch((err) => console.error("[member-assistant] Lỗi runPresentationVideoJob từ Quote Planner:", err));
         return "";
+      }
+
+      const isPhysicalFileReq = (plan.taskType === "file_generation" || plan.taskType === "voice_generation" || plan.taskType === "music_generation" || checkIsFileOrVoiceGeneration(question, options?.quote?.text)) && !isImageRequest(question, options?.quote?.text);
+      const isDocConfirmed = Boolean(options?.isConfirmedAction) || isAffirmativeConfirmation(question);
+      if (options?.api && isPhysicalFileReq && !isDocConfirmed) {
+        setPendingAction(threadId, options?.sender || "", {
+          type: "generate_file",
+          userName: displayName,
+          data: { userPrompt: question, quoteText: options.quote.text || fileTextContent || "" },
+          summary: `Tạo tài liệu / xuất file: "${question.slice(0, 50)}"`,
+        });
+        return `📄 **KẾ HOẠCH TẠO TÀI LIỆU / XUẤT FILE**:\n\n` +
+          `• **Yêu cầu**: "${question}"\n` +
+          `• **Người yêu cầu**: ${displayName ? `@${displayName}` : "bác"}\n\n` +
+          `👉 Bác ${displayName ? `@${displayName}` : ""} có muốn em tiến hành soạn thảo và xuất file này gửi vào nhóm không ạ?\n` +
+          `• Nhắn **"ok"** hoặc **"tiến hành"** để em tạo file nhé!\n` +
+          `• Nhắn **"hủy"** hoặc **"thôi"** nếu chưa cần ạ.`;
       }
 
       if (!isFileOrVoiceReq && plan.needsSearch && plan.queries.length > 0) {
@@ -2822,6 +2889,31 @@ QUY TẮC BẮT BUỘC:
 
       if (options?.api && plan.taskType === "motion_video" && isMotionVideoRequest(question, options?.quote?.text)) {
         console.log(`[member-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Motion Video: "${question.slice(0, 80)}"`);
+        const isConfirmed = Boolean(options?.isConfirmedAction) || isAffirmativeConfirmation(question);
+        if (!isConfirmed) {
+          const genre = determineMotionVideoGenre(question, options?.quote?.text);
+          const genreNames: Record<MotionVideoGenre, string> = {
+            tiktok_story: "TikTok Viral Story (Phụ đề Karaoke CapCut)",
+            versus: "So Sánh Đối Đầu (A vs B)",
+            breaking_news: "Bản Tin Nóng (Thời sự)",
+            landscape: "Thuyết Trình Dự Án (16:9 Keynote)",
+            spotlight: "Điểm Tin Kiến Thức Dọc (Shorts)",
+          };
+          setPendingAction(threadId, options?.sender || "", {
+            type: "create_motion_video",
+            userName: displayName,
+            data: { userPrompt: question, quoteText: options?.quote?.text || fileTextContent || "", genre },
+            summary: `Dựng video Remotion [${genreNames[genre]}]: "${question.slice(0, 50)}"`,
+          });
+          return `🎬 **KẾ HOẠCH DỰNG VIDEO REMOTION**:\n\n` +
+            `• **Thể loại**: ${genreNames[genre]}\n` +
+            `• **Chủ đề**: "${question}"\n` +
+            `• **Người yêu cầu**: ${displayName ? `@${displayName}` : "bác"}\n\n` +
+            `👉 Bác ${displayName ? `@${displayName}` : ""} có muốn em tiến hành dựng và xuất video này không ạ?\n` +
+            `• Nhắn **"ok"** hoặc **"tiến hành"** để bắt đầu dựng.\n` +
+            `• Nhắn **"hủy"** hoặc **"thôi"** nếu không cần nhé!`;
+        }
+
         void runMotionVideoJob({
           api: options.api,
           sender: options.sender || "",
@@ -2837,7 +2929,7 @@ QUY TẮC BẮT BUỘC:
 
       if (options?.api && plan.taskType === "presentation_video" && isPresentationVideoRequest(question, options?.quote?.text)) {
         console.log(`[member-assistant] 🎬 Semantic Planner phát hiện yêu cầu tạo Video: "${question.slice(0, 80)}"`);
-        const isConfirmed = isAffirmativeConfirmation(question) || (options?.quote?.text && /(?:xác nhận|kế hoạch dựng video|tiến hành không|cho em tín hiệu)/i.test(options.quote.text));
+        const isConfirmed = Boolean(options?.isConfirmedAction) || isAffirmativeConfirmation(question) || (options?.quote?.text && /(?:xác nhận|kế hoạch dựng video|tiến hành không|cho em tín hiệu)/i.test(options.quote.text));
         if (!isConfirmed) {
           setPendingAction(threadId, options?.sender || "", {
             type: "create_presentation_video",
@@ -2845,9 +2937,10 @@ QUY TẮC BẮT BUỘC:
             data: { userPrompt: question, quoteText: options?.quote?.text || fileTextContent || "" },
             summary: `Dựng video thuyết trình: "${question.slice(0, 50)}"`,
           });
-          return `🎬 KẾ HOẠCH DỰNG VIDEO THUYẾT TRÌNH:\n\n` +
-            `• Đề tài: "${question}"\n` +
-            `• Dự kiến: Soạn kịch bản phân cảnh, tạo slide hình ảnh và lồng tiếng AI.\n\n` +
+          return `🎬 **KẾ HOẠCH DỰNG VIDEO THUYẾT TRÌNH**:\n\n` +
+            `• **Đề tài**: "${question}"\n` +
+            `• **Người yêu cầu**: ${displayName ? `@${displayName}` : "bác"}\n` +
+            `• **Dự kiến**: Soạn kịch bản phân cảnh, tạo slide hình ảnh và lồng tiếng AI.\n\n` +
             `👉 ${isSuperAdmin ? "Sếp" : `@${displayName}`} có xác nhận để Sen Chúa tiến hành dựng video ngay không ạ? (Gõ "ok" hoặc "duyệt" để chạy, "hủy" để dừng)`;
         }
 
@@ -2862,6 +2955,23 @@ QUY TẮC BẮT BUỘC:
           quoteText: options?.quote?.text || fileTextContent || "",
         }).catch((err) => console.error("[member-assistant] Lỗi runPresentationVideoJob từ Planner:", err));
         return "";
+      }
+
+      const isPhysicalFileReq = (plan.taskType === "file_generation" || plan.taskType === "voice_generation" || plan.taskType === "music_generation" || checkIsFileOrVoiceGeneration(question, options?.quote?.text)) && !isImageRequest(question, options?.quote?.text);
+      const isDocConfirmed = Boolean(options?.isConfirmedAction) || isAffirmativeConfirmation(question);
+      if (options?.api && isPhysicalFileReq && !isDocConfirmed) {
+        setPendingAction(threadId, options?.sender || "", {
+          type: "generate_file",
+          userName: displayName,
+          data: { userPrompt: question, quoteText: options?.quote?.text || fileTextContent || "" },
+          summary: `Tạo tài liệu / xuất file: "${question.slice(0, 50)}"`,
+        });
+        return `📄 **KẾ HOẠCH TẠO TÀI LIỆU / XUẤT FILE**:\n\n` +
+          `• **Yêu cầu**: "${question}"\n` +
+          `• **Người yêu cầu**: ${displayName ? `@${displayName}` : "bác"}\n\n` +
+          `👉 Bác ${displayName ? `@${displayName}` : ""} có muốn em tiến hành soạn thảo và xuất file này gửi vào nhóm không ạ?\n` +
+          `• Nhắn **"ok"** hoặc **"tiến hành"** để em tạo file nhé!\n` +
+          `• Nhắn **"hủy"** hoặc **"thôi"** nếu chưa cần ạ.`;
       }
 
       const isFileOrVoiceReq = checkIsFileOrVoiceGeneration(question, options?.quote?.text);
@@ -3683,10 +3793,67 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         }).catch((err) => console.error("[member-assistant] Lỗi runPresentationVideoJob:", err));
         return;
       }
+      if (pending.type === "create_motion_video") {
+        await sendGroupText(
+          api,
+          threadId,
+          `🎬 Dạ ${isSuperAdmin ? "Sếp" : `@${displayName}`}, Sen Chúa đã nhận lệnh xác nhận và đang tiến hành dựng video Remotion [${pending.summary}] ngay đây ạ! Video hoàn tất sẽ tự động gửi lên nhóm nhé! ✨`,
+        );
+        void runMotionVideoJob({
+          api,
+          sender,
+          isGroup: true,
+          threadId,
+          userGreeting: isSuperAdmin ? "Sếp" : (displayName ? `bác ${displayName}` : "bác"),
+          displayName,
+          userPrompt: pending.data.userPrompt,
+          quoteText: pending.data.quoteText || "",
+          genre: pending.data.genre,
+        }).catch((err) => console.error("[member-assistant] Lỗi runMotionVideoJob:", err));
+        return;
+      }
+      if (pending.type === "generate_file") {
+        await sendGroupText(
+          api,
+          threadId,
+          `📄 Dạ ${isSuperAdmin ? "Sếp" : `@${displayName}`}, Sen Chúa đã nhận lệnh xác nhận và đang tiến hành tạo file [${pending.summary}] ngay đây ạ! File hoàn tất sẽ gửi vào nhóm nhé! ✨`,
+        );
+        void handleHistoryQA(pending.data.userPrompt, displayName, threadId, {
+          api,
+          quote: pending.data.quote || event.quote,
+          sender,
+          isSuperAdmin,
+          mentions: event.mentions,
+          rawText: pending.data.userPrompt,
+          isConfirmedAction: true,
+        }).then(async (answer) => {
+          if (answer && answer.trim()) {
+            await sendGroupReplyWithMention(api, threadId, botName, displayName, sender, answer, {
+              quote: buildQuoteObject(event),
+            });
+          }
+        }).catch((err) => console.error("[member-assistant] Lỗi thực thi generate_file sau xác nhận:", err));
+        return;
+      }
     } else if (isCancelConfirmation(rawText)) {
       clearPendingAction(threadId, sender);
+      cancelActiveRenderJob(threadId);
       void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.OK);
       await sendGroupText(api, threadId, `❌ Đã hủy thao tác [${pending.summary}] theo yêu cầu của ${isSuperAdmin ? "Sếp" : `@${displayName}`}.`);
+      return;
+    }
+  }
+
+  // 0.2. NẾU KHÔNG CÓ PENDING ACTION NHƯNG CÓ TIẾN TRÌNH RENDER ĐANG CHẠY MÀ NGƯỜI DÙNG BẢO RÚT ĐIỆN / HỦY
+  if (isCancelConfirmation(rawText)) {
+    const { cancelled, job } = cancelActiveRenderJob(threadId);
+    if (cancelled) {
+      void sendReaction(api, threadId, event.msgId, event.cliMsgId, Reactions.OK);
+      await sendGroupText(
+        api,
+        threadId,
+        `🛑 Đã rút điện / hủy tiến trình render video [${job?.title || "đang chạy"}] ngay lập tức theo yêu cầu của ${isSuperAdmin ? "Sếp" : `@${displayName}`}!`,
+      );
       return;
     }
   }
@@ -4519,6 +4686,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     lower.startsWith("/anh");
 
   const isTagBot =
+    Boolean((event as any)?.isConfirmedAction) ||
     isCommand ||
     mentionsBot ||
     (hasGoogleDocUrl &&
@@ -4534,25 +4702,6 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     const smartReaction = pickSmartReaction(rawText);
     void sendReaction(api, threadId, event.msgId, event.cliMsgId, smartReaction);
     void sendTyping(api, threadId);
-
-    // 📢 Phản hồi tiếp nhận tức thì khi người dùng ra lệnh tạo/chuyển đổi file hoặc tác vụ xuất file:
-    const isDocOrFileOrder =
-      (/(?:chuyển|xuất|đổi|lưu|tạo|đóng\s*gói|soạn|viết)\s*(?:nó\s*|tài\s*liệu\s*|file\s*(?:này|gốc|đính\s*kèm)?\s*)?(?:qua|sang|thành|vào|ra|dưới\s*dạng)?\s*(?:file\s+)?(?:word|docx|excel|xlsx|bảng\s*biểu|bảng\s*tính|powerpoint|pptx|slide|markdown|\.md\b|pdf|csv)/i.test(rawText) ||
-       /(?:chuyển qua|xuất ra|đóng gói|soạn)\s+(?:file|word|excel|slide|powerpoint)/i.test(rawText)) &&
-      !/(?:vẽ\s+ảnh|tạo\s+ảnh|chỉnh\s+ảnh|sửa\s+ảnh)/i.test(rawText);
-
-    if (isDocOrFileOrder && api) {
-      const isWord = /(?:word|docx|văn\s*bản)/i.test(rawText);
-      const isExcel = /(?:excel|xlsx|bảng\s*tính)/i.test(rawText);
-      const isSlide = /(?:powerpoint|pptx|ppt|slide|thuyết\s*trình)/i.test(rawText);
-      const targetTypeLabel = isWord ? "Word (.docx)" : isExcel ? "Excel (.xlsx)" : isSlide ? "PowerPoint (.pptx)" : "tài liệu";
-      const isSuperAdminUser = isUserAdmin(sender);
-      const greeting = isSuperAdminUser ? "Sếp" : (displayName ? `bác @${displayName}` : "bác");
-      const ackMsg = isSuperAdminUser
-        ? `📄 Dạ Sếp, em đã tiếp nhận chỉ đạo! Em đang tiến hành xử lý dữ liệu và đóng gói sang file ${targetTypeLabel}... Sếp chờ em một lát nhé! ⏳✨`
-        : `📄 Dạ ${greeting}, ${botName} đã nhận lệnh và đang tiến hành xử lý dữ liệu để xuất file ${targetTypeLabel}... ${greeting} chờ em một lát nhé! ⏳✨`;
-      void sendGroupText(api, threadId, ackMsg);
-    }
 
     let isStrictDocQuery =
       isDocCommand ||
@@ -4673,6 +4822,35 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
 
     // 0. XỬ LÝ NHANH YÊU CẦU XUẤT FILE MARKDOWN (.md) ĐỂ LƯU TRỮ
     if (isQuickMarkdownExportRequest(question, event.quote?.text)) {
+      const isConfirmed = Boolean((event as any)?.isConfirmedAction) || isAffirmativeConfirmation(question);
+      if (api && !isConfirmed) {
+        setPendingAction(threadId, sender, {
+          type: "generate_file",
+          userName: displayName,
+          data: {
+            userPrompt: question,
+            quoteText: event.quote?.text || "",
+            quote: event.quote,
+          },
+          summary: `Xuất file Markdown (.md): "${question.slice(0, 50)}"`,
+        });
+        await sendGroupReplyWithMention(
+          api,
+          threadId,
+          botName,
+          displayName,
+          sender,
+          `📄 **KẾ HOẠCH XUẤT FILE MARKDOWN (.md)**:\n\n` +
+          `• **Nội dung**: Xuất tài liệu tóm tắt/hướng dẫn sang file .md để lưu trữ\n` +
+          `• **Người yêu cầu**: ${displayName ? `@${displayName}` : "bác"}\n\n` +
+          `👉 Bác ${displayName ? `@${displayName}` : ""} có muốn em tiến hành xuất file Markdown này gửi vào nhóm không ạ?\n` +
+          `• Nhắn **"ok"** hoặc **"tiến hành"** để em tạo file nhé!\n` +
+          `• Nhắn **"hủy"** hoặc **"thôi"** nếu chưa cần ạ.`,
+          { quote: buildQuoteObject(event) },
+        );
+        return;
+      }
+
       let exportContent = "";
       if (event.quote?.text && event.quote.text.trim().length > 20) {
         exportContent = stitchMultiChunkQuote(threadId, event.quote.text.trim());
@@ -4780,6 +4958,7 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         isSuperAdmin,
         mentions: event.mentions,
         rawText,
+        isConfirmedAction: Boolean((event as any)?.isConfirmedAction),
       });
       const groupSettings = getGroupSettings(threadId);
       const botName = (groupSettings.botName || defaultBotName).trim();

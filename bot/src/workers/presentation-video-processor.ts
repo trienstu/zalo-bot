@@ -14,6 +14,11 @@ import {
 } from "../tools/file-generator.js";
 import { synthesizeSingleAudio } from "../tools/voice-generator.js";
 import { sendDirectFile, sendDirectText, sendGroupFile, sendGroupText } from "../zalo/client.js";
+import {
+  registerRenderJob,
+  unregisterRenderJob,
+  getActiveRenderJob,
+} from "./active-render-jobs.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -57,12 +62,22 @@ export function isPresentationVideoRequest(text: string, quoteText = ""): boolea
 
   if (!qLower) return false;
 
-  // 1. Phủ định ngay các trường hợp phản hồi, đính chính, góp ý hoặc than phiền về bot
+  // 1. Phủ định ngay các trường hợp phản hồi, đính chính, góp ý, từ chối, rút điện
   const isCorrectionOrFeedback =
     /(?:tóm\s*tắt|dịch|nói|phân\s*loại)\s*(?:ko|không|chưa)\s*(?:chuẩn|đúng|chính\s*xác)|(?:sai|nhầm)\s*rồi|không\s*phải\s*(?:đâu|rồi)|(?:tóm\s*tắt|nói)\s*nhảm/i.test(
       qLower,
+    ) ||
+    /(?:đâu\s+cần|không\s+cần|ko\s+cần|chưa\s+cần|thôi\s+khỏi|thôi\s+đừng|rút\s+điện|hủy\s+bỏ|hủy\s+đi|dừng\s+lại|ngừng|đừng\s+tạo|không\s+phải|ai\s+mượn)/iu.test(
+      qLower,
     );
   if (isCorrectionOrFeedback) return false;
+
+  // 1.5. Phủ định nếu là câu hỏi tra cứu tài nguyên / hỏi repo / hỏi công cụ / hỏi cách làm
+  const isResourceOrToolInquiry =
+    /(?:có\s+(?:repo|mã\s*nguồn|thư\s*viện|tool|công\s*cụ|app|ứng\s*dụng|phần\s*mềm|web|site|kênh|hệ\s*thống|cách|phương\s*pháp|ai)\s+(?:nào|gì)|hướng\s*dẫn\s+cách|làm\s*sao\s+để|xin\s+(?:repo|tool|link)|chia\s*sẻ\s+(?:repo|tool|phần\s*mềm))/iu.test(
+      qLower,
+    );
+  if (isResourceOrToolInquiry) return false;
 
   // 2. Phủ định các trường hợp miêu tả phần mềm tải video hoặc cào dữ liệu
   const isDownloaderOrScraperDesc =
@@ -131,8 +146,11 @@ export function isPresentationVideoRequest(text: string, quoteText = ""): boolea
     // 7B. Trích dẫn một đề xuất làm video của bot VÀ người dùng đồng ý/xác nhận
     const isQuotingVideoProposal =
       /(?:video\s+thuyết\s*trình|xuất\s+bản\s+video|sản\s+xuất\s+video|dựng\s+clip)/iu.test(quoteLower);
+    // Sử dụng ranh giới từ chặt chẽ chống bắt nhầm chữ "u" trong tiếng Việt
     const isAffirmation =
-      /(?:ok|oke|ừ|uh|u|dạ|vâng|được|triển|làm\s*đi|xuất\s*đi|làm\s*luôn)/iu.test(qLower);
+      /\b(?:ok(?:ela|ay|e)?|okie|ừ|uh|da|dạ|vâng|được|dc|triển|làm\s*đi|xuất\s*đi|làm\s*luôn|chốt|duyệt|tiến\s*hành)\b/iu.test(
+        qLower,
+      );
     if (isQuotingVideoProposal && isAffirmation) return true;
   }
 
@@ -819,9 +837,22 @@ export async function runPresentationVideoJob(options: PresentationVideoJobOptio
     }
   };
 
+  const currentThreadKey = threadId || sender;
   const jobId = `pres_job_${Date.now()}`;
   const workDir = path.join("/tmp", jobId);
   fs.mkdirSync(workDir, { recursive: true });
+
+  const abortController = new AbortController();
+  registerRenderJob({
+    jobId,
+    threadId: currentThreadKey,
+    userId: sender,
+    type: "presentation_video",
+    title: userPrompt.slice(0, 60),
+    abortController,
+    cancelled: false,
+    startTime: Date.now(),
+  });
 
   const ffmpegBin = findSystemBinary("ffmpeg", [
     "/usr/bin/ffmpeg",
@@ -830,6 +861,7 @@ export async function runPresentationVideoJob(options: PresentationVideoJobOptio
   ]);
 
   if (!ffmpegBin) {
+    unregisterRenderJob(currentThreadKey, jobId);
     await sendReplyText(
       `⚠️ Dạ ${userGreeting} ơi, hệ thống máy chủ hiện chưa tìm thấy công cụ FFmpeg để dựng video MP4.\n` +
       `👉 Kính nhờ Admin kiểm tra cài đặt FFmpeg trên máy chủ giúp em nhé! ☘️`,
@@ -926,6 +958,15 @@ export async function runPresentationVideoJob(options: PresentationVideoJobOptio
     console.log(`[presentation-video] 🎬 Đang ghép ${segmentPaths.length} phân đoạn thành video tổng thể: ${finalVideoFileName}...`);
     await concatenateVideoSegments(ffmpegBin, segmentPaths, concatListPath, finalVideoPath);
 
+    const curJob = getActiveRenderJob(currentThreadKey);
+    if (!curJob || curJob.cancelled || abortController.signal.aborted) {
+      console.log(`[presentation-video] 🛑 Job render cho thread [${currentThreadKey}] đã bị hủy bởi người dùng. Không gửi file.`);
+      try {
+        if (fs.existsSync(finalVideoPath)) fs.unlinkSync(finalVideoPath);
+      } catch {}
+      return;
+    }
+
     // 7. Gửi trả video và file PowerPoint cho người dùng trên Zalo
     console.log(`[presentation-video] 📤 Đang gửi video MP4 lên Zalo...`);
     await sendReplyFile(
@@ -950,11 +991,16 @@ export async function runPresentationVideoJob(options: PresentationVideoJobOptio
       `☘️ Kính chúc ${userGreeting} có buổi thuyết trình/báo cáo thật thành công và ấn tượng ạ!`,
     );
   } catch (err: any) {
+    if (abortController.signal.aborted || err?.name === "AbortError") {
+      console.log(`[presentation-video] 🛑 Job render cho thread [${currentThreadKey}] đã dừng an toàn do lệnh hủy của người dùng.`);
+      return;
+    }
     console.error("[presentation-video] ❌ Lỗi xử lý job tạo video thuyết trình:", err);
     await sendReplyText(
       `⚠️ Dạ ${userGreeting} ơi, quá trình dựng video gặp sự cố kỹ thuật với bộ mã hóa đa phương tiện. Bot đã ghi nhận lỗi vào hệ thống để kỹ thuật viên kiểm tra xử lý ngay ạ!`,
     );
   } finally {
+    unregisterRenderJob(currentThreadKey, jobId);
     // Dọn dẹp thư mục tạm
     try {
       if (fs.existsSync(workDir)) {
