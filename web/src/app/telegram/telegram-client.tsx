@@ -610,16 +610,31 @@ export function TelegramClient() {
                       </button>
                     </div>
 
-                    {item.useful_links && item.useful_links.length > 0 && (
-                      <a
-                        href={item.useful_links[0]}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-1 text-blue-400 hover:underline"
-                      >
-                        Link tham khảo <ExternalLink className="h-3 w-3" />
-                      </a>
-                    )}
+                    <div className="flex items-center gap-3">
+                      {item.telegram_url && (
+                        <a
+                          href={item.telegram_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 rounded-md bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 hover:text-sky-300 border border-sky-500/20 px-2 py-0.5 text-[11px] transition-colors"
+                          title="Mở trực tiếp bài viết gốc trong Telegram"
+                        >
+                          <span>Xem bài gốc Telegram</span>
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+
+                      {item.useful_links && item.useful_links.length > 0 && (
+                        <a
+                          href={item.useful_links[0]}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 text-blue-400 hover:underline"
+                        >
+                          Link tham khảo <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -789,7 +804,21 @@ export function TelegramClient() {
                 <div key={m.id} className="rounded-lg bg-[var(--color-surface-2)] p-3 text-xs space-y-1">
                   <div className="flex items-center justify-between text-[10px] text-[var(--color-muted)]">
                     <span className="font-semibold text-blue-400">{m.sender_name || m.sender_username || "Thành viên"}</span>
-                    <span>{new Date(m.date * 1000).toLocaleString("vi-VN")}</span>
+                    <div className="flex items-center gap-2">
+                      <span>{new Date(m.date * 1000).toLocaleString("vi-VN")}</span>
+                      {m.telegram_url && (
+                        <a
+                          href={m.telegram_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-0.5 text-[10px] text-sky-400 hover:underline"
+                          title="Xem tin này trên Telegram"
+                        >
+                          <span>Mở Telegram</span>
+                          <ExternalLink className="h-2.5 w-2.5" />
+                        </a>
+                      )}
+                    </div>
                   </div>
                   <p className="text-[var(--color-text)] whitespace-pre-wrap">{m.message_text}</p>
                 </div>

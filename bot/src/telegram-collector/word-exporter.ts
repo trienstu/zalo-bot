@@ -378,6 +378,30 @@ export async function buildTelegramKnowledgeWordBuffer(
         );
       }
 
+      if (item.telegram_url) {
+        docChildren.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: "📍 Link bài gốc trên Telegram: ",
+                font: "Times New Roman",
+                size: 20,
+                bold: true,
+                color: "1F497D",
+              }),
+              new TextRun({
+                text: item.telegram_url,
+                font: "Times New Roman",
+                size: 20,
+                color: "0070C0",
+                underline: {},
+              }),
+            ],
+            spacing: { after: 120 },
+          }),
+        );
+      }
+
       // Đường kẻ ngăn cách nhẹ giữa các item
       docChildren.push(
         new Paragraph({

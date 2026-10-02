@@ -49,7 +49,14 @@ const sampleItems: TelegramKnowledgeItem[] = [
 ];
 
 test("buildTelegramKnowledgeWordBuffer tạo buffer Word .docx hợp lệ", async () => {
-  const buffer = await buildTelegramKnowledgeWordBuffer(sampleItems, "TÀI LIỆU TEST TRI THỨC");
+  const itemsWithUrl: TelegramKnowledgeItem[] = [
+    {
+      ...sampleItems[0]!,
+      telegram_url: "https://t.me/c/123456789/1001",
+    },
+    sampleItems[1]!,
+  ];
+  const buffer = await buildTelegramKnowledgeWordBuffer(itemsWithUrl, "TÀI LIỆU TEST TRI THỨC");
   assert.ok(Buffer.isBuffer(buffer));
   assert.ok(buffer.length > 5000, `Buffer size phải > 5KB, thực tế: ${buffer.length}`);
 
@@ -70,4 +77,33 @@ test("exportTelegramKnowledgeToDocxFile ghi file Word chuẩn ra đĩa", async (
   try {
     fs.unlinkSync(res.filePath);
   } catch {}
+});
+
+test("buildTelegramMessageUrl sinh link chính xác cho cả nhóm public và private", async () => {
+  const { buildTelegramMessageUrl } = await import("./db.js");
+
+  // 1. Nhóm công khai có username
+  assert.equal(
+    buildTelegramMessageUrl("-1002345304386", "kcracker007", 2150),
+    "https://t.me/kcracker007/2150",
+  );
+  assert.equal(
+    buildTelegramMessageUrl("-1002345304386", "@kcracker007", 2150),
+    "https://t.me/kcracker007/2150",
+  );
+
+  // 2. Nhóm kín / Supergroup không có username (cắt bỏ -100)
+  assert.equal(
+    buildTelegramMessageUrl("-1002345304386", null, 2150),
+    "https://t.me/c/2345304386/2150",
+  );
+  assert.equal(
+    buildTelegramMessageUrl("-1001310275291", undefined, 9316),
+    "https://t.me/c/1310275291/9316",
+  );
+
+  // 3. ID không hợp lệ hoặc thiếu messageId
+  assert.equal(buildTelegramMessageUrl("-1002345304386", null, null), null);
+  assert.equal(buildTelegramMessageUrl("-1002345304386", null, 0), null);
+  assert.equal(buildTelegramMessageUrl("-1002345304386", null, -5), null);
 });

@@ -24,6 +24,7 @@ export interface KnowledgeItemForWord {
   original_content?: string;
   useful_links: string[];
   raw_message_ids: number[];
+  telegram_url?: string | null;
   date_range: string;
   created_at: number;
   chat_title?: string;
@@ -436,6 +437,30 @@ export async function generateTelegramKnowledgeDocxBuffer(
         );
       }
 
+      if (item.telegram_url) {
+        docChildren.push(
+          new Paragraph({
+            children: [
+              new TextRun({
+                text: "📍 Link bài gốc trên Telegram: ",
+                font: "Times New Roman",
+                size: 20,
+                bold: true,
+                color: "1F497D",
+              }),
+              new TextRun({
+                text: item.telegram_url,
+                font: "Times New Roman",
+                size: 20,
+                color: "0070C0",
+                underline: {},
+              }),
+            ],
+            spacing: { after: 120 },
+          }),
+        );
+      }
+
       docChildren.push(
         new Paragraph({
           children: [
@@ -737,6 +762,30 @@ export async function generateSingleTelegramKnowledgeDocxBuffer(
           }),
           new TextRun({
             text: item.useful_links.join(" | "),
+            font: "Times New Roman",
+            size: 20,
+            color: "0070C0",
+            underline: {},
+          }),
+        ],
+        spacing: { after: 140 },
+      }),
+    );
+  }
+
+  if (item.telegram_url) {
+    docChildren.push(
+      new Paragraph({
+        children: [
+          new TextRun({
+            text: "📍 Link bài gốc trên Telegram: ",
+            font: "Times New Roman",
+            size: 20,
+            bold: true,
+            color: "1F497D",
+          }),
+          new TextRun({
+            text: item.telegram_url,
             font: "Times New Roman",
             size: 20,
             color: "0070C0",

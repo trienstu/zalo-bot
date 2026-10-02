@@ -36,6 +36,7 @@ export interface TelegramRawMessage {
   file_name?: string | null;
   file_size?: number | null;
   reply_to_msg_id: number | null;
+  telegram_url?: string | null;
   date: number; // Unix timestamp (giây) của tin nhắn trên Telegram
   created_at: number; // Epoch ms khi lưu vào DB
 }
@@ -51,6 +52,7 @@ export interface TelegramKnowledgeItem {
   original_content?: string;
   useful_links: string[];
   raw_message_ids: number[];
+  telegram_url?: string | null;
   date_range: string;
   created_at: number;
   updated_at: number;

@@ -312,6 +312,33 @@ export function getKnowledgeItemById(id: number): TelegramKnowledgeItem | null {
 /**
  * Tra cứu danh sách tri thức có lọc theo nhóm, chủ đề, ngày tháng và tìm kiếm
  */
+/**
+ * Sinh link trực tiếp tới bài viết/tin nhắn trên Telegram (permalink)
+ * - Nhóm có username: https://t.me/<username>/<message_id>
+ * - Nhóm kín / không username: https://t.me/c/<clean_channel_id>/<message_id>
+ */
+export function buildTelegramMessageUrl(
+  chatId: string,
+  username?: string | null,
+  messageId?: number | string | null,
+): string | null {
+  if (!messageId) return null;
+  const numId = Number(messageId);
+  if (!Number.isFinite(numId) || numId <= 0) return null;
+
+  if (username && username.trim()) {
+    const cleanUser = username.trim().replace(/^@/, "");
+    return `https://t.me/${cleanUser}/${numId}`;
+  }
+
+  const cleanChatId = (chatId || "").trim().replace(/^-?100/, "");
+  if (/^\d+$/.test(cleanChatId)) {
+    return `https://t.me/c/${cleanChatId}/${numId}`;
+  }
+
+  return null;
+}
+
 export function listKnowledgeItems(filter?: {
   chatId?: string;
   category?: string;
@@ -359,7 +386,8 @@ export function listKnowledgeItems(filter?: {
     .prepare(`
       SELECT 
         k.*,
-        c.title as chat_title
+        c.title as chat_title,
+        c.username as chat_username
       FROM telegram_knowledge_items k
       LEFT JOIN telegram_tracked_chats c ON c.chat_id = k.chat_id
       ${whereClause}
@@ -368,22 +396,28 @@ export function listKnowledgeItems(filter?: {
     `)
     .all(params) as any[];
 
-  const items: TelegramKnowledgeItem[] = rows.map((r) => ({
-    id: r.id,
-    chat_id: r.chat_id,
-    category: r.category as KnowledgeCategory,
-    title: r.title,
-    summary: r.summary,
-    key_takeaways: safeParseJson(r.key_takeaways, []),
-    original_quotes: r.original_quotes || "",
-    original_content: r.original_content || "",
-    useful_links: safeParseJson(r.useful_links, []),
-    raw_message_ids: safeParseJson(r.raw_message_ids, []),
-    date_range: r.date_range,
-    created_at: r.created_at,
-    updated_at: r.updated_at,
-    chat_title: r.chat_title || "Nhóm Telegram",
-  }));
+  const items: TelegramKnowledgeItem[] = rows.map((r) => {
+    const rawMsgIds = safeParseJson(r.raw_message_ids, []);
+    const primaryMsgId = Array.isArray(rawMsgIds) && rawMsgIds.length > 0 ? rawMsgIds[0] : null;
+
+    return {
+      id: r.id,
+      chat_id: r.chat_id,
+      category: r.category as KnowledgeCategory,
+      title: r.title,
+      summary: r.summary,
+      key_takeaways: safeParseJson(r.key_takeaways, []),
+      original_quotes: r.original_quotes || "",
+      original_content: r.original_content || "",
+      useful_links: safeParseJson(r.useful_links, []),
+      raw_message_ids: rawMsgIds,
+      telegram_url: buildTelegramMessageUrl(r.chat_id, r.chat_username, primaryMsgId),
+      date_range: r.date_range,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+      chat_title: r.chat_title || "Nhóm Telegram",
+    };
+  });
 
   return { items, total };
 }

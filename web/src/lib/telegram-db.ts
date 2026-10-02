@@ -152,6 +152,33 @@ export function getTrackedChatByIdWeb(chatId: string) {
     .get(chatId) as any;
 }
 
+/**
+ * Sinh link trực tiếp tới bài viết/tin nhắn trên Telegram (permalink)
+ * - Nhóm có username: https://t.me/<username>/<message_id>
+ * - Nhóm kín / không username: https://t.me/c/<clean_channel_id>/<message_id>
+ */
+export function buildTelegramMessageUrl(
+  chatId: string,
+  username?: string | null,
+  messageId?: number | string | null,
+): string | null {
+  if (!messageId) return null;
+  const numId = Number(messageId);
+  if (!Number.isFinite(numId) || numId <= 0) return null;
+
+  if (username && username.trim()) {
+    const cleanUser = username.trim().replace(/^@/, "");
+    return `https://t.me/${cleanUser}/${numId}`;
+  }
+
+  const cleanChatId = (chatId || "").trim().replace(/^-?100/, "");
+  if (/^\d+$/.test(cleanChatId)) {
+    return `https://t.me/c/${cleanChatId}/${numId}`;
+  }
+
+  return null;
+}
+
 export function getKnowledgeItemByIdWeb(id: number) {
   ensureTelegramKnowledgeSchemaWeb();
   const db = getDb();
@@ -159,7 +186,8 @@ export function getKnowledgeItemByIdWeb(id: number) {
     .prepare(`
       SELECT 
         k.*,
-        c.title as chat_title
+        c.title as chat_title,
+        c.username as chat_username
       FROM telegram_knowledge_items k
       LEFT JOIN telegram_tracked_chats c ON c.chat_id = k.chat_id
       WHERE k.id = ?
@@ -167,6 +195,9 @@ export function getKnowledgeItemByIdWeb(id: number) {
     .get(id) as any;
 
   if (!r) return null;
+  const rawMsgIds = safeParseJson(r.raw_message_ids, []);
+  const primaryMsgId = Array.isArray(rawMsgIds) && rawMsgIds.length > 0 ? rawMsgIds[0] : null;
+
   return {
     id: r.id,
     chat_id: r.chat_id,
@@ -177,11 +208,13 @@ export function getKnowledgeItemByIdWeb(id: number) {
     original_quotes: r.original_quotes || "",
     original_content: r.original_content || "",
     useful_links: safeParseJson(r.useful_links, []),
-    raw_message_ids: safeParseJson(r.raw_message_ids, []),
+    raw_message_ids: rawMsgIds,
+    telegram_url: buildTelegramMessageUrl(r.chat_id, r.chat_username, primaryMsgId),
     date_range: r.date_range,
     created_at: r.created_at,
     updated_at: r.updated_at,
     chat_title: r.chat_title || "Nhóm Telegram",
+    chat_username: r.chat_username || null,
   };
 }
 
@@ -232,7 +265,8 @@ export function listKnowledgeItemsWeb(filter?: {
     .prepare(`
       SELECT 
         k.*,
-        c.title as chat_title
+        c.title as chat_title,
+        c.username as chat_username
       FROM telegram_knowledge_items k
       LEFT JOIN telegram_tracked_chats c ON c.chat_id = k.chat_id
       ${whereClause}
@@ -241,22 +275,29 @@ export function listKnowledgeItemsWeb(filter?: {
     `)
     .all(params) as any[];
 
-  const items = rows.map((r) => ({
-    id: r.id,
-    chat_id: r.chat_id,
-    category: r.category,
-    title: r.title,
-    summary: r.summary,
-    key_takeaways: safeParseJson(r.key_takeaways, []),
-    original_quotes: r.original_quotes || "",
-    original_content: r.original_content || "",
-    useful_links: safeParseJson(r.useful_links, []),
-    raw_message_ids: safeParseJson(r.raw_message_ids, []),
-    date_range: r.date_range,
-    created_at: r.created_at,
-    updated_at: r.updated_at,
-    chat_title: r.chat_title || "Nhóm Telegram",
-  }));
+  const items = rows.map((r) => {
+    const rawMsgIds = safeParseJson(r.raw_message_ids, []);
+    const primaryMsgId = Array.isArray(rawMsgIds) && rawMsgIds.length > 0 ? rawMsgIds[0] : null;
+
+    return {
+      id: r.id,
+      chat_id: r.chat_id,
+      category: r.category,
+      title: r.title,
+      summary: r.summary,
+      key_takeaways: safeParseJson(r.key_takeaways, []),
+      original_quotes: r.original_quotes || "",
+      original_content: r.original_content || "",
+      useful_links: safeParseJson(r.useful_links, []),
+      raw_message_ids: rawMsgIds,
+      telegram_url: buildTelegramMessageUrl(r.chat_id, r.chat_username, primaryMsgId),
+      date_range: r.date_range,
+      created_at: r.created_at,
+      updated_at: r.updated_at,
+      chat_title: r.chat_title || "Nhóm Telegram",
+      chat_username: r.chat_username || null,
+    };
+  });
 
   return { items, total };
 }
@@ -289,16 +330,22 @@ export function listRawMessagesWeb(filter?: {
     .prepare(`
       SELECT 
         m.*,
-        c.title as chat_title
+        c.title as chat_title,
+        c.username as chat_username
       FROM telegram_messages m
       LEFT JOIN telegram_tracked_chats c ON c.chat_id = m.chat_id
       ${whereClause}
       ORDER BY m.date DESC
       LIMIT @limit OFFSET @offset
     `)
-    .all(params);
+    .all(params) as any[];
 
-  return { messages: rows, total: totalRow?.total || 0 };
+  const messages = rows.map((m) => ({
+    ...m,
+    telegram_url: buildTelegramMessageUrl(m.chat_id, m.chat_username, m.message_id),
+  }));
+
+  return { messages, total: totalRow?.total || 0 };
 }
 
 export function listTelegramExportsWeb(limit = 20) {

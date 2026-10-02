@@ -379,16 +379,31 @@ export function TelegramShareClient({ chatId }: ShareClientProps) {
                       </button>
                     </div>
 
-                    {item.useful_links && item.useful_links.length > 0 && (
-                      <a
-                        href={item.useful_links[0]}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-1 text-[11px] text-blue-400 hover:underline"
-                      >
-                        Link đính kèm <ExternalLink className="h-3 w-3" />
-                      </a>
-                    )}
+                    <div className="flex items-center gap-3">
+                      {item.telegram_url && (
+                        <a
+                          href={item.telegram_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 rounded-md bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 hover:text-sky-300 border border-sky-500/30 px-2 py-0.5 text-[11px] transition-colors"
+                          title="Mở trực tiếp bài viết gốc trên Telegram"
+                        >
+                          <span>Xem bài gốc Telegram</span>
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+
+                      {item.useful_links && item.useful_links.length > 0 && (
+                        <a
+                          href={item.useful_links[0]}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 text-[11px] text-blue-400 hover:underline"
+                        >
+                          Link đính kèm <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
