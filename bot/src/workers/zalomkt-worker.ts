@@ -3,6 +3,7 @@ import { callGemini } from "../gemini.js";
 import {
   ZaloMktCampaign,
   ZaloMktCampaignConfig,
+  checkAndActivateScheduledCampaigns,
   getActiveRunningCampaign,
   getCampaignById,
   getMktContact,
@@ -123,6 +124,12 @@ export function initZaloMktWorker(api: any): void {
 
   // Chạy vòng lặp định kỳ kiểm tra chiến dịch
   setInterval(() => {
+    try {
+      checkAndActivateScheduledCampaigns();
+    } catch (schedErr) {
+      console.error(`[zalomkt-worker] Lỗi kiểm tra lịch hẹn chiến dịch:`, schedErr);
+    }
+
     if (isProcessingLead) return;
 
     void (async () => {

@@ -382,10 +382,34 @@ function ensureWebSchema(database: Database.Database): void {
       created_at          INTEGER NOT NULL,
       FOREIGN KEY (campaign_id) REFERENCES zalomkt_campaigns(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS zalomkt_contact_groups (
+      id                  TEXT PRIMARY KEY,
+      name                TEXT NOT NULL,
+      description         TEXT NOT NULL DEFAULT '',
+      color               TEXT NOT NULL DEFAULT 'sky',
+      created_at          INTEGER NOT NULL,
+      updated_at          INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS zalomkt_contact_group_members (
+      group_id            TEXT NOT NULL,
+      phone               TEXT NOT NULL,
+      added_at            INTEGER NOT NULL,
+      PRIMARY KEY (group_id, phone),
+      FOREIGN KEY (group_id) REFERENCES zalomkt_contact_groups(id) ON DELETE CASCADE,
+      FOREIGN KEY (phone) REFERENCES zalomkt_contacts(phone) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_zalomkt_cgm_phone ON zalomkt_contact_group_members(phone);
   `);
 
   try {
     database.exec("ALTER TABLE bot_friends ADD COLUMN manually_disabled INTEGER NOT NULL DEFAULT 0");
+  } catch (_) {}
+
+  try {
+    database.exec("ALTER TABLE zalomkt_campaigns ADD COLUMN scheduled_at INTEGER");
   } catch (_) {}
 }
 

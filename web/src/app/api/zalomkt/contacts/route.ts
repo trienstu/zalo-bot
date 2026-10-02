@@ -16,10 +16,11 @@ export async function GET(request: Request) {
 
     const search = searchParams.get("search") || "";
     const status = searchParams.get("status") || "all";
+    const groupId = searchParams.get("groupId") || "all";
     const page = parseInt(searchParams.get("page") || "1", 10);
     const limit = parseInt(searchParams.get("limit") || "50", 10);
 
-    const { contacts, total } = listMktContacts({ search, status, page, limit }, botId);
+    const { contacts, total } = listMktContacts({ search, status, groupId, page, limit }, botId);
     const stats = getMktStats(botId);
 
     return NextResponse.json({

@@ -35,8 +35,9 @@ export interface ZaloMktCampaign {
   title: string;
   raw_content: string;
   images_json: string; // JSON array of paths
-  status: "draft" | "running" | "paused" | "completed" | "stopped";
+  status: "draft" | "running" | "paused" | "completed" | "stopped" | "scheduled";
   config_json: string; // JSON of ZaloMktCampaignConfig
+  scheduled_at?: number | null; // epoch ms hẹn giờ
   total_leads: number;
   sent_count: number;
   failed_count: number;
@@ -44,6 +45,16 @@ export interface ZaloMktCampaign {
   skipped_count: number;
   created_at: number;
   updated_at: number;
+}
+
+export interface ZaloMktContactGroup {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  created_at: number;
+  updated_at: number;
+  member_count?: number;
 }
 
 export interface ZaloMktLead {
@@ -265,3 +276,130 @@ export function recalculateCampaignCounts(campaignId: string): void {
     campaignId,
   );
 }
+
+/**
+ * Kiểm tra và kích hoạt các chiến dịch hẹn giờ đến hạn chạy
+ */
+export function checkAndActivateScheduledCampaigns(): string[] {
+  const db = getDb();
+  const now = Date.now();
+  const dueCampaigns = db.prepare(`
+    SELECT id, title FROM zalomkt_campaigns
+    WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= ?
+  `).all(now) as { id: string; title: string }[];
+
+  if (dueCampaigns.length === 0) return [];
+
+  const updateStmt = db.prepare(`UPDATE zalomkt_campaigns SET status = 'running', updated_at = ? WHERE id = ?`);
+  const activatedIds: string[] = [];
+
+  for (const camp of dueCampaigns) {
+    updateStmt.run(now, camp.id);
+    activatedIds.push(camp.id);
+    console.log(`[zalomkt-db] ⏰ Tự động kích hoạt chiến dịch hẹn giờ [${camp.title}] (ID: ${camp.id})`);
+  }
+
+  return activatedIds;
+}
+
+/** Lấy danh sách nhóm khách hàng kèm số lượng thành viên */
+export function listContactGroups(): ZaloMktContactGroup[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT g.*, COUNT(m.phone) as member_count
+    FROM zalomkt_contact_groups g
+    LEFT JOIN zalomkt_contact_group_members m ON g.id = m.group_id
+    GROUP BY g.id
+    ORDER BY g.created_at DESC
+  `).all() as ZaloMktContactGroup[];
+}
+
+/** Tạo nhóm khách hàng mới */
+export function createContactGroup(name: string, description = "", color = "sky"): ZaloMktContactGroup {
+  const db = getDb();
+  const id = `grp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const now = Date.now();
+
+  db.prepare(`
+    INSERT INTO zalomkt_contact_groups (id, name, description, color, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, name.trim(), description.trim(), color.trim(), now, now);
+
+  return {
+    id,
+    name: name.trim(),
+    description: description.trim(),
+    color: color.trim(),
+    created_at: now,
+    updated_at: now,
+    member_count: 0,
+  };
+}
+
+/** Xóa nhóm khách hàng */
+export function deleteContactGroup(id: string): void {
+  const db = getDb();
+  const transaction = db.transaction(() => {
+    db.prepare(`DELETE FROM zalomkt_contact_group_members WHERE group_id = ?`).run(id);
+    db.prepare(`DELETE FROM zalomkt_contact_groups WHERE id = ?`).run(id);
+  });
+  transaction();
+}
+
+/** Thêm danh sách số điện thoại vào nhóm */
+export function addPhonesToGroup(groupId: string, phones: string[]): { added: number; total: number } {
+  const db = getDb();
+  const now = Date.now();
+  let added = 0;
+
+  const insertMemberStmt = db.prepare(`
+    INSERT OR IGNORE INTO zalomkt_contact_group_members (group_id, phone, added_at)
+    VALUES (?, ?, ?)
+  `);
+
+  const transaction = db.transaction(() => {
+    for (const raw of phones) {
+      const p = normalizePhoneNumber(raw);
+      if (!p || p.length < 9 || p.length > 12) continue;
+      // Đảm bảo số có trong kho zalomkt_contacts
+      upsertMktContact({ phone: p });
+      const res = insertMemberStmt.run(groupId, p, now);
+      if (res.changes > 0) added++;
+    }
+  });
+
+  transaction();
+  const totalRow = db.prepare(`SELECT COUNT(*) as count FROM zalomkt_contact_group_members WHERE group_id = ?`).get(groupId) as any;
+  return { added, total: totalRow?.count || 0 };
+}
+
+/** Xóa danh sách số điện thoại khỏi nhóm */
+export function removePhonesFromGroup(groupId: string, phones: string[]): number {
+  const db = getDb();
+  let removed = 0;
+  const deleteMemberStmt = db.prepare(`DELETE FROM zalomkt_contact_group_members WHERE group_id = ? AND phone = ?`);
+
+  const transaction = db.transaction(() => {
+    for (const raw of phones) {
+      const p = normalizePhoneNumber(raw);
+      const res = deleteMemberStmt.run(groupId, p);
+      removed += res.changes;
+    }
+  });
+
+  transaction();
+  return removed;
+}
+
+/** Lấy toàn bộ số điện thoại thuộc các nhóm được chỉ định (đã deduplicate) */
+export function getPhonesByGroupIds(groupIds: string[]): string[] {
+  if (groupIds.length === 0) return [];
+  const db = getDb();
+  const placeholders = groupIds.map(() => "?").join(", ");
+  const rows = db.prepare(`
+    SELECT DISTINCT phone FROM zalomkt_contact_group_members
+    WHERE group_id IN (${placeholders})
+  `).all(...groupIds) as { phone: string }[];
+  return rows.map((r) => r.phone);
+}
+

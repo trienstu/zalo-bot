@@ -38,6 +38,9 @@ export async function POST(request: Request) {
       images?: string[];
       config?: Record<string, any>;
       rawPhones?: string;
+      groupIds?: string[];
+      scheduledAt?: number | null;
+      isDraft?: boolean;
       botId?: string;
     };
 
@@ -47,8 +50,13 @@ export async function POST(request: Request) {
     if (!body.rawContent?.trim()) {
       return NextResponse.json({ ok: false, error: "Thiếu nội dung tin nhắn" }, { status: 400 });
     }
-    if (!body.rawPhones?.trim()) {
-      return NextResponse.json({ ok: false, error: "Thiếu danh sách số điện thoại" }, { status: 400 });
+    const hasPhones = Boolean(body.rawPhones?.trim());
+    const hasGroups = Array.isArray(body.groupIds) && body.groupIds.length > 0;
+    if (!hasPhones && !hasGroups) {
+      return NextResponse.json(
+        { ok: false, error: "Vui lòng nhập danh sách số điện thoại hoặc chọn ít nhất 1 nhóm khách hàng" },
+        { status: 400 },
+      );
     }
 
     const botId = resolveBotIdFromRequest(request, body.botId);
@@ -58,7 +66,10 @@ export async function POST(request: Request) {
         rawContent: body.rawContent,
         images: body.images || [],
         config: body.config || {},
-        rawPhones: body.rawPhones,
+        rawPhones: body.rawPhones || "",
+        groupIds: body.groupIds || [],
+        scheduledAt: body.scheduledAt || null,
+        isDraft: Boolean(body.isDraft),
       },
       botId,
     );

@@ -767,8 +767,9 @@ CREATE TABLE IF NOT EXISTS zalomkt_campaigns (
   title               TEXT NOT NULL,
   raw_content         TEXT NOT NULL DEFAULT '',
   images_json         TEXT NOT NULL DEFAULT '[]', -- JSON array đường dẫn file ảnh
-  status              TEXT NOT NULL DEFAULT 'draft', -- draft, running, paused, completed, stopped
+  status              TEXT NOT NULL DEFAULT 'draft', -- draft, running, paused, completed, stopped, scheduled
   config_json         TEXT NOT NULL DEFAULT '{}', -- min_delay, max_delay, auto_alias, auto_friend, ai_rewrite
+  scheduled_at        INTEGER,                     -- unix timestamp hẹn giờ gửi (nếu có)
   total_leads         INTEGER NOT NULL DEFAULT 0,
   sent_count          INTEGER NOT NULL DEFAULT 0,
   failed_count        INTEGER NOT NULL DEFAULT 0,
@@ -806,5 +807,27 @@ CREATE TABLE IF NOT EXISTS zalomkt_campaign_leads (
 CREATE INDEX IF NOT EXISTS idx_zalomkt_leads_campaign ON zalomkt_campaign_leads(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_zalomkt_leads_camp_phone ON zalomkt_campaign_leads(campaign_id, phone);
 CREATE INDEX IF NOT EXISTS idx_zalomkt_leads_camp_status ON zalomkt_campaign_leads(campaign_id, status);
+
+-- 4. Danh Mục Nhóm Khách Hàng (Contact Groups & Segmentation)
+CREATE TABLE IF NOT EXISTS zalomkt_contact_groups (
+  id                  TEXT PRIMARY KEY,
+  name                TEXT NOT NULL,
+  description         TEXT NOT NULL DEFAULT '',
+  color               TEXT NOT NULL DEFAULT 'sky',
+  created_at          INTEGER NOT NULL,
+  updated_at          INTEGER NOT NULL
+);
+
+-- 5. Thành Viên Của Nhóm Khách Hàng (Group Members)
+CREATE TABLE IF NOT EXISTS zalomkt_contact_group_members (
+  group_id            TEXT NOT NULL,
+  phone               TEXT NOT NULL,
+  added_at            INTEGER NOT NULL,
+  PRIMARY KEY (group_id, phone),
+  FOREIGN KEY (group_id) REFERENCES zalomkt_contact_groups(id) ON DELETE CASCADE,
+  FOREIGN KEY (phone) REFERENCES zalomkt_contacts(phone) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_zalomkt_cgm_phone ON zalomkt_contact_group_members(phone);
 
 

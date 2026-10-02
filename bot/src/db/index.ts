@@ -97,6 +97,8 @@ function runColumnMigrations(database: Database.Database): void {
     ["permanent_knowledge", "last_synced_at", "INTEGER NOT NULL DEFAULT 0"],
     // Phân quyền bạn bè Zalo: đánh dấu người bị Admin chủ động gạt tắt thủ công trên Dashboard
     ["bot_friends", "manually_disabled", "INTEGER NOT NULL DEFAULT 0"],
+    // Hẹn giờ chạy chiến dịch Zalo Marketing
+    ["zalomkt_campaigns", "scheduled_at", "INTEGER"],
   ];
 
   for (const [table, column, definition] of additions) {

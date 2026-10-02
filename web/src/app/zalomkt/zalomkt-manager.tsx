@@ -23,6 +23,11 @@ import {
   Upload,
   Calendar,
   Layers,
+  FolderPlus,
+  Folder,
+  Tag,
+  FileEdit,
+  Send,
 } from "lucide-react";
 import { Card, CardTitle, Badge } from "@/components/ui";
 
@@ -31,8 +36,9 @@ interface ZaloMktCampaign {
   title: string;
   raw_content: string;
   images_json: string;
-  status: "draft" | "running" | "paused" | "completed" | "stopped";
+  status: "draft" | "running" | "paused" | "completed" | "stopped" | "scheduled";
   config_json: string;
+  scheduled_at?: number | null;
   total_leads: number;
   sent_count: number;
   failed_count: number;
@@ -40,6 +46,16 @@ interface ZaloMktCampaign {
   skipped_count: number;
   created_at: number;
   updated_at: number;
+}
+
+interface ZaloMktContactGroup {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  created_at: number;
+  updated_at: number;
+  member_count?: number;
 }
 
 interface ZaloMktContact {
@@ -106,6 +122,9 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
   const [createTitle, setCreateTitle] = useState("");
   const [createContent, setCreateContent] = useState("");
   const [createPhones, setCreatePhones] = useState("");
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
+  const [isScheduled, setIsScheduled] = useState(false);
+  const [scheduledDateTime, setScheduledDateTime] = useState("");
   const [minDelay, setMinDelay] = useState(25);
   const [maxDelay, setMaxDelay] = useState(45);
   const [autoAlias, setAutoAlias] = useState(true);
@@ -130,12 +149,28 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
   const [loadingLeads, setLoadingLeads] = useState(false);
   const [leadStatusFilter, setLeadStatusFilter] = useState("all");
 
-  // State kho contacts
+  // State kho contacts & nhóm
   const [contacts, setContacts] = useState<ZaloMktContact[]>([]);
   const [loadingContacts, setLoadingContacts] = useState(false);
   const [contactSearch, setContactSearch] = useState("");
   const [contactStatusFilter, setContactStatusFilter] = useState("all");
+  const [selectedGroupFilter, setSelectedGroupFilter] = useState("all");
   const [contactTotal, setContactTotal] = useState(0);
+
+  // State danh mục nhóm khách hàng
+  const [groups, setGroups] = useState<ZaloMktContactGroup[]>([]);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [newGroupDesc, setNewGroupDesc] = useState("");
+  const [newGroupColor, setNewGroupColor] = useState("sky");
+  const [creatingGroup, setCreatingGroup] = useState(false);
+
+  // State gán SĐT vào nhóm
+  const [showAddPhonesToGroupModal, setShowAddPhonesToGroupModal] = useState(false);
+  const [targetGroupId, setTargetGroupId] = useState("");
+  const [groupPhonesText, setGroupPhonesText] = useState("");
+  const [addingPhonesToGroup, setAddingPhonesToGroup] = useState(false);
 
   // State modal nhập contacts
   const [showImportModal, setShowImportModal] = useState(false);
@@ -159,6 +194,22 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
     }
   }, [botId]);
 
+  // Tải danh sách nhóm khách hàng
+  const fetchGroups = useCallback(async () => {
+    setLoadingGroups(true);
+    try {
+      const res = await fetch(`/api/zalomkt/groups?botId=${botId}`);
+      const data = await res.json();
+      if (data.ok) {
+        setGroups(data.groups || []);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingGroups(false);
+    }
+  }, [botId]);
+
   // Tải danh sách contacts
   const fetchContacts = useCallback(async () => {
     setLoadingContacts(true);
@@ -167,6 +218,7 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
         botId,
         search: contactSearch,
         status: contactStatusFilter,
+        groupId: selectedGroupFilter,
         limit: "50",
       });
       const res = await fetch(`/api/zalomkt/contacts?${query.toString()}`);
@@ -181,7 +233,7 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
     } finally {
       setLoadingContacts(false);
     }
-  }, [botId, contactSearch, contactStatusFilter]);
+  }, [botId, contactSearch, contactStatusFilter, selectedGroupFilter]);
 
   // Tải danh sách leads của 1 chiến dịch
   const fetchCampaignDetails = useCallback(async (campId: string) => {
@@ -202,7 +254,8 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
 
   useEffect(() => {
     fetchCampaigns();
-  }, [fetchCampaigns]);
+    fetchGroups();
+  }, [fetchCampaigns, fetchGroups]);
 
   useEffect(() => {
     if (activeTab === "contacts") {
@@ -260,11 +313,112 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
     }
   };
 
-  // Xử lý tạo chiến dịch
-  const handleCreateCampaign = async () => {
+  // Tạo nhóm khách hàng mới
+  const handleCreateGroup = async () => {
+    if (!newGroupName.trim()) return alert("Vui lòng nhập tên nhóm khách hàng");
+    setCreatingGroup(true);
+    try {
+      const res = await fetch("/api/zalomkt/groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          botId,
+          name: newGroupName,
+          description: newGroupDesc,
+          color: newGroupColor,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setNewGroupName("");
+        setNewGroupDesc("");
+        setShowCreateGroupModal(false);
+        fetchGroups();
+      } else {
+        alert("Lỗi tạo nhóm: " + data.error);
+      }
+    } catch (err: any) {
+      alert("Lỗi: " + String(err));
+    } finally {
+      setCreatingGroup(false);
+    }
+  };
+
+  // Xóa nhóm khách hàng
+  const handleDeleteGroup = async (groupId: string, groupName: string) => {
+    if (!confirm(`Bạn có chắc chắn muốn xóa nhóm "${groupName}"? Các số điện thoại trong danh bạ sẽ không bị xóa.`)) return;
+    try {
+      const res = await fetch(`/api/zalomkt/groups?id=${groupId}&botId=${botId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (data.ok) {
+        if (selectedGroupFilter === groupId) setSelectedGroupFilter("all");
+        fetchGroups();
+        fetchContacts();
+      } else {
+        alert("Lỗi xóa nhóm: " + data.error);
+      }
+    } catch (err: any) {
+      alert("Lỗi xóa nhóm: " + String(err));
+    }
+  };
+
+  // Thêm danh sách số vào nhóm
+  const handleAddPhonesToGroup = async () => {
+    if (!targetGroupId) return alert("Vui lòng chọn nhóm cần thêm");
+    if (!groupPhonesText.trim()) return alert("Vui lòng nhập ít nhất 1 số điện thoại");
+    setAddingPhonesToGroup(true);
+    try {
+      const res = await fetch("/api/zalomkt/groups/members", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          botId,
+          groupId: targetGroupId,
+          rawPhones: groupPhonesText,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        alert(`✅ Đã thêm ${data.added} số mới vào nhóm! (Tổng thành viên nhóm: ${data.total})`);
+        setShowAddPhonesToGroupModal(false);
+        setGroupPhonesText("");
+        fetchGroups();
+        fetchContacts();
+      } else {
+        alert("Lỗi: " + data.error);
+      }
+    } catch (err: any) {
+      alert("Lỗi: " + String(err));
+    } finally {
+      setAddingPhonesToGroup(false);
+    }
+  };
+
+  // Xử lý tạo chiến dịch (hỗ trợ Chạy ngay, Lưu bản nháp, Lên lịch hẹn giờ)
+  const handleCreateCampaign = async (mode: "run_now" | "save_draft" | "schedule") => {
     if (!createTitle.trim()) return alert("Vui lòng nhập tên chiến dịch");
     if (!createContent.trim()) return alert("Vui lòng nhập nội dung tin nhắn");
-    if (!createPhones.trim()) return alert("Vui lòng nhập ít nhất 1 số điện thoại");
+    if (!createPhones.trim() && selectedGroupIds.length === 0) {
+      return alert("Vui lòng nhập danh sách số điện thoại hoặc tick chọn ít nhất 1 nhóm khách hàng");
+    }
+
+    let scheduledAt: number | null = null;
+    let isDraft = false;
+
+    if (mode === "schedule") {
+      if (!scheduledDateTime) {
+        return alert("Vui lòng chọn ngày và giờ hẹn chạy chiến dịch");
+      }
+      const schedTime = new Date(scheduledDateTime).getTime();
+      if (isNaN(schedTime) || schedTime <= Date.now()) {
+        return alert("Thời gian hẹn giờ phải ở tương lai so với hiện tại");
+      }
+      scheduledAt = schedTime;
+    } else if (mode === "save_draft") {
+      isDraft = true;
+    }
 
     setCreating(true);
     try {
@@ -277,6 +431,9 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
           rawContent: createContent,
           images: uploadedImages,
           rawPhones: createPhones,
+          groupIds: selectedGroupIds,
+          scheduledAt,
+          isDraft,
           config: {
             minDelay: minDelay * 1000,
             maxDelay: maxDelay * 1000,
@@ -288,13 +445,23 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
       });
       const data = await res.json();
       if (data.ok) {
-        alert(
-          `🎉 Tạo chiến dịch thành công!\n- Tổng số nhận diện: ${data.totalLeads}\n- Tự động bỏ qua (Pre-flight Filter): ${data.skippedLeads} số chết/chặn`,
-        );
+        let msg = `🎉 Tạo chiến dịch thành công!\n- Tổng số nhận diện: ${data.totalLeads}\n- Tự động bỏ qua (Pre-flight Filter): ${data.skippedLeads} số chết/chặn`;
+        if (mode === "run_now") {
+          await handleControlCampaign(data.id, "start");
+          msg += "\n- Trạng thái: Đang bắt đầu gửi ngay!";
+        } else if (mode === "schedule") {
+          msg += `\n- Trạng thái: Đã lên lịch hẹn lúc ${new Date(scheduledAt!).toLocaleString("vi-VN")}`;
+        } else {
+          msg += "\n- Trạng thái: Đã lưu bản nháp an toàn.";
+        }
+        alert(msg);
         setShowCreateModal(false);
         setCreateTitle("");
         setCreateContent("");
         setCreatePhones("");
+        setSelectedGroupIds([]);
+        setIsScheduled(false);
+        setScheduledDateTime("");
         setUploadedImages([]);
         fetchCampaigns();
       } else {
@@ -556,12 +723,18 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
                                 ? "warn"
                                 : camp.status === "completed"
                                 ? "default"
+                                : camp.status === "scheduled"
+                                ? "default"
                                 : "muted"
                             }
+                            className={camp.status === "scheduled" ? "bg-sky-500/20 text-sky-300 border border-sky-500/30" : undefined}
                           >
                             {camp.status === "running" && <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-emerald-400 animate-ping" />}
+                            {camp.status === "scheduled" && <Clock className="mr-1 inline-block h-3 w-3 text-sky-400" />}
                             {camp.status === "running"
                               ? "Đang chạy"
+                              : camp.status === "scheduled"
+                              ? `Hẹn giờ (${camp.scheduled_at ? new Date(camp.scheduled_at).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }) + " " + new Date(camp.scheduled_at).toLocaleDateString("vi-VN") : "Sắp chạy"})`
                               : camp.status === "paused"
                               ? "Tạm dừng"
                               : camp.status === "completed"
@@ -593,13 +766,13 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
 
                       {/* Nút hành động */}
                       <div className="flex items-center gap-2">
-                        {camp.status === "draft" && (
+                        {(camp.status === "draft" || camp.status === "scheduled") && (
                           <button
                             onClick={() => handleControlCampaign(camp.id, "start")}
-                            className="flex items-center gap-1.5 rounded-lg bg-emerald-600/20 px-3 py-1.5 text-xs font-semibold text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30"
+                            className="flex items-center gap-1.5 rounded-lg bg-emerald-600/20 px-3 py-1.5 text-xs font-semibold text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30 transition-colors"
                           >
                             <Play className="h-3.5 w-3.5" />
-                            Bắt đầu gửi
+                            {camp.status === "scheduled" ? "Chạy ngay (Bỏ hẹn)" : "Bắt đầu gửi"}
                           </button>
                         )}
 
@@ -839,9 +1012,96 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
         </div>
       )}
 
-      {/* 4. NỘI DUNG TAB 2: KHO DATA SĐT TOÀN CỤC */}
+      {/* 4. NỘI DUNG TAB 2: KHO DATA SĐT TOÀN CỤC & PHÂN NHÓM */}
       {activeTab === "contacts" && (
         <div className="space-y-4">
+          {/* Thanh danh mục nhóm khách hàng */}
+          <div className="rounded-xl border border-slate-800/80 bg-slate-900/60 p-4 backdrop-blur-md space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Folder className="h-4 w-4 text-sky-400" />
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                  Phân Nhóm Dữ Liệu Khách Hàng ({groups.length} nhóm)
+                </h4>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateGroupModal(true)}
+                  className="flex items-center gap-1.5 rounded-lg bg-sky-500/10 border border-sky-500/30 px-3 py-1.5 text-xs font-semibold text-sky-300 hover:bg-sky-500/20 transition-colors"
+                >
+                  <FolderPlus className="h-3.5 w-3.5" />
+                  + Tạo Nhóm Mới
+                </button>
+                {groups.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!targetGroupId && groups[0]) setTargetGroupId(groups[0].id);
+                      setShowAddPhonesToGroupModal(true);
+                    }}
+                    className="flex items-center gap-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 transition-colors"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    + Thêm SĐT Vào Nhóm
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Danh sách chips lọc theo nhóm */}
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setSelectedGroupFilter("all")}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-medium transition-all ${
+                  selectedGroupFilter === "all"
+                    ? "bg-sky-500 text-white shadow-sm"
+                    : "bg-slate-800/80 text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                }`}
+              >
+                <span>Tất cả số</span>
+                <span className="rounded-full bg-black/20 px-1.5 py-0.2 text-[10px]">{contactTotal}</span>
+              </button>
+
+              {groups.map((grp) => (
+                <div
+                  key={grp.id}
+                  className={`group relative flex items-center rounded-lg border transition-all ${
+                    selectedGroupFilter === grp.id
+                      ? "border-sky-500 bg-sky-500/20 text-sky-200"
+                      : "border-slate-800 bg-slate-800/60 text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setSelectedGroupFilter(grp.id)}
+                    className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium"
+                  >
+                    <Tag className="h-3 w-3 text-sky-400" />
+                    <span>{grp.name}</span>
+                    <span className="rounded-full bg-slate-900/80 px-1.5 py-0.2 text-[10px] text-slate-300">
+                      {grp.member_count || 0}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteGroup(grp.id, grp.name);
+                    }}
+                    title="Xóa nhóm"
+                    className="pr-2 pl-0.5 text-slate-500 opacity-0 group-hover:opacity-100 hover:text-rose-400 transition-opacity"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Thanh tìm kiếm & lọc trạng thái */}
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-3">
               <div className="relative min-w-[260px]">
@@ -869,7 +1129,11 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
             </div>
 
             <div className="text-xs text-slate-400">
-              Tổng số trong kho: <strong className="text-sky-400">{contactTotal}</strong> số
+              {selectedGroupFilter !== "all" ? (
+                <>Số trong nhóm: <strong className="text-sky-400">{contactTotal}</strong></>
+              ) : (
+                <>Tổng số trong kho: <strong className="text-sky-400">{contactTotal}</strong> số</>
+              )}
             </div>
           </div>
 
@@ -1098,18 +1362,98 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
                 </div>
               </div>
 
-              {/* Danh sách SĐT */}
+              {/* Nạp nhanh từ Nhóm Khách Hàng */}
+              {groups.length > 0 && (
+                <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                      <Folder className="h-3.5 w-3.5 text-sky-400" />
+                      Nạp nhanh từ Nhóm Khách Hàng ({groups.length} nhóm có sẵn)
+                    </label>
+                    {selectedGroupIds.length > 0 && (
+                      <span className="text-[11px] text-sky-400 font-medium">
+                        Đã chọn {selectedGroupIds.length} nhóm (ước tính: {groups.filter((g) => selectedGroupIds.includes(g.id)).reduce((acc, g) => acc + (g.member_count || 0), 0)} số)
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {groups.map((grp) => {
+                      const isSelected = selectedGroupIds.includes(grp.id);
+                      return (
+                        <button
+                          key={grp.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedGroupIds((prev) =>
+                              isSelected ? prev.filter((id) => id !== grp.id) : [...prev, grp.id],
+                            );
+                          }}
+                          className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all ${
+                            isSelected
+                              ? "border-sky-500 bg-sky-500/20 text-sky-200 shadow-sm"
+                              : "border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                          }`}
+                        >
+                          <span className={`inline-block h-2 w-2 rounded-full ${isSelected ? "bg-sky-400" : "bg-slate-600"}`} />
+                          <span>{grp.name}</span>
+                          <span className="rounded-full bg-slate-950 px-1.5 py-0.2 text-[10px] text-slate-400">
+                            {grp.member_count || 0}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-slate-500">
+                    * Các số điện thoại từ các nhóm được chọn sẽ tự động gộp và loại bỏ trùng lặp với danh sách bên dưới.
+                  </p>
+                </div>
+              )}
+
+              {/* Danh sách SĐT nhập tay hoặc paste */}
               <div>
                 <label className="text-xs font-semibold text-slate-300">
-                  Danh sách số điện thoại nhận tin * (Mỗi dòng 1 số hoặc kèm tên)
+                  Danh sách số điện thoại nhập thêm (Mỗi dòng 1 số hoặc kèm tên, tùy chọn nếu đã chọn nhóm)
                 </label>
                 <textarea
-                  rows={4}
+                  rows={3}
                   placeholder={"0912345678, Nguyễn Văn A\n0987654321, Trần Thị B\n0901234567"}
                   value={createPhones}
                   onChange={(e) => setCreatePhones(e.target.value)}
                   className="mt-1 w-full font-mono rounded-xl border border-slate-700 bg-slate-950 p-3 text-xs text-white placeholder-slate-500 focus:border-sky-500 focus:outline-none"
                 />
+              </div>
+
+              {/* Hẹn giờ chạy chiến dịch */}
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-sky-400 uppercase tracking-wider">
+                    <input
+                      type="checkbox"
+                      checked={isScheduled}
+                      onChange={(e) => setIsScheduled(e.target.checked)}
+                      className="rounded border-slate-700 text-sky-500 focus:ring-0"
+                    />
+                    <Clock className="h-4 w-4" />
+                    Lên Lịch Hẹn Giờ Gửi Tự Động
+                  </label>
+                  {isScheduled && (
+                    <span className="text-[11px] text-amber-400 font-medium">
+                      Hệ thống tự động kích hoạt khi đến giờ hẹn
+                    </span>
+                  )}
+                </div>
+
+                {isScheduled && (
+                  <div className="space-y-1.5 pt-1">
+                    <label className="text-xs text-slate-300 font-medium">Chọn ngày & giờ bắt đầu gửi:</label>
+                    <input
+                      type="datetime-local"
+                      value={scheduledDateTime}
+                      onChange={(e) => setScheduledDateTime(e.target.value)}
+                      className="w-full rounded-xl border border-sky-500/40 bg-slate-900 px-3.5 py-2 text-xs text-white focus:border-sky-400 focus:outline-none"
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Cấu hình Anti-ban */}
@@ -1178,22 +1522,48 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
               </div>
             </div>
 
-            <div className="mt-6 flex items-center justify-end gap-3 border-t border-slate-800 pt-4">
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-800 pt-4">
               <button
                 type="button"
                 onClick={() => setShowCreateModal(false)}
-                className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700"
+                className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700 transition-colors"
               >
                 Hủy bỏ
               </button>
-              <button
-                type="button"
-                onClick={handleCreateCampaign}
-                disabled={creating}
-                className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-2 text-xs font-bold text-white shadow-lg shadow-sky-500/20 hover:from-sky-400 hover:to-indigo-500 disabled:opacity-50"
-              >
-                {creating ? "Đang khởi tạo & Lọc trước..." : "Khởi Tạo Chiến Dịch"}
-              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleCreateCampaign("save_draft")}
+                  disabled={creating}
+                  className="flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-800/80 px-4 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                >
+                  <FileEdit className="h-3.5 w-3.5 text-slate-400" />
+                  Lưu Bản Nháp
+                </button>
+
+                {isScheduled ? (
+                  <button
+                    type="button"
+                    onClick={() => handleCreateCampaign("schedule")}
+                    disabled={creating}
+                    className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 px-5 py-2 text-xs font-bold text-white shadow-lg shadow-sky-500/20 hover:from-sky-400 hover:to-indigo-500 disabled:opacity-50 transition-all"
+                  >
+                    <Clock className="h-4 w-4" />
+                    {creating ? "Đang lên lịch..." : "Lên Lịch Hẹn Giờ"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleCreateCampaign("run_now")}
+                    disabled={creating}
+                    className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-5 py-2 text-xs font-bold text-white shadow-lg shadow-emerald-500/20 hover:from-emerald-400 hover:to-teal-500 disabled:opacity-50 transition-all"
+                  >
+                    <Send className="h-4 w-4" />
+                    {creating ? "Đang khởi tạo & Lọc..." : "Bắt Đầu Gửi Ngay"}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -1333,6 +1703,160 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
                 className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-50"
               >
                 {importing ? "Đang nạp..." : "Lưu vào Kho Data"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: TẠO NHÓM KHÁCH HÀNG MỚI */}
+      {showCreateGroupModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md">
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <FolderPlus className="h-4 w-4 text-sky-400" />
+                Tạo Nhóm Khách Hàng Mới
+              </h3>
+              <button
+                onClick={() => setShowCreateGroupModal(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3.5 text-xs">
+              <div>
+                <label className="text-slate-300 font-semibold">Tên nhóm *</label>
+                <input
+                  type="text"
+                  placeholder="Ví dụ: Khách dự án The Privia, Đội Sale..."
+                  value={newGroupName}
+                  onChange={(e) => setNewGroupName(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-xs text-white placeholder-slate-500 focus:border-sky-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-semibold">Mô tả nhóm (Tùy chọn)</label>
+                <input
+                  type="text"
+                  placeholder="Ghi chú phân loại nhóm khách hàng..."
+                  value={newGroupDesc}
+                  onChange={(e) => setNewGroupDesc(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-xs text-white placeholder-slate-500 focus:border-sky-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-semibold">Màu đại diện</label>
+                <div className="mt-1.5 flex gap-2">
+                  {[
+                    { id: "sky", bg: "bg-sky-500" },
+                    { id: "emerald", bg: "bg-emerald-500" },
+                    { id: "indigo", bg: "bg-indigo-500" },
+                    { id: "rose", bg: "bg-rose-500" },
+                    { id: "amber", bg: "bg-amber-500" },
+                    { id: "purple", bg: "bg-purple-500" },
+                  ].map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setNewGroupColor(c.id)}
+                      className={`h-6 w-6 rounded-full ${c.bg} transition-transform ${
+                        newGroupColor === c.id ? "ring-2 ring-white scale-110" : "opacity-60 hover:opacity-100"
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2 border-t border-slate-800 pt-3">
+              <button
+                type="button"
+                onClick={() => setShowCreateGroupModal(false)}
+                className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleCreateGroup}
+                disabled={creatingGroup}
+                className="rounded-xl bg-sky-600 px-4 py-2 text-xs font-bold text-white hover:bg-sky-500 disabled:opacity-50"
+              >
+                {creatingGroup ? "Đang tạo..." : "Tạo Nhóm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: THÊM SĐT VÀO NHÓM */}
+      {showAddPhonesToGroupModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-md">
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Tag className="h-4 w-4 text-emerald-400" />
+                Thêm SĐT Vào Nhóm Khách Hàng
+              </h3>
+              <button
+                onClick={() => setShowAddPhonesToGroupModal(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3.5 text-xs">
+              <div>
+                <label className="text-slate-300 font-semibold">Chọn nhóm đích *</label>
+                <select
+                  value={targetGroupId}
+                  onChange={(e) => setTargetGroupId(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-xs text-white focus:border-sky-500 focus:outline-none"
+                >
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name} ({g.member_count || 0} thành viên)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-semibold">Danh sách số điện thoại cần thêm *</label>
+                <p className="text-[11px] text-slate-400 mb-1">
+                  Mỗi dòng 1 số điện thoại. Hệ thống sẽ tự động liên kết vào nhóm và lưu vào Kho Data.
+                </p>
+                <textarea
+                  rows={6}
+                  placeholder={"0912345678\n0987654321\n0901234567"}
+                  value={groupPhonesText}
+                  onChange={(e) => setGroupPhonesText(e.target.value)}
+                  className="w-full font-mono rounded-xl border border-slate-700 bg-slate-950 p-3 text-xs text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2 border-t border-slate-800 pt-3">
+              <button
+                type="button"
+                onClick={() => setShowAddPhonesToGroupModal(false)}
+                className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleAddPhonesToGroup}
+                disabled={addingPhonesToGroup}
+                className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-50"
+              >
+                {addingPhonesToGroup ? "Đang thêm..." : "Xác Nhận Thêm Vào Nhóm"}
               </button>
             </div>
           </div>
