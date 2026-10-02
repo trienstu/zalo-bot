@@ -2302,6 +2302,7 @@ export async function executeAgentTool(name: string, args: Record<string, any>):
         duration,
         aspectRatio,
         imageUrl,
+        timeoutMs: 360_000,
       });
 
       if (vidRes.success && vidRes.filePath) {

@@ -1599,7 +1599,7 @@ async function handleHistoryQA(
                 void sendGroupText(
                   options.api,
                   threadId,
-                  `🎬 ${isSuperAdmin ? "Em đang tạo video AI cho Sếp" : `${botName} đang tạo video AI`}: "${promptPreview}..." (khoảng 40-60s)... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em xíu nhé! ✨`,
+                  `🎬 ${isSuperAdmin ? "Em đang tạo video AI cho Sếp" : `${botName} đang tạo video AI`}: "${promptPreview}..." (khoảng 3-4 phút)... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em xíu nhé! ✨`,
                 );
               }
             }
@@ -3024,6 +3024,7 @@ QUY TẮC BẮT BUỘC:
     `   - [KỸ NĂNG TẠO VIDEO AI (generate_video)]:\n` +
     `     + Khi người dùng yêu cầu tạo video, làm clip, biến ảnh thành video (Image-to-Video), hoặc sinh video AI theo ý tưởng/mô tả: BẮT BUỘC GỌI TOOL 'generate_video'.\n` +
     `     + duration: 5 hoặc 10 (mặc định 5s), aspectRatio: '16:9' (ngang) hoặc '9:16' (dọc). Truyền imageUrl nếu là biến ảnh thành video.\n` +
+    `     + CHỐNG ẢO GIÁC & FALLBACK SAI: NẾU tool 'generate_video' gặp sự cố hoặc timeout: TUYỆT ĐỐI CẤM tự ý gọi 'generate_image' để vẽ ảnh thay thế khi người dùng không yêu cầu vẽ ảnh! Hãy báo cáo trung thực sự cố và đề xuất hướng xử lý cho người dùng.\n` +
     `   - KỸ NĂNG VẼ BIỂU ĐỒ, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):\n` +
     `     + Khi người dùng yêu cầu vẽ biểu đồ số liệu, đồ thị, sơ đồ, poster lịch thi đấu, bảng xếp hạng hoặc yêu cầu làm lại/sửa lại biểu đồ: BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM in code Python ra chat!\n` +
     `     + Với lịch thi đấu/bảng sự kiện/roadmap: Dùng PIL vẽ Infographic Poster Card Layout nền tối (burgundy/navy), thẻ bo góc, badge nổi bật ([CHÍNH THỨC], [GIAO HỮU]), tiêu đề vàng kim #FFD700. Với số liệu: Dùng matplotlib dark theme.\n` +
@@ -3175,7 +3176,7 @@ QUY TẮC BẮT BUỘC:
               void sendGroupText(
                 options.api,
                 threadId,
-                `🎬 ${isSuperAdmin ? "Em đang tạo video AI cho Sếp" : `${botName} đang tạo video AI`}: "${promptPreview}..." (khoảng 40-60s)... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em xíu nhé! ✨`,
+                `🎬 ${isSuperAdmin ? "Em đang tạo video AI cho Sếp" : `${botName} đang tạo video AI`}: "${promptPreview}..." (khoảng 3-4 phút)... ${isSuperAdmin ? "Sếp" : "Bác"} chờ em xíu nhé! ✨`,
               );
             }
           }

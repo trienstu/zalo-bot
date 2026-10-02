@@ -115,7 +115,7 @@ export async function generateAiVideo(
   const apiKey = config.museApiKey;
   const duration = options?.duration === 10 ? 10 : 5;
   const aspectRatio = options?.aspectRatio === "9:16" ? "9:16" : "16:9";
-  const timeoutMs = options?.timeoutMs || 180_000;
+  const timeoutMs = options?.timeoutMs || 360_000;
   const refImage = prepareVideoImageDataUrl(options?.imageUrl);
 
   if (!apiKey) {
