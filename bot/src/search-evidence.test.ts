@@ -7,6 +7,7 @@ import {
   finalizeGroundedAnswer,
   formatEvidenceContext,
   isStrictVerificationQuestion,
+  isUnreliableSource,
   rankEvidence,
   scoreEvidence,
   type SearchEvidence,
@@ -494,5 +495,28 @@ test("finalizeGroundedAnswer soft-fallback cho câu hỏi tra cứu thông thư�
   });
   assert.match(resultStrict, /Em chưa đủ bằng chứng đáng tin cậy/i);
 });
+
+test("isUnreliableSource nhận diện và loại bỏ các nguồn rác/mạng xã hội (TikTok, CafeBiz, Facebook)", () => {
+  assert.equal(isUnreliableSource("TikTok"), true);
+  assert.equal(isUnreliableSource("tiktok.com"), true);
+  assert.equal(isUnreliableSource("CafeBiz"), true);
+  assert.equal(isUnreliableSource("cafebiz.vn"), true);
+  assert.equal(isUnreliableSource("facebook.com"), true);
+  assert.equal(isUnreliableSource("VnExpress"), false);
+  assert.equal(isUnreliableSource("Tuổi Trẻ"), false);
+});
+
+test("finalizeGroundedAnswer KHÔNG gắn nguồn thời sự vào bài hướng dẫn kỹ thuật IT (cài Win, SSD, BIOS)", () => {
+  const answer = "Ý tưởng của Anh làm được, hoàn toàn có thể cài trực tiếp sang SSD ngay trên nền Win HDD cũ mà KHÔNG CẦN USB bằng WinNTSetup.";
+  const context = "[Nguồn: cafebiz.vn | Tiêu đề: Hướng dẫn - CafeBiz]";
+  const res = finalizeGroundedAnswer(answer, context, false, {
+    question: "trả lời lại xem . sếp chú mày cho phép chưa",
+    intent: "chat",
+  });
+  assert.ok(!res.includes("*(Nguồn:"));
+  assert.ok(!res.includes("CafeBiz"));
+  assert.equal(res, answer);
+});
+
 
 

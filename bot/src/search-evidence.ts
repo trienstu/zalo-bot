@@ -517,6 +517,14 @@ function cleanPublisherName(raw: string): string {
   return clean.length > 20 ? clean.slice(0, 20) + "..." : clean;
 }
 
+export function isUnreliableSource(source: string): boolean {
+  const norm = String(source || "").toLowerCase().trim();
+  return (
+    /^(?:tiktok|facebook|fb|instagram|threads|twitter|youtube|douyin|weibo|pinterest)(?:\.com)?$/i.test(norm) ||
+    /(?:tiktok\.com|facebook\.com|fb\.com|instagram\.com|threads\.net|twitter\.com|x\.com|youtube\.com|cafebiz\.vn|cafebiz)/i.test(norm)
+  );
+}
+
 export function extractEvidenceSources(context: string): string[] {
   const sources: string[] = [];
 
@@ -528,12 +536,12 @@ export function extractEvidenceSources(context: string): string[] {
     const parts = title.split(/\s*[-–—|]\s*/);
     if (parts.length > 1) {
       const candidate = parts[parts.length - 1]?.trim().replace(/^báo\s+/i, "");
-      if (candidate && candidate.length > 1 && candidate.length < 25) {
+      if (candidate && candidate.length > 1 && candidate.length < 25 && !isUnreliableSource(candidate)) {
         sources.push(cleanPublisherName(candidate));
         continue;
       }
     }
-    if (domain && !domain.includes("google.com")) {
+    if (domain && !domain.includes("google.com") && !isUnreliableSource(domain)) {
       sources.push(cleanPublisherName(domain));
     }
   }
@@ -542,10 +550,10 @@ export function extractEvidenceSources(context: string): string[] {
   const directMatches = [...String(context || "").matchAll(/^-?\s*Nguồn(?:\s+chính\s+thức)?\s*:\s*(.+?)\s*$/gim)];
   for (const m of directMatches) {
     const s = m[1]?.trim();
-    if (s) sources.push(cleanPublisherName(s));
+    if (s && !isUnreliableSource(s)) sources.push(cleanPublisherName(s));
   }
 
-  return [...new Set(sources.filter(Boolean))].slice(0, 3);
+  return [...new Set(sources.filter((s) => Boolean(s) && !isUnreliableSource(s)))].slice(0, 3);
 }
 
 function stripTrailingSourceBlock(answer: string): string {
@@ -619,7 +627,13 @@ export function finalizeGroundedAnswer(
     const isInternalOrNegativeAnswer =
       /(?:trong nhóm|nhóm mình|nội bộ|thành viên.*nhóm|không tìm thấy|chưa tìm thấy|chưa có thông tin|không có dữ liệu|chưa đủ bằng chứng)/i.test(answer);
 
-    if (!isInternalOrNegativeAnswer && !isBotSelfStatusOrChat) {
+    // 5. Không gắn nguồn nếu câu hỏi hoặc câu trả lời là hướng dẫn kỹ thuật IT, phần cứng, phần mềm, thủ thuật máy tính
+    const isTechnicalOrComputing =
+      /(?:cài win|windows|bios|boot menu|rufus|winntsetup|ssd|hdd|ổ cứng|ram|cpu|mainboard|card đồ họa|gpu|vga|driver|format|phân vùng|ubuntu|linux|docker|nodejs|python|git\b|clone win)/i.test(
+        `${options?.question || ""} ${answer}`
+      );
+
+    if (!isInternalOrNegativeAnswer && !isBotSelfStatusOrChat && !isTechnicalOrComputing) {
       const allowedSources = extractEvidenceSources(evidenceContext);
       const alreadyHasCitation = /(?:nguồn(?:\s+kiểm\s+chứng)?|source)\s*:/i.test(answer) || /\*\(nguồn/i.test(answer);
       if (allowedSources.length > 0 && !alreadyHasCitation) {

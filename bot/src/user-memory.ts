@@ -308,10 +308,10 @@ export async function parseAdminProfileUpdateIntent(
   const isCandidateText = (hasUpdateKeyword && hasEntityOrPronoun) || hasDirectPattern;
   if (!isCandidateText) return null;
 
-  // 2.0. Dạng mô tả danh xưng & vai trò: "<Target> là <Nghề/Vai trò>, gọi/xưng là <Danh xưng>"
-  // Ví dụ: "Trien Nguyen DXS là thầy giáo, gọi là Mr Johnny nhé!", "Lưu bạn Thảo là nữ, gọi bằng chị nhé"
+  // 2.0. Dạng mô tả danh xưng & vai trò: "<Target> là <Nghề/Vai trò/Chi tiết>, gọi/xưng là <Danh xưng>"
+  // Ví dụ: "Trien Nguyen DXS là thầy giáo, gọi là Mr Johnny nhé!", "Lưu bạn Thảo là nữ, gọi bằng chị nhé", "Lưu bạn Thức Ăn Chăn Nuôi là nam, tên thật là Lên , gọi là Anh Lên nhé"
   const titleAndRoleMatch = clean.match(
-    /^([^\n,:]+?)\s+là\s+([^\n,:]+?),\s*(?:gọi|xưng)\s*(?:là|bằng)?\s*([^\n,.:!]+)/iu
+    /^([^\n,:]+?)\s+là\s+([^\n:]+?),\s*(?:gọi|xưng)\s*(?:là|bằng)?\s*([^\n,.:!]+)/iu
   );
   if (titleAndRoleMatch && titleAndRoleMatch[1] && titleAndRoleMatch[2] && titleAndRoleMatch[3]) {
     let rawTarget = titleAndRoleMatch[1]

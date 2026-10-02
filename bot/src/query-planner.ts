@@ -457,17 +457,17 @@ export async function planSearchQueries(params: {
     }, question, quoteText);
   }
 
-  // Nhận diện câu phản biện / chất vấn / thắc mắc meta về câu trả lời trước đó (Feedback / Critique)
-  // Các câu như: "sao em nhầm vậy", "sao lại sai thế", "bot nói sai rồi", "em nhầm rồi", "sao e biết"
+  // Nhận diện câu phản biện / chất vấn / thắc mắc meta về câu trả lời trước đó (Feedback / Critique / Challenge)
+  // Các câu như: "sao em nhầm vậy", "sao lại sai thế", "bot nói sai rồi", "em nhầm rồi", "sao e biết", "trả lời lại xem", "chú mày yếu"
   // BẮT BUỘC là hội thoại chat, đối thoại dựa trên ngữ cảnh lịch sử chat, KHÔNG search báo chí RSS!
   const isMetaCritique =
-    /(?:sao\s+(?:lại\s+|e\s+|em\s+|bot\s+|mày\s+)?(?:nhầm|sai|lộn|bậy|ngáo|lú)|nói\s+sai|nhầm\s+rồi|bị\s+(?:ngáo|lú|nhầm)|trả\s+lời\s+sai|tại\s+sao\s+(?:lại\s+)?(?:sai|nhầm)|nhầm\s+to\s+rồi|sai\s+bét|sai\s+rồi)/i.test(trimmed);
+    /(?:sao\s+(?:lại\s+|e\s+|em\s+|bot\s+|mày\s+)?(?:nhầm|sai|lộn|bậy|ngáo|lú)|nói\s+sai|nhầm\s+rồi|bị\s+(?:ngáo|lú|nhầm)|trả\s+lời\s+sai|tại\s+sao\s+(?:lại\s+)?(?:sai|nhầm)|nhầm\s+to\s+rồi|sai\s+bét|sai\s+rồi|trả\s+lời\s+lại\s+xem|nói\s+lại\s+xem|xem\s+lại\s+xem|chú\s+mày\s+(?:yếu|lươn|kém|ngáo)|đang\s+lươn|lươn\s+lẹo|sếp\s+(?:chú\s+mày\s+)?cho\s+phép\s+chưa|sếp\s+(?:chú\s+mày\s+)?duyệt\s+chưa)/i.test(trimmed);
   if (isMetaCritique) {
     return applyExecutionSignals({
       needsSearch: false,
       intent: "chat",
       queries: [],
-      summaryIntent: "Người dùng chất vấn / phản biện về câu trả lời trước đó",
+      summaryIntent: "Người dùng chất vấn / phản biện / thách thức về câu trả lời trước đó",
     }, question, quoteText);
   }
 

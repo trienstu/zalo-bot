@@ -3986,6 +3986,25 @@ export interface DirectUserProfile {
   memories: UserMemoryItem[];
 }
 
+function normalizeVietnameseMatchText(val: string): string {
+  return String(val || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/gi, (char) => (char === "Đ" ? "D" : "d"))
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isUserDisplayNameOrIdMatch(userId: string, displayName: string, cleanQuery: string): boolean {
+  if (userId === cleanQuery) return true;
+  if (!cleanQuery) return false;
+  const dNorm = normalizeVietnameseMatchText(displayName);
+  const qNorm = normalizeVietnameseMatchText(cleanQuery);
+  if (!dNorm || !qNorm) return false;
+  return dNorm.includes(qNorm) || qNorm.includes(dNorm);
+}
+
 export function findDirectUserByNameOrId(query: string): DirectUserProfile[] {
   try {
     const db = getDb();
@@ -4003,23 +4022,25 @@ export function findDirectUserByNameOrId(query: string): DirectUserProfile[] {
       }
     >();
 
-    // 1. Tìm trong bot_friends
+    // 1. Tìm trong bot_friends (hỗ trợ Unicode tiếng Việt đầy đủ)
     const friendRows = db
       .prepare(
         `SELECT user_id as userId, display_name as displayName, updated_at as updatedAt
          FROM bot_friends
-         WHERE user_id = ? OR LOWER(display_name) LIKE ?
-         LIMIT 10`
+         ORDER BY updated_at DESC
+         LIMIT 200`
       )
-      .all(cleanQuery, `%${cleanQuery.toLowerCase()}%`) as any[];
+      .all() as any[];
 
     for (const r of friendRows) {
-      userMap.set(r.userId, {
-        displayName: r.displayName || "",
-        source: "friend",
-        lastActiveAt: r.updatedAt || 0,
-        count: 0,
-      });
+      if (isUserDisplayNameOrIdMatch(r.userId, r.displayName, cleanQuery)) {
+        userMap.set(r.userId, {
+          displayName: r.displayName || "",
+          source: "friend",
+          lastActiveAt: r.updatedAt || 0,
+          count: 0,
+        });
+      }
     }
 
     // 2. Tìm trong direct_interactions
@@ -4027,25 +4048,27 @@ export function findDirectUserByNameOrId(query: string): DirectUserProfile[] {
       .prepare(
         `SELECT user_id as userId, display_name as displayName, MAX(created_at) as lastActiveAt, COUNT(id) as count
          FROM direct_interactions
-         WHERE user_id = ? OR LOWER(display_name) LIKE ?
          GROUP BY user_id
-         LIMIT 15`
+         ORDER BY lastActiveAt DESC
+         LIMIT 200`
       )
-      .all(cleanQuery, `%${cleanQuery.toLowerCase()}%`) as any[];
+      .all() as any[];
 
     for (const r of dmRows) {
-      const existing = userMap.get(r.userId);
-      if (existing) {
-        if (!existing.displayName && r.displayName) existing.displayName = r.displayName;
-        if (r.lastActiveAt > existing.lastActiveAt) existing.lastActiveAt = r.lastActiveAt;
-        existing.count = r.count;
-      } else {
-        userMap.set(r.userId, {
-          displayName: r.displayName || "",
-          source: "direct_interaction",
-          lastActiveAt: r.lastActiveAt || 0,
-          count: r.count,
-        });
+      if (isUserDisplayNameOrIdMatch(r.userId, r.displayName, cleanQuery)) {
+        const existing = userMap.get(r.userId);
+        if (existing) {
+          if (!existing.displayName && r.displayName) existing.displayName = r.displayName;
+          if (r.lastActiveAt > existing.lastActiveAt) existing.lastActiveAt = r.lastActiveAt;
+          existing.count = r.count;
+        } else {
+          userMap.set(r.userId, {
+            displayName: r.displayName || "",
+            source: "direct_interaction",
+            lastActiveAt: r.lastActiveAt || 0,
+            count: r.count,
+          });
+        }
       }
     }
 
@@ -4054,24 +4077,26 @@ export function findDirectUserByNameOrId(query: string): DirectUserProfile[] {
       .prepare(
         `SELECT user_id as userId, user_name as displayName, MAX(updated_at) as lastActiveAt
          FROM user_memories
-         WHERE user_id = ? OR LOWER(user_name) LIKE ?
          GROUP BY user_id
-         LIMIT 15`
+         ORDER BY lastActiveAt DESC
+         LIMIT 100`
       )
-      .all(cleanQuery, `%${cleanQuery.toLowerCase()}%`) as any[];
+      .all() as any[];
 
     for (const r of memUsers) {
-      const existing = userMap.get(r.userId);
-      if (existing) {
-        if (!existing.displayName && r.displayName) existing.displayName = r.displayName;
-        if (r.lastActiveAt > existing.lastActiveAt) existing.lastActiveAt = r.lastActiveAt;
-      } else {
-        userMap.set(r.userId, {
-          displayName: r.displayName || "",
-          source: "memory",
-          lastActiveAt: r.lastActiveAt || 0,
-          count: 0,
-        });
+      if (isUserDisplayNameOrIdMatch(r.userId, r.displayName, cleanQuery)) {
+        const existing = userMap.get(r.userId);
+        if (existing) {
+          if (!existing.displayName && r.displayName) existing.displayName = r.displayName;
+          if (r.lastActiveAt > existing.lastActiveAt) existing.lastActiveAt = r.lastActiveAt;
+        } else {
+          userMap.set(r.userId, {
+            displayName: r.displayName || "",
+            source: "memory",
+            lastActiveAt: r.lastActiveAt || 0,
+            count: 0,
+          });
+        }
       }
     }
 
@@ -4082,34 +4107,37 @@ export function findDirectUserByNameOrId(query: string): DirectUserProfile[] {
                 COALESCE(bg.name, '') as groupName
          FROM group_members gm
          LEFT JOIN bot_groups bg ON gm.group_id = bg.group_id
-         WHERE gm.zalo_user_id = ? OR LOWER(gm.display_name) LIKE ?
-         LIMIT 20`
+         WHERE gm.is_active = 1 OR gm.is_active IS NULL
+         ORDER BY gm.first_seen_at DESC
+         LIMIT 1000`
       )
-      .all(cleanQuery, `%${cleanQuery.toLowerCase()}%`) as any[];
+      .all() as any[];
 
     for (const r of groupMemberRows) {
-      const existing = userMap.get(r.userId);
-      if (existing) {
-        if (!existing.displayName && r.displayName) existing.displayName = r.displayName;
-        if (!existing.groupName && r.groupName) existing.groupName = r.groupName;
-      } else {
-        let msgCount = 0;
-        let lastMsgTs = 0;
-        try {
-          const stats = db
-            .prepare(`SELECT COUNT(id) as c, MAX(ts) as maxTs FROM group_messages WHERE zalo_user_id = ?`)
-            .get(r.userId) as any;
-          msgCount = stats?.c || 0;
-          lastMsgTs = stats?.maxTs || 0;
-        } catch {}
+      if (isUserDisplayNameOrIdMatch(r.userId, r.displayName, cleanQuery)) {
+        const existing = userMap.get(r.userId);
+        if (existing) {
+          if (!existing.displayName && r.displayName) existing.displayName = r.displayName;
+          if (!existing.groupName && r.groupName) existing.groupName = r.groupName;
+        } else {
+          let msgCount = 0;
+          let lastMsgTs = 0;
+          try {
+            const stats = db
+              .prepare(`SELECT COUNT(id) as c, MAX(ts) as maxTs FROM group_messages WHERE zalo_user_id = ?`)
+              .get(r.userId) as any;
+            msgCount = stats?.c || 0;
+            lastMsgTs = stats?.maxTs || 0;
+          } catch {}
 
-        userMap.set(r.userId, {
-          displayName: r.displayName || "",
-          source: "group_member",
-          lastActiveAt: lastMsgTs || 0,
-          count: msgCount,
-          groupName: r.groupName || "",
-        });
+          userMap.set(r.userId, {
+            displayName: r.displayName || "",
+            source: "group_member",
+            lastActiveAt: lastMsgTs || 0,
+            count: msgCount,
+            groupName: r.groupName || "",
+          });
+        }
       }
     }
 
@@ -4118,13 +4146,13 @@ export function findDirectUserByNameOrId(query: string): DirectUserProfile[] {
       .prepare(
         `SELECT zalo_user_id as userId, display_name as displayName
          FROM members
-         WHERE zalo_user_id = ? OR LOWER(display_name) LIKE ?
-         LIMIT 15`
+         ORDER BY first_seen_at DESC
+         LIMIT 500`
       )
-      .all(cleanQuery, `%${cleanQuery.toLowerCase()}%`) as any[];
+      .all() as any[];
 
     for (const r of generalMemberRows) {
-      if (!userMap.has(r.userId)) {
+      if (!userMap.has(r.userId) && isUserDisplayNameOrIdMatch(r.userId, r.displayName, cleanQuery)) {
         let msgCount = 0;
         let lastMsgTs = 0;
         try {
