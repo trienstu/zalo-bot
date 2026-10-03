@@ -50,6 +50,8 @@ import { normalizeExecutionSignals, selectResponseMode } from "./hybrid-routing.
 import { isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
 import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from "./grounding-quota.js";
 import { githubSearch, extractFirstYouTubeUrl } from "./tools/vertical-tools.js";
+import { hasSupportedMediaUrl } from "./tools/video-downloader.js";
+import { isFacebookUrl } from "./tools/facebook-scraper.js";
 import {
   checkIsFileOrVoiceGeneration,
   checkIsVoiceRequest,
@@ -2116,10 +2118,11 @@ QUY TẮC BẮT BUỘC:
       if (matchedYtUrl && !quoteUserPrompt.includes(matchedYtUrl)) {
         quoteUserPrompt += `\n\n[LƯU Ý NGỮ CẢNH HỆ THỐNG]: Người dùng đang yêu cầu xử lý/tóm tắt video YouTube: ${matchedYtUrl}. BẮT BUỘC gọi công cụ 'youtube_transcript_lookup' với URL này để lấy transcript và tóm tắt.`;
       }
+      const combinedQuoteInput = `${question} ${options.quote?.text || ""}`;
+      const hasQuoteMediaLink = Boolean(matchedYtUrl) || hasSupportedMediaUrl(combinedQuoteInput) || isFacebookUrl(combinedQuoteInput);
       const isQuoteExternalAction =
-        Boolean(matchedYtUrl) ||
-        /(?:facebook\.com|fb\.com|fb\.watch|tiktok\.com|vt\.tiktok\.com|youtube\.com|youtu\.be|instagram\.com|twitter\.com|x\.com)\b/i.test(`${question} ${options.quote.text || ""}`) ||
-        /(?:tải|download|lay|lấy|xin|tach|tách)\s+(?:video|clip|mp4|nhạc|audio|mp3)/i.test(`${question} ${options.quote.text || ""}`) ||
+        hasQuoteMediaLink ||
+        /(?:tải|download|lấy|xin|tách)\s+(?:video|clip|mp4|nhạc|audio|mp3|bài\s*hát)/i.test(combinedQuoteInput) ||
         /(?:đọc link|tải trang|cào web|check link|bài viết|bình luận|comment)\s+https?:/i.test(question);
       const needsAgentLoop = (checkIsFileOrVoiceGeneration(question, options.quote.text) || isQuotePlanAction || isQuoteExternalAction) && !isPureGreeting;
       if (needsAgentLoop) {
@@ -3164,10 +3167,10 @@ QUY TẮC BẮT BUỘC:
       }
     }
 
+    const hasMediaLink = Boolean(matchedYtUrl) || hasSupportedMediaUrl(combinedContent) || isFacebookUrl(combinedContent);
     const isExternalLinkOrScrapeAction =
-      Boolean(matchedYtUrl) ||
-      /(?:facebook\.com|fb\.com|fb\.watch|tiktok\.com|vt\.tiktok\.com|youtube\.com|youtu\.be|instagram\.com|twitter\.com|x\.com)\b/i.test(combinedContent) ||
-      /(?:tải|download|lay|lấy|xin|tach|tách)\s+(?:video|clip|mp4|nhạc|audio|mp3)/i.test(combinedContent) ||
+      hasMediaLink ||
+      /(?:tải|download|lấy|xin|tách)\s+(?:video|clip|mp4|nhạc|audio|mp3|bài\s*hát)/i.test(combinedContent) ||
       (!isSearchDisabled && /(?:đọc link|tải trang|cào web|check link|bài viết|bình luận|comment)\s+https?:/i.test(question));
     const needsAgentLoop = isFileOrVoiceReq || isExternalLinkOrScrapeAction;
 

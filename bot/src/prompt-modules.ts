@@ -3,6 +3,8 @@ import { checkIsFileOrVoiceGeneration } from "./tools/file-generator.js";
 import { checkIsMusicRequest } from "./tools/music-generator.js";
 import { isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
 import { isYouTubeUrl } from "./tools/vertical-tools.js";
+import { isFacebookUrl } from "./tools/facebook-scraper.js";
+import { hasSupportedMediaUrl } from "./tools/video-downloader.js";
 
 export function getPromptModuleDocGen(): string {
   return `\n- QUY TẮC BẮT BUỘC KHI TẠO SLIDE THUYẾT TRÌNH, XUẤT FILE TÀI LIỆU (.MD, .DOCX, .XLSX, .PPTX, .HTML, .CSV) HOẶC TẠO VOICE:
@@ -53,31 +55,31 @@ export function getPromptModuleRealEstate(): string {
   + In đậm các số liệu quan trọng, trình bày gạch đầu dòng rõ ràng, mạch lạc, tối ưu hiển thị trên giao diện chat Zalo.\n`;
 }
 
+export function getPromptModuleMediaAndLinks(): string {
+  return `\n- KỸ NĂNG XỬ LÝ LIÊN KẾT & PHƯƠNG TIỆN ĐA NỀN TẢNG (YOUTUBE, FACEBOOK, TIKTOK, REELS, THREADS...):
+  + TỰ ĐỘNG PHÂN TÍCH Ý ĐỊNH CỦA NGƯỜI DÙNG ĐỂ CHỌN CÔNG CỤ CHUẨN XÁC NHẤT (AUTONOMOUS TOOL SELECTION):
+    1. KHI NGƯỜI DÙNG MUỐN ĐỌC NỘI DUNG, TÓM TẮT, PHÂN TÍCH HOẶC HỎI VỀ VIDEO/BÀI VIẾT:
+       * Với YouTube (youtube.com, youtu.be, shorts): BẮT BUỘC gọi công cụ 'youtube_transcript_lookup' để lấy toàn bộ transcript/phụ đề, tiêu đề, thời lượng video và tóm tắt mạch lạc theo các luận điểm chính.
+       * Với Facebook (facebook.com, fb.watch, fb.com): BẮT BUỘC gọi công cụ 'facebook_post_lookup' để đọc caption bài viết và tổng hợp các bình luận nổi bật (đặc biệt là link tài liệu của tác giả ở top comments).
+       * Với Bài báo / Trang web thông thường: Gọi công cụ 'fetch_url' để lấy nội dung bài viết.
+    2. KHI NGƯỜI DÙNG YÊU CẦU TẢI FILE VỀ MÁY HOẶC TÁCH RIÊNG ÂM THANH (LƯU VỀ MÁY):
+       * BẮT BUỘC gọi công cụ 'download_media_video' (hỗ trợ TikTok không logo, YouTube, Facebook Reels/Video, Instagram, X/Twitter, Threads, Reddit, Pinterest, Bilibili...):
+         - Đặt tham số 'format: "audio"' nếu người dùng muốn tách nhạc, lấy MP3, bài hát, chỉ lấy âm thanh.
+         - Đặt tham số 'format: "video"' nếu người dùng muốn tải file video MP4, clip để lưu về máy.
+    3. KHI NGƯỜI DÙNG YÊU CẦU XUẤT BÌNH LUẬN FACEBOOK RA FILE EXCEL (.xlsx):
+       * Gọi công cụ 'facebook_post_lookup' với tham số 'exportCommentsToExcel: true' và 'maxComments: 100'.\n`;
+}
+
 export function getPromptModuleFacebookAnalysis(): string {
-  return `\n- KỸ NĂNG XỬ LÝ LINK BÀI VIẾT VÀ BÌNH LUẬN FACEBOOK (facebook_post_lookup):
-  + Khi người dùng gửi đường link bài viết Facebook (facebook.com, fb.com, fb.watch...) kèm câu hỏi, yêu cầu tóm tắt, viết lại bài hoặc xuất dữ liệu:
-    * BẮT BUỘC SỬ DỤNG CÔNG CỤ 'facebook_post_lookup' để đọc trọn vẹn nội dung bài gốc và các bình luận (đặc biệt là bình luận của chính tác giả chứa link tài liệu/chi tiết bổ sung).
-    * NẾU NGƯỜI DÙNG YÊU CẦU TẢI / XUẤT / TRÍCH XUẤT BÌNH LUẬN RA EXCEL:
-      - Đặt tham số 'exportCommentsToExcel: true' và 'maxComments: 100' (hoặc số lượng yêu cầu). Hệ thống sẽ tự động đóng gói toàn bộ bình luận vào file Excel .xlsx và gửi trực tiếp đính kèm lên Zalo cho người dùng!
-    * NẾU NGƯỜI DÙNG YÊU CẦU TÓM TẮT / VIẾT LẠI THÀNH BÀI POST HOÀN CHỈNH / ĐỌC NỘI DUNG:
-      - Kết hợp nhuần nhuyễn nội dung bài gốc VÀ các bình luận bổ sung của tác giả (chứa link tài nguyên, phần 2, thông tin giải thích) để viết thành một bài post độc lập, mạch lạc, đầy đủ các liên kết tham khảo mà không bị thiếu thông tin!\n`;
+  return getPromptModuleMediaAndLinks();
 }
 
 export function getPromptModuleYouTubeAnalysis(): string {
-  return `\n- KỸ NĂNG TRÍCH XUẤT PHỤ ĐỀ VÀ PHÂN TÍCH VIDEO YOUTUBE (youtube_transcript_lookup):
-  + Khi người dùng gửi đường link YouTube (youtube.com, youtu.be, shorts...) hoặc hỏi về nội dung video, tóm tắt video, video nói gì, phân tích bài giảng/review:
-    * BẮT BUỘC SỬ DỤNG CÔNG CỤ 'youtube_transcript_lookup' với đường link đó để lấy toàn bộ transcript/phụ đề và tiêu đề, thời lượng video.
-    * Sau khi có transcript, hãy tóm tắt mạch lạc, phân tích cấu trúc các luận điểm chính, đúc kết các bài học cốt lõi hoặc giải đáp câu hỏi của người dùng một cách chuyên nghiệp, dễ hiểu.
-    * Nếu video không có phụ đề (CC/Subtitles), hãy dựa vào tiêu đề, tên kênh và mô tả của tác giả do công cụ cung cấp để hỗ trợ người dùng.\n`;
+  return getPromptModuleMediaAndLinks();
 }
 
 export function getPromptModuleVideoDownload(): string {
-  return `\n- KỸ NĂNG TẢI VIDEO VÀ TÁCH ÂM THANH ĐA NỀN TẢNG (download_media_video):
-  + Khi người dùng gửi đường link video (TikTok, YouTube, Facebook Video/Reels, Instagram, X/Twitter...) kèm yêu cầu tải video, tải clip, tách nhạc hoặc lấy audio:
-    * BẮT BUỘC SỬ DỤNG CÔNG CỤ 'download_media_video'.
-    * NẾU NGƯỜI DÙNG YÊU CẦU TÁCH NHẠC / TẢI MP3 / LẤY MP3 / BÀI HÁT / CHỈ LẤY ÂM THANH: BẮT BUỘC ĐẶT THAM SỐ 'format: "audio"'.
-    * NẾU NGƯỜI DÙNG YÊU CẦU TẢI VIDEO / CLIP (TIKTOK KHÔNG LOGO, FACEBOOK, YOUTUBE MP4): BẮT BUỘC ĐẶT THAM SỐ 'format: "video"'.
-    * Hệ thống sẽ tự động tải file chuẩn H.264/MP3 và gửi trực tiếp đính kèm vào nhóm Zalo cho người dùng lưu về máy!\n`;
+  return getPromptModuleMediaAndLinks();
 }
 
 export function buildDynamicSystemPromptModules(params: {
@@ -130,29 +132,17 @@ export function buildDynamicSystemPromptModules(params: {
     extraModules += getPromptModuleRealEstate();
   }
 
-  // 6. Module xử lý bài viết và bình luận Facebook
-  if (
-    /(?:facebook\.com|fb\.com|fb\.watch)/i.test(combinedText) ||
-    /(?:bình\s*luận|comment|cmt|bài\s*post|bài\s*viết)\s+facebook/iu.test(combinedText)
-  ) {
-    extraModules += getPromptModuleFacebookAnalysis();
-  }
-
-  // 7. Module tải Video và tách âm thanh đa nền tảng
-  const isVideoDownloadQuery =
-    /(?:tải|download|lay|lấy|xin|tach|tách)\s+(?:video|clip|mp4|nhạc|audio|mp3|bài\s+hát|tiếng)/i.test(combinedText) ||
-    /(?:tiktok\.com|vt\.tiktok\.com|youtube\.com|youtu\.be|instagram\.com\/reel|facebook\.com\/(?:reel|watch|share)|fb\.watch)\b/i.test(combinedText);
-  if (isVideoDownloadQuery) {
-    extraModules += getPromptModuleVideoDownload();
-  }
-
-  // 8. Module phân tích & tóm tắt video YouTube qua phụ đề (Transcript Lookup)
-  const isYouTubeAnalysisQuery =
+  // 6. Module xử lý liên kết và phương tiện đa nền tảng (YouTube, Facebook, TikTok, Download, Web...)
+  const hasMediaOrLinkContext =
+    hasSupportedMediaUrl(combinedText) ||
     isYouTubeUrl(combinedText) ||
-    (/(?:youtube|youtu\.be)/i.test(combinedText) &&
-      /(?:tóm\s*tắt|tom\s*tat|nội\s*dung|noi\s*dung|nói\s*gì|noi\s*gi|review|phân\s*tích|phan\s*tich|bài\s*học|ý\s*chính|y\s*chinh|transcript|phụ\s*đề)/iu.test(combinedText));
-  if (isYouTubeAnalysisQuery) {
-    extraModules += getPromptModuleYouTubeAnalysis();
+    isFacebookUrl(combinedText) ||
+    /https?:\/\/[^\s]+/i.test(combinedText) ||
+    (/(?:youtube|tiktok|facebook|reels|shorts|video)\b/iu.test(combinedText) &&
+      /(?:tóm\s*tắt|tom\s*tat|nội\s*dung|noi\s*dung|nói\s*gì|noi\s*gi|review|phân\s*tích|tải|download|tách\s*nhạc|mp3|mp4|transcript|phụ\s*đề)/iu.test(combinedText));
+
+  if (hasMediaOrLinkContext) {
+    extraModules += getPromptModuleMediaAndLinks();
   }
 
   return extraModules;

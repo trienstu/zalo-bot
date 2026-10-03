@@ -158,10 +158,10 @@ export function isMotionVideoRequest(text: string, quoteText = ""): boolean {
 
   // 7. Cụm từ nhận diện trực tiếp có kèm động từ hành động rõ ràng
   const directTerms =
-    /(?:^|[^\p{L}\p{N}])(?:làm|tạo|dựng|xuất|quay)\s+(?:video|clip)\s+(?:tiktok|shorts|reels|vox|explainer|chuyển\s*động|motion|so\s*sánh|tin\s*nóng|thời\s*sự|remotion|karaoke|nhảy\s*chữ)\b/iu.test(
+    /(?:^|[^\p{L}\p{N}])(?:làm|tạo|dựng|xuất|quay)\s+(?:video|clip)\s+(?:tiktok|shorts|reels|vox|explainer|chuyển\s*động|motion|so\s*sánh|tin\s*nóng|thời\s*sự|remotion|karaoke|nhảy\s*chữ)(?=[^\p{L}\p{N}]|$)/iu.test(
       qLower,
     ) ||
-    /(?:^|[^\p{L}\p{N}])(?:làm|tạo|dựng|xuất|quay)\s+(?:tiktok|shorts|reels|vox|explainer|motion|remotion)\s+(?:video|clip)\b/iu.test(qLower);
+    /(?:^|[^\p{L}\p{N}])(?:làm|tạo|dựng|xuất|quay)\s+(?:tiktok|shorts|reels|vox|explainer|motion|remotion)\s+(?:video|clip)(?=[^\p{L}\p{N}]|$)/iu.test(qLower);
   if (directTerms) return true;
 
   // 8. Mệnh lệnh tạo video kết hợp với từ khóa thể loại
@@ -171,7 +171,7 @@ export function isMotionVideoRequest(text: string, quoteText = ""): boolean {
     );
 
   const mentionsMotionGenre =
-    /\b(?:tiktok|shorts|reels|vox|explainer|chuyển\s*động|motion|so\s*sánh|versus|vs|đối\s*đầu|tin\s*nóng|thời\s*sự|breaking\s*news|remotion|karaoke|nhảy\s*chữ|bản\s*tin)\b/iu.test(
+    /(?:^|[^\p{L}\p{N}])(?:tiktok|shorts|reels|vox|explainer|chuyển\s*động|motion|so\s*sánh|versus|vs|đối\s*đầu|tin\s*nóng|thời\s*sự|breaking\s*news|remotion|karaoke|nhảy\s*chữ|bản\s*tin)(?=[^\p{L}\p{N}]|$)/iu.test(
       combined,
     );
 

@@ -87,12 +87,22 @@ export function scheduleFileCleanup(filePath: string, delayMs = 120_000): void {
   }, delayMs).unref();
 }
 
+const SUPPORTED_VIDEO_URL_REGEX = /https?:\/\/(?:www\.|m\.|vt\.|v\.|vm\.)?(?:tiktok\.com|youtube\.com|youtu\.be|facebook\.com|fb\.watch|fb\.com|instagram\.com|twitter\.com|x\.com|threads\.net|reddit\.com|pinterest\.com|bilibili\.com)\b/i;
+
 /**
  * Kiểm tra xem URL có thuộc danh sách các nền tảng video hỗ trợ hay không
  */
 export function isSupportedVideoUrl(url: string): boolean {
   if (!url || typeof url !== "string") return false;
-  return /https?:\/\/(?:www\.|m\.|vt\.|v\.|vm\.)?(?:tiktok\.com|youtube\.com|youtu\.be|facebook\.com|fb\.watch|fb\.com|instagram\.com|twitter\.com|x\.com|threads\.net|reddit\.com|pinterest\.com|bilibili\.com)\b/i.test(url.trim());
+  return SUPPORTED_VIDEO_URL_REGEX.test(url.trim());
+}
+
+/**
+ * Kiểm tra xem một đoạn văn bản có chứa liên kết video từ các nền tảng được hỗ trợ hay không
+ */
+export function hasSupportedMediaUrl(text: string): boolean {
+  if (!text || typeof text !== "string") return false;
+  return SUPPORTED_VIDEO_URL_REGEX.test(text);
 }
 
 /**

@@ -64,6 +64,8 @@ import { isPresentationVideoRequest, runPresentationVideoJob } from "./workers/p
 import { isMotionVideoRequest, runMotionVideoJob } from "./workers/motion-video-processor.js";
 import { parseHermesTaskCommand, runHermesTaskJob, handleHermesTaskStatusQuery, handleHermesTaskListQuery } from "./workers/hermes-task-runner.js";
 import { extractFirstYouTubeUrl } from "./tools/vertical-tools.js";
+import { hasSupportedMediaUrl } from "./tools/video-downloader.js";
+import { isFacebookUrl } from "./tools/facebook-scraper.js";
 
 async function deliverGeneratedToolFileDirect(
   api: any,
@@ -3093,10 +3095,11 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       }
     }
 
+    const combinedInput = `${rawText} ${event.quote?.text || ""}`;
+    const hasMediaLink = Boolean(matchedYtUrl) || hasSupportedMediaUrl(combinedInput) || isFacebookUrl(combinedInput);
     const isExternalLinkOrScrapeAction =
-      Boolean(matchedYtUrl) ||
-      /(?:facebook\.com|fb\.com|fb\.watch|tiktok\.com|vt\.tiktok\.com|youtube\.com|youtu\.be|instagram\.com|twitter\.com|x\.com)\b/i.test(`${rawText} ${event.quote?.text || ""}`) ||
-      /(?:tải|download|lay|lấy|xin|tach|tách)\s+(?:video|clip|mp4|nhạc|audio|mp3)/i.test(`${rawText} ${event.quote?.text || ""}`) ||
+      hasMediaLink ||
+      /(?:tải|download|lấy|xin|tách)\s+(?:video|clip|mp4|nhạc|audio|mp3|bài\s*hát)/i.test(combinedInput) ||
       (!isSearchDisabled && /(?:đọc link|tải trang|cào web|check link|bài viết|bình luận|comment)\s+https?:/i.test(rawText));
 
     const needsAgentLoop = checkIsFileOrVoiceGeneration(rawText, event.quote?.text) || isExternalLinkOrScrapeAction;
