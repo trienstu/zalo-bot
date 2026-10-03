@@ -18,6 +18,7 @@ export async function POST(
     const body = (await request.json().catch(() => ({}))) as {
       action?: "start" | "pause" | "resume" | "stop";
       botId?: string;
+      batchLimit?: number;
     };
 
     if (!body.action || !["start", "pause", "resume", "stop"].includes(body.action)) {
@@ -30,7 +31,7 @@ export async function POST(
       return NextResponse.json({ ok: false, error: "Không tìm thấy chiến dịch" }, { status: 404 });
     }
 
-    const ok = controlMktCampaign(id, body.action, botId);
+    const ok = controlMktCampaign(id, body.action, botId, body.batchLimit);
     const updated = getMktCampaign(id, botId);
 
     return NextResponse.json({

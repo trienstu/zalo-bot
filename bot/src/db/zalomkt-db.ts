@@ -28,6 +28,8 @@ export interface ZaloMktCampaignConfig {
   autoFriend?: boolean;
   aiRewrite?: boolean;
   dailyLimit?: number;
+  batchLimit?: number; // Số tin nhắn thành công tối đa cho lượt chạy này (0 hoặc undefined = không giới hạn)
+  runSentCount?: number; // Số tin nhắn đã gửi thành công trong lượt chạy hiện tại
 }
 
 export interface ZaloMktCampaign {
@@ -195,6 +197,16 @@ export function getCampaignById(id: string): ZaloMktCampaign | null {
 export function updateCampaignStatus(id: string, status: ZaloMktCampaign["status"]): void {
   const db = getDb();
   db.prepare(`UPDATE zalomkt_campaigns SET status = ?, updated_at = ? WHERE id = ?`).run(status, Date.now(), id);
+}
+
+/** Cập nhật cấu hình chiến dịch (config_json) */
+export function updateCampaignConfig(id: string, config: ZaloMktCampaignConfig): void {
+  const db = getDb();
+  db.prepare(`UPDATE zalomkt_campaigns SET config_json = ?, updated_at = ? WHERE id = ?`).run(
+    JSON.stringify(config),
+    Date.now(),
+    id,
+  );
 }
 
 /** Lấy lead tiếp theo cần xử lý trong chiến dịch */

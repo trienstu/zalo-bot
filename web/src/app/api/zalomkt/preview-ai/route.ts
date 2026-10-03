@@ -46,24 +46,60 @@ export async function POST(request: Request) {
     }
 
     const recipientName = body.recipientName?.trim() || "Nguyễn Văn A";
-    const gender = typeof body.gender === "number" ? body.gender : 1;
+    const gender = typeof body.gender === "number" ? body.gender : 0;
     const phone = body.phone?.trim() || "0912345678";
     const sdob = body.sdob?.trim() || "";
 
-    let pronoun = "Anh/Chị";
-    if (gender === 1) pronoun = "Anh";
-    else if (gender === 0) pronoun = "Chị";
-
+    let isSenior = false;
     if (sdob && sdob.includes("/")) {
       const parts = sdob.split("/");
       if (parts.length === 3 && parts[2]) {
         const year = parseInt(parts[2], 10);
         const currentYear = new Date().getFullYear();
-        if (!isNaN(year) && year > 1940 && year <= currentYear) {
-          const age = currentYear - year;
-          if (age >= 55) {
-            pronoun = gender === 1 ? "Bác" : "Cô";
+        if (!isNaN(year) && year > 1930 && year <= currentYear) {
+          if (currentYear - year >= 55) {
+            isSenior = true;
           }
+        }
+      }
+    }
+
+    let pronoun = "Anh/Chị";
+    if (gender === 0) {
+      // 0: Nam (chuẩn Zalo API)
+      pronoun = isSenior ? "Bác" : "Anh";
+    } else if (gender === 1) {
+      // 1: Nữ (chuẩn Zalo API)
+      pronoun = isSenior ? "Cô" : "Chị";
+    } else {
+      // Chưa rõ (-1 hoặc 2) -> Heuristic tên tiếng Việt
+      const cleanName = recipientName.toLowerCase();
+      const words = cleanName.split(/\s+/);
+      const femaleIndicators = [
+        "thị", "thi", "nữ", "nu", "hồng", "hong", "thảo", "thao", "mai", "loan",
+        "hoa", "hương", "huong", "lan", "linh", "hằng", "hang", "trang", "phương", "phuong",
+        "quỳnh", "quynh", "thu", "nga", "hà", "ha", "huyền", "huyen", "diệu", "dieu",
+        "oanh", "trâm", "tram", "hạnh", "hanh", "yến", "yen", "dung", "thủy", "thuy",
+        "vy", "nhi", "chi", "ngân", "ngan", "ly", "my", "thư", "thu", "nhung", "tuyết", "tuyet"
+      ];
+      const maleIndicators = [
+        "văn", "van", "trọng", "trong", "tuấn", "tuan", "hùng", "hung", "dũng", "dung",
+        "hoàng", "hoang", "huy", "đức", "duc", "hải", "hai", "nam", "phong", "long",
+        "thành", "thanh", "thắng", "thang", "quân", "quan", "cường", "cuong", "khoa",
+        "kiên", "kien", "sơn", "son", "tùng", "tung", "trung", "hiếu", "hieu", "duy",
+        "đạt", "dat", "bảo", "bao", "phúc", "phuc", "khang", "bách", "bach", "bình", "binh"
+      ];
+
+      if (words.some((w) => w === "thị" || w === "thi")) {
+        pronoun = isSenior ? "Cô" : "Chị";
+      } else if (words.some((w) => w === "văn" || w === "van")) {
+        pronoun = isSenior ? "Bác" : "Anh";
+      } else {
+        const lastName = words[words.length - 1];
+        if (femaleIndicators.includes(lastName)) {
+          pronoun = isSenior ? "Cô" : "Chị";
+        } else if (maleIndicators.includes(lastName)) {
+          pronoun = isSenior ? "Bác" : "Anh";
         }
       }
     }

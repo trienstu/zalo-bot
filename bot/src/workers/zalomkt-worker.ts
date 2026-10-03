@@ -10,6 +10,7 @@ import {
   getNextPendingLead,
   normalizePhoneNumber,
   recalculateCampaignCounts,
+  updateCampaignConfig,
   updateCampaignStatus,
   updateLead,
   upsertMktContact,
@@ -21,6 +22,82 @@ let workerRunning = false;
 let isProcessingLead = false;
 
 /**
+ * Xác định đại từ xưng hô theo chuẩn giới tính Zalo API và bộ quy tắc tiếng Việt.
+ * - gender === 0: Nam (Mặc định: "Anh", nếu >= 55 tuổi: "Bác")
+ * - gender === 1: Nữ (Mặc định: "Chị", nếu >= 55 tuổi: "Cô")
+ * - gender === -1 hoặc 2: Chưa rõ / Ẩn thông tin -> Phân tích chữ đệm & tên tiếng Việt, nếu không chắc -> "Anh/Chị"
+ */
+export function resolveVietnamesePronoun(params: {
+  gender?: number;
+  fullName?: string;
+  sdob?: string;
+}): string {
+  const { gender, fullName = "", sdob = "" } = params;
+
+  let isSenior = false;
+  if (sdob && sdob.includes("/")) {
+    const parts = sdob.split("/");
+    if (parts.length === 3 && parts[2]) {
+      const year = parseInt(parts[2], 10);
+      const currentYear = new Date().getFullYear();
+      if (!isNaN(year) && year > 1930 && year <= currentYear) {
+        if (currentYear - year >= 55) {
+          isSenior = true;
+        }
+      }
+    }
+  }
+
+  // 0: Nam (Chuẩn Zalo Web API)
+  if (gender === 0) {
+    return isSenior ? "Bác" : "Anh";
+  }
+  // 1: Nữ (Chuẩn Zalo Web API)
+  if (gender === 1) {
+    return isSenior ? "Cô" : "Chị";
+  }
+
+  // Heuristic chữ đệm & tên tiếng Việt khi gender === -1 hoặc 2
+  const cleanName = fullName.trim().toLowerCase();
+  if (cleanName) {
+    const words = cleanName.split(/\s+/);
+    const femaleIndicators = [
+      "thị", "thi", "nữ", "nu", "hồng", "hong", "thảo", "thao", "mai", "loan",
+      "hoa", "hương", "huong", "lan", "linh", "hằng", "hang", "trang", "phương", "phuong",
+      "quỳnh", "quynh", "thu", "nga", "hà", "ha", "huyền", "huyen", "diệu", "dieu",
+      "oanh", "trâm", "tram", "hạnh", "hanh", "yến", "yen", "dung", "thủy", "thuy",
+      "vy", "nhi", "chi", "ngân", "ngan", "ly", "my", "thư", "thu", "nhung", "tuyết", "tuyet"
+    ];
+    const maleIndicators = [
+      "văn", "van", "trọng", "trong", "tuấn", "tuan", "hùng", "hung", "dũng", "dung",
+      "hoàng", "hoang", "huy", "đức", "duc", "hải", "hai", "nam", "phong", "long",
+      "thành", "thanh", "thắng", "thang", "quân", "quan", "cường", "cuong", "khoa",
+      "kiên", "kien", "sơn", "son", "tùng", "tung", "trung", "hiếu", "hieu", "duy",
+      "đạt", "dat", "bảo", "bao", "phúc", "phuc", "khang", "bách", "bach", "bình", "binh"
+    ];
+
+    if (words.some((w) => w === "thị" || w === "thi")) {
+      return isSenior ? "Cô" : "Chị";
+    }
+    if (words.some((w) => w === "văn" || w === "van")) {
+      return isSenior ? "Bác" : "Anh";
+    }
+
+    const lastName = words[words.length - 1];
+    if (lastName) {
+      if (femaleIndicators.includes(lastName)) {
+        return isSenior ? "Cô" : "Chị";
+      }
+      if (maleIndicators.includes(lastName)) {
+        return isSenior ? "Bác" : "Anh";
+      }
+    }
+  }
+
+  return "Anh/Chị";
+}
+
+/**
  * Sinh nội dung tin nhắn cá nhân hóa bằng AI (Gemini Flash-Lite).
  * Giữ nguyên 100% nội dung cốt lõi, link, số liên hệ; làm mới câu chữ,
  * điều chỉnh xưng hô theo tên, giới tính, tuổi (nếu có ngày sinh).
@@ -28,31 +105,18 @@ let isProcessingLead = false;
 export async function generatePersonalizedMessage(params: {
   rawContent: string;
   recipientName: string;
-  gender: number; // 0: Nữ, 1: Nam, -1: Chưa rõ
+  gender: number; // 0: Nam, 1: Nữ, -1: Chưa rõ
   phone: string;
   sdob?: string;
 }): Promise<string> {
   const { rawContent, recipientName, gender, phone, sdob } = params;
 
-  // Xác định đại từ xưng hô mặc định
-  let pronoun = "Anh/Chị";
-  if (gender === 1) pronoun = "Anh";
-  else if (gender === 0) pronoun = "Chị";
-
-  // Kiểm tra tuổi từ sdob nếu có năm sinh
-  if (sdob && sdob.includes("/")) {
-    const parts = sdob.split("/");
-    if (parts.length === 3 && parts[2]) {
-      const year = parseInt(parts[2], 10);
-      const currentYear = new Date().getFullYear();
-      if (!isNaN(year) && year > 1940 && year <= currentYear) {
-        const age = currentYear - year;
-        if (age >= 55) {
-          pronoun = gender === 1 ? "Bác" : "Cô";
-        }
-      }
-    }
-  }
+  // Xác định đại từ xưng hô chuẩn xác
+  const pronoun = resolveVietnamesePronoun({
+    gender,
+    fullName: recipientName,
+    sdob,
+  });
 
   const fallbackText = rawContent
     .replace(/\{name\}/gi, recipientName)
@@ -310,9 +374,11 @@ async function processNextLeadInCampaign(api: any, campaign: ZaloMktCampaign): P
       sdob: targetSdob,
     });
   } else {
-    let pronoun = "Anh/Chị";
-    if (targetGender === 1) pronoun = "Anh";
-    else if (targetGender === 0) pronoun = "Chị";
+    const pronoun = resolveVietnamesePronoun({
+      gender: targetGender,
+      fullName: recipientName,
+      sdob: targetSdob,
+    });
     messageText = campaign.raw_content
       .replace(/\{name\}/gi, recipientName)
       .replace(/\{gender_call\}/gi, pronoun)
@@ -358,7 +424,11 @@ async function processNextLeadInCampaign(api: any, campaign: ZaloMktCampaign): P
       status_code: "valid",
     });
 
-    console.log(`[zalomkt-worker] ✅ Gửi tin nhắn thành công tới ${recipientName} (${normalized}).`);
+    // Cập nhật số tin nhắn thành công trong lượt chạy hiện tại
+    config.runSentCount = (config.runSentCount || 0) + 1;
+    updateCampaignConfig(campaign.id, config);
+
+    console.log(`[zalomkt-worker] ✅ Gửi tin nhắn thành công tới ${recipientName} (${normalized}) [Lượt này: ${config.runSentCount}${config.batchLimit ? `/${config.batchLimit}` : ""}].`);
 
     // 7. Tự động đổi tên gợi nhớ: [Tên Zalo] + [SĐT]
     if (autoAlias) {
@@ -414,7 +484,15 @@ async function processNextLeadInCampaign(api: any, campaign: ZaloMktCampaign): P
   // 9. Cập nhật thống kê chiến dịch
   recalculateCampaignCounts(campaign.id);
 
-  // 10. Smart Anti-Ban Random Delay (Giãn cách ngẫu nhiên an toàn)
+  // 10. Kiểm tra định mức số lượng tin nhắn trong lượt chạy này (Batch Limit)
+  const batchLimit = config.batchLimit;
+  if (typeof batchLimit === "number" && batchLimit > 0 && (config.runSentCount || 0) >= batchLimit) {
+    console.log(`[zalomkt-worker] ⏸️ Đã hoàn thành định mức lượt chạy: ${config.runSentCount}/${batchLimit} tin nhắn gửi thành công. Tự động tạm dừng chiến dịch [${campaign.title}] (ID: ${campaign.id}).`);
+    updateCampaignStatus(campaign.id, "paused");
+    return;
+  }
+
+  // 11. Smart Anti-Ban Random Delay (Giãn cách ngẫu nhiên an toàn)
   const randomDelay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
   console.log(`[zalomkt-worker] ⏳ Giãn cách an toàn Anti-Ban: Chờ ${Math.round(randomDelay / 1000)}s trước khi xử lý số tiếp theo...`);
   const sleepCompleted = await smartSleep(randomDelay, campaign.id);

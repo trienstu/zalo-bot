@@ -11,17 +11,37 @@ test("normalizePhoneNumber chuẩn hóa chính xác các định dạng SĐT Vi�
   assert.equal(normalizePhoneNumber("098.765.4321"), "0987654321");
 });
 
+test("resolveVietnamesePronoun xác định chuẩn xác đại từ xưng hô theo Zalo API & Heuristic tiếng Việt", async () => {
+  const { resolveVietnamesePronoun } = await import("./zalomkt-worker.js");
+
+  // 1. Chuẩn Zalo API (0: Nam, 1: Nữ)
+  assert.equal(resolveVietnamesePronoun({ gender: 0, fullName: "Hoàng" }), "Anh");
+  assert.equal(resolveVietnamesePronoun({ gender: 1, fullName: "Hoa" }), "Chị");
+
+  // 2. Kính ngữ người lớn tuổi (>= 55 tuổi từ sdob)
+  assert.equal(resolveVietnamesePronoun({ gender: 0, fullName: "Nguyễn Văn A", sdob: "10/05/1960" }), "Bác");
+  assert.equal(resolveVietnamesePronoun({ gender: 1, fullName: "Trần Thị B", sdob: "10/05/1960" }), "Cô");
+
+  // 3. Giới tính ẩn (-1 hoặc 2) -> Heuristic tên tiếng Việt
+  assert.equal(resolveVietnamesePronoun({ gender: -1, fullName: "Trần Văn Hoàng" }), "Anh");
+  assert.equal(resolveVietnamesePronoun({ gender: -1, fullName: "Nguyễn Thị Mai" }), "Chị");
+  assert.equal(resolveVietnamesePronoun({ gender: 2, fullName: "Phạm Thảo" }), "Chị");
+  assert.equal(resolveVietnamesePronoun({ gender: 2, fullName: "Lê Tuấn" }), "Anh");
+  assert.equal(resolveVietnamesePronoun({ gender: -1, fullName: "Alex Smith" }), "Anh/Chị");
+});
+
 test("generatePersonalizedMessage thay thế token chuẩn xác khi fallback", async () => {
   const raw = "Chào {gender_call} {name}, bên em gửi thông tin qua số {phone}.";
   const result = await generatePersonalizedMessage({
     rawContent: raw,
-    recipientName: "Nguyễn Văn A",
-    gender: 1, // Nam
-    phone: "0912345678",
+    recipientName: "Nguyễn Văn Hoàng",
+    gender: 0, // Nam (Zalo standard)
+    phone: "0342320596",
   });
 
-  assert.ok(result.includes("Nguyễn Văn A"));
-  assert.ok(result.includes("0912345678"));
+  assert.ok(result.includes("Nguyễn Văn Hoàng"));
+  assert.ok(result.includes("0342320596"));
+  assert.ok(result.includes("Anh Nguyễn Văn Hoàng") || result.includes("Chào Anh"));
 });
 
 test("upsertMktContact và getMktContact lưu trữ và truy xuất Profile khách hàng chuẩn xác", () => {
@@ -30,7 +50,7 @@ test("upsertMktContact và getMktContact lưu trữ và truy xuất Profile khá
     phone: testPhone,
     zalo_uid: "uid_test_123",
     display_name: "Anh Test",
-    gender: 1,
+    gender: 0, // Nam
     sdob: "15/08/1990",
     status_code: "valid",
     ai_tags: ["vip", "bds"],
@@ -41,7 +61,7 @@ test("upsertMktContact và getMktContact lưu trữ và truy xuất Profile khá
   assert.equal(contact.phone, testPhone);
   assert.equal(contact.zalo_uid, "uid_test_123");
   assert.equal(contact.display_name, "Anh Test");
-  assert.equal(contact.gender, 1);
+  assert.equal(contact.gender, 0);
   assert.equal(contact.sdob, "15/08/1990");
   assert.equal(contact.status_code, "valid");
   assert.deepEqual(contact.ai_tags, ["vip", "bds"]);
@@ -96,6 +116,33 @@ test("checkAndActivateScheduledCampaigns tự động kích hoạt chiến dịc
   // Kiểm tra trạng thái mới
   const row = db.prepare(`SELECT status FROM zalomkt_campaigns WHERE id = ?`).get(campId) as any;
   assert.equal(row?.status, "running");
+
+  // Dọn dẹp
+  db.prepare(`DELETE FROM zalomkt_campaigns WHERE id = ?`).run(campId);
+});
+
+test("Cấu hình lượt chạy (batchLimit) và updateCampaignConfig lưu trữ chuẩn xác", async () => {
+  const { updateCampaignConfig, getCampaignById } = await import("../db/zalomkt-db.js");
+  const db = getDb();
+  const campId = `camp_batch_test_${Date.now()}`;
+
+  db.prepare(`
+    INSERT INTO zalomkt_campaigns (
+      id, title, raw_content, status, config_json, total_leads, created_at, updated_at
+    ) VALUES (?, 'Test Batch Limit', 'Content', 'running', '{}', 50, ?, ?)
+  `).run(campId, Date.now(), Date.now());
+
+  // Cập nhật cấu hình lượt chạy: giới hạn 30 tin
+  updateCampaignConfig(campId, {
+    batchLimit: 30,
+    runSentCount: 15,
+  });
+
+  const camp = getCampaignById(campId);
+  assert.ok(camp);
+  const cfg = JSON.parse(camp.config_json);
+  assert.equal(cfg.batchLimit, 30);
+  assert.equal(cfg.runSentCount, 15);
 
   // Dọn dẹp
   db.prepare(`DELETE FROM zalomkt_campaigns WHERE id = ?`).run(campId);

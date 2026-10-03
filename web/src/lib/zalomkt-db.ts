@@ -5,7 +5,7 @@ export interface ZaloMktContact {
   zalo_uid?: string | null;
   zalo_name: string;
   display_name: string;
-  gender: number;
+  gender: number; // -1/2: unk, 0: male (Nam), 1: female (Nữ)
   dob?: number | null;
   sdob: string;
   avatar: string;
@@ -19,6 +19,17 @@ export interface ZaloMktContact {
   ai_notes: string;
   created_at: number;
   updated_at: number;
+}
+
+export interface ZaloMktCampaignConfig {
+  minDelay?: number; // ms
+  maxDelay?: number; // ms
+  autoAlias?: boolean;
+  autoFriend?: boolean;
+  aiRewrite?: boolean;
+  dailyLimit?: number;
+  batchLimit?: number; // Số tin nhắn thành công tối đa cho lượt chạy này (0 hoặc undefined: không giới hạn)
+  runSentCount?: number; // Số tin nhắn đã gửi thành công trong lượt chạy hiện tại
 }
 
 export interface ZaloMktCampaign {
@@ -254,12 +265,37 @@ export function controlMktCampaign(
   id: string,
   action: "start" | "pause" | "resume" | "stop",
   botId = "bot-1",
+  batchLimit?: number,
 ): boolean {
   const db = getDb(botId);
   let newStatus: ZaloMktCampaign["status"] = "draft";
   if (action === "start" || action === "resume") newStatus = "running";
   else if (action === "pause") newStatus = "paused";
   else if (action === "stop") newStatus = "stopped";
+
+  // Khi start hoặc resume: nếu có chỉ định batchLimit (hoặc cập nhật lượt chạy mới), cập nhật config_json
+  if (action === "start" || action === "resume") {
+    const camp = db.prepare(`SELECT config_json FROM zalomkt_campaigns WHERE id = ?`).get(id) as any;
+    if (camp) {
+      let config: ZaloMktCampaignConfig = {};
+      try {
+        config = JSON.parse(camp.config_json || "{}");
+      } catch {}
+
+      if (typeof batchLimit === "number") {
+        config.batchLimit = Math.max(0, batchLimit);
+      }
+      config.runSentCount = 0; // Luôn reset bộ đếm gửi thành công của lượt chạy mới này về 0
+
+      const res = db.prepare(`UPDATE zalomkt_campaigns SET status = ?, config_json = ?, updated_at = ? WHERE id = ?`).run(
+        newStatus,
+        JSON.stringify(config),
+        Date.now(),
+        id,
+      );
+      return res.changes > 0;
+    }
+  }
 
   const res = db.prepare(`UPDATE zalomkt_campaigns SET status = ?, updated_at = ? WHERE id = ?`).run(
     newStatus,

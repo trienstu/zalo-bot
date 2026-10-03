@@ -134,10 +134,15 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
   const [uploadingImages, setUploadingImages] = useState(false);
   const [creating, setCreating] = useState(false);
 
+  // State Modal Lượt Chạy (Batch Limit)
+  const [runBatchCamp, setRunBatchCamp] = useState<ZaloMktCampaign | null>(null);
+  const [runBatchAction, setRunBatchAction] = useState<"start" | "resume">("start");
+  const [runBatchLimit, setRunBatchLimit] = useState<number>(30);
+
   // State AI preview modal
   const [showAiPreviewModal, setShowAiPreviewModal] = useState(false);
   const [previewSampleName, setPreviewSampleName] = useState("Nguyễn Văn A");
-  const [previewSampleGender, setPreviewSampleGender] = useState(1);
+  const [previewSampleGender, setPreviewSampleGender] = useState(0); // 0: Nam, 1: Nữ
   const [previewSamplePhone, setPreviewSamplePhone] = useState("0912345678");
   const [previewSampleSdob, setPreviewSampleSdob] = useState("15/08/1990");
   const [previewResult, setPreviewResult] = useState("");
@@ -475,12 +480,16 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
   };
 
   // Điều khiển chiến dịch (Start, Pause, Resume, Stop)
-  const handleControlCampaign = async (id: string, action: "start" | "pause" | "resume" | "stop") => {
+  const handleControlCampaign = async (
+    id: string,
+    action: "start" | "pause" | "resume" | "stop",
+    batchLimit?: number,
+  ) => {
     try {
       const res = await fetch(`/api/zalomkt/campaigns/${id}/control`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ botId, action }),
+        body: JSON.stringify({ botId, action, batchLimit }),
       });
       const data = await res.json();
       if (data.ok) {
@@ -494,6 +503,26 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
     } catch (err: any) {
       alert("Lỗi thao tác: " + String(err));
     }
+  };
+
+  const openRunBatchModal = (camp: ZaloMktCampaign, action: "start" | "resume") => {
+    let campConfig: any = {};
+    try {
+      campConfig = JSON.parse(camp.config_json || "{}");
+    } catch {}
+    const defaultLimit = typeof campConfig.batchLimit === "number" && campConfig.batchLimit > 0
+      ? campConfig.batchLimit
+      : 30;
+    setRunBatchLimit(defaultLimit);
+    setRunBatchAction(action);
+    setRunBatchCamp(camp);
+  };
+
+  const confirmRunBatch = async () => {
+    if (!runBatchCamp) return;
+    const limit = Math.max(0, runBatchLimit);
+    await handleControlCampaign(runBatchCamp.id, runBatchAction, limit);
+    setRunBatchCamp(null);
   };
 
   // Xóa chiến dịch
@@ -744,31 +773,54 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
                               : "Bản nháp"}
                           </Badge>
                         </div>
-                        <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400">
-                          <span className="flex items-center gap-1">
-                            <Clock className="h-3.5 w-3.5 text-slate-500" />
-                            {new Date(camp.created_at).toLocaleString("vi-VN")}
-                          </span>
-                          <span>•</span>
-                          <span>Tổng: <strong className="text-slate-200">{camp.total_leads}</strong> số</span>
-                          <span>•</span>
-                          <span className="text-emerald-400">Thành công: <strong>{camp.sent_count}</strong></span>
-                          <span>•</span>
-                          <span className="text-amber-400">Tự động bỏ qua: <strong>{camp.skipped_count}</strong></span>
-                          {camp.failed_count > 0 && (
-                            <>
+                        {(() => {
+                          let campConfig: any = {};
+                          try {
+                            campConfig = JSON.parse(camp.config_json || "{}");
+                          } catch {}
+                          const batchLimit = campConfig.batchLimit;
+                          const runSentCount = campConfig.runSentCount || 0;
+                          return (
+                            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+                              <span className="flex items-center gap-1">
+                                <Clock className="h-3.5 w-3.5 text-slate-500" />
+                                {new Date(camp.created_at).toLocaleString("vi-VN")}
+                              </span>
                               <span>•</span>
-                              <span className="text-rose-400">Thất bại: <strong>{camp.failed_count}</strong></span>
-                            </>
-                          )}
-                        </div>
+                              <span>Tổng: <strong className="text-slate-200">{camp.total_leads}</strong> số</span>
+                              <span>•</span>
+                              <span className="text-emerald-400">Thành công: <strong>{camp.sent_count}</strong></span>
+                              <span>•</span>
+                              <span className="text-amber-400">Tự động bỏ qua: <strong>{camp.skipped_count}</strong></span>
+                              {camp.failed_count > 0 && (
+                                <>
+                                  <span>•</span>
+                                  <span className="text-rose-400">Thất bại: <strong>{camp.failed_count}</strong></span>
+                                </>
+                              )}
+                              {typeof batchLimit === "number" && batchLimit > 0 && (
+                                <>
+                                  <span>•</span>
+                                  <span className={`px-2 py-0.5 rounded text-[11px] font-semibold border ${
+                                    camp.status === "paused" && runSentCount >= batchLimit
+                                      ? "bg-amber-950/80 text-amber-300 border-amber-500/40"
+                                      : "bg-indigo-950/80 text-indigo-300 border-indigo-500/40"
+                                  }`}>
+                                    🎯 Lượt này: <strong>{runSentCount}/{batchLimit}</strong> tin
+                                    {camp.status === "paused" && runSentCount >= batchLimit ? " (Đã đạt định mức)" : ""}
+                                  </span>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {/* Nút hành động */}
                       <div className="flex items-center gap-2">
                         {(camp.status === "draft" || camp.status === "scheduled") && (
                           <button
-                            onClick={() => handleControlCampaign(camp.id, "start")}
+                            onClick={() => openRunBatchModal(camp, "start")}
                             className="flex items-center gap-1.5 rounded-lg bg-emerald-600/20 px-3 py-1.5 text-xs font-semibold text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30 transition-colors"
                           >
                             <Play className="h-3.5 w-3.5" />
@@ -798,7 +850,7 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
                         {camp.status === "paused" && (
                           <>
                             <button
-                              onClick={() => handleControlCampaign(camp.id, "resume")}
+                              onClick={() => openRunBatchModal(camp, "resume")}
                               className="flex items-center gap-1.5 rounded-lg bg-emerald-600/20 px-3 py-1.5 text-xs font-semibold text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30"
                             >
                               <Play className="h-3.5 w-3.5" />
@@ -952,9 +1004,9 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
                             {lead.zalo_uid && <div className="text-[10px] text-slate-500">UID: {lead.zalo_uid}</div>}
                           </td>
                           <td className="p-3">
-                            {lead.gender === 1 ? (
+                            {lead.gender === 0 ? (
                               <span className="text-sky-400 font-medium">Nam</span>
-                            ) : lead.gender === 0 ? (
+                            ) : lead.gender === 1 ? (
                               <span className="text-pink-400 font-medium">Nữ</span>
                             ) : (
                               <span className="text-slate-500">-</span>
@@ -1172,9 +1224,9 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
                         {c.bio && <div className="text-[10px] text-slate-400 italic truncate max-w-xs">{c.bio}</div>}
                       </td>
                       <td className="p-3">
-                        {c.gender === 1 ? (
+                        {c.gender === 0 ? (
                           <span className="text-sky-400 font-medium">Nam</span>
-                        ) : c.gender === 0 ? (
+                        ) : c.gender === 1 ? (
                           <span className="text-pink-400 font-medium">Nữ</span>
                         ) : (
                           <span className="text-slate-500">-</span>
@@ -1604,8 +1656,9 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
                     onChange={(e) => setPreviewSampleGender(parseInt(e.target.value, 10))}
                     className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 p-2 text-white"
                   >
-                    <option value={1}>Nam (Anh)</option>
-                    <option value={0}>Nữ (Chị)</option>
+                    <option value={0}>Nam (Anh)</option>
+                    <option value={1}>Nữ (Chị)</option>
+                    <option value={-1}>Chưa rõ (Anh/Chị)</option>
                   </select>
                 </div>
               </div>
@@ -1857,6 +1910,107 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
                 className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-500 disabled:opacity-50"
               >
                 {addingPhonesToGroup ? "Đang thêm..." : "Xác Nhận Thêm Vào Nhóm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Modal Cấu hình số lượng tin nhắn trong lượt chạy (Batch Limit) */}
+      {runBatchCamp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Play className="h-4 w-4 text-emerald-400" />
+                {runBatchAction === "start" ? "Bắt Đầu Gửi Tin Nhắn" : "Tiếp Tục Gửi Chiến Dịch"}
+              </h3>
+              <button
+                onClick={() => setRunBatchCamp(null)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4 text-xs">
+              <div className="rounded-xl bg-slate-950/70 border border-slate-800 p-3.5 space-y-1.5">
+                <div className="font-semibold text-white truncate">{runBatchCamp.title}</div>
+                <div className="flex items-center gap-3 text-slate-400 text-[11px]">
+                  <span>Tổng: <strong>{runBatchCamp.total_leads}</strong> số</span>
+                  <span>•</span>
+                  <span className="text-emerald-400">Đã gửi: <strong>{runBatchCamp.sent_count}</strong></span>
+                  <span>•</span>
+                  <span className="text-sky-400">
+                    Còn lại: <strong>{Math.max(0, runBatchCamp.total_leads - runBatchCamp.sent_count - runBatchCamp.skipped_count)}</strong> số
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1">
+                  Số lượng tin nhắn trong lượt chạy này *
+                </label>
+                <p className="text-[11px] text-slate-400 mb-2">
+                  Sau khi gửi đủ số tin nhắn thành công này, chiến dịch sẽ <strong>tự động tạm dừng</strong> để bạn kiểm tra kết quả và tránh bị Zalo đánh dấu spam. (Nhập 0 để gửi hết).
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    max={1000}
+                    value={runBatchLimit}
+                    onChange={(e) => setRunBatchLimit(parseInt(e.target.value, 10) || 0)}
+                    className="w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-sm font-bold text-white focus:border-emerald-500 focus:outline-none"
+                  />
+                  <span className="text-slate-400 font-medium whitespace-nowrap">tin nhắn</span>
+                </div>
+
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  <span className="text-[11px] text-slate-500 self-center mr-1">Chọn nhanh:</span>
+                  {[10, 20, 30, 50, 100].map((num) => (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => setRunBatchLimit(num)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors border ${
+                        runBatchLimit === num
+                          ? "bg-emerald-600/30 text-emerald-300 border-emerald-500/50"
+                          : "bg-slate-800/80 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white"
+                      }`}
+                    >
+                      {num} tin
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setRunBatchLimit(0)}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors border ${
+                      runBatchLimit === 0
+                        ? "bg-amber-600/30 text-amber-300 border-amber-500/50"
+                        : "bg-slate-800/80 text-slate-400 border-slate-700 hover:bg-slate-700 hover:text-white"
+                    }`}
+                  >
+                    Gửi hết (0)
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2 border-t border-slate-800 pt-3">
+              <button
+                type="button"
+                onClick={() => setRunBatchCamp(null)}
+                className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={confirmRunBatch}
+                className="flex items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-500 transition-colors shadow-lg shadow-emerald-950/50"
+              >
+                <Play className="h-3.5 w-3.5" />
+                {runBatchAction === "start" ? `Bắt đầu gửi ${runBatchLimit > 0 ? `(${runBatchLimit} tin)` : ""}` : `Tiếp tục gửi ${runBatchLimit > 0 ? `(${runBatchLimit} tin)` : ""}`}
               </button>
             </div>
           </div>
