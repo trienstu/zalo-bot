@@ -64,7 +64,7 @@ import { isPresentationVideoRequest, runPresentationVideoJob } from "./workers/p
 import { isMotionVideoRequest, runMotionVideoJob } from "./workers/motion-video-processor.js";
 import { parseHermesTaskCommand, runHermesTaskJob, handleHermesTaskStatusQuery, handleHermesTaskListQuery } from "./workers/hermes-task-runner.js";
 import { extractFirstYouTubeUrl } from "./tools/vertical-tools.js";
-import { hasSupportedMediaUrl } from "./tools/video-downloader.js";
+import { hasSupportedMediaUrl, isMediaOrDocUrl } from "./tools/video-downloader.js";
 import { isFacebookUrl } from "./tools/facebook-scraper.js";
 
 async function deliverGeneratedToolFileDirect(
@@ -2482,6 +2482,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
   let mediaPart: GeminiMediaPart | null = null;
   let fileTextContent: string | null = null;
   let imageOcrText: string | null = null;
+  const hasExplicitAttachment = Boolean(
+    event.fileAttachment?.url ||
+    event.quote?.fileAttachment?.url ||
+    event.mediaUrl ||
+    event.quote?.mediaUrl,
+  );
   let targetUrl =
     event.fileAttachment?.url ||
     event.quote?.fileAttachment?.url ||
@@ -2501,7 +2507,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
   if (!targetUrl && event.quote?.text) {
     const urlMatch = event.quote.text.match(/https?:\/\/[^\s]+/i);
-    if (urlMatch) {
+    if (urlMatch && isMediaOrDocUrl(urlMatch[0])) {
       targetUrl = urlMatch[0];
     }
   }
@@ -2515,7 +2521,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
   if (!targetUrl && rawText) {
     const urlMatch = rawText.match(/https?:\/\/[^\s]+/i);
-    if (urlMatch) {
+    if (urlMatch && isMediaOrDocUrl(urlMatch[0])) {
       targetUrl = urlMatch[0];
     }
   }
@@ -2630,46 +2636,50 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         console.log(`[admin-assistant] 📦 Nhận file nén [${fileName}], không phải yêu cầu bóc băng audio, bỏ qua batch audio.`);
       }
     } else {
-      // Báo rõ lỗi tải file theo đúng danh xưng của người dùng
-      if (fileRes?.error === "UNSUPPORTED_IMAGE_FORMAT") {
+      // Chỉ ngắt luồng và báo lỗi tải file nếu người dùng thực sự gửi file/ảnh vật lý qua Zalo
+      if (hasExplicitAttachment) {
+        if (fileRes?.error === "UNSUPPORTED_IMAGE_FORMAT") {
+          await sendDirectText(
+            api,
+            sender,
+            `⚠️ Dạ ${userGreeting} ơi, hình ảnh đính kèm có định dạng "${fileRes.unsupportedMime || "tệp"}" hiện AI chưa hỗ trợ giải mã trực tiếp ạ!\n\n` +
+            `👉 Kính nhờ ${userGreeting} chụp lại màn hình hoặc lưu ảnh dạng JPG/PNG gửi lại giúp em nhé! ☘️`,
+          );
+          return;
+        }
+        if (fileRes?.error === "FILE_TOO_LARGE") {
+          const mb = fileRes.fileSizeBytes ? (fileRes.fileSizeBytes / 1024 / 1024).toFixed(1) : "hơn 50";
+          await sendDirectText(
+            api,
+            sender,
+            `⚠️ Dạ ${userGreeting} ơi, file "${fileName || "tài liệu"}" có dung lượng quá lớn (${mb} MB)!\n\n` +
+            `👉 Do file vượt quá 50MB nên máy chủ không thể tải và giải mã trực tiếp trong vài giây được.\n` +
+            `👉 ${userGreeting} giúp em:\n` +
+            `1. Xuất lại file ở mức Standard / Nén dung lượng (khuyên dùng dưới 30MB - 50MB).\n` +
+            `2. Hoặc gửi file Word (.docx) / Excel (.xlsx) / dán trực tiếp văn bản vào đây, em sẽ nạp và ghi nhớ ngay lập tức ạ! ☘️`,
+          );
+          return;
+        }
+        if (fileRes?.error === "DOWNLOAD_TIMEOUT") {
+          await sendDirectText(
+            api,
+            sender,
+            `⚠️ Dạ ${userGreeting} ơi, đường truyền tải file "${fileName || "tài liệu"}" từ Zalo bị gián đoạn hoặc timeout (do file quá nặng)!\n\n` +
+            `👉 ${userGreeting} vui lòng gửi file nhẹ hơn (dưới 30MB) hoặc gửi file Word / text trực tiếp để em hỗ trợ nhé!`,
+          );
+          return;
+        }
         await sendDirectText(
           api,
           sender,
-          `⚠️ Dạ ${userGreeting} ơi, hình ảnh đính kèm có định dạng "${fileRes.unsupportedMime || "tệp"}" hiện AI chưa hỗ trợ giải mã trực tiếp ạ!\n\n` +
-          `👉 Kính nhờ ${userGreeting} chụp lại màn hình hoặc lưu ảnh dạng JPG/PNG gửi lại giúp em nhé! ☘️`,
+          `⚠️ Dạ ${userGreeting} ơi, em không thể tải hoặc đọc được nội dung từ file "${fileName || "tài liệu"}"!\n\n` +
+          `👉 Nguyên nhân: Link tải file từ Zalo bị gián đoạn, quá hạn hoặc file scan dạng ảnh không có lớp chữ.\n` +
+          `👉 ${userGreeting} vui lòng gửi file dạng văn bản (Word, Excel, PDF chuẩn) hoặc nén file nhẹ hơn để em hỗ trợ nhé!`,
         );
         return;
+      } else {
+        console.log(`[admin-assistant] 🌐 Link không phải tài liệu nhị phân trực tiếp (${targetUrl.slice(0, 60)}), chuyển tiếp sang Agent Loop.`);
       }
-      if (fileRes?.error === "FILE_TOO_LARGE") {
-        const mb = fileRes.fileSizeBytes ? (fileRes.fileSizeBytes / 1024 / 1024).toFixed(1) : "hơn 50";
-        await sendDirectText(
-          api,
-          sender,
-          `⚠️ Dạ ${userGreeting} ơi, file "${fileName || "tài liệu"}" có dung lượng quá lớn (${mb} MB)!\n\n` +
-          `👉 Do file vượt quá 50MB nên máy chủ không thể tải và giải mã trực tiếp trong vài giây được.\n` +
-          `👉 ${userGreeting} giúp em:\n` +
-          `1. Xuất lại file ở mức Standard / Nén dung lượng (khuyên dùng dưới 30MB - 50MB).\n` +
-          `2. Hoặc gửi file Word (.docx) / Excel (.xlsx) / dán trực tiếp văn bản vào đây, em sẽ nạp và ghi nhớ ngay lập tức ạ! ☘️`,
-        );
-        return;
-      }
-      if (fileRes?.error === "DOWNLOAD_TIMEOUT") {
-        await sendDirectText(
-          api,
-          sender,
-          `⚠️ Dạ ${userGreeting} ơi, đường truyền tải file "${fileName || "tài liệu"}" từ Zalo bị gián đoạn hoặc timeout (do file quá nặng)!\n\n` +
-          `👉 ${userGreeting} vui lòng gửi file nhẹ hơn (dưới 30MB) hoặc gửi file Word / text trực tiếp để em hỗ trợ nhé!`,
-        );
-        return;
-      }
-      await sendDirectText(
-        api,
-        sender,
-        `⚠️ Dạ ${userGreeting} ơi, em không thể tải hoặc đọc được nội dung từ file "${fileName || "tài liệu"}"!\n\n` +
-        `👉 Nguyên nhân: Link tải file từ Zalo bị gián đoạn, quá hạn hoặc file scan dạng ảnh không có lớp chữ.\n` +
-        `👉 ${userGreeting} vui lòng gửi file dạng văn bản (Word, Excel, PDF chuẩn) hoặc nén file nhẹ hơn để em hỗ trợ nhé!`,
-      );
-      return;
     }
   }
 
@@ -3097,8 +3107,14 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
     const combinedInput = `${rawText} ${event.quote?.text || ""}`;
     const hasMediaLink = Boolean(matchedYtUrl) || hasSupportedMediaUrl(combinedInput) || isFacebookUrl(combinedInput);
+    const hasAnyWebUrl = /https?:\/\/[^\s]+/i.test(combinedInput);
+    const isWebScrapeIntent =
+      hasAnyWebUrl &&
+      /(?:tóm\s*tắt|tom\s*tat|đọc|xem|nội\s*dung|noi\s*dung|nói\s*gì|noi\s*gi|phân\s*tích|phan\s*tich|tra\s*cứu|bài\s*viết|bài\s*báo|bình\s*luận|comment|cmt|review|cào|check)/iu.test(combinedInput);
+
     const isExternalLinkOrScrapeAction =
       hasMediaLink ||
+      isWebScrapeIntent ||
       /(?:tải|download|lấy|xin|tách)\s+(?:video|clip|mp4|nhạc|audio|mp3|bài\s*hát)/i.test(combinedInput) ||
       (!isSearchDisabled && /(?:đọc link|tải trang|cào web|check link|bài viết|bình luận|comment)\s+https?:/i.test(rawText));
 

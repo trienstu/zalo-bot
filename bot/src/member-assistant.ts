@@ -50,7 +50,7 @@ import { normalizeExecutionSignals, selectResponseMode } from "./hybrid-routing.
 import { isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
 import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from "./grounding-quota.js";
 import { githubSearch, extractFirstYouTubeUrl } from "./tools/vertical-tools.js";
-import { hasSupportedMediaUrl } from "./tools/video-downloader.js";
+import { hasSupportedMediaUrl, isMediaOrDocUrl } from "./tools/video-downloader.js";
 import { isFacebookUrl } from "./tools/facebook-scraper.js";
 import {
   checkIsFileOrVoiceGeneration,
@@ -1157,26 +1157,6 @@ function handleHelpCommand(botName = defaultBotName): string {
   );
 }
 
-function isMediaOrDocUrl(url?: string | null): boolean {
-  if (!url) return false;
-  const clean = (url.split("?")[0] || "").toLowerCase();
-  const mediaExts = [
-    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp",
-    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv",
-    ".mp3", ".wav", ".m4a", ".aac", ".mp4", ".wma", ".flac", ".ogg",
-    ".txt", ".json", ".zip", ".rar", ".7z", ".tar.gz", ".tar"
-  ];
-  if (mediaExts.some((ext) => clean.endsWith(ext))) return true;
-  if (
-    url.includes("zdn.vn") ||
-    url.includes("dlfl.vn") ||
-    url.includes("chat-photo") ||
-    url.includes("res-zalo") ||
-    url.includes("zaloapp") ||
-    url.includes("files-cdn.zalo.me")
-  ) return true;
-  return false;
-}
 
 /**
  * Nhận diện ý định yêu cầu tóm tắt / xem thông tin nhóm khác trong nhóm.

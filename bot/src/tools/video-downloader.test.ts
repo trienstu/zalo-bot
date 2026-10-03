@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   isSupportedVideoUrl,
+  isMediaOrDocUrl,
   ensureVideoOutputDir,
   cleanOldDownloadedVideos,
   downloadMediaVideo,
@@ -62,5 +63,33 @@ test("isYouTubeUrl & extractYouTubeVideoId nhận diện chính xác các địn
   assert.equal(extractYouTubeVideoId("https://youtu.be/hPtpf0rmL5M"), "hPtpf0rmL5M");
   assert.equal(extractYouTubeVideoId("https://youtube.com/shorts/hPtpf0rmL5M"), "hPtpf0rmL5M");
   assert.equal(extractYouTubeVideoId("https://google.com"), null);
+});
+
+test("isMediaOrDocUrl: phân biệt chính xác file tài liệu/ảnh vật lý vs liên kết web/mạng xã hội", () => {
+  // File tài liệu & media trực tiếp -> true
+  assert.equal(isMediaOrDocUrl("https://example.com/tailieu.pdf"), true);
+  assert.equal(isMediaOrDocUrl("https://example.com/baocao.docx?token=123"), true);
+  assert.equal(isMediaOrDocUrl("https://example.com/data.xlsx"), true);
+  assert.equal(isMediaOrDocUrl("https://example.com/slides.pptx"), true);
+  assert.equal(isMediaOrDocUrl("https://example.com/photo.png"), true);
+  assert.equal(isMediaOrDocUrl("https://example.com/audio.mp3"), true);
+  assert.equal(isMediaOrDocUrl("https://example.com/archive.zip"), true);
+
+  // Link Zalo CDN -> true
+  assert.equal(isMediaOrDocUrl("https://res-zalo.zadn.vn/v1/download/xyz"), true);
+  assert.equal(isMediaOrDocUrl("https://files-cdn.zalo.me/xyz"), true);
+
+  // Link mạng xã hội (Facebook, YouTube, TikTok...) -> false (để Agent Loop xử lý qua tool)
+  assert.equal(isMediaOrDocUrl("https://www.facebook.com/share/p/1fV2ipxy5U/?mibextid=wwXIfr"), false);
+  assert.equal(isMediaOrDocUrl("https://fb.watch/xyz"), false);
+  assert.equal(isMediaOrDocUrl("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), false);
+  assert.equal(isMediaOrDocUrl("https://youtu.be/dQw4w9WgXcQ"), false);
+  assert.equal(isMediaOrDocUrl("https://vt.tiktok.com/ZSjRNY3yv/"), false);
+
+  // Trang web thông thường không đuôi file -> false
+  assert.equal(isMediaOrDocUrl("https://vnexpress.net/thoi-su"), false);
+  assert.equal(isMediaOrDocUrl("https://google.com"), false);
+  assert.equal(isMediaOrDocUrl(""), false);
+  assert.equal(isMediaOrDocUrl(null), false);
 });
 

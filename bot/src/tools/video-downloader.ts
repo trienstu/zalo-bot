@@ -106,6 +106,33 @@ export function hasSupportedMediaUrl(text: string): boolean {
 }
 
 /**
+ * Kiểm tra xem một URL có phải là file tài liệu hoặc phương tiện nhị phân (PDF, Word, Excel, PowerPoint, Ảnh, Audio, Zip...)
+ * hoặc link CDN tải file từ Zalo hay không (để tránh nhầm lẫn với link trang web / mạng xã hội thông thường).
+ */
+export function isMediaOrDocUrl(url?: string | null): boolean {
+  if (!url || typeof url !== "string") return false;
+  // Bỏ qua nếu là link mạng xã hội video/bài viết (Facebook, YouTube, TikTok...)
+  if (isSupportedVideoUrl(url)) return false;
+  const clean = (url.split(/[?#]/)[0] || "").toLowerCase();
+  const mediaExts = [
+    ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg",
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv",
+    ".mp3", ".wav", ".m4a", ".aac", ".mp4", ".wma", ".flac", ".ogg",
+    ".txt", ".json", ".zip", ".rar", ".7z", ".tar.gz", ".tar"
+  ];
+  if (mediaExts.some((ext) => clean.endsWith(ext))) return true;
+  if (
+    url.includes("zdn.vn") ||
+    url.includes("dlfl.vn") ||
+    url.includes("chat-photo") ||
+    url.includes("res-zalo") ||
+    url.includes("zaloapp") ||
+    url.includes("files-cdn.zalo.me")
+  ) return true;
+  return false;
+}
+
+/**
  * Tìm đường dẫn file cookies của YouTube cho yt-dlp nếu có
  */
 export function getYtDlpCookiesPath(): string | null {
