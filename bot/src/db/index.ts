@@ -191,6 +191,24 @@ function runColumnMigrations(database: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_mention_alerts_status ON admin_mention_alerts(status, created_at);
     CREATE INDEX IF NOT EXISTS idx_mention_alerts_group ON admin_mention_alerts(group_id, admin_id);
+
+    CREATE TABLE IF NOT EXISTS member_birthdays (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      zalo_user_id  TEXT NOT NULL,
+      group_id      TEXT NOT NULL DEFAULT '',
+      display_name  TEXT NOT NULL DEFAULT '',
+      day           INTEGER NOT NULL,
+      month         INTEGER NOT NULL,
+      year          INTEGER,
+      sdob          TEXT NOT NULL DEFAULT '',
+      note          TEXT NOT NULL DEFAULT '',
+      created_by    TEXT NOT NULL DEFAULT '',
+      created_at    INTEGER NOT NULL,
+      updated_at    INTEGER NOT NULL,
+      UNIQUE(zalo_user_id, group_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_member_birthdays_date ON member_birthdays(month, day);
+    CREATE INDEX IF NOT EXISTS idx_member_birthdays_user ON member_birthdays(zalo_user_id);
   `);
 }
 
@@ -3172,6 +3190,130 @@ export function cancelScheduledReminder(id: number, creatorId?: string): boolean
     return result.changes > 0;
   } catch (e) {
     console.error("[db] cancelScheduledReminder error:", e);
+    return false;
+  }
+}
+
+// ---- QUẢN LÝ SINH NHẬT THÀNH VIÊN (MEMBER BIRTHDAYS) ----
+
+export interface MemberBirthday {
+  id: number;
+  zaloUserId: string;
+  groupId: string;
+  displayName: string;
+  day: number;
+  month: number;
+  year?: number | null;
+  sdob: string;
+  note: string;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export function upsertMemberBirthday(data: {
+  zaloUserId: string;
+  groupId?: string;
+  displayName?: string;
+  day: number;
+  month: number;
+  year?: number | null;
+  sdob?: string;
+  note?: string;
+  createdBy?: string;
+}): boolean {
+  try {
+    const now = Date.now();
+    const gid = data.groupId || "";
+    const sdobStr =
+      data.sdob ||
+      (data.year
+        ? `${String(data.day).padStart(2, "0")}/${String(data.month).padStart(2, "0")}/${data.year}`
+        : `${String(data.day).padStart(2, "0")}/${String(data.month).padStart(2, "0")}`);
+
+    getDb()
+      .prepare(
+        `INSERT INTO member_birthdays (zalo_user_id, group_id, display_name, day, month, year, sdob, note, created_by, created_at, updated_at)
+         VALUES (@zaloUserId, @groupId, @displayName, @day, @month, @year, @sdob, @note, @createdBy, @createdAt, @updatedAt)
+         ON CONFLICT(zalo_user_id, group_id) DO UPDATE SET
+           display_name = CASE WHEN excluded.display_name != '' THEN excluded.display_name ELSE member_birthdays.display_name END,
+           day = excluded.day,
+           month = excluded.month,
+           year = excluded.year,
+           sdob = excluded.sdob,
+           note = CASE WHEN excluded.note != '' THEN excluded.note ELSE member_birthdays.note END,
+           updated_at = excluded.updated_at`,
+      )
+      .run({
+        zaloUserId: data.zaloUserId,
+        groupId: gid,
+        displayName: data.displayName || "",
+        day: data.day,
+        month: data.month,
+        year: data.year ?? null,
+        sdob: sdobStr,
+        note: data.note || "",
+        createdBy: data.createdBy || "",
+        createdAt: now,
+        updatedAt: now,
+      });
+    return true;
+  } catch (e) {
+    console.error("[db] upsertMemberBirthday error:", e);
+    return false;
+  }
+}
+
+export function getTodayMemberBirthdays(month: number, day: number): MemberBirthday[] {
+  try {
+    const rows = getDb()
+      .prepare(
+        `SELECT id, zalo_user_id as zaloUserId, group_id as groupId, display_name as displayName,
+                day, month, year, sdob, note, created_by as createdBy, created_at as createdAt, updated_at as updatedAt
+         FROM member_birthdays
+         WHERE month = ? AND day = ?
+         ORDER BY display_name ASC`,
+      )
+      .all(month, day) as any[];
+    return rows;
+  } catch (e) {
+    console.error("[db] getTodayMemberBirthdays error:", e);
+    return [];
+  }
+}
+
+export function getAllMemberBirthdays(): MemberBirthday[] {
+  try {
+    const rows = getDb()
+      .prepare(
+        `SELECT id, zalo_user_id as zaloUserId, group_id as groupId, display_name as displayName,
+                day, month, year, sdob, note, created_by as createdBy, created_at as createdAt, updated_at as updatedAt
+         FROM member_birthdays
+         ORDER BY month ASC, day ASC`,
+      )
+      .all() as any[];
+    return rows;
+  } catch (e) {
+    console.error("[db] getAllMemberBirthdays error:", e);
+    return [];
+  }
+}
+
+export function deleteMemberBirthday(zaloUserId: string, groupId?: string): boolean {
+  try {
+    if (groupId) {
+      const res = getDb()
+        .prepare(`DELETE FROM member_birthdays WHERE zalo_user_id = ? AND group_id = ?`)
+        .run(zaloUserId, groupId);
+      return res.changes > 0;
+    } else {
+      const res = getDb()
+        .prepare(`DELETE FROM member_birthdays WHERE zalo_user_id = ?`)
+        .run(zaloUserId);
+      return res.changes > 0;
+    }
+  } catch (e) {
+    console.error("[db] deleteMemberBirthday error:", e);
     return false;
   }
 }

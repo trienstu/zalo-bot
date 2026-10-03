@@ -35,10 +35,12 @@ export function handleGroupMentions(
   const { threadId, sender, displayName, text, mentions, groupName, msgId } = params;
 
   if (!mentions || !Array.isArray(mentions) || mentions.length === 0) return;
-  if (!text || !threadId) return;
-
   // Nếu người gửi chính là Admin thì không cần theo dõi tự tag
   if (isUserAdmin(sender)) return;
+
+  // Nếu người gửi là chính con Bot thì không ghi nhận cảnh báo
+  const ownId = typeof _api?.getOwnId === "function" ? String(_api.getOwnId()) : "";
+  if (ownId && sender === ownId) return;
 
   let gName = groupName || "";
   if (!gName) {

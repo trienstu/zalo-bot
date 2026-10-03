@@ -66,6 +66,8 @@ import {
 } from "./audio-utils.js";
 import { isJxlBuffer, transcodeImageWithFfmpeg } from "./image-utils.js";
 import { normalizeZaloMediaUrl } from "./message-extract.js";
+import { handleSetReminder } from "./reminder.js";
+import { handleSetBirthday, handleListUpcomingBirthdays } from "./birthday-reminder.js";
 
 /**
  * Lớp gọi Google Gemini API dùng chung (Tóm tắt hội thoại Zalo, bóc tách dữ liệu).
@@ -1543,10 +1545,43 @@ export interface AgentLoopOptions {
   targetImageUrl?: string;
   onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
   onFileGenerated?: (file: GeneratedFileResult) => Promise<void>;
+  context?: {
+    threadId?: string;
+    isDirect?: boolean;
+    sender?: string;
+    displayName?: string;
+  };
 }
 
 const AGENT_TOOLS_DECLARATION = {
   functionDeclarations: [
+    {
+      name: "set_reminder",
+      description: "Đặt lịch hẹn, báo thức hoặc nhắc nhở công việc vào một thời điểm trong tương lai (giờ, ngày cụ thể hoặc khoảng thời gian sau bao lâu). BẮT BUỘC DÙNG khi người dùng yêu cầu nhắc việc, hẹn giờ, báo thức.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          time: { type: "STRING", description: "Thời gian nhắc hẹn (ví dụ: '15 phút nữa', '09:00 15/10', '8h sáng mai', '17:30 hôm nay', 'ngày 15/10 lúc 9h sáng')" },
+          content: { type: "STRING", description: "Nội dung công việc cần nhắc (ví dụ: 'Họp với đối tác', 'Uống nước', 'Gửi báo giá')" },
+          target: { type: "STRING", enum: ["sender", "all"], description: "'sender' (mặc định) nếu nhắc riêng người yêu cầu, 'all' nếu nhắc cả nhóm" },
+        },
+        required: ["time", "content"],
+      },
+    },
+    {
+      name: "manage_birthday",
+      description: "Quản lý và tra cứu thông tin sinh nhật của thành viên (lưu ngày sinh nhật thành viên, xem danh sách sinh nhật sắp tới).",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          action: { type: "STRING", enum: ["set", "list"], description: "'set' để lưu sinh nhật, 'list' để xem danh sách sinh nhật sắp tới" },
+          name: { type: "STRING", description: "Tên thành viên (nếu action='set')" },
+          dob: { type: "STRING", description: "Ngày sinh định dạng DD/MM hoặc DD/MM/YYYY (nếu action='set')" },
+          note: { type: "STRING", description: "Ghi chú thêm nếu có (ví dụ: Khách VIP, Trưởng phòng)" },
+        },
+        required: ["action"],
+      },
+    },
     {
       name: "web_search",
       description: "Tìm kiếm thông tin thời gian thực, tin tức mới nhất, sự kiện, thời điểm ra mắt, giá cả hoặc số liệu trên web.",
@@ -1971,8 +2006,34 @@ export function getOpenAIAgentTools(): any[] {
   }));
 }
 
-export async function executeAgentTool(name: string, args: Record<string, any>): Promise<any> {
+export async function executeAgentTool(name: string, args: Record<string, any>, context?: any): Promise<any> {
   switch (name) {
+    case "set_reminder": {
+      const time = String(args?.time || "").trim();
+      const content = String(args?.content || "").trim();
+      const target = args?.target === "all" ? "cho cả nhóm" : "";
+      const fullArgs = `${target} ${time} ${content}`.trim();
+      const threadId = context?.threadId || "";
+      const isDirect = Boolean(context?.isDirect ?? true);
+      const sender = context?.sender || "user";
+      const displayName = context?.displayName || "Bạn";
+      const res = handleSetReminder(threadId, isDirect, sender, displayName, fullArgs);
+      return { success: true, message: res };
+    }
+    case "manage_birthday": {
+      const action = String(args?.action || "list").trim();
+      if (action === "set") {
+        const name = String(args?.name || "").trim();
+        const dob = String(args?.dob || "").trim();
+        const note = String(args?.note || "").trim();
+        const full = `${name} ${dob} ${note ? "- " + note : ""}`.trim();
+        const res = handleSetBirthday(full, [], context?.threadId || "", context?.sender || "");
+        return { success: true, message: res };
+      } else {
+        const res = handleListUpcomingBirthdays(30);
+        return { success: true, message: res };
+      }
+    }
     case "weather_forecast": {
       const loc = String(args?.location || "Hồ Chí Minh").trim();
       const targetDate = args?.date ? String(args.date).trim() : undefined;
@@ -2524,7 +2585,7 @@ async function call9RouterAgentLoop(
       }
 
       options?.onToolCall?.(fnName, fnArgs);
-      const result = await executeAgentTool(fnName, fnArgs);
+      const result = await executeAgentTool(fnName, fnArgs, options?.context);
 
       if (
         (fnName === "generate_file" ||
@@ -2795,7 +2856,7 @@ export async function callGeminiAgentLoop(
             fc.args.format = resolveMediaDownloadFormat(fc.args.format, user);
           }
           options?.onToolCall?.(fc.name, fc.args || {});
-          const result = await executeAgentTool(fc.name, fc.args || {});
+          const result = await executeAgentTool(fc.name, fc.args || {}, options?.context);
           if ((fc.name === "generate_file" || fc.name === "create_voice" || fc.name === "generate_image" || fc.name === "generate_video" || fc.name === "generate_music" || (fc.name === "download_media_video" && result?.filePath) || (fc.name === "facebook_post_lookup" && result?.filePath)) && result?.success && options?.onFileGenerated) {
             try {
               await options.onFileGenerated({

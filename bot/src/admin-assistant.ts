@@ -34,7 +34,8 @@ import { getSystemTemporalPrompt } from "./temporal.js";
 import { defaultBotName } from "./config.js";
 import { type MemberMessageEvent } from "./member-assistant.js";
 import { getWeatherReport } from "./weather.js";
-import { handleSetReminder, handleListReminders, handleCancelReminder } from "./reminder.js";
+import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam } from "./reminder.js";
+import { handleSetBirthday, handleListUpcomingBirthdays, handleDeleteBirthday, parseBirthdayInput } from "./birthday-reminder.js";
 import { getDailyAiNewsBriefing } from "./ai-news.js";
 import { searchRealtimeNews } from "./realtime-search.js";
 import { planSearchQueries } from "./query-planner.js";
@@ -1712,6 +1713,17 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     return;
   }
 
+  // 2.3b. Nhận diện nhắc việc / hẹn giờ bằng câu nói tự nhiên (không cần gõ /hengio)
+  const hasReminderWord = /(?:nhắc|nhac|báo thức|bao thuc|hẹn giờ|hen gio|đặt lịch|dat lich|nhớ nhắc|nho nhac|remind|alarm)/i.test(rawText);
+  if (hasReminderWord) {
+    const naturalReminder = parseNaturalTimeVietnam(rawText);
+    if (naturalReminder) {
+      const reply = handleSetReminder(sender, true, sender, displayName, rawText);
+      await sendDirectText(api, sender, reply);
+      return;
+    }
+  }
+
   // 2.4. Lệnh /dsnhac, /lichnhac (Danh sách lịch hẹn)
   if (lower === "/dsnhac" || lower === "!dsnhac" || lower === "/lichnhac" || lower === "dsnhac") {
     const reply = handleListReminders(sender);
@@ -1725,6 +1737,51 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     const reply = handleCancelReminder(sender, idStr);
     await sendDirectText(api, sender, reply);
     return;
+  }
+
+  // 2.6. Lệnh /sinhnhat [Tên/@User] [DD/MM] [Ghi chú]
+  if (lower.startsWith("/sinhnhat ") || lower.startsWith("!sinhnhat ")) {
+    const args = rawText.replace(/^\/(?:sinhnhat|!sinhnhat)\s+/i, "").trim();
+    const reply = handleSetBirthday(args, event.mentions || [], "", sender);
+    await sendDirectText(api, sender, reply);
+    return;
+  }
+
+  // 2.7. Lệnh /dssinhnhat, /sinhnhat saptoi (Xem danh sách sinh nhật)
+  if (
+    lower === "/dssinhnhat" ||
+    lower === "!dssinhnhat" ||
+    lower === "dssinhnhat" ||
+    lower === "/sinhnhat" ||
+    lower === "!sinhnhat" ||
+    lower.includes("sinh nhật sắp tới") ||
+    lower.includes("sinh nhat sap toi") ||
+    lower.includes("hôm nay sinh nhật ai")
+  ) {
+    const reply = handleListUpcomingBirthdays(30);
+    await sendDirectText(api, sender, reply);
+    return;
+  }
+
+  // 2.7b. Lệnh /xoasinhnhat [Tên/@User]
+  if (lower.startsWith("/xoasinhnhat ") || lower.startsWith("!xoasinhnhat ")) {
+    const args = rawText.replace(/^\/(?:xoasinhnhat|!xoasinhnhat)\s+/i, "").trim();
+    const reply = handleDeleteBirthday(args);
+    await sendDirectText(api, sender, reply);
+    return;
+  }
+
+  // 2.7c. Tự nhiên: "lưu sinh nhật...", "sinh nhật của [Tên] là..."
+  if (
+    /(?:lưu|luu|thêm|them|cài|cai|đặt|dat)\s*(?:ngày\s*)?sinh\s*nhật/i.test(rawText) ||
+    /(?:sinh\s*nhật|ngay\s*sinh)\s+(?:của|cho)\s+/i.test(rawText)
+  ) {
+    const parsedBday = parseBirthdayInput(rawText, event.mentions || []);
+    if (parsedBday) {
+      const reply = handleSetBirthday(rawText, event.mentions || [], "", sender);
+      await sendDirectText(api, sender, reply);
+      return;
+    }
   }
 
   // 2.8. Lệnh xem danh sách Kho Tri Thức Vĩnh Viễn: /kienthuc hoặc /dskienthuc
@@ -3031,6 +3088,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
         model: targetModel,
         mediaParts: mediaPart ? [mediaPart] : undefined,
         targetImageUrl: targetUrl,
+        context: { threadId: sender, isDirect: true, sender, displayName },
         onToolCall: (toolName, args) => {
           if (toolName === "generate_image") {
             const promptPreview = String(args?.prompt || "").slice(0, 45);

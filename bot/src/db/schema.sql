@@ -830,4 +830,25 @@ CREATE TABLE IF NOT EXISTS zalomkt_contact_group_members (
 
 CREATE INDEX IF NOT EXISTS idx_zalomkt_cgm_phone ON zalomkt_contact_group_members(phone);
 
+-- 6. Quản Lý Ngày Sinh Nhật Thành Viên / Khách Hàng
+CREATE TABLE IF NOT EXISTS member_birthdays (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  zalo_user_id        TEXT NOT NULL,
+  group_id            TEXT NOT NULL DEFAULT '',
+  display_name        TEXT NOT NULL DEFAULT '',
+  day                 INTEGER NOT NULL,          -- 1 - 31
+  month               INTEGER NOT NULL,          -- 1 - 12
+  year                INTEGER,                   -- Ví dụ: 1990 (tùy chọn)
+  sdob                TEXT NOT NULL DEFAULT '',  -- 'DD/MM' hoặc 'DD/MM/YYYY'
+  note                TEXT NOT NULL DEFAULT '',  -- Ghi chú thêm (vd: Khách VIP, Trưởng phòng)
+  created_by          TEXT NOT NULL DEFAULT '',  -- Admin ID người tạo
+  created_at          INTEGER NOT NULL,
+  updated_at          INTEGER NOT NULL,
+  UNIQUE(zalo_user_id, group_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_member_birthdays_date ON member_birthdays(month, day);
+CREATE INDEX IF NOT EXISTS idx_member_birthdays_user ON member_birthdays(zalo_user_id);
+
+
 

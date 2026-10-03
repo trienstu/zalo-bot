@@ -59,6 +59,7 @@ import { getDailyAiNewsBriefing } from "./ai-news.js";
 import { syncGroupMembers } from "./member-sync.js";
 import { saveZaloImage } from "./zalo-media.js";
 import { initZaloMktWorker } from "./workers/zalomkt-worker.js";
+import { checkDailyBirthdayCronLoop } from "./birthday-reminder.js";
 import { KICK_LOCK_KEY, KICK_LOCK_STALE_MS } from "./commands/monthly-cleanup.js";
 import { runDailySummarySafe } from "./commands/daily-summary.js";
 import { handleMemberInteraction } from "./member-assistant.js";
@@ -1001,11 +1002,14 @@ export async function runListener(): Promise<void> {
           now: Date.now(),
         });
 
+        const ownId = typeof api?.getOwnId === "function" ? String(api.getOwnId()) : "";
+        const isMsgSelf = Boolean(payload?.isSelf) || Boolean(ownId && sender === ownId);
+
         // Ghi nhận hoạt động Admin trong nhóm (hủy cảnh báo tag) và kiểm tra tag/độ gấp
         handleAdminActivity(threadId, sender);
 
         const mentions = Array.isArray(payload?.data?.mentions) ? payload.data.mentions : [];
-        if (mentions.length > 0) {
+        if (mentions.length > 0 && !isMsgSelf) {
           handleGroupMentions(api, {
             threadId,
             sender,
@@ -1047,8 +1051,6 @@ export async function runListener(): Promise<void> {
         // 1. Nhóm ở chế độ 🟢 'interactive' (Toàn quyền tương tác)
         // 2. TUYỆT ĐỐI KHÔNG PHẢN HỒI tin nhắn của chính Bot (!isMsgSelf)
         const currentGroupMode = getGroupMode(threadId);
-        const ownId = typeof api?.getOwnId === "function" ? String(api.getOwnId()) : "";
-        const isMsgSelf = Boolean(payload?.isSelf) || Boolean(ownId && sender === ownId);
 
         if (currentGroupMode === "interactive" && !isMsgSelf) {
           const mentions = Array.isArray(payload?.data?.mentions) ? payload.data.mentions : [];
@@ -1516,6 +1518,12 @@ export async function runListener(): Promise<void> {
     }
   }
   setInterval(() => void checkRemindersLoop(), 15000);
+
+  // =========================================================================
+  // VÒNG LẶP KIỂM TRA & THÔNG BÁO SINH NHẬT THÀNH VIÊN CHO SẾP (MỖI 60 GIÂY)
+  // =========================================================================
+  setInterval(() => void checkDailyBirthdayCronLoop(api), 60000);
+  void checkDailyBirthdayCronLoop(api);
 
   // =========================================================================
   // VÒNG LẶP GỬI BẢN TIN THỜI TIẾT & CHÀO BUỔI SÁNG TỰ ĐỘNG (MỖI 30 GIÂY)

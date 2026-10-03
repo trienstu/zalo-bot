@@ -92,7 +92,7 @@ export function parseNaturalTimeVietnam(text: string): { remindAt: number; conte
     targetType = "all";
   }
 
-  // 1. Mẫu: "HH:mm mai", "HHh sáng mai", "HHh tối mai", "HH:mm ngày mai", "8h tối mai", "mai 8h"
+  // 1a. Mẫu: "HH:mm mai", "HHh sáng mai", "HHh tối mai", "HH:mm ngày mai", "8h tối mai", "mai 8h"
   const tomorrowMatch = raw.match(/(?:nhắc\s+(?:tôi|tao|mình|em|anh|cả nhóm|mọi người)\s+)?(\d{1,2})(?:[:h](\d{1,2}))?\s*(?:h|giờ)?\s*(sáng|trưa|chiều|tối|đêm)?\s*(?:ngày\s*)?mai\s*[:,-]?\s*(.*)/i);
   if (tomorrowMatch && tomorrowMatch[1]) {
     let h = parseInt(tomorrowMatch[1], 10);
@@ -107,6 +107,25 @@ export function parseNaturalTimeVietnam(text: string): { remindAt: number; conte
 
     remindAt = makeVietnamTimestamp(vn.year, vn.month, vn.day + 1, h, m);
     cleanContent = tomorrowMatch[4]?.trim() || "Có việc cần làm";
+  }
+
+  // 1b. Mẫu: "mai lúc 8h", "ngày mai 9h sáng", "ngày mai lúc 14:30" (mai/ngày mai đứng trước giờ)
+  if (!remindAt) {
+    const tmrPrefixMatch = raw.match(/(?:nhắc\s+(?:tôi|tao|mình|em|anh|cả nhóm|mọi người)\s+)?(?:vào\s+)?(?:ngày\s*)?mai(?:\s+(?:lúc|vào))?\s*(\d{1,2})(?:[:h](\d{1,2}))?\s*(?:h|giờ)?\s*(sáng|trưa|chiều|tối|đêm)?\s*[:,-]?\s*(.*)/i);
+    if (tmrPrefixMatch && tmrPrefixMatch[1]) {
+      let h = parseInt(tmrPrefixMatch[1], 10);
+      const m = tmrPrefixMatch[2] ? parseInt(tmrPrefixMatch[2], 10) : 0;
+      const period = tmrPrefixMatch[3]?.toLowerCase();
+
+      if (period === "tối" || period === "chiều") {
+        if (h < 12) h += 12;
+      } else if (period === "sáng" && h === 12) {
+        h = 0;
+      }
+
+      remindAt = makeVietnamTimestamp(vn.year, vn.month, vn.day + 1, h, m);
+      cleanContent = tmrPrefixMatch[4]?.trim() || "Có việc cần làm";
+    }
   }
 
   // 2. Mẫu: "N phút nữa", "N p nữa", "N phút", "Np" (ví dụ: "15p uống nước", "20 phút nữa vào họp")
@@ -133,20 +152,98 @@ export function parseNaturalTimeVietnam(text: string): { remindAt: number; conte
     }
   }
 
-  // 4. Mẫu: "HH:mm DD/MM" (ví dụ: "15:00 30/08 họp ban quản trị")
+  // 4a. Mẫu ngày đứng trước giờ: "ngày 15/10 lúc 9h sáng họp", "15/10 9h", "ngày 15/10/2026 lúc 14:00"
   if (!remindAt) {
-    const specificDateMatch = raw.match(/(?:nhắc\s+(?:tôi|tao|mình|em|anh|cả nhóm|mọi người)\s+)?(\d{1,2})[:h](\d{2})\s+(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?\s*[:,-]?\s*(.*)/i);
-    if (specificDateMatch && specificDateMatch[1] && specificDateMatch[2] && specificDateMatch[3] && specificDateMatch[4]) {
-      const h = parseInt(specificDateMatch[1], 10);
-      const m = parseInt(specificDateMatch[2], 10);
-      const day = parseInt(specificDateMatch[3], 10);
-      const month = parseInt(specificDateMatch[4], 10) - 1;
-      const year = specificDateMatch[5] ? parseInt(specificDateMatch[5], 10) : vn.year;
+    const dateFirstMatch = raw.match(
+      /(?:nhắc\s+(?:tôi|tao|mình|em|anh|cả nhóm|mọi người)\s+)?(?:vào\s+)?(?:ngày\s+)?\b(\d{1,2})[\/\.-](\d{1,2})(?:[\/\.-](\d{4}))?\b\s+(?:(?:lúc|vào)\s+)?(\d{1,2})(?:[:h](\d{2}))?\s*(h|giờ)?\s*(sáng|trưa|chiều|tối|đêm)?\s*[:,-]?\s*(.*)/i,
+    );
+    if (
+      dateFirstMatch &&
+      dateFirstMatch[1] &&
+      dateFirstMatch[2] &&
+      dateFirstMatch[4] &&
+      (dateFirstMatch[5] || dateFirstMatch[6] || dateFirstMatch[7] || /(?:lúc|vào)\s+\d{1,2}/i.test(raw))
+    ) {
+      const day = parseInt(dateFirstMatch[1], 10);
+      const month = parseInt(dateFirstMatch[2], 10) - 1;
+      let year = dateFirstMatch[3] ? parseInt(dateFirstMatch[3], 10) : vn.year;
+      let h = parseInt(dateFirstMatch[4], 10);
+      const m = dateFirstMatch[5] ? parseInt(dateFirstMatch[5], 10) : 0;
+      const period = dateFirstMatch[7]?.toLowerCase();
 
-      const targetTs = makeVietnamTimestamp(year, month, day, h, m);
+      if (period === "tối" || period === "chiều") {
+        if (h < 12) h += 12;
+      } else if (period === "sáng" && h === 12) {
+        h = 0;
+      }
+
+      let targetTs = makeVietnamTimestamp(year, month, day, h, m);
+      if (!dateFirstMatch[3] && targetTs < Date.now()) {
+        year += 1;
+        targetTs = makeVietnamTimestamp(year, month, day, h, m);
+      }
       if (targetTs > Date.now()) {
         remindAt = targetTs;
-        cleanContent = specificDateMatch[6]?.trim() || "Có việc cần làm";
+        cleanContent = dateFirstMatch[8]?.trim() || "Có việc cần làm";
+      }
+    }
+  }
+
+  // 4b. Mẫu giờ đứng trước ngày: "15:00 30/08", "lúc 9h sáng ngày 15/10", "9h ngày 15/10"
+  if (!remindAt) {
+    const timeFirstMatch = raw.match(
+      /(?:nhắc\s+(?:tôi|tao|mình|em|anh|cả nhóm|mọi người)\s+)?(?:vào\s+|lúc\s+)?(\d{1,2})(?:[:h](\d{2}))?\s*(h|giờ)?\s*(sáng|trưa|chiều|tối|đêm)?\s*(?:vào\s+)?(?:ngày\s+)?\b(\d{1,2})[\/\.-](\d{1,2})(?:[\/\.-](\d{4}))?\b\s*[:,-]?\s*(.*)/i,
+    );
+    if (
+      timeFirstMatch &&
+      timeFirstMatch[1] &&
+      timeFirstMatch[5] &&
+      timeFirstMatch[6] &&
+      (timeFirstMatch[2] || timeFirstMatch[3] || timeFirstMatch[4] || /(?:lúc|vào)\s+\d{1,2}/i.test(raw))
+    ) {
+      let h = parseInt(timeFirstMatch[1], 10);
+      const m = timeFirstMatch[2] ? parseInt(timeFirstMatch[2], 10) : 0;
+      const period = timeFirstMatch[4]?.toLowerCase();
+      const day = parseInt(timeFirstMatch[5], 10);
+      const month = parseInt(timeFirstMatch[6], 10) - 1;
+      let year = timeFirstMatch[7] ? parseInt(timeFirstMatch[7], 10) : vn.year;
+
+      if (period === "tối" || period === "chiều") {
+        if (h < 12) h += 12;
+      } else if (period === "sáng" && h === 12) {
+        h = 0;
+      }
+
+      let targetTs = makeVietnamTimestamp(year, month, day, h, m);
+      if (!timeFirstMatch[7] && targetTs < Date.now()) {
+        year += 1;
+        targetTs = makeVietnamTimestamp(year, month, day, h, m);
+      }
+      if (targetTs > Date.now()) {
+        remindAt = targetTs;
+        cleanContent = timeFirstMatch[8]?.trim() || "Có việc cần làm";
+      }
+    }
+  }
+
+  // 4c. Mẫu chỉ có ngày, không nói giờ (mặc định 08:30 sáng): "nhắc anh ngày 15/10 sinh nhật đối tác A"
+  if (!remindAt) {
+    const dateOnlyMatch = raw.match(
+      /(?:nhắc\s+(?:tôi|tao|mình|em|anh|cả nhóm|mọi người)\s+)?(?:vào\s+)?(?:ngày\s+)?\b(\d{1,2})[\/\.-](\d{1,2})(?:[\/\.-](\d{4}))?\b\s*[:,-]?\s*(.*)/i,
+    );
+    if (dateOnlyMatch && dateOnlyMatch[1] && dateOnlyMatch[2]) {
+      const day = parseInt(dateOnlyMatch[1], 10);
+      const month = parseInt(dateOnlyMatch[2], 10) - 1;
+      let year = dateOnlyMatch[3] ? parseInt(dateOnlyMatch[3], 10) : vn.year;
+
+      let targetTs = makeVietnamTimestamp(year, month, day, 8, 30);
+      if (!dateOnlyMatch[3] && targetTs < Date.now()) {
+        year += 1;
+        targetTs = makeVietnamTimestamp(year, month, day, 8, 30);
+      }
+      if (targetTs > Date.now()) {
+        remindAt = targetTs;
+        cleanContent = dateOnlyMatch[4]?.trim() || "Có việc cần làm";
       }
     }
   }
@@ -192,10 +289,10 @@ export function parseNaturalTimeVietnam(text: string): { remindAt: number; conte
 
   // Xóa bớt các từ thừa ở đầu và cuối nội dung
   cleanContent = cleanContent
-    .replace(/^(?:nhắc|nhac)?\s*(?:tôi|tao|mình|em|anh|cả nhóm|mọi người|anh em|cho em|cho anh)?\s*/gi, "")
-    .replace(/^(?:báo|bao|làm|lam|rằng|rang|là|la|rồi)\s+/gi, "")
+    .replace(/^(?:nhắc|nhac)?\s*(?:tôi|tao|mình|em|anh|cả nhóm|mọi người|anh em|cho em|cho anh|hộ anh|giúp anh)?\s*/gi, "")
+    .replace(/^(?:báo|bao|làm|lam|rằng|rang|là|la|rồi|phải|đi|về việc|ve viec)\s+/gi, "")
     .replace(/^[:,-]\s*/, "")
-    .replace(/\s*(?:nhe|nhé|nha|nhá|ạ|a|nghen|nhen)$/gi, "")
+    .replace(/\s*(?:nhe|nhé|nha|nhá|ạ|a|nghen|nhen|nhé sếp|nhe sep)$/gi, "")
     .trim();
 
   if (!cleanContent) {

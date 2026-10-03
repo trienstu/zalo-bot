@@ -33,7 +33,8 @@ import {
 } from "./gemini.js";
 import { getWeatherReport } from "./weather.js";
 import { getDailyAiNewsBriefing } from "./ai-news.js";
-import { handleSetReminder, handleListReminders, handleCancelReminder } from "./reminder.js";
+import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam } from "./reminder.js";
+import { handleSetBirthday, handleListUpcomingBirthdays } from "./birthday-reminder.js";
 import { searchRealtimeNews } from "./realtime-search.js";
 import { refreshDynamicKnowledgeIfExpired, fetchGoogleContent, parseGoogleUrl } from "./google-sync.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
@@ -1581,6 +1582,7 @@ async function handleHistoryQA(
           timeoutMs: dynamicTimeout,
           mediaParts: mediaPart ? [mediaPart] : undefined,
           targetImageUrl: targetUrl,
+          context: { threadId, isDirect: false, sender: options?.sender || "", displayName },
           onToolCall: (toolName, args) => {
             if (toolName === "generate_image") {
               const promptPreview = String(args?.prompt || "").slice(0, 45);
@@ -2122,6 +2124,7 @@ QUY TẮC BẮT BUỘC:
           maxTurns: 3,
           timeoutMs: dynamicTimeout,
           mediaParts: mediaPart ? [mediaPart] : undefined,
+          context: { threadId, isDirect: false, sender: options?.sender || options?.quote?.senderId || "", displayName },
           onFileGenerated: async (file) => {
             try {
               if (options?.api) {
@@ -3157,6 +3160,7 @@ QUY TẮC BẮT BUỘC:
         timeoutMs: dynamicTimeout,
         mediaParts: mediaPart ? [mediaPart] : undefined,
         targetImageUrl: options?.imageUrl || targetUrl,
+        context: { threadId, isDirect: false, sender: options?.sender || "", displayName },
         onToolCall: (toolName, args) => {
           if (toolName === "generate_image") {
             const promptPreview = String(args?.prompt || "").slice(0, 45);
@@ -4160,6 +4164,19 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     return;
   }
 
+  // 7b. Nhận diện nhắc việc / hẹn giờ bằng câu nói tự nhiên
+  const hasReminderWord = /(?:nhắc|nhac|báo thức|bao thuc|hẹn giờ|hen gio|đặt lịch|dat lich|nhớ nhắc|nho nhac|remind|alarm)/i.test(rawText);
+  if (hasReminderWord) {
+    const naturalReminder = parseNaturalTimeVietnam(rawText);
+    if (naturalReminder) {
+      userCooldowns.set(sender, now);
+      const reply = handleSetReminder(threadId, false, sender, displayName, rawText);
+      await sendGroupText(api, threadId, reply);
+      console.log(`[member-assistant] ✅ Đã lưu lịch hẹn tự nhiên cho ${displayName}`);
+      return;
+    }
+  }
+
   // 8. Lệnh /dsnhac, /lichnhac
   if (lower === "/dsnhac" || lower === "!dsnhac" || lower === "/lichnhac" || lower === "dsnhac") {
     userCooldowns.set(sender, now);
@@ -4176,6 +4193,32 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
     const reply = handleCancelReminder(sender, idStr);
     await sendGroupText(api, threadId, reply);
     console.log(`[member-assistant] ✅ Đã hủy lịch hẹn cho ${displayName}`);
+    return;
+  }
+
+  // 9.05. Lệnh /sinhnhat [Tên/@User] [DD/MM] [Ghi chú]
+  if (lower.startsWith("/sinhnhat ") || lower.startsWith("!sinhnhat ")) {
+    userCooldowns.set(sender, now);
+    const args = rawText.replace(/^\/(?:sinhnhat|!sinhnhat)\s+/i, "").trim();
+    const reply = handleSetBirthday(args, event.mentions || [], threadId, sender);
+    await sendGroupText(api, threadId, reply);
+    return;
+  }
+
+  // 9.06. Lệnh /dssinhnhat, /sinhnhat saptoi (Xem danh sách sinh nhật)
+  if (
+    lower === "/dssinhnhat" ||
+    lower === "!dssinhnhat" ||
+    lower === "dssinhnhat" ||
+    lower === "/sinhnhat" ||
+    lower === "!sinhnhat" ||
+    lower.includes("sinh nhật sắp tới") ||
+    lower.includes("sinh nhat sap toi") ||
+    lower.includes("hôm nay sinh nhật ai")
+  ) {
+    userCooldowns.set(sender, now);
+    const reply = handleListUpcomingBirthdays(30);
+    await sendGroupText(api, threadId, reply);
     return;
   }
 
