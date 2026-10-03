@@ -49,7 +49,7 @@ import { answerWithHybridRouting } from "./hybrid-agent.js";
 import { normalizeExecutionSignals, selectResponseMode } from "./hybrid-routing.js";
 import { isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
 import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from "./grounding-quota.js";
-import { githubSearch } from "./tools/vertical-tools.js";
+import { githubSearch, extractFirstYouTubeUrl } from "./tools/vertical-tools.js";
 import {
   checkIsFileOrVoiceGeneration,
   checkIsVoiceRequest,
@@ -2089,7 +2089,7 @@ QUY TẮC BẮT BUỘC:
     const userPromptContent = question ||
       "Thành viên trích dẫn nội dung trên và gọi bạn hỗ trợ. Hãy đọc kỹ toàn bộ nội dung trích dẫn để thực thi chính xác (nếu trích dẫn là yêu cầu tạo ảnh/file/voice/nhạc thì kích hoạt tool tương ứng, nếu là câu hỏi/vấn đề cần giải đáp thì trả lời chuyên sâu, nếu là bài viết cần nhận xét thì đưa ra phản hồi sắc bén).";
 
-    const quoteUserPrompt =
+    let quoteUserPrompt =
       `BẠN ĐANG TƯƠNG TÁC TẠI NHÓM "${currentGroupName}".\n` +
       `${recentChatContext}\n` +
       `=== NỘI DUNG ĐƯỢC TRÍCH DẪN (TỪ ${options.quote.senderName || "THÀNH VIÊN"}): ===\n` +
@@ -2112,7 +2112,12 @@ QUY TẮC BẮT BUỘC:
       quotePlan?.toolIntent === "create" ||
       quotePlan?.toolIntent === "execute";
     try {
+      const matchedYtUrl = extractFirstYouTubeUrl(question) || extractFirstYouTubeUrl(options.quote?.text || "");
+      if (matchedYtUrl && !quoteUserPrompt.includes(matchedYtUrl)) {
+        quoteUserPrompt += `\n\n[LƯU Ý NGỮ CẢNH HỆ THỐNG]: Người dùng đang yêu cầu xử lý/tóm tắt video YouTube: ${matchedYtUrl}. BẮT BUỘC gọi công cụ 'youtube_transcript_lookup' với URL này để lấy transcript và tóm tắt.`;
+      }
       const isQuoteExternalAction =
+        Boolean(matchedYtUrl) ||
         /(?:facebook\.com|fb\.com|fb\.watch|tiktok\.com|vt\.tiktok\.com|youtube\.com|youtu\.be|instagram\.com|twitter\.com|x\.com)\b/i.test(`${question} ${options.quote.text || ""}`) ||
         /(?:tải|download|lay|lấy|xin|tach|tách)\s+(?:video|clip|mp4|nhạc|audio|mp3)/i.test(`${question} ${options.quote.text || ""}`) ||
         /(?:đọc link|tải trang|cào web|check link|bài viết|bình luận|comment)\s+https?:/i.test(question);
@@ -3123,7 +3128,7 @@ QUY TẮC BẮT BUỘC:
     ? `\n[ẢNH THAM CHIẾU / ĐÍNH KÈM HIỆN TẠI]: "${options?.imageUrl || targetUrl}". Khi người dùng yêu cầu chỉnh sửa, thay đổi chi tiết hoặc biến thể từ ảnh này, hãy gọi 'generate_image' với imageUrl="${options?.imageUrl || targetUrl}" và isEdit=true.\n`
     : "";
 
-  const userPrompt =
+  let userPrompt =
     `${fileContentSection}${liveNewsSection}${imageRefSection}\n` +
     `DƯỚI ĐÂY LÀ DỮ LIỆU LỊCH SỬ CHAT NỘI BỘ CỦA CHÍNH NHÓM "${currentGroupName}" (ID: ${threadId}) ĐỂ THAM KHẢO:\n` +
     `<chat_history>\n${contextData}\n</chat_history>\n\n` +
@@ -3142,11 +3147,33 @@ QUY TẮC BẮT BUỘC:
       queryPlan?.toolIntent === "execute";
     const isFileOrVoiceReq = checkIsFileOrVoiceGeneration(question, options?.quote?.text) || isPlanAction;
     const combinedContent = `${question} ${options?.quote?.text || ""}`;
+    let matchedYtUrl = extractFirstYouTubeUrl(combinedContent);
+    const isAskingAboutVideoOrMedia = /(?:tóm\s*tắt|tom\s*tat|nội\s*dung|noi\s*dung|nói\s*gì|noi\s*gi|review|phân\s*tích|clip|video|bài\s*giảng|bài\s*học|ý\s*chính|phụ\s*đề|transcript)/iu.test(question);
+
+    // Nếu người dùng hỏi tóm tắt/nội dung video mà tin nhắn hiện tại không có URL, tìm trong các tin nhắn gần nhất của nhóm
+    if (!matchedYtUrl && isAskingAboutVideoOrMedia) {
+      const recentMsgs = getRecentGroupMessages(threadId, 8);
+      for (const msg of recentMsgs) {
+        if (msg.text) {
+          const found = extractFirstYouTubeUrl(msg.text);
+          if (found) {
+            matchedYtUrl = found;
+            break;
+          }
+        }
+      }
+    }
+
     const isExternalLinkOrScrapeAction =
+      Boolean(matchedYtUrl) ||
       /(?:facebook\.com|fb\.com|fb\.watch|tiktok\.com|vt\.tiktok\.com|youtube\.com|youtu\.be|instagram\.com|twitter\.com|x\.com)\b/i.test(combinedContent) ||
       /(?:tải|download|lay|lấy|xin|tach|tách)\s+(?:video|clip|mp4|nhạc|audio|mp3)/i.test(combinedContent) ||
       (!isSearchDisabled && /(?:đọc link|tải trang|cào web|check link|bài viết|bình luận|comment)\s+https?:/i.test(question));
     const needsAgentLoop = isFileOrVoiceReq || isExternalLinkOrScrapeAction;
+
+    if (matchedYtUrl && !userPrompt.includes(matchedYtUrl)) {
+      userPrompt += `\n\n[LƯU Ý NGỮ CẢNH HỆ THỐNG]: Người dùng đang yêu cầu xử lý/tóm tắt video YouTube: ${matchedYtUrl}. BẮT BUỘC gọi công cụ 'youtube_transcript_lookup' với URL này để lấy transcript và tóm tắt.`;
+    }
 
     let answer = "";
     let voiceGenerated = false;

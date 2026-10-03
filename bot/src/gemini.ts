@@ -6,6 +6,7 @@ import { config, hybridAgentSettings } from "./config.js";
 import {
   webSearch,
   fetchUrl,
+  fetchYouTubeContent,
   wikiLookup,
   hnSearch,
   arxivSearch,
@@ -1618,6 +1619,17 @@ const AGENT_TOOLS_DECLARATION = {
       },
     },
     {
+      name: "youtube_transcript_lookup",
+      description: "Trích xuất phụ đề (transcript), tiêu đề, tên kênh và thời lượng của video YouTube (youtube.com, youtu.be, shorts). BẮT BUỘC gọi công cụ này khi người dùng gửi link YouTube hoặc yêu cầu tóm tắt, phân tích, tìm ý chính hay trích xuất nội dung nói trong video YouTube.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          url: { type: "STRING", description: "Đường link video YouTube (youtube.com hoặc youtu.be hoặc shorts)" },
+        },
+        required: ["url"],
+      },
+    },
+    {
       name: "download_media_video",
       description: "Tải file Video (.mp4) hoặc tách riêng âm thanh Audio (.mp3) từ đường link video mạng xã hội (TikTok không dính watermark, YouTube, Facebook Video/Reels, Instagram, X/Twitter...). File sau khi tải sẽ được tự động gửi trực tiếp đính kèm vào nhóm Zalo cho người dùng lưu về máy.",
       parameters: {
@@ -2111,6 +2123,15 @@ export async function executeAgentTool(name: string, args: Record<string, any>, 
         topComments: enriched.topComments,
         formattedContent: formatFacebookEnrichedPost(enriched),
       };
+    }
+    case "youtube_transcript_lookup": {
+      const url = String(args?.url || "").trim();
+      if (!url) return { error: "Thiếu URL YouTube cần trích xuất phụ đề" };
+      const ytResult = await fetchYouTubeContent(url, 15000);
+      if (!ytResult) {
+        return { error: "Không thể trích xuất thông tin từ URL YouTube này (URL không hợp lệ hoặc video không khả dụng)." };
+      }
+      return ytResult;
     }
     case "download_media_video": {
       const url = String(args?.url || "").trim();

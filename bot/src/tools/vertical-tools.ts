@@ -376,7 +376,7 @@ export async function webSearch(query: string, maxResults = 5): Promise<SearchRe
  */
 export function isYouTubeUrl(url: string): boolean {
   if (!url || typeof url !== "string") return false;
-  return /(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/|v\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i.test(url.trim());
+  return /(?:youtube\.com\/(?:[^\/\s]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i.test(url.trim());
 }
 
 /**
@@ -384,8 +384,17 @@ export function isYouTubeUrl(url: string): boolean {
  */
 export function extractYouTubeVideoId(url: string): string | null {
   if (!url || typeof url !== "string") return null;
-  const match = url.trim().match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/|v\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
+  const match = url.trim().match(/(?:youtube\.com\/(?:[^\/\s]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i);
   return match ? match[1]! : null;
+}
+
+/**
+ * Tìm và trích xuất URL YouTube đầu tiên xuất hiện trong một chuỗi văn bản
+ */
+export function extractFirstYouTubeUrl(text: string): string | null {
+  if (!text || typeof text !== "string") return null;
+  const match = text.match(/https?:\/\/(?:www\.|m\.)?(?:youtube\.com\/(?:[^\/\s]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=|shorts\/|live\/)[^\s"'<>]+|youtu\.be\/[a-zA-Z0-9_-]{11}[^\s"'<>]*)/i);
+  return match ? match[0] : null;
 }
 
 /**
@@ -394,7 +403,15 @@ export function extractYouTubeVideoId(url: string): string | null {
 export async function fetchYouTubeContent(
   url: string,
   maxChars = 15000,
-): Promise<{ title: string; content: string; url: string } | null> {
+): Promise<{
+  title: string;
+  content: string;
+  url: string;
+  videoId?: string;
+  author?: string;
+  duration?: string;
+  hasTranscript?: boolean;
+} | null> {
   const videoId = extractYouTubeVideoId(url);
   if (!videoId) return null;
 
@@ -470,13 +487,17 @@ export async function fetchYouTubeContent(
   if (transcript) {
     fullContent += `\n📜 TOÀN BỘ PHỤ ĐỀ / NỘI DUNG NÓI TRONG VIDEO (TRANSCRIPT):\n${transcript.slice(0, maxChars)}`;
   } else {
-    fullContent += `\n⚠️ LƯU Ý: Video này hiện không có phụ đề (CC/Subtitles) khả dụng trên YouTube, thông tin tóm tắt dựa trên mô tả và nội dung chính của video.`;
+    fullContent += `\n⚠️ LƯU Ý: Video này hiện không có phụ đề (CC/Subtitles) khả dụng trên YouTube, thông tin tóm tắt dựa trên tiêu đề, kênh và mô tả của tác giả.`;
   }
 
   return {
     title: `${title} - ${author}`,
     content: fullContent,
     url: `https://www.youtube.com/watch?v=${videoId}`,
+    videoId,
+    author,
+    duration: duration || undefined,
+    hasTranscript: Boolean(transcript),
   };
 }
 

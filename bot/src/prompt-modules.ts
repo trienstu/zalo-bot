@@ -2,6 +2,7 @@ import { getSystemArchitectureProfile, isSystemArchitectureQuery } from "./syste
 import { checkIsFileOrVoiceGeneration } from "./tools/file-generator.js";
 import { checkIsMusicRequest } from "./tools/music-generator.js";
 import { isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
+import { isYouTubeUrl } from "./tools/vertical-tools.js";
 
 export function getPromptModuleDocGen(): string {
   return `\n- QUY TẮC BẮT BUỘC KHI TẠO SLIDE THUYẾT TRÌNH, XUẤT FILE TÀI LIỆU (.MD, .DOCX, .XLSX, .PPTX, .HTML, .CSV) HOẶC TẠO VOICE:
@@ -60,6 +61,14 @@ export function getPromptModuleFacebookAnalysis(): string {
       - Đặt tham số 'exportCommentsToExcel: true' và 'maxComments: 100' (hoặc số lượng yêu cầu). Hệ thống sẽ tự động đóng gói toàn bộ bình luận vào file Excel .xlsx và gửi trực tiếp đính kèm lên Zalo cho người dùng!
     * NẾU NGƯỜI DÙNG YÊU CẦU TÓM TẮT / VIẾT LẠI THÀNH BÀI POST HOÀN CHỈNH / ĐỌC NỘI DUNG:
       - Kết hợp nhuần nhuyễn nội dung bài gốc VÀ các bình luận bổ sung của tác giả (chứa link tài nguyên, phần 2, thông tin giải thích) để viết thành một bài post độc lập, mạch lạc, đầy đủ các liên kết tham khảo mà không bị thiếu thông tin!\n`;
+}
+
+export function getPromptModuleYouTubeAnalysis(): string {
+  return `\n- KỸ NĂNG TRÍCH XUẤT PHỤ ĐỀ VÀ PHÂN TÍCH VIDEO YOUTUBE (youtube_transcript_lookup):
+  + Khi người dùng gửi đường link YouTube (youtube.com, youtu.be, shorts...) hoặc hỏi về nội dung video, tóm tắt video, video nói gì, phân tích bài giảng/review:
+    * BẮT BUỘC SỬ DỤNG CÔNG CỤ 'youtube_transcript_lookup' với đường link đó để lấy toàn bộ transcript/phụ đề và tiêu đề, thời lượng video.
+    * Sau khi có transcript, hãy tóm tắt mạch lạc, phân tích cấu trúc các luận điểm chính, đúc kết các bài học cốt lõi hoặc giải đáp câu hỏi của người dùng một cách chuyên nghiệp, dễ hiểu.
+    * Nếu video không có phụ đề (CC/Subtitles), hãy dựa vào tiêu đề, tên kênh và mô tả của tác giả do công cụ cung cấp để hỗ trợ người dùng.\n`;
 }
 
 export function getPromptModuleVideoDownload(): string {
@@ -135,6 +144,15 @@ export function buildDynamicSystemPromptModules(params: {
     /(?:tiktok\.com|vt\.tiktok\.com|youtube\.com|youtu\.be|instagram\.com\/reel|facebook\.com\/(?:reel|watch|share)|fb\.watch)\b/i.test(combinedText);
   if (isVideoDownloadQuery) {
     extraModules += getPromptModuleVideoDownload();
+  }
+
+  // 8. Module phân tích & tóm tắt video YouTube qua phụ đề (Transcript Lookup)
+  const isYouTubeAnalysisQuery =
+    isYouTubeUrl(combinedText) ||
+    (/(?:youtube|youtu\.be)/i.test(combinedText) &&
+      /(?:tóm\s*tắt|tom\s*tat|nội\s*dung|noi\s*dung|nói\s*gì|noi\s*gi|review|phân\s*tích|phan\s*tich|bài\s*học|ý\s*chính|y\s*chinh|transcript|phụ\s*đề)/iu.test(combinedText));
+  if (isYouTubeAnalysisQuery) {
+    extraModules += getPromptModuleYouTubeAnalysis();
   }
 
   return extraModules;
