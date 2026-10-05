@@ -209,6 +209,15 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
     return false;
   }
 
+  // 1.5.1. Chặn tuyệt đối câu hỏi thao tác giao diện, chuột, phần mềm, kéo/dịch chuyển biểu đồ MT4/MT5/TradingView/Excel
+  const isSoftwareUiInteraction =
+    /(?:dịch\s*chuyển|kéo|cuộn|scroll|drag|phóng\s*to|thu\s*nhỏ|zoom|xem|bấm|click|chỉnh\s*(?:màu|trục|nến)|khóa|mở\s*khóa|qua\s*trái|qua\s*phải|lên\s*xuống)\s+.*?(?:biểu\s*đồ|đồ\s*thị|chart|nến)/iu.test(qLower) ||
+    /(?:trên|ở|trong)\s+(?:mt4|mt5|metatrader|trading\s*view|tradingview|excel|bảng\s*giá).*?(?:biểu\s*đồ|đồ\s*thị|chart)/iu.test(qLower) ||
+    /(?:biểu\s*đồ|đồ\s*thị|chart).*?(?:trên|ở|trong)\s+(?:mt4|mt5|metatrader|trading\s*view|tradingview)/iu.test(qLower);
+  if (isSoftwareUiInteraction) {
+    return false;
+  }
+
   // 1.6. Chặn tuyệt đối câu hỏi tra cứu, tìm kiếm, đọc hiểu, hỏi đáp thông tin (kể cả khi quote có từ file/pdf/sách)
   const isInformationOrSearchInquiry =
     /(?:^|[^\p{L}\p{N}])(?:tìm|tra\s*cứu|tìm\s*kiếm|kiếm|hỏi|cho\s*hỏi|sách\s*này|cuốn\s*này|tác\s*giả|nội\s*dung\s*(?:là|gì)|bản\s*dịch|dịch\s*thuật|giải\s*thích|tóm\s*tắt\s*(?:nội\s*dung|ý\s*chính)?|review|đánh\s*giá)(?=$|[^\p{L}\p{N}])/iu.test(qLower) &&

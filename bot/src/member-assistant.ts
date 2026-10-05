@@ -4921,11 +4921,16 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         }
       }
 
-      // 2. Nếu có quote: Ưu tiên tra cứu ảnh gốc từ DB theo msgId / cliMsgId của quote
-      // (đặc biệt khi URL quote là ảnh jxl hoặc thumbnail rút gọn)
+      // 2. Nếu có quote: Ưu tiên tra cứu ảnh gốc từ DB theo msgId / cliMsgId của quote hoặc trực tiếp từ payload
       if (event.quote) {
+        const quoteMedia = event.quote.mediaUrl || (event.quote as any)?.thumbUrl;
+        if (!targetImageUrl && quoteMedia) {
+          targetImageUrl = quoteMedia;
+          console.log(`[member-assistant] 📸 Đã lấy trực tiếp mediaUrl từ payload của quote (${targetImageUrl})`);
+        }
+
         const quoteId = event.quote.msgId || event.quote.cliMsgId || event.quote.globalMsgId;
-        if (quoteId) {
+        if (!targetImageUrl && quoteId) {
           const media = getMediaByMessageId(threadId, quoteId);
           if (media?.local_path && fs.existsSync(media.local_path)) {
             targetImageUrl = media.local_path;
@@ -4937,17 +4942,13 @@ export async function handleMemberInteraction(api: any, event: MemberMessageEven
         }
       }
 
-      // 2. Nếu vẫn chưa có targetImageUrl và câu hỏi có ý định xem/phân tích/chỉnh sửa ảnh
-      const isImageAnalysisOrEditIntent =
-        event.quote?.mediaType === "image" ||
-        /(?:phân tích|xem|đọc|giải thích|soi|kiểm tra|review|sửa|chỉnh\s*sửa|chỉnh|edit|thay|đổi|xoá|xóa|làm\s*nét|biến\s*đổi|phục\s*chế)\s+(?:cái\s+|bức\s+|tấm\s+|tệp\s+|file\s+)?(?:ảnh|hình|tool|giao diện|screenshot|background|phông|nền|màu|tóc|áo|quần|kính|người)/i.test(question) ||
-        /(?:ảnh này|hình này|bức ảnh|tấm ảnh|tool này|giao diện này)/i.test(question);
-
-      if (!targetImageUrl && isImageAnalysisOrEditIntent) {
-        const recentImg = getRecentGroupImage(threadId, 10 * 60 * 1000);
+      // 3. Tự động kế thừa ảnh gần nhất trong nhóm (trong vòng 15 phút) mà KHÔNG DÙNG REGEX CẢN TRỞ
+      // Đảm bảo AI luôn có ảnh tham chiếu để thực hiện Image-to-Image / Sửa ảnh khi có thảo luận về ảnh
+      if (!targetImageUrl) {
+        const recentImg = getRecentGroupImage(threadId, 15 * 60 * 1000);
         if (recentImg) {
           targetImageUrl = recentImg.local_path || recentImg.media_url || undefined;
-          console.log(`[member-assistant] 📸 Đã tự động bắt ảnh gần nhất trong nhóm (${recentImg.message_id}) để phân tích/chỉnh sửa`);
+          console.log(`[member-assistant] 📸 Đã tự động nạp ảnh gần nhất trong nhóm (${recentImg.message_id}) làm ngữ cảnh tham chiếu`);
         }
       }
 

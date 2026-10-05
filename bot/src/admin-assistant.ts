@@ -3296,21 +3296,13 @@ QUY TẮC BẮT BUỘC:
       question: rawText,
     });
 
-    const isGenerationRequest = checkIsFileOrVoiceGeneration(rawText, event.quote?.text);
-    if (isGenerationRequest && !fileGenerated && !voiceGenerated) {
+    // 🛡️ CHỈ báo lỗi khi thực sự có sự cố cào web hoặc exception kỹ thuật, KHÔNG dùng regex đoán mò cãi lại quyết định của AI
+    const isWebFetchRequest = /(?:đọc link|tải trang|cào web|check link|tóm tắt link)\s+https?:/i.test(rawText);
+    if (isWebFetchRequest && /(?:không thể truy cập|lỗi tải trang|không lấy được nội dung|lỗi kết nối)/i.test(answer)) {
       interactionStatus = "failed";
-      failureReason = "Khách yêu cầu tạo file/voice nhưng hệ thống không xuất được file";
+      failureReason = "Lỗi truy cập hoặc không cào được nội dung từ liên kết web";
       if (!isAdmin) {
         void notifyAdminDmFailure(api, sender, displayName, rawText, failureReason).catch(() => {});
-      }
-    } else {
-      const isWebFetchRequest = /(?:đọc link|tải trang|cào web|check link|tóm tắt link)\s+https?:/i.test(rawText);
-      if (isWebFetchRequest && /(?:không thể truy cập|lỗi tải trang|không lấy được nội dung|lỗi kết nối)/i.test(answer)) {
-        interactionStatus = "failed";
-        failureReason = "Lỗi truy cập hoặc không cào được nội dung từ liên kết web";
-        if (!isAdmin) {
-          void notifyAdminDmFailure(api, sender, displayName, rawText, failureReason).catch(() => {});
-        }
       }
     }
 
