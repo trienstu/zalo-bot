@@ -693,8 +693,12 @@ export function searchRelevantLinksAndResources(
   if (/github|repo/i.test(query) && !keywords.includes("github")) keywords.push("github");
   if (/zalo/i.test(query) && !keywords.includes("zalo")) keywords.push("zalo");
 
-  if (keywords.length === 0 && !authorHint) {
+  if (wantsAll) {
     return candidateLinks.slice(0, effectiveLimit);
+  }
+
+  if (keywords.length === 0 && !authorHint) {
+    return !query.trim() ? candidateLinks.slice(0, effectiveLimit) : [];
   }
 
   // 4. Chấm điểm độ khớp: Người gửi + URL + Ngữ cảnh chứa từ khóa
@@ -732,8 +736,8 @@ export function searchRelevantLinksAndResources(
     .sort((a, b) => b.matchCount - a.matchCount || b.item.ts - a.item.ts)
     .map((s) => s.item);
 
-  if (matched.length === 0 && candidateLinks.length > 0) {
-    return candidateLinks.slice(0, effectiveLimit);
+  if (matched.length === 0) {
+    return [];
   }
 
   return matched.slice(0, effectiveLimit);
@@ -1830,7 +1834,9 @@ QUY TẮC BẮT BUỘC:
           })
           .join("\n\n") +
         "\n\nCHỈ DẪN BẮT BUỘC: Thành viên hỏi xin link/tài nguyên. Trong lịch sử nhóm ĐÃ TỪNG CÓ thành viên chia sẻ các đường link ở trên! " +
-        "Bạn BẮT BUỘC phải trích xuất và cung cấp đầy đủ các đường link, ghi rõ người chia sẻ và ngày gửi từ danh sách trên để trả lời cho thành viên!\n";
+        "Bạn BẮT BUỘC phải trích xuất và cung cấp đầy đủ các đường link, ghi rõ người chia sẻ và ngày gửi từ danh sách trên để trả lời cho thành viên! " +
+        "QUY TẮC BẢO VỆ CHỐNG ẢO GIÁC: Chỉ được tóm tắt nội dung của đường link bằng đúng thông tin có trong 'Ngữ cảnh/tin nhắn đi kèm'. " +
+        "TUYỆT ĐỐI CẤM tự ý suy diễn hoặc tự đặt thêm tên chủ đề mới, dự án mới cho link nếu ngữ cảnh không ghi rõ!\n";
     }
 
     // 1c. Hồ sơ & Trí nhớ dài hạn của thành viên đang hỏi (User Long-term Memory)
@@ -2738,6 +2744,10 @@ QUY TẮC BẮT BUỘC:
         "CHỈ DẪN QUAN TRỌNG: Nếu thành viên hỏi về QUY TRÌNH, CÁCH LÀM, KINH NGHIỆM hoặc NỘI DUNG THẢO LUẬN: Hãy ưu tiên TRÍCH XUẤT VÀ GIẢI THÍCH CHI TIẾT CÁC BƯỚC THỰC HIỆN từ các đoạn thảo luận/đúc kết ở trên. Sau đó đính kèm các đường link ở trên ở cuối câu trả lời làm tài liệu tham khảo/tải về bổ trợ."
       );
     }
+    contextLines.push(
+      "QUY TẮC BẢO VỆ CHỐNG ẢO GIÁC ĐƯỜNG LINK (BẮT BUỘC): Chỉ được tóm tắt nội dung của đường link bằng đúng thông tin có trong 'Ngữ cảnh/lời bình đi kèm'. " +
+      "TUYỆT ĐỐI CẤM tự ý suy diễn hoặc tự đặt thêm tên chủ đề mới, model mới hoặc dự án mới cho link nếu ngữ cảnh không ghi rõ (ví dụ: ngữ cảnh chỉ ghi 'thư mục tài liệu' thì cấm tự bịa là 'tài nguyên Muse AI' hay 'công cụ âm thanh')!"
+    );
   } else if (isResourceQuery && !isDiscussionOrProcessQuery) {
     if (githubRepoResults.length > 0) {
       contextLines.push(

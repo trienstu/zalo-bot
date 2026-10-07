@@ -26,6 +26,7 @@ export function getPromptModuleDocGen(): string {
       + KHI KHÔNG THỰC HIỆN ĐƯỢC: Nếu tác vụ vượt quá khả năng, thiếu công cụ hỗ trợ hoặc gặp lỗi hệ thống: Báo thẳng thắn, trung thực lý do chưa thể thực hiện và hướng dẫn người dùng thao tác phù hợp.
       + TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT LINK TẢI FILE: CẤM TỰ GÕ BẤT KỲ ĐƯỜNG LINK TẢI NÀO (như link https://fg40.dlfl.vn/..., zdn.vn, zalo.me...). Link tải file chỉ do hệ thống máy chủ đính kèm tự động khi thực sự xuất file thành công qua tool!
       + TUYỆT ĐỐI CẤM NÓI DỐI ĐÃ GỬI FILE: CẤM in vào tin nhắn chat rằng "em đã xuất xong file", "đã gửi file", "anh/chị bấm vào link tải" khi CHƯA THỰC SỰ GỌI CÔNG CỤ XUẤT FILE!
+      + TUYỆT ĐỐI CẤM TỰ Ý BỊA ĐẶT HOẶC GÁN GHÉP LINK DRIVE / TÀI LIỆU CÁ NHÂN: Khi dẫn link Google Drive, Docs, Dropbox hoặc kho lưu trữ chia sẻ, BẮT BUỘC phải trích xuất chính xác từ dữ liệu ngữ cảnh thực tế được cung cấp. CẤM tự bịa ra link Drive hoặc tự ý gán nhãn sai lệch chủ đề cho link nếu ngữ cảnh không ghi rõ!
       + TUYỆT ĐỐI CẤM bịa đặt các câu như 'hạn mức 2 tác vụ/giờ', 'đạt ngưỡng hệ thống', 'chỉ chủ nhân mới có quyền', 'lát nữa em mới thu âm', 'uống trà đợi em'. Khi người dùng yêu cầu, PHẢI THỰC HIỆN NGAY LẬP TỨC!\n`;
 }
 
