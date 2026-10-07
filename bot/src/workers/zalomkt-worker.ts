@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { callGemini } from "../gemini.js";
+import { getDb } from "../db/index.js";
 import {
   ZaloMktCampaign,
   ZaloMktCampaignConfig,
@@ -14,12 +15,17 @@ import {
   updateCampaignStatus,
   updateLead,
   upsertMktContact,
+  calculateNextSlotSchedule,
+  getActiveVerifyTask,
+  updateVerifyTask,
+  getUnverifiedContacts,
 } from "../db/zalomkt-db.js";
 
 const ThreadTypeUser = 0;
 
 let workerRunning = false;
 let isProcessingLead = false;
+let isProcessingVerify = false;
 
 /**
  * Xác định đại từ xưng hô theo chuẩn giới tính Zalo API và bộ quy tắc tiếng Việt.
@@ -194,21 +200,39 @@ export function initZaloMktWorker(api: any): void {
       console.error(`[zalomkt-worker] Lỗi kiểm tra lịch hẹn chiến dịch:`, schedErr);
     }
 
-    if (isProcessingLead) return;
+    // 1. Ưu tiên xử lý chiến dịch đang chạy (nếu có)
+    if (!isProcessingLead) {
+      void (async () => {
+        const activeCampaign = getActiveRunningCampaign();
+        if (!activeCampaign) return;
 
-    void (async () => {
-      const activeCampaign = getActiveRunningCampaign();
-      if (!activeCampaign) return;
+        isProcessingLead = true;
+        try {
+          await processNextLeadInCampaign(api, activeCampaign);
+        } catch (err) {
+          console.error(`[zalomkt-worker] Lỗi xử lý chiến dịch ${activeCampaign.id}:`, err);
+        } finally {
+          isProcessingLead = false;
+        }
+      })();
+    }
 
-      isProcessingLead = true;
-      try {
-        await processNextLeadInCampaign(api, activeCampaign);
-      } catch (err) {
-        console.error(`[zalomkt-worker] Lỗi xử lý chiến dịch ${activeCampaign.id}:`, err);
-      } finally {
-        isProcessingLead = false;
-      }
-    })();
+    // 2. Chạy tác vụ quét xác minh SĐT nền (nếu có yêu cầu từ Web)
+    if (!isProcessingVerify && !isProcessingLead) {
+      void (async () => {
+        const activeTask = getActiveVerifyTask();
+        if (!activeTask) return;
+
+        isProcessingVerify = true;
+        try {
+          await processNextContactVerification(api, activeTask);
+        } catch (err) {
+          console.error(`[zalomkt-worker] Lỗi xác minh SĐT nền:`, err);
+        } finally {
+          isProcessingVerify = false;
+        }
+      })();
+    }
   }, 3000);
 }
 
@@ -484,10 +508,34 @@ async function processNextLeadInCampaign(api: any, campaign: ZaloMktCampaign): P
   // 9. Cập nhật thống kê chiến dịch
   recalculateCampaignCounts(campaign.id);
 
-  // 10. Kiểm tra định mức số lượng tin nhắn trong lượt chạy này (Batch Limit)
+  // 10. Kiểm tra định mức số lượng tin nhắn trong lượt chạy này (Batch Limit & Multi-slot Scheduling)
   const batchLimit = config.batchLimit;
   if (typeof batchLimit === "number" && batchLimit > 0 && (config.runSentCount || 0) >= batchLimit) {
-    console.log(`[zalomkt-worker] ⏸️ Đã hoàn thành định mức lượt chạy: ${config.runSentCount}/${batchLimit} tin nhắn gửi thành công. Tự động tạm dừng chiến dịch [${campaign.title}] (ID: ${campaign.id}).`);
+    // Nếu chiến dịch có cài đặt ca chạy đa khung giờ (Multi-slot batch scheduling)
+    if (Array.isArray(config.scheduleSlots) && config.scheduleSlots.length > 0) {
+      const nextSchedule = calculateNextSlotSchedule(config.scheduleSlots);
+      if (nextSchedule) {
+        config.batchLimit = nextSchedule.nextSlot.batchSize;
+        config.runSentCount = 0;
+        config.currentSlotTime = nextSchedule.nextSlot.time;
+        updateCampaignConfig(campaign.id, config);
+
+        const db = getDb();
+        db.prepare(
+          `UPDATE zalomkt_campaigns SET status = 'scheduled', scheduled_at = ?, updated_at = ? WHERE id = ?`,
+        ).run(nextSchedule.nextScheduledAt, Date.now(), campaign.id);
+
+        const nextTimeStr = new Date(nextSchedule.nextScheduledAt).toLocaleString("vi-VN");
+        console.log(
+          `[zalomkt-worker] ⏰ Đã hoàn thành ca [${config.currentSlotTime || ""}] (${batchLimit} tin nhắn). Tự động lên lịch ca tiếp theo: ${nextSchedule.nextSlot.time} (${nextTimeStr}) với định mức ${nextSchedule.nextSlot.batchSize} số.`,
+        );
+        return;
+      }
+    }
+
+    console.log(
+      `[zalomkt-worker] ⏸️ Đã hoàn thành định mức lượt chạy: ${config.runSentCount}/${batchLimit} tin nhắn gửi thành công. Tự động tạm dừng chiến dịch [${campaign.title}] (ID: ${campaign.id}).`,
+    );
     updateCampaignStatus(campaign.id, "paused");
     return;
   }
@@ -500,3 +548,80 @@ async function processNextLeadInCampaign(api: any, campaign: ZaloMktCampaign): P
     console.log(`[zalomkt-worker] ⏸️ Chiến dịch [${campaign.title}] đã được tạm dừng hoặc hủy.`);
   }
 }
+
+/**
+ * Xử lý tác vụ quét kiểm tra trạng thái Zalo hàng loạt trong Kho Data (Pre-validation hub)
+ * Thực hiện êm dịu từng số với delay 2.5s để chống Zalo rate limit Code 216
+ */
+async function processNextContactVerification(api: any, activeTask: any): Promise<void> {
+  const phones = getUnverifiedContacts(1, activeTask.target_group_id);
+  if (phones.length === 0) {
+    updateVerifyTask(activeTask.id, { status: "completed" });
+    console.log(
+      `[zalomkt-worker] 🎉 Đã hoàn tất tác vụ quét xác minh SĐT (ID: ${activeTask.id}). Tổng đã quét: ${activeTask.checked_count}, Hợp lệ: ${activeTask.valid_count}, Không Zalo: ${activeTask.no_zalo_count}`,
+    );
+    return;
+  }
+
+  const phone = phones[0];
+  if (!phone) return;
+  const normalized = normalizePhoneNumber(phone);
+
+  try {
+    const userProfile = await api.findUser(normalized);
+    if (userProfile && userProfile.uid) {
+      upsertMktContact({
+        phone: normalized,
+        zalo_uid: String(userProfile.uid),
+        zalo_name: userProfile.zalo_name || "",
+        display_name: userProfile.display_name || userProfile.zalo_name || "",
+        gender: typeof userProfile.gender === "number" ? userProfile.gender : -1,
+        dob: userProfile.dob || null,
+        sdob: userProfile.sdob || "",
+        avatar: userProfile.avatar || "",
+        bio: userProfile.status || "",
+        status_code: "valid",
+        last_checked_at: Date.now(),
+      });
+      updateVerifyTask(activeTask.id, {
+        checked_count: activeTask.checked_count + 1,
+        valid_count: activeTask.valid_count + 1,
+      });
+      console.log(`[zalomkt-worker] 🔍 Xác minh SĐT ${normalized}: Có Zalo (${userProfile.display_name || userProfile.uid})`);
+    } else {
+      upsertMktContact({
+        phone: normalized,
+        status_code: "no_zalo",
+        last_checked_at: Date.now(),
+      });
+      updateVerifyTask(activeTask.id, {
+        checked_count: activeTask.checked_count + 1,
+        no_zalo_count: activeTask.no_zalo_count + 1,
+      });
+      console.log(`[zalomkt-worker] 🔍 Xác minh SĐT ${normalized}: Không có tài khoản Zalo`);
+    }
+  } catch (err: any) {
+    const errStr = String(err?.message || err);
+    const isNotFound = err?.code === 216 || /chưa đăng ký|không tìm thấy|not found/i.test(errStr);
+    if (isNotFound) {
+      upsertMktContact({
+        phone: normalized,
+        status_code: "no_zalo",
+        last_checked_at: Date.now(),
+      });
+      updateVerifyTask(activeTask.id, {
+        checked_count: activeTask.checked_count + 1,
+        no_zalo_count: activeTask.no_zalo_count + 1,
+      });
+    } else {
+      updateVerifyTask(activeTask.id, {
+        checked_count: activeTask.checked_count + 1,
+        error_count: activeTask.error_count + 1,
+      });
+    }
+  }
+
+  // Giãn cách an toàn 2.5 giây giữa các lượt tra cứu
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+}
+

@@ -56,9 +56,7 @@ export async function POST(request: Request) {
     }
 
     const botId = resolveBotIdFromRequest(request, body.botId);
-    const phones = body.rawPhones.split(/[\r\n,;]+/).map((s) => s.trim()).filter(Boolean);
-
-    const result = importMktContacts(phones, botId);
+    const result = importMktContacts(body.rawPhones, botId);
 
     return NextResponse.json({
       ok: true,

@@ -28,6 +28,7 @@ import {
   Tag,
   FileEdit,
   Send,
+  Copy,
 } from "lucide-react";
 import { Card, CardTitle, Badge } from "@/components/ui";
 
@@ -123,8 +124,15 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
   const [createContent, setCreateContent] = useState("");
   const [createPhones, setCreatePhones] = useState("");
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
+  const [groupFilterMode, setGroupFilterMode] = useState<"all" | "uncontacted" | "valid_only">("all");
   const [isScheduled, setIsScheduled] = useState(false);
+  const [scheduleType, setScheduleType] = useState<"single" | "multi_slots">("single");
   const [scheduledDateTime, setScheduledDateTime] = useState("");
+  const [scheduleSlots, setScheduleSlots] = useState<Array<{ time: string; batchSize: number }>>([
+    { time: "09:00", batchSize: 50 },
+    { time: "13:30", batchSize: 50 },
+    { time: "18:00", batchSize: 50 },
+  ]);
   const [minDelay, setMinDelay] = useState(25);
   const [maxDelay, setMaxDelay] = useState(45);
   const [autoAlias, setAutoAlias] = useState(true);
@@ -133,6 +141,20 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   const [uploadingImages, setUploadingImages] = useState(false);
   const [creating, setCreating] = useState(false);
+
+  // State modal Sao Chép Chiến Dịch
+  const [showCopyModal, setShowCopyModal] = useState(false);
+  const [campaignToCopy, setCampaignToCopy] = useState<ZaloMktCampaign | null>(null);
+  const [copyTitle, setCopyTitle] = useState("");
+  const [copyLeads, setCopyLeads] = useState(true);
+  const [copying, setCopying] = useState(false);
+
+  // State Modal Quét Xác Minh Zalo (Pre-validation hub)
+  const [showVerifyModal, setShowVerifyModal] = useState(false);
+  const [verifyTargetGroupId, setVerifyTargetGroupId] = useState("all");
+  const [verifyTask, setVerifyTask] = useState<any>(null);
+  const [unverifiedCount, setUnverifiedCount] = useState(0);
+  const [verifyingAction, setVerifyingAction] = useState(false);
 
   // State Modal Lượt Chạy (Batch Limit)
   const [runBatchCamp, setRunBatchCamp] = useState<ZaloMktCampaign | null>(null);
@@ -413,14 +435,39 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
     let isDraft = false;
 
     if (mode === "schedule") {
-      if (!scheduledDateTime) {
-        return alert("Vui lòng chọn ngày và giờ hẹn chạy chiến dịch");
+      if (scheduleType === "multi_slots") {
+        if (!scheduleSlots || scheduleSlots.length === 0) {
+          return alert("Vui lòng thiết lập ít nhất 1 ca chạy trong ngày");
+        }
+        // Tính mốc ca chạy sắp tới đầu tiên
+        const now = new Date();
+        const sorted = [...scheduleSlots].sort((a, b) => a.time.localeCompare(b.time));
+        const curMins = now.getHours() * 60 + now.getMinutes();
+        let targetSlot = sorted.find((s) => {
+          const [h, m] = s.time.split(":").map(Number);
+          return h * 60 + m > curMins;
+        });
+        const targetDate = new Date();
+        if (targetSlot) {
+          const [h, m] = targetSlot.time.split(":").map(Number);
+          targetDate.setHours(h, m, 0, 0);
+        } else {
+          targetSlot = sorted[0];
+          const [h, m] = targetSlot.time.split(":").map(Number);
+          targetDate.setDate(targetDate.getDate() + 1);
+          targetDate.setHours(h, m, 0, 0);
+        }
+        scheduledAt = targetDate.getTime();
+      } else {
+        if (!scheduledDateTime) {
+          return alert("Vui lòng chọn ngày và giờ hẹn chạy chiến dịch");
+        }
+        const schedTime = new Date(scheduledDateTime).getTime();
+        if (isNaN(schedTime) || schedTime <= Date.now()) {
+          return alert("Thời gian hẹn giờ phải ở tương lai so với hiện tại");
+        }
+        scheduledAt = schedTime;
       }
-      const schedTime = new Date(scheduledDateTime).getTime();
-      if (isNaN(schedTime) || schedTime <= Date.now()) {
-        return alert("Thời gian hẹn giờ phải ở tương lai so với hiện tại");
-      }
-      scheduledAt = schedTime;
     } else if (mode === "save_draft") {
       isDraft = true;
     }
@@ -437,6 +484,7 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
           images: uploadedImages,
           rawPhones: createPhones,
           groupIds: selectedGroupIds,
+          groupFilterMode: selectedGroupIds.length > 0 ? groupFilterMode : "all",
           scheduledAt,
           isDraft,
           config: {
@@ -445,6 +493,8 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
             autoAlias,
             autoFriend,
             aiRewrite,
+            scheduleSlots: isScheduled && scheduleType === "multi_slots" ? scheduleSlots : undefined,
+            batchLimit: isScheduled && scheduleType === "multi_slots" ? scheduleSlots[0]?.batchSize : undefined,
           },
         }),
       });
@@ -455,7 +505,11 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
           await handleControlCampaign(data.id, "start");
           msg += "\n- Trạng thái: Đang bắt đầu gửi ngay!";
         } else if (mode === "schedule") {
-          msg += `\n- Trạng thái: Đã lên lịch hẹn lúc ${new Date(scheduledAt!).toLocaleString("vi-VN")}`;
+          if (scheduleType === "multi_slots") {
+            msg += `\n- Trạng thái: Đã lên lịch chạy đa khung giờ (${scheduleSlots.map((s) => `${s.time}: ${s.batchSize} số`).join(", ")})`;
+          } else {
+            msg += `\n- Trạng thái: Đã lên lịch hẹn lúc ${new Date(scheduledAt!).toLocaleString("vi-VN")}`;
+          }
         } else {
           msg += "\n- Trạng thái: Đã lưu bản nháp an toàn.";
         }
@@ -476,6 +530,122 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
       alert("Lỗi gửi dữ liệu: " + String(err));
     } finally {
       setCreating(false);
+    }
+  };
+
+  // Mở modal Sao Chép Chiến Dịch
+  const handleOpenCopyModal = (camp: ZaloMktCampaign) => {
+    setCampaignToCopy(camp);
+    setCopyTitle(`${camp.title} (Bản sao)`);
+    setCopyLeads(true);
+    setShowCopyModal(true);
+  };
+
+  // Xác nhận sao chép chiến dịch
+  const handleConfirmCopy = async () => {
+    if (!campaignToCopy) return;
+    if (!copyTitle.trim()) return alert("Vui lòng nhập tên cho chiến dịch mới");
+
+    setCopying(true);
+    try {
+      const res = await fetch("/api/zalomkt/campaigns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "copy",
+          sourceCampaignId: campaignToCopy.id,
+          title: copyTitle.trim(),
+          copyLeads,
+          botId,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        alert(`🎉 Nhân bản chiến dịch thành công!\n- Tên mới: ${copyTitle}\n- Số lượng leads sao chép: ${data.totalLeads || 0}`);
+        setShowCopyModal(false);
+        setCampaignToCopy(null);
+        fetchCampaigns();
+      } else {
+        alert("Lỗi sao chép: " + (data.error || "Không xác định"));
+      }
+    } catch (err: any) {
+      alert("Lỗi kết nối: " + String(err?.message || err));
+    } finally {
+      setCopying(false);
+    }
+  };
+
+  // Tải trạng thái tác vụ quét kiểm tra SĐT Zalo
+  const fetchVerifyStatus = useCallback(async () => {
+    try {
+      const gId = verifyTargetGroupId === "all" ? "" : verifyTargetGroupId;
+      const res = await fetch(`/api/zalomkt/contacts/verify?groupId=${gId}&botId=${botId}`);
+      const data = await res.json();
+      if (data.ok) {
+        setVerifyTask(data.task || null);
+        setUnverifiedCount(data.unverifiedCount || 0);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }, [botId, verifyTargetGroupId]);
+
+  // Mở modal quét kiểm tra Zalo
+  const handleOpenVerifyModal = () => {
+    setShowVerifyModal(true);
+    fetchVerifyStatus();
+  };
+
+  // Bắt đầu quét kiểm tra Zalo
+  const handleStartVerification = async () => {
+    setVerifyingAction(true);
+    try {
+      const gId = verifyTargetGroupId === "all" ? "" : verifyTargetGroupId;
+      const res = await fetch("/api/zalomkt/contacts/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "start",
+          groupId: gId,
+          botId,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        alert(data.message || "Đã khởi chạy tác vụ quét kiểm tra!");
+        fetchVerifyStatus();
+        fetchContacts();
+      } else {
+        alert("Lỗi: " + (data.error || "Không thể khởi chạy"));
+      }
+    } catch (err: any) {
+      alert("Lỗi kết nối: " + String(err));
+    } finally {
+      setVerifyingAction(false);
+    }
+  };
+
+  // Dừng quét kiểm tra Zalo
+  const handleStopVerification = async () => {
+    setVerifyingAction(true);
+    try {
+      const res = await fetch("/api/zalomkt/contacts/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "stop",
+          botId,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        alert("Đã dừng tác vụ quét kiểm tra.");
+        fetchVerifyStatus();
+      }
+    } catch (err: any) {
+      alert("Lỗi kết nối: " + String(err));
+    } finally {
+      setVerifyingAction(false);
     }
   };
 
@@ -697,13 +867,24 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
           )}
 
           {activeTab === "contacts" && (
-            <button
-              onClick={() => setShowImportModal(true)}
-              className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 hover:from-emerald-400 hover:to-teal-500 transition-all"
-            >
-              <Plus className="h-4 w-4" />
-              Nhập Data SĐT
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleOpenVerifyModal}
+                className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-3.5 py-2 text-sm font-semibold text-white shadow-lg shadow-purple-500/20 hover:from-purple-500 hover:to-indigo-500 transition-all"
+                title="Quét tự động trạng thái Zalo trước khi chạy (Pre-validation hub)"
+              >
+                <Search className="h-4 w-4" />
+                Quét Kiểm Tra Zalo
+              </button>
+
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-lg shadow-emerald-500/20 hover:from-emerald-400 hover:to-teal-500 transition-all"
+              >
+                <Plus className="h-4 w-4" />
+                Nhập Data SĐT
+              </button>
+            </div>
           )}
 
           <button
@@ -865,6 +1046,15 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
                             </button>
                           </>
                         )}
+
+                        <button
+                          onClick={() => handleOpenCopyModal(camp)}
+                          className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-500/20 transition-colors"
+                          title="Sao chép / Nhân bản chiến dịch"
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                          Sao chép
+                        </button>
 
                         <button
                           onClick={() => setSelectedCampaign(camp)}
@@ -1455,6 +1645,53 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
                       );
                     })}
                   </div>
+                  {/* Bộ lọc phân loại số trong nhóm */}
+                  {selectedGroupIds.length > 0 && (
+                    <div className="mt-2.5 pt-2.5 border-t border-slate-800">
+                      <label className="text-[11px] font-semibold text-slate-300 block mb-1.5">
+                        Phân loại dữ liệu SĐT nạp từ các nhóm đã chọn:
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setGroupFilterMode("all")}
+                          className={`p-2 rounded-lg border text-left text-xs transition-all ${
+                            groupFilterMode === "all"
+                              ? "border-sky-500 bg-sky-500/20 text-sky-200"
+                              : "border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700"
+                          }`}
+                        >
+                          <div className="font-semibold text-sky-400">Toàn bộ nhóm</div>
+                          <div className="text-[10px] text-slate-400">Nạp tất cả số có trong nhóm</div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setGroupFilterMode("uncontacted")}
+                          className={`p-2 rounded-lg border text-left text-xs transition-all ${
+                            groupFilterMode === "uncontacted"
+                              ? "border-emerald-500 bg-emerald-500/20 text-emerald-200"
+                              : "border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700"
+                          }`}
+                        >
+                          <div className="font-semibold text-emerald-400">Chưa từng gửi tin</div>
+                          <div className="text-[10px] text-slate-400">Chỉ số chưa chạy chiến dịch nào</div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setGroupFilterMode("valid_only")}
+                          className={`p-2 rounded-lg border text-left text-xs transition-all ${
+                            groupFilterMode === "valid_only"
+                              ? "border-purple-500 bg-purple-500/20 text-purple-200"
+                              : "border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700"
+                          }`}
+                        >
+                          <div className="font-semibold text-purple-400">Chỉ số có Zalo</div>
+                          <div className="text-[10px] text-slate-400">Đã xác minh Valid trước đó</div>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <p className="text-[11px] text-slate-500">
                     * Các số điện thoại từ các nhóm được chọn sẽ tự động gộp và loại bỏ trùng lặp với danh sách bên dưới.
                   </p>
@@ -1463,16 +1700,24 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
 
               {/* Danh sách SĐT nhập tay hoặc paste */}
               <div>
-                <label className="text-xs font-semibold text-slate-300">
-                  Danh sách số điện thoại nhập thêm (Mỗi dòng 1 số hoặc kèm tên, tùy chọn nếu đã chọn nhóm)
-                </label>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-300">
+                    Danh sách số điện thoại nhập thêm (Mỗi dòng 1 số hoặc kèm tên, tùy chọn nếu đã chọn nhóm)
+                  </label>
+                  <span className="text-[11px] text-emerald-400">
+                    Tự bóc tách đa số & đổi 11 số sang 10 số
+                  </span>
+                </div>
                 <textarea
                   rows={3}
-                  placeholder={"0912345678, Nguyễn Văn A\n0987654321, Trần Thị B\n0901234567"}
+                  placeholder={"0908120591 - 09888123456 Anh Tuấn\n0912345678, Nguyễn Văn A\n01681234567 (Tự đổi sang 0381234567)"}
                   value={createPhones}
                   onChange={(e) => setCreatePhones(e.target.value)}
                   className="mt-1 w-full font-mono rounded-xl border border-slate-700 bg-slate-950 p-3 text-xs text-white placeholder-slate-500 focus:border-sky-500 focus:outline-none"
                 />
+                <p className="mt-1 text-[11px] text-slate-400">
+                  💡 Hỗ trợ dán dữ liệu tự do: nhận diện dòng chứa 2 số (VD: <code className="text-sky-300">0908120591 - 09888123456</code>), tự bóc tách tên khách hàng và tự động chuẩn hóa đầu số 11 số cũ của các nhà mạng về 10 số mới.
+                </p>
               </div>
 
               {/* Hẹn giờ chạy chiến dịch */}
@@ -1496,14 +1741,112 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
                 </div>
 
                 {isScheduled && (
-                  <div className="space-y-1.5 pt-1">
-                    <label className="text-xs text-slate-300 font-medium">Chọn ngày & giờ bắt đầu gửi:</label>
-                    <input
-                      type="datetime-local"
-                      value={scheduledDateTime}
-                      onChange={(e) => setScheduledDateTime(e.target.value)}
-                      className="w-full rounded-xl border border-sky-500/40 bg-slate-900 px-3.5 py-2 text-xs text-white focus:border-sky-400 focus:outline-none"
-                    />
+                  <div className="space-y-3 pt-1">
+                    {/* Chọn chế độ hẹn giờ: 1 lần hoặc theo ca */}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setScheduleType("single")}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                          scheduleType === "single"
+                            ? "border-sky-500 bg-sky-500/20 text-sky-300"
+                            : "border-slate-800 bg-slate-900/60 text-slate-400 hover:text-slate-200"
+                        }`}
+                      >
+                        Hẹn giờ 1 lần
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setScheduleType("multi_slots")}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                          scheduleType === "multi_slots"
+                            ? "border-amber-500 bg-amber-500/20 text-amber-300"
+                            : "border-slate-800 bg-slate-900/60 text-slate-400 hover:text-slate-200"
+                        }`}
+                      >
+                        Chạy theo ca trong ngày (Multi-slot Batching)
+                      </button>
+                    </div>
+
+                    {scheduleType === "single" ? (
+                      <div className="space-y-1.5">
+                        <label className="text-xs text-slate-300 font-medium">Chọn ngày & giờ bắt đầu gửi:</label>
+                        <input
+                          type="datetime-local"
+                          value={scheduledDateTime}
+                          onChange={(e) => setScheduledDateTime(e.target.value)}
+                          className="w-full rounded-xl border border-sky-500/40 bg-slate-900 px-3.5 py-2 text-xs text-white focus:border-sky-400 focus:outline-none"
+                        />
+                      </div>
+                    ) : (
+                      <div className="space-y-2 rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-slate-300">
+                            Các ca chạy trong ngày (Tự ngắt nghỉ giữa các ca để bảo vệ nick):
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setScheduleSlots((prev) => [...prev, { time: "20:00", batchSize: 50 }])
+                            }
+                            className="text-xs text-sky-400 hover:text-sky-300 font-medium"
+                          >
+                            + Thêm ca
+                          </button>
+                        </div>
+                        <div className="space-y-2">
+                          {scheduleSlots.map((slot, idx) => (
+                            <div key={idx} className="flex items-center gap-3 bg-slate-950/60 p-2 rounded-lg border border-slate-800">
+                              <span className="text-xs text-slate-400 w-12 font-medium">Ca {idx + 1}:</span>
+                              <div className="flex items-center gap-1.5">
+                                <label className="text-[11px] text-slate-400">Giờ:</label>
+                                <input
+                                  type="time"
+                                  value={slot.time}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    setScheduleSlots((prev) =>
+                                      prev.map((s, i) => (i === idx ? { ...s, time: val } : s)),
+                                    );
+                                  }}
+                                  className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white"
+                                />
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <label className="text-[11px] text-slate-400">Số lượng:</label>
+                                <input
+                                  type="number"
+                                  min={10}
+                                  max={200}
+                                  value={slot.batchSize}
+                                  onChange={(e) => {
+                                    const val = parseInt(e.target.value, 10) || 50;
+                                    setScheduleSlots((prev) =>
+                                      prev.map((s, i) => (i === idx ? { ...s, batchSize: val } : s)),
+                                    );
+                                  }}
+                                  className="w-20 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white"
+                                />
+                                <span className="text-[11px] text-slate-400">số</span>
+                              </div>
+                              {scheduleSlots.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setScheduleSlots((prev) => prev.filter((_, i) => i !== idx))}
+                                  className="ml-auto text-rose-400 hover:text-rose-300 text-xs p-1"
+                                  title="Xóa ca"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-[11px] text-slate-400">
+                          * Ví dụ: 09:00 chạy 50 số, 13:30 chạy 50 số, 18:00 chạy 50 số. Sau mỗi ca bot sẽ tự chuyển sang trạng thái chờ ca tiếp theo.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2012,6 +2355,217 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
                 <Play className="h-3.5 w-3.5" />
                 {runBatchAction === "start" ? `Bắt đầu gửi ${runBatchLimit > 0 ? `(${runBatchLimit} tin)` : ""}` : `Tiếp tục gửi ${runBatchLimit > 0 ? `(${runBatchLimit} tin)` : ""}`}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Modal Sao Chép / Nhân Bản Chiến Dịch */}
+      {showCopyModal && campaignToCopy && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Copy className="h-4 w-4 text-amber-400" />
+                Sao Chép / Nhân Bản Chiến Dịch
+              </h3>
+              <button
+                onClick={() => setShowCopyModal(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4 text-xs">
+              <div className="rounded-xl bg-slate-950/70 border border-slate-800 p-3.5 space-y-1">
+                <div className="text-[11px] text-slate-400">Chiến dịch gốc:</div>
+                <div className="font-semibold text-white">{campaignToCopy.title}</div>
+                <div className="text-[11px] text-slate-400">
+                  Số lượng leads hiện tại: <strong>{campaignToCopy.total_leads}</strong> số
+                </div>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1">
+                  Tên chiến dịch mới *
+                </label>
+                <input
+                  type="text"
+                  value={copyTitle}
+                  onChange={(e) => setCopyTitle(e.target.value)}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-xs text-white focus:border-amber-500 focus:outline-none"
+                  placeholder="Nhập tên chiến dịch mới..."
+                />
+              </div>
+
+              <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={copyLeads}
+                    onChange={(e) => setCopyLeads(e.target.checked)}
+                    className="mt-0.5 rounded border-slate-700 text-amber-500 focus:ring-0"
+                  />
+                  <div>
+                    <span className="font-semibold text-slate-200 block">
+                      Sao chép danh sách số điện thoại (Leads)
+                    </span>
+                    <span className="text-[11px] text-slate-400 block mt-0.5">
+                      {copyLeads
+                        ? `Sẽ nhân bản toàn bộ ${campaignToCopy.total_leads} số sang chiến dịch mới ở trạng thái chờ gửi (pending).`
+                        : "Chỉ sao chép cấu hình, nội dung tin nhắn và hình ảnh. Danh sách số sẽ để trống để bạn nạp mới."}
+                    </span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2 border-t border-slate-800 pt-3">
+              <button
+                type="button"
+                onClick={() => setShowCopyModal(false)}
+                className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCopy}
+                disabled={copying}
+                className="flex items-center gap-1.5 rounded-xl bg-amber-600 px-4 py-2 text-xs font-bold text-white hover:bg-amber-500 transition-colors shadow-lg shadow-amber-950/50 disabled:opacity-50"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                {copying ? "Đang nhân bản..." : "Xác Nhận Sao Chép"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Quét Tự Động Trạng Thái Zalo (Pre-validation hub) */}
+      {showVerifyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Search className="h-4 w-4 text-purple-400" />
+                Quét Tự Động Trạng Thái Zalo (Pre-Validation Hub)
+              </h3>
+              <button
+                onClick={() => setShowVerifyModal(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4 text-xs">
+              <div className="rounded-xl bg-purple-950/20 border border-purple-500/30 p-3.5 text-slate-300 space-y-1">
+                <div className="font-semibold text-purple-300">Tính năng xác thực trước:</div>
+                <p className="text-[11px] text-slate-300">
+                  Bot sẽ tự động quét kiểm tra từng SĐT với khoảng nghỉ an toàn 2.5s/số để phân loại tài khoản Zalo, lưu trực tiếp UID & Avatar vào Kho Data. Khi chạy chiến dịch sau này, bot sẽ gửi thẳng siêu tốc mà không cần tốn thời gian dò tìm lại!
+                </p>
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1">
+                  Chọn phạm vi quét kiểm tra:
+                </label>
+                <select
+                  value={verifyTargetGroupId}
+                  onChange={(e) => {
+                    setVerifyTargetGroupId(e.target.value);
+                  }}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-xs text-white focus:border-purple-500 focus:outline-none"
+                >
+                  <option value="all">Toàn bộ Kho Data (Tất cả SĐT chưa xác minh)</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      Nhóm: {g.name} ({g.member_count || 0} số)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Thông tin trạng thái task */}
+              <div className="rounded-xl bg-slate-950 border border-slate-800 p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Số lượng cần xác minh:</span>
+                  <span className="font-bold text-amber-400">{unverifiedCount} số</span>
+                </div>
+
+                {verifyTask && (
+                  <div className="space-y-2 border-t border-slate-800 pt-2.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400">
+                        Trạng thái:{" "}
+                        <strong className={verifyTask.status === "running" ? "text-emerald-400" : "text-slate-300"}>
+                          {verifyTask.status === "running" ? "Đang quét..." : "Đã dừng / Hoàn thành"}
+                        </strong>
+                      </span>
+                      <span className="font-semibold text-sky-400">
+                        {verifyTask.checked_count} / {verifyTask.total_phones}
+                      </span>
+                    </div>
+
+                    {/* Progress bar */}
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
+                      <div
+                        className="h-full bg-gradient-to-r from-purple-500 to-indigo-500 transition-all duration-300"
+                        style={{
+                          width: `${verifyTask.total_phones > 0 ? Math.min(100, Math.round((verifyTask.checked_count / verifyTask.total_phones) * 100)) : 0}%`,
+                        }}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2 text-center pt-1 text-[11px]">
+                      <div className="bg-slate-900/80 p-1.5 rounded-lg border border-slate-800">
+                        <div className="text-emerald-400 font-bold">{verifyTask.valid_count}</div>
+                        <div className="text-[10px] text-slate-400">Có Zalo</div>
+                      </div>
+                      <div className="bg-slate-900/80 p-1.5 rounded-lg border border-slate-800">
+                        <div className="text-slate-400 font-bold">{verifyTask.no_zalo_count}</div>
+                        <div className="text-[10px] text-slate-400">Không có Zalo</div>
+                      </div>
+                      <div className="bg-slate-900/80 p-1.5 rounded-lg border border-slate-800">
+                        <div className="text-rose-400 font-bold">{verifyTask.error_count}</div>
+                        <div className="text-[10px] text-slate-400">Lỗi / Chặn</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2 border-t border-slate-800 pt-3">
+              <button
+                type="button"
+                onClick={() => setShowVerifyModal(false)}
+                className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700"
+              >
+                Đóng
+              </button>
+
+              {verifyTask && verifyTask.status === "running" ? (
+                <button
+                  type="button"
+                  onClick={handleStopVerification}
+                  disabled={verifyingAction}
+                  className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white hover:bg-rose-500 transition-colors"
+                >
+                  Dừng Quét
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleStartVerification}
+                  disabled={verifyingAction || unverifiedCount === 0}
+                  className="flex items-center gap-1.5 rounded-xl bg-purple-600 px-4 py-2 text-xs font-bold text-white hover:bg-purple-500 transition-colors disabled:opacity-50"
+                >
+                  <Search className="h-3.5 w-3.5" />
+                  Bắt Đầu Quét ({unverifiedCount} số)
+                </button>
+              )}
             </div>
           </div>
         </div>

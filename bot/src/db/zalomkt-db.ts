@@ -21,6 +21,11 @@ export interface ZaloMktContact {
   updated_at?: number;
 }
 
+export interface ScheduleSlot {
+  time: string; // "HH:mm" (ví dụ: "09:00", "13:30", "18:00")
+  batchSize: number; // số lượng gửi tối đa mỗi ca
+}
+
 export interface ZaloMktCampaignConfig {
   minDelay?: number; // ms
   maxDelay?: number; // ms
@@ -30,6 +35,8 @@ export interface ZaloMktCampaignConfig {
   dailyLimit?: number;
   batchLimit?: number; // Số tin nhắn thành công tối đa cho lượt chạy này (0 hoặc undefined = không giới hạn)
   runSentCount?: number; // Số tin nhắn đã gửi thành công trong lượt chạy hiện tại
+  scheduleSlots?: ScheduleSlot[]; // Hẹn giờ đa khung giờ trong ngày
+  currentSlotTime?: string; // Mốc giờ của ca hiện tại đang chạy
 }
 
 export interface ZaloMktCampaign {
@@ -79,15 +86,117 @@ export interface ZaloMktLead {
   created_at: number;
 }
 
-/** Chuẩn hóa số điện thoại: loại bỏ khoảng trắng, dấu gạch nối, dấu chấm, chuyển +84 hoặc 84 về 0 */
+/**
+ * Bảng tra cứu chuyển đổi đầu số 11 số sang 10 số theo quy hoạch Viễn thông Việt Nam
+ */
+export const OLD_PREFIX_11_TO_10: Record<string, string> = {
+  // Viettel (0162 - 0169 -> 032 - 039)
+  "0162": "032",
+  "0163": "033",
+  "0164": "034",
+  "0165": "035",
+  "0166": "036",
+  "0167": "037",
+  "0168": "038",
+  "0169": "039",
+  // MobiFone (0120, 0121, 0122, 0126, 0128 -> 070, 079, 077, 076, 078)
+  "0120": "070",
+  "0121": "079",
+  "0122": "077",
+  "0126": "076",
+  "0128": "078",
+  // VinaPhone (0123, 0124, 0125, 0127, 0129 -> 083, 084, 085, 081, 082)
+  "0123": "083",
+  "0124": "084",
+  "0125": "085",
+  "0127": "081",
+  "0129": "082",
+  // Vietnamobile (0186, 0188 -> 056, 058)
+  "0186": "056",
+  "0188": "058",
+  // Gmobile (0199 -> 059)
+  "0199": "059",
+};
+
+/** Chuẩn hóa số điện thoại: loại bỏ ký tự lạ, chuyển +84/84 về 0, chuyển 11 số cũ sang 10 số mới */
 export function normalizePhoneNumber(rawPhone: string): string {
+  if (!rawPhone) return "";
   let cleaned = rawPhone.replace(/[\s\-_.\(\)]/g, "").trim();
   if (cleaned.startsWith("+84")) {
     cleaned = "0" + cleaned.slice(3);
   } else if (cleaned.startsWith("84") && cleaned.length >= 11) {
     cleaned = "0" + cleaned.slice(2);
   }
+
+  // Chuyển đổi từ 11 số sang 10 số nếu thuộc các đầu số cũ của Việt Nam
+  if (cleaned.length === 11 && cleaned.startsWith("0")) {
+    const prefix4 = cleaned.slice(0, 4);
+    const newPrefix = OLD_PREFIX_11_TO_10[prefix4];
+    if (newPrefix) {
+      cleaned = newPrefix + cleaned.slice(4);
+    }
+  }
+
   return cleaned;
+}
+
+/** Kiểm tra SĐT Việt Nam hợp lệ sau khi chuẩn hóa */
+export function isValidVietnamesePhone(phone: string): boolean {
+  return /^0[235789]\d{8}$/.test(phone);
+}
+
+/**
+ * Tự động bóc tách và chuẩn hóa danh sách số điện thoại từ văn bản:
+ * - Hỗ trợ nhiều SĐT trên 1 dòng (ví dụ: "0908120591 - 09888123456", "0908120591, 09888123456")
+ * - Tự động tách tên gợi ý nếu có (ví dụ: "0908120591 - Anh Nam")
+ * - Chuyển toàn bộ 11 số cũ về 10 số chuẩn
+ * - Khử trùng lặp (deduplicate)
+ */
+export function extractPhonesWithNamesFromText(rawText: string): Array<{ phone: string; customName: string }> {
+  if (!rawText) return [];
+  const lines = rawText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const results: Array<{ phone: string; customName: string }> = [];
+  const seen = new Set<string>();
+
+  for (const line of lines) {
+    // 1. Kiểm tra định dạng phân tách rõ ràng (CSV/TSV): "0908120591, Nguyễn Văn A" hoặc "0908120591\tNguyễn Văn A"
+    const delimiterMatch = line.match(/^([+0-9\s.\-_()]+)[,\t;|]+(.*)$/);
+    if (delimiterMatch && delimiterMatch[1]) {
+      const p1 = normalizePhoneNumber(delimiterMatch[1]);
+      const namePart = (delimiterMatch[2] || "").trim();
+      // Nếu phần đầu là 1 SĐT hợp lệ duy nhất
+      if (isValidVietnamesePhone(p1)) {
+        if (!seen.has(p1)) {
+          seen.add(p1);
+          results.push({ phone: p1, customName: namePart });
+        }
+        continue;
+      }
+    }
+
+    // 2. Tìm tất cả các chuỗi giống số điện thoại trong dòng (hỗ trợ nhiều số: 0908120591 - 09888123456)
+    const phoneRegex = /(?:\+84|84|0)(?:[\s\-_.]*\d){8,10}\b/g;
+    const matches = line.match(phoneRegex);
+
+    if (matches && matches.length > 0) {
+      // Tìm tên nếu có (phần chữ còn lại sau khi bóc tách tất cả các số)
+      let remainingText = line;
+      for (const m of matches) {
+        remainingText = remainingText.replace(m, " ");
+      }
+      const extractedName = remainingText.replace(/[\-–—/,;|()]/g, " ").replace(/\s+/g, " ").trim();
+
+      for (const rawP of matches) {
+        const norm = normalizePhoneNumber(rawP);
+        if (isValidVietnamesePhone(norm) && !seen.has(norm)) {
+          seen.add(norm);
+          results.push({ phone: norm, customName: extractedName });
+        }
+      }
+    }
+  }
+
+  return results;
 }
 
 /** Lấy thông tin contact trong kho data toàn cục */
@@ -403,15 +512,227 @@ export function removePhonesFromGroup(groupId: string, phones: string[]): number
   return removed;
 }
 
-/** Lấy toàn bộ số điện thoại thuộc các nhóm được chỉ định (đã deduplicate) */
-export function getPhonesByGroupIds(groupIds: string[]): string[] {
+/** Lấy toàn bộ số điện thoại thuộc các nhóm được chỉ định (hỗ trợ phân loại: tất cả, chưa từng gửi, chỉ số có Zalo) */
+export function getPhonesByGroupIds(
+  groupIds: string[],
+  filterMode: "all" | "uncontacted" | "valid_only" = "all",
+): string[] {
   if (groupIds.length === 0) return [];
   const db = getDb();
   const placeholders = groupIds.map(() => "?").join(", ");
+
+  if (filterMode === "uncontacted") {
+    // Chỉ lấy các số chưa từng được gửi thành công trong bất kỳ chiến dịch nào
+    const rows = db.prepare(`
+      SELECT DISTINCT m.phone
+      FROM zalomkt_contact_group_members m
+      LEFT JOIN zalomkt_contacts c ON m.phone = c.phone
+      WHERE m.group_id IN (${placeholders})
+        AND (c.total_sent IS NULL OR c.total_sent = 0)
+        AND m.phone NOT IN (
+          SELECT DISTINCT phone FROM zalomkt_campaign_leads WHERE status = 'sent'
+        )
+    `).all(...groupIds) as { phone: string }[];
+    return rows.map((r) => r.phone);
+  }
+
+  if (filterMode === "valid_only") {
+    // Chỉ lấy các số đã xác nhận có Zalo (valid)
+    const rows = db.prepare(`
+      SELECT DISTINCT m.phone
+      FROM zalomkt_contact_group_members m
+      JOIN zalomkt_contacts c ON m.phone = c.phone
+      WHERE m.group_id IN (${placeholders})
+        AND c.status_code = 'valid'
+    `).all(...groupIds) as { phone: string }[];
+    return rows.map((r) => r.phone);
+  }
+
   const rows = db.prepare(`
     SELECT DISTINCT phone FROM zalomkt_contact_group_members
     WHERE group_id IN (${placeholders})
   `).all(...groupIds) as { phone: string }[];
   return rows.map((r) => r.phone);
 }
+
+/**
+ * Tính timestamp hẹn giờ tiếp theo dựa trên danh sách ca chạy (scheduleSlots)
+ * Ví dụ slots: [{ time: "09:00", batchSize: 50 }, { time: "13:00", batchSize: 50 }, { time: "18:00", batchSize: 50 }]
+ */
+export function calculateNextSlotSchedule(
+  slots: ScheduleSlot[],
+  referenceDate = new Date(),
+): { nextSlot: ScheduleSlot; nextScheduledAt: number } | null {
+  if (!slots || slots.length === 0) return null;
+
+  // Sắp xếp các slot theo thứ tự thời gian tăng dần trong ngày
+  const sortedSlots = [...slots].sort((a, b) => a.time.localeCompare(b.time));
+
+  const currentHour = referenceDate.getHours();
+  const currentMinute = referenceDate.getMinutes();
+  const currentTotalMinutes = currentHour * 60 + currentMinute;
+
+  // 1. Tìm slot đầu tiên trong ngày hôm nay có mốc giờ lớn hơn giờ hiện tại (ít nhất 1 phút)
+  for (const slot of sortedSlots) {
+    const parts = slot.time.split(":");
+    const h = parseInt(parts[0] || "0", 10);
+    const m = parseInt(parts[1] || "0", 10);
+    if (isNaN(h) || isNaN(m)) continue;
+    const slotTotalMinutes = h * 60 + m;
+
+    if (slotTotalMinutes > currentTotalMinutes) {
+      const targetDate = new Date(referenceDate);
+      targetDate.setHours(h, m, 0, 0);
+      return { nextSlot: slot, nextScheduledAt: targetDate.getTime() };
+    }
+  }
+
+  // 2. Nếu đã qua hết các ca hôm nay -> Lấy ca sớm nhất của ngày mai
+  const firstSlot = sortedSlots[0];
+  if (!firstSlot) return null;
+  const parts = firstSlot.time.split(":");
+  const h = parseInt(parts[0] || "0", 10) || 0;
+  const m = parseInt(parts[1] || "0", 10) || 0;
+
+  const tomorrow = new Date(referenceDate);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(h, m, 0, 0);
+
+  return { nextSlot: firstSlot, nextScheduledAt: tomorrow.getTime() };
+}
+
+export interface ZaloMktVerifyTask {
+  id: string;
+  status: "running" | "completed" | "stopped";
+  total_phones: number;
+  checked_count: number;
+  valid_count: number;
+  no_zalo_count: number;
+  error_count: number;
+  target_group_id: string;
+  created_at: number;
+  updated_at: number;
+}
+
+/** Đảm bảo bảng zalomkt_verify_tasks tồn tại */
+export function ensureVerifyTaskTable(): void {
+  const db = getDb();
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS zalomkt_verify_tasks (
+      id              TEXT PRIMARY KEY,
+      status          TEXT NOT NULL DEFAULT 'running',
+      total_phones    INTEGER NOT NULL DEFAULT 0,
+      checked_count   INTEGER NOT NULL DEFAULT 0,
+      valid_count     INTEGER NOT NULL DEFAULT 0,
+      no_zalo_count   INTEGER NOT NULL DEFAULT 0,
+      error_count     INTEGER NOT NULL DEFAULT 0,
+      target_group_id TEXT NOT NULL DEFAULT '',
+      created_at      INTEGER NOT NULL,
+      updated_at      INTEGER NOT NULL
+    )
+  `);
+}
+
+/** Tạo tác vụ quét kiểm tra SĐT Zalo mới */
+export function createVerifyTask(totalPhones: number, targetGroupId = ""): ZaloMktVerifyTask {
+  ensureVerifyTaskTable();
+  const db = getDb();
+  const id = `vtask_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+  const now = Date.now();
+
+  // Dừng bất kỳ task cũ nào còn đang running
+  db.prepare(`UPDATE zalomkt_verify_tasks SET status = 'stopped', updated_at = ? WHERE status = 'running'`).run(now);
+
+  db.prepare(`
+    INSERT INTO zalomkt_verify_tasks (
+      id, status, total_phones, checked_count, valid_count, no_zalo_count, error_count, target_group_id, created_at, updated_at
+    ) VALUES (?, 'running', ?, 0, 0, 0, 0, ?, ?, ?)
+  `).run(id, totalPhones, targetGroupId, now, now);
+
+  return {
+    id,
+    status: "running",
+    total_phones: totalPhones,
+    checked_count: 0,
+    valid_count: 0,
+    no_zalo_count: 0,
+    error_count: 0,
+    target_group_id: targetGroupId,
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+/** Lấy tác vụ xác minh đang chạy */
+export function getActiveVerifyTask(): ZaloMktVerifyTask | null {
+  ensureVerifyTaskTable();
+  const db = getDb();
+  const row = db.prepare(`SELECT * FROM zalomkt_verify_tasks WHERE status = 'running' ORDER BY created_at DESC LIMIT 1`).get() as any;
+  return row || null;
+}
+
+/** Lấy tác vụ xác minh gần nhất */
+export function getLatestVerifyTask(): ZaloMktVerifyTask | null {
+  ensureVerifyTaskTable();
+  const db = getDb();
+  const row = db.prepare(`SELECT * FROM zalomkt_verify_tasks ORDER BY created_at DESC LIMIT 1`).get() as any;
+  return row || null;
+}
+
+/** Cập nhật tiến độ tác vụ xác minh */
+export function updateVerifyTask(
+  id: string,
+  update: Partial<ZaloMktVerifyTask>,
+): void {
+  ensureVerifyTaskTable();
+  const db = getDb();
+  const fields: string[] = ["updated_at = ?"];
+  const values: any[] = [Date.now()];
+
+  if (typeof update.status === "string") {
+    fields.push("status = ?");
+    values.push(update.status);
+  }
+  if (typeof update.checked_count === "number") {
+    fields.push("checked_count = ?");
+    values.push(update.checked_count);
+  }
+  if (typeof update.valid_count === "number") {
+    fields.push("valid_count = ?");
+    values.push(update.valid_count);
+  }
+  if (typeof update.no_zalo_count === "number") {
+    fields.push("no_zalo_count = ?");
+    values.push(update.no_zalo_count);
+  }
+  if (typeof update.error_count === "number") {
+    fields.push("error_count = ?");
+    values.push(update.error_count);
+  }
+
+  values.push(id);
+  db.prepare(`UPDATE zalomkt_verify_tasks SET ${fields.join(", ")} WHERE id = ?`).run(...values);
+}
+
+/** Lấy danh sách SĐT cần xác minh (chưa có kết quả hoặc unverified) */
+export function getUnverifiedContacts(limit = 100, groupId = ""): string[] {
+  const db = getDb();
+  if (groupId && groupId !== "all") {
+    const rows = db.prepare(`
+      SELECT m.phone FROM zalomkt_contact_group_members m
+      JOIN zalomkt_contacts c ON m.phone = c.phone
+      WHERE m.group_id = ? AND c.status_code = 'unverified'
+      LIMIT ?
+    `).all(groupId, limit) as { phone: string }[];
+    return rows.map((r) => r.phone);
+  }
+
+  const rows = db.prepare(`
+    SELECT phone FROM zalomkt_contacts
+    WHERE status_code = 'unverified'
+    LIMIT ?
+  `).all(limit) as { phone: string }[];
+  return rows.map((r) => r.phone);
+}
+
 

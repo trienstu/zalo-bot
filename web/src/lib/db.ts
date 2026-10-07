@@ -402,6 +402,19 @@ function ensureWebSchema(database: Database.Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_zalomkt_cgm_phone ON zalomkt_contact_group_members(phone);
+
+    CREATE TABLE IF NOT EXISTS zalomkt_verify_tasks (
+      id              TEXT PRIMARY KEY,
+      status          TEXT NOT NULL DEFAULT 'running',
+      total_phones    INTEGER NOT NULL DEFAULT 0,
+      checked_count   INTEGER NOT NULL DEFAULT 0,
+      valid_count     INTEGER NOT NULL DEFAULT 0,
+      no_zalo_count   INTEGER NOT NULL DEFAULT 0,
+      error_count     INTEGER NOT NULL DEFAULT 0,
+      target_group_id TEXT NOT NULL DEFAULT '',
+      created_at      INTEGER NOT NULL,
+      updated_at      INTEGER NOT NULL
+    );
   `);
 
   try {
