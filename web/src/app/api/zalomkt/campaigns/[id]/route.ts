@@ -5,6 +5,7 @@ import {
   getMktCampaign,
   getCampaignLeads,
   deleteMktCampaign,
+  updateMktCampaign,
 } from "@/lib/zalomkt-db";
 
 export const dynamic = "force-dynamic";
@@ -65,3 +66,33 @@ export async function DELETE(
     return NextResponse.json({ ok: false, error: String(err?.message || err) }, { status: 500 });
   }
 }
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  if (!isOriginAllowed(request)) {
+    return NextResponse.json({ error: "Origin không hợp lệ" }, { status: 403 });
+  }
+
+  try {
+    const { id } = await params;
+    const body = (await request.json().catch(() => ({}))) as any;
+    const botId = resolveBotIdFromRequest(request, body.botId);
+
+    const result = updateMktCampaign(id, body, botId);
+    if (!result.success) {
+      return NextResponse.json({ ok: false, error: "Không tìm thấy hoặc không thể cập nhật chiến dịch" }, { status: 404 });
+    }
+
+    return NextResponse.json({
+      ok: true,
+      campaign: result.campaign,
+      newLeadsAdded: result.newLeadsAdded || 0,
+    });
+  } catch (err: any) {
+    console.error("[api/zalomkt/campaigns/[id]] PATCH error:", err);
+    return NextResponse.json({ ok: false, error: String(err?.message || err) }, { status: 500 });
+  }
+}
+

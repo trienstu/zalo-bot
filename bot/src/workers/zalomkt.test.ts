@@ -238,4 +238,37 @@ test("calculateNextSlotSchedule tính toán ca chạy tiếp theo chuẩn xác",
   assert.ok(next2!.nextScheduledAt > refDate7PM.getTime());
 });
 
+test("deleteMktContacts xóa số điện thoại đơn lẻ, nhiều số và xóa theo bộ lọc chuẩn xác", async () => {
+  const { upsertMktContact, getMktContact, deleteMktContacts, createContactGroup, addPhonesToGroup } = await import("../db/zalomkt-db.js");
+
+  // Chuẩn bị dữ liệu test
+  const p1 = "0977111222";
+  const p2 = "0977222333";
+  const p3 = "0977333444";
+
+  upsertMktContact({ phone: p1, display_name: "Khách 1", status_code: "valid" });
+  upsertMktContact({ phone: p2, display_name: "Khách 2", status_code: "valid" });
+  upsertMktContact({ phone: p3, display_name: "Khách 3", status_code: "no_zalo" });
+
+  assert.ok(getMktContact(p1));
+  assert.ok(getMktContact(p2));
+  assert.ok(getMktContact(p3));
+
+  // 1. Xóa 1 số lẻ
+  const res1 = deleteMktContacts({ phones: [p1] });
+  assert.equal(res1.deletedCount, 1);
+  assert.equal(getMktContact(p1), null);
+
+  // 2. Xóa nhiều số
+  const res2 = deleteMktContacts({ phones: [p2] });
+  assert.equal(res2.deletedCount, 1);
+  assert.equal(getMktContact(p2), null);
+
+  // 3. Xóa theo filter
+  const res3 = deleteMktContacts({ deleteAll: true, filter: { status: "no_zalo" } });
+  assert.ok(res3.deletedCount >= 1);
+  assert.equal(getMktContact(p3), null);
+});
+
+
 

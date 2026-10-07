@@ -288,6 +288,66 @@ export function upsertMktContact(contact: Partial<ZaloMktContact> & { phone: str
   }
 }
 
+export interface DeleteMktContactsParams {
+  phones?: string[];
+  deleteAll?: boolean;
+  filter?: {
+    search?: string;
+    status?: string;
+    groupId?: string;
+  };
+}
+
+/** Xóa số điện thoại trong Kho Data Toàn Cục */
+export function deleteMktContacts(
+  params: DeleteMktContactsParams,
+): { success: boolean; deletedCount: number } {
+  const db = getDb();
+  let deletedCount = 0;
+
+  const transaction = db.transaction(() => {
+    if (params.deleteAll) {
+      let where = "WHERE 1=1";
+      const queryParams: any[] = [];
+
+      if (params.filter?.search?.trim()) {
+        const s = `%${params.filter.search.trim()}%`;
+        where += " AND (phone LIKE ? OR display_name LIKE ? OR zalo_name LIKE ?)";
+        queryParams.push(s, s, s);
+      }
+
+      if (params.filter?.status && params.filter.status !== "all") {
+        where += " AND status_code = ?";
+        queryParams.push(params.filter.status);
+      }
+
+      if (params.filter?.groupId && params.filter.groupId !== "all") {
+        where += " AND phone IN (SELECT phone FROM zalomkt_contact_group_members WHERE group_id = ?)";
+        queryParams.push(params.filter.groupId);
+      }
+
+      db.prepare(`DELETE FROM zalomkt_contact_group_members WHERE phone IN (SELECT phone FROM zalomkt_contacts ${where})`).run(...queryParams);
+      const res = db.prepare(`DELETE FROM zalomkt_contacts ${where}`).run(...queryParams);
+      deletedCount = res.changes;
+    } else if (params.phones && params.phones.length > 0) {
+      const deleteGroupMembersStmt = db.prepare(`DELETE FROM zalomkt_contact_group_members WHERE phone = ?`);
+      const deleteContactStmt = db.prepare(`DELETE FROM zalomkt_contacts WHERE phone = ?`);
+
+      for (const phone of params.phones) {
+        if (!phone) continue;
+        deleteGroupMembersStmt.run(phone);
+        const res = deleteContactStmt.run(phone);
+        if (res.changes > 0) {
+          deletedCount += res.changes;
+        }
+      }
+    }
+  });
+
+  transaction();
+  return { success: true, deletedCount };
+}
+
 /** Lấy chiến dịch đang chạy */
 export function getActiveRunningCampaign(): ZaloMktCampaign | null {
   const db = getDb();

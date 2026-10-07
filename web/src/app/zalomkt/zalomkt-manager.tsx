@@ -29,6 +29,7 @@ import {
   FileEdit,
   Send,
   Copy,
+  CheckSquare,
 } from "lucide-react";
 import { Card, CardTitle, Badge } from "@/components/ui";
 
@@ -148,6 +149,34 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
   const [copyTitle, setCopyTitle] = useState("");
   const [copyLeads, setCopyLeads] = useState(true);
   const [copying, setCopying] = useState(false);
+
+  // State Modal Chỉnh Sửa Chiến Dịch
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [campaignToEdit, setCampaignToEdit] = useState<ZaloMktCampaign | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editContent, setEditContent] = useState("");
+  const [editImages, setEditImages] = useState<string[]>([]);
+  const [editMinDelay, setEditMinDelay] = useState(30);
+  const [editMaxDelay, setEditMaxDelay] = useState(60);
+  const [editAutoAlias, setEditAutoAlias] = useState(true);
+  const [editAutoFriend, setEditAutoFriend] = useState(false);
+  const [editAiRewrite, setEditAiRewrite] = useState(false);
+  const [editIsScheduled, setEditIsScheduled] = useState(false);
+  const [editScheduleType, setEditScheduleType] = useState<"once" | "multi_slots">("once");
+  const [editScheduledDateTime, setEditScheduledDateTime] = useState("");
+  const [editScheduleSlots, setEditScheduleSlots] = useState<{ time: string; batchSize: number }[]>([
+    { time: "09:00", batchSize: 50 },
+    { time: "13:30", batchSize: 50 },
+    { time: "18:00", batchSize: 50 },
+  ]);
+  const [editAdditionalPhones, setEditAdditionalPhones] = useState("");
+  const [editSelectedGroupIds, setEditSelectedGroupIds] = useState<string[]>([]);
+  const [editGroupFilterMode, setEditGroupFilterMode] = useState<"all" | "uncontacted" | "valid_only">("all");
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // State chọn và xóa SĐT trong Kho Data
+  const [selectedPhones, setSelectedPhones] = useState<Set<string>>(new Set());
+  const [deletingContacts, setDeletingContacts] = useState(false);
 
   // State Modal Quét Xác Minh Zalo (Pre-validation hub)
   const [showVerifyModal, setShowVerifyModal] = useState(false);
@@ -574,6 +603,274 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
       setCopying(false);
     }
   };
+
+  // Mở modal Chỉnh Sửa Chiến Dịch
+  const handleOpenEditModal = (camp: ZaloMktCampaign) => {
+    setCampaignToEdit(camp);
+    setEditTitle(camp.title);
+    setEditContent(camp.raw_content);
+    try {
+      setEditImages(JSON.parse(camp.images_json || "[]"));
+    } catch {
+      setEditImages([]);
+    }
+
+    let config: any = {};
+    try {
+      config = JSON.parse(camp.config_json || "{}");
+    } catch {}
+
+    setEditMinDelay(Math.round((config.minDelay || 30000) / 1000));
+    setEditMaxDelay(Math.round((config.maxDelay || 60000) / 1000));
+    setEditAutoAlias(config.autoAlias !== false);
+    setEditAutoFriend(Boolean(config.autoFriend));
+    setEditAiRewrite(Boolean(config.aiRewrite));
+
+    if (config.scheduleSlots && config.scheduleSlots.length > 0) {
+      setEditIsScheduled(true);
+      setEditScheduleType("multi_slots");
+      setEditScheduleSlots(config.scheduleSlots);
+    } else if (camp.scheduled_at && camp.scheduled_at > Date.now()) {
+      setEditIsScheduled(true);
+      setEditScheduleType("once");
+      const d = new Date(camp.scheduled_at);
+      const pad = (n: number) => n.toString().padStart(2, "0");
+      setEditScheduledDateTime(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+    } else {
+      setEditIsScheduled(false);
+      setEditScheduleType("once");
+      setEditScheduledDateTime("");
+    }
+
+    setEditAdditionalPhones("");
+    setEditSelectedGroupIds([]);
+    setEditGroupFilterMode("all");
+    setShowEditModal(true);
+  };
+
+  // Lưu chỉnh sửa chiến dịch
+  const handleSaveEdit = async () => {
+    if (!campaignToEdit) return;
+    if (!editTitle.trim()) return alert("Vui lòng nhập tên chiến dịch");
+    if (!editContent.trim()) return alert("Vui lòng nhập nội dung tin nhắn");
+
+    let scheduledAt: number | null = null;
+    if (editIsScheduled) {
+      if (editScheduleType === "multi_slots") {
+        if (!editScheduleSlots || editScheduleSlots.length === 0) {
+          return alert("Vui lòng cấu hình ít nhất 1 ca chạy trong ngày");
+        }
+        const now = new Date();
+        const sorted = [...editScheduleSlots].sort((a, b) => a.time.localeCompare(b.time));
+        const curMins = now.getHours() * 60 + now.getMinutes();
+        let targetSlot = sorted.find((s) => {
+          const [h, m] = s.time.split(":").map(Number);
+          return h * 60 + m > curMins;
+        });
+        const targetDate = new Date();
+        if (targetSlot) {
+          const [h, m] = targetSlot.time.split(":").map(Number);
+          targetDate.setHours(h, m, 0, 0);
+        } else {
+          targetSlot = sorted[0];
+          const [h, m] = targetSlot.time.split(":").map(Number);
+          targetDate.setDate(targetDate.getDate() + 1);
+          targetDate.setHours(h, m, 0, 0);
+        }
+        scheduledAt = targetDate.getTime();
+      } else {
+        if (!editScheduledDateTime) {
+          return alert("Vui lòng chọn ngày và giờ hẹn chạy");
+        }
+        const schedTime = new Date(editScheduledDateTime).getTime();
+        if (isNaN(schedTime) || schedTime <= Date.now()) {
+          return alert("Thời gian hẹn giờ phải ở tương lai so với hiện tại");
+        }
+        scheduledAt = schedTime;
+      }
+    } else {
+      scheduledAt = null;
+    }
+
+    setSavingEdit(true);
+    try {
+      const res = await fetch(`/api/zalomkt/campaigns/${campaignToEdit.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          botId,
+          title: editTitle.trim(),
+          rawContent: editContent.trim(),
+          images: editImages,
+          scheduledAt,
+          rawPhones: editAdditionalPhones.trim() || undefined,
+          groupIds: editSelectedGroupIds.length > 0 ? editSelectedGroupIds : undefined,
+          groupFilterMode: editSelectedGroupIds.length > 0 ? editGroupFilterMode : "all",
+          config: {
+            minDelay: editMinDelay * 1000,
+            maxDelay: editMaxDelay * 1000,
+            autoAlias: editAutoAlias,
+            autoFriend: editAutoFriend,
+            aiRewrite: editAiRewrite,
+            scheduleSlots: editIsScheduled && editScheduleType === "multi_slots" ? editScheduleSlots : undefined,
+            batchLimit: editIsScheduled && editScheduleType === "multi_slots" ? editScheduleSlots[0]?.batchSize : undefined,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        let msg = `✅ Đã lưu cập nhật chiến dịch thành công!`;
+        if (data.newLeadsAdded > 0) {
+          msg += `\nĐã bổ sung thêm ${data.newLeadsAdded} số điện thoại mới vào chiến dịch.`;
+        }
+        alert(msg);
+        setShowEditModal(false);
+        setCampaignToEdit(null);
+        fetchCampaigns();
+      } else {
+        alert("Lỗi lưu cập nhật: " + (data.error || "Không rõ nguyên nhân"));
+      }
+    } catch (err: any) {
+      alert("Lỗi kết nối: " + String(err));
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  // Chọn & Bỏ chọn SĐT
+  const toggleSelectPhone = (phone: string) => {
+    setSelectedPhones((prev) => {
+      const next = new Set(prev);
+      if (next.has(phone)) next.delete(phone);
+      else next.add(phone);
+      return next;
+    });
+  };
+
+  const isAllPageSelected = contacts.length > 0 && contacts.every((c) => selectedPhones.has(c.phone));
+
+  const toggleSelectAllPage = () => {
+    if (isAllPageSelected) {
+      setSelectedPhones((prev) => {
+        const next = new Set(prev);
+        contacts.forEach((c) => next.delete(c.phone));
+        return next;
+      });
+    } else {
+      setSelectedPhones((prev) => {
+        const next = new Set(prev);
+        contacts.forEach((c) => next.add(c.phone));
+        return next;
+      });
+    }
+  };
+
+  const clearSelectedPhones = () => {
+    setSelectedPhones(new Set());
+  };
+
+  // Xóa danh sách SĐT đã chọn
+  const handleDeleteSelectedContacts = async () => {
+    if (selectedPhones.size === 0) return;
+    if (!confirm(`Bạn có chắc chắn muốn xóa ${selectedPhones.size} số điện thoại đã chọn khỏi Kho Data không?\nThao tác này sẽ xóa vĩnh viễn khỏi danh bạ và các nhóm!`)) return;
+
+    setDeletingContacts(true);
+    try {
+      const res = await fetch("/api/zalomkt/contacts", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          botId,
+          phones: Array.from(selectedPhones),
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        alert(`✅ Đã xóa thành công ${data.deletedCount} số điện thoại.`);
+        clearSelectedPhones();
+        fetchContacts();
+      } else {
+        alert("Lỗi khi xóa: " + (data.error || "Không xác định"));
+      }
+    } catch (err: any) {
+      alert("Lỗi kết nối: " + String(err));
+    } finally {
+      setDeletingContacts(false);
+    }
+  };
+
+  // Xóa 1 SĐT đơn lẻ
+  const handleDeleteSingleContact = async (phone: string) => {
+    if (!confirm(`Bạn có chắc muốn xóa số điện thoại ${phone} khỏi Kho Data?`)) return;
+
+    setDeletingContacts(true);
+    try {
+      const res = await fetch("/api/zalomkt/contacts", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          botId,
+          phones: [phone],
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setSelectedPhones((prev) => {
+          const next = new Set(prev);
+          next.delete(phone);
+          return next;
+        });
+        fetchContacts();
+      } else {
+        alert("Lỗi khi xóa: " + (data.error || ""));
+      }
+    } catch (err: any) {
+      alert("Lỗi: " + String(err));
+    } finally {
+      setDeletingContacts(false);
+    }
+  };
+
+  // Xóa tất cả SĐT theo bộ lọc hiện tại hoặc toàn bộ kho
+  const handleDeleteAllFilteredContacts = async () => {
+    const scopeLabel = selectedGroupFilter !== "all"
+      ? `tất cả ${contactTotal} số trong nhóm này`
+      : (contactSearch || contactStatusFilter !== "all"
+        ? `tất cả ${contactTotal} số thỏa mãn bộ lọc hiện tại`
+        : `toàn bộ ${contactTotal} số trong Kho Data`);
+
+    if (!confirm(`⚠️ CẢNH BÁO QUAN TRỌNG:\nBạn có chắc chắn muốn xóa ${scopeLabel} không?\nToàn bộ danh bạ trong phạm vi này sẽ bị xóa vĩnh viễn khỏi hệ thống!`)) return;
+
+    setDeletingContacts(true);
+    try {
+      const res = await fetch("/api/zalomkt/contacts", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          botId,
+          deleteAll: true,
+          filter: {
+            search: contactSearch,
+            status: contactStatusFilter,
+            groupId: selectedGroupFilter,
+          },
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        alert(`✅ Đã xóa sạch ${data.deletedCount} số điện thoại.`);
+        clearSelectedPhones();
+        fetchContacts();
+      } else {
+        alert("Lỗi khi xóa: " + (data.error || ""));
+      }
+    } catch (err: any) {
+      alert("Lỗi: " + String(err));
+    } finally {
+      setDeletingContacts(false);
+    }
+  };
+
 
   // Tải trạng thái tác vụ quét kiểm tra SĐT Zalo
   const fetchVerifyStatus = useCallback(async () => {
@@ -1057,6 +1354,15 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
                         </button>
 
                         <button
+                          onClick={() => handleOpenEditModal(camp)}
+                          className="flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-500/20 transition-colors"
+                          title="Chỉnh sửa thông tin & cấu hình chiến dịch"
+                        >
+                          <FileEdit className="h-3.5 w-3.5" />
+                          Chỉnh sửa
+                        </button>
+
+                        <button
                           onClick={() => setSelectedCampaign(camp)}
                           className="flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs font-medium text-slate-200 hover:bg-slate-700"
                         >
@@ -1370,19 +1676,73 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
               </select>
             </div>
 
-            <div className="text-xs text-slate-400">
-              {selectedGroupFilter !== "all" ? (
-                <>Số trong nhóm: <strong className="text-sky-400">{contactTotal}</strong></>
-              ) : (
-                <>Tổng số trong kho: <strong className="text-sky-400">{contactTotal}</strong> số</>
+            <div className="flex items-center gap-3">
+              <div className="text-xs text-slate-400">
+                {selectedGroupFilter !== "all" ? (
+                  <>Số trong nhóm: <strong className="text-sky-400">{contactTotal}</strong></>
+                ) : (
+                  <>Tổng số trong kho: <strong className="text-sky-400">{contactTotal}</strong> số</>
+                )}
+              </div>
+
+              {contactTotal > 0 && (
+                <button
+                  type="button"
+                  onClick={handleDeleteAllFilteredContacts}
+                  disabled={deletingContacts}
+                  className="flex items-center gap-1.5 rounded-xl border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 transition-colors disabled:opacity-50"
+                  title="Xóa tất cả số theo phạm vi bộ lọc đang chọn"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Xóa tất cả ({contactTotal})
+                </button>
               )}
             </div>
           </div>
+
+          {/* Thanh công cụ chọn & xóa hàng loạt khi có SĐT được tick chọn */}
+          {selectedPhones.size > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-500/30 bg-rose-950/30 px-4 py-2.5 backdrop-blur-md animate-in fade-in duration-200">
+              <div className="flex items-center gap-2 text-xs font-semibold text-rose-300">
+                <CheckSquare className="h-4 w-4 text-rose-400" />
+                <span>
+                  Đã chọn <strong className="text-white font-bold">{selectedPhones.size}</strong> / {contacts.length} số trên trang này
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={clearSelectedPhones}
+                  className="rounded-lg border border-slate-700 bg-slate-800/80 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700 hover:text-white transition-colors"
+                >
+                  Bỏ chọn tất cả
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteSelectedContacts}
+                  disabled={deletingContacts}
+                  className="flex items-center gap-1.5 rounded-lg bg-rose-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-rose-500 transition-colors shadow-lg shadow-rose-950/50 disabled:opacity-50"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {deletingContacts ? "Đang xóa..." : `Xóa ${selectedPhones.size} số đã chọn`}
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/60 backdrop-blur-md">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-900/90 text-slate-400 uppercase tracking-wider">
                 <tr>
+                  <th className="p-3 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isAllPageSelected}
+                      onChange={toggleSelectAllPage}
+                      className="rounded border-slate-700 bg-slate-850 text-sky-500 focus:ring-0 cursor-pointer"
+                      title="Chọn / Bỏ chọn toàn bộ trang này"
+                    />
+                  </th>
                   <th className="p-3">Số Điện Thoại</th>
                   <th className="p-3">Tên Hiển Thị Zalo</th>
                   <th className="p-3">Giới Tính</th>
@@ -1390,24 +1750,38 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
                   <th className="p-3">Trạng Thái Zalo</th>
                   <th className="p-3">Số Chiến Dịch</th>
                   <th className="p-3">Lần Cuối Gửi</th>
+                  <th className="p-3 text-right">Thao Tác</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 bg-slate-950/30">
                 {loadingContacts ? (
                   <tr>
-                    <td colSpan={7} className="p-8 text-center text-slate-500">
+                    <td colSpan={9} className="p-8 text-center text-slate-500">
                       Đang tải danh bạ khách hàng...
                     </td>
                   </tr>
                 ) : contacts.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="p-8 text-center text-slate-500">
+                    <td colSpan={9} className="p-8 text-center text-slate-500">
                       Chưa có số điện thoại nào trong kho dữ liệu.
                     </td>
                   </tr>
                 ) : (
                   contacts.map((c) => (
-                    <tr key={c.phone} className="hover:bg-slate-900/40 transition-colors">
+                    <tr
+                      key={c.phone}
+                      className={`hover:bg-slate-900/40 transition-colors ${
+                        selectedPhones.has(c.phone) ? "bg-rose-950/10" : ""
+                      }`}
+                    >
+                      <td className="p-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedPhones.has(c.phone)}
+                          onChange={() => toggleSelectPhone(c.phone)}
+                          className="rounded border-slate-700 bg-slate-850 text-sky-500 focus:ring-0 cursor-pointer"
+                        />
+                      </td>
                       <td className="p-3 font-mono font-medium text-slate-200">{c.phone}</td>
                       <td className="p-3">
                         <div className="font-semibold text-white">{c.display_name || c.zalo_name || "-"}</div>
@@ -1456,6 +1830,17 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
                       <td className="p-3 text-slate-300 font-medium">{c.total_sent || 0} lần</td>
                       <td className="p-3 text-slate-400">
                         {c.last_sent_at ? new Date(c.last_sent_at).toLocaleDateString("vi-VN") : "Chưa gửi"}
+                      </td>
+                      <td className="p-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSingleContact(c.phone)}
+                          disabled={deletingContacts}
+                          className="rounded-lg p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                          title={`Xóa số ${c.phone} khỏi kho data`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </td>
                     </tr>
                   ))
@@ -2436,6 +2821,345 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
               >
                 <Copy className="h-3.5 w-3.5" />
                 {copying ? "Đang nhân bản..." : "Xác Nhận Sao Chép"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Chỉnh Sửa Chiến Dịch */}
+      {showEditModal && campaignToEdit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm animate-in fade-in duration-150 overflow-y-auto">
+          <div className="w-full max-w-2xl max-h-[90vh] flex flex-col rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 p-5">
+              <div className="flex items-center gap-2.5">
+                <div className="rounded-lg bg-sky-500/20 p-2 text-sky-400">
+                  <FileEdit className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">
+                    Chỉnh Sửa Chiến Dịch
+                  </h3>
+                  <div className="text-[11px] text-slate-400">
+                    ID: <code className="text-sky-300">{campaignToEdit.id}</code> • Đang có {campaignToEdit.total_leads} leads
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+              {campaignToEdit.status === "running" && (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-amber-200 space-y-1">
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <AlertCircle className="h-4 w-4 text-amber-400" />
+                    Chiến dịch đang trong quá trình chạy!
+                  </div>
+                  <p className="text-[11px] text-slate-300">
+                    Mọi thay đổi về nội dung tin nhắn, độ trễ và các thiết lập chống spam sẽ áp dụng ngay cho các lượt gửi tiếp theo.
+                  </p>
+                </div>
+              )}
+
+              {/* Tên chiến dịch */}
+              <div>
+                <label className="text-slate-300 font-semibold block mb-1">
+                  Tên chiến dịch *
+                </label>
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-xs text-white focus:border-sky-500 focus:outline-none"
+                  placeholder="Nhập tên chiến dịch..."
+                />
+              </div>
+
+              {/* Nội dung tin nhắn mẫu */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-slate-300 font-semibold">
+                    Nội dung tin nhắn mẫu *
+                  </label>
+                  <div className="flex gap-1.5 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() => setEditContent((prev) => prev + " {name}")}
+                      className="rounded bg-sky-500/10 px-1.5 py-0.5 text-sky-400 border border-sky-500/20 hover:bg-sky-500/20"
+                    >
+                      + {"{name}"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditContent((prev) => prev + " {gender_call}")}
+                      className="rounded bg-sky-500/10 px-1.5 py-0.5 text-sky-400 border border-sky-500/20 hover:bg-sky-500/20"
+                    >
+                      + {"{gender_call}"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditContent((prev) => prev + " {phone}")}
+                      className="rounded bg-sky-500/10 px-1.5 py-0.5 text-sky-400 border border-sky-500/20 hover:bg-sky-500/20"
+                    >
+                      + {"{phone}"}
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  rows={4}
+                  value={editContent}
+                  onChange={(e) => setEditContent(e.target.value)}
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-xs text-white focus:border-sky-500 focus:outline-none leading-relaxed"
+                  placeholder="Nhập nội dung tin nhắn gửi khách hàng..."
+                />
+              </div>
+
+              {/* Cài đặt hẹn giờ / đa khung giờ */}
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-2 cursor-pointer text-slate-200 font-semibold">
+                    <input
+                      type="checkbox"
+                      checked={editIsScheduled}
+                      onChange={(e) => setEditIsScheduled(e.target.checked)}
+                      className="rounded border-slate-700 text-sky-500 focus:ring-0"
+                    />
+                    <Clock className="h-4 w-4 text-sky-400" />
+                    <span>Lên lịch hẹn giờ chạy chiến dịch</span>
+                  </label>
+
+                  {editIsScheduled && (
+                    <div className="flex items-center gap-1.5 bg-slate-900 rounded-lg p-0.5 border border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setEditScheduleType("once")}
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                          editScheduleType === "once" ? "bg-sky-500 text-white" : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        1 mốc giờ
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditScheduleType("multi_slots")}
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${
+                          editScheduleType === "multi_slots" ? "bg-sky-500 text-white" : "text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        Nhiều ca trong ngày
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {editIsScheduled && editScheduleType === "once" && (
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">Thời gian chạy:</label>
+                    <input
+                      type="datetime-local"
+                      value={editScheduledDateTime}
+                      onChange={(e) => setEditScheduledDateTime(e.target.value)}
+                      className="rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-white focus:border-sky-500 focus:outline-none"
+                    />
+                  </div>
+                )}
+
+                {editIsScheduled && editScheduleType === "multi_slots" && (
+                  <div className="space-y-2 border-t border-slate-800/80 pt-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-slate-400">Thiết lập các ca chạy (Khung giờ & Số lượng):</span>
+                      <button
+                        type="button"
+                        onClick={() => setEditScheduleSlots([...editScheduleSlots, { time: "12:00", batchSize: 50 }])}
+                        className="text-[11px] font-bold text-sky-400 hover:text-sky-300"
+                      >
+                        + Thêm ca
+                      </button>
+                    </div>
+                    {editScheduleSlots.map((slot, idx) => (
+                      <div key={idx} className="flex items-center gap-2">
+                        <input
+                          type="time"
+                          value={slot.time}
+                          onChange={(e) => {
+                            const updated = [...editScheduleSlots];
+                            updated[idx].time = e.target.value;
+                            setEditScheduleSlots(updated);
+                          }}
+                          className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs text-white"
+                        />
+                        <span className="text-slate-400">Gửi:</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={500}
+                          value={slot.batchSize}
+                          onChange={(e) => {
+                            const updated = [...editScheduleSlots];
+                            updated[idx].batchSize = Math.max(1, parseInt(e.target.value) || 1);
+                            setEditScheduleSlots(updated);
+                          }}
+                          className="w-20 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-white"
+                        />
+                        <span className="text-slate-400">số</span>
+                        {editScheduleSlots.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setEditScheduleSlots(editScheduleSlots.filter((_, i) => i !== idx))}
+                            className="p-1 text-slate-500 hover:text-rose-400"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Cài đặt Giãn cách & Anti-Ban */}
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-3">
+                <div className="text-slate-200 font-semibold flex items-center gap-1.5">
+                  <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                  Cấu Hình Anti-Ban & Giãn Cách
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">Giãn cách tối thiểu (giây):</label>
+                    <input
+                      type="number"
+                      min={10}
+                      max={300}
+                      value={editMinDelay}
+                      onChange={(e) => setEditMinDelay(Math.max(5, parseInt(e.target.value) || 30))}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900 p-2 text-xs text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">Giãn cách tối đa (giây):</label>
+                    <input
+                      type="number"
+                      min={10}
+                      max={600}
+                      value={editMaxDelay}
+                      onChange={(e) => setEditMaxDelay(Math.max(5, parseInt(e.target.value) || 60))}
+                      className="w-full rounded-xl border border-slate-700 bg-slate-900 p-2 text-xs text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2 pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer text-slate-300 text-[11px]">
+                    <input
+                      type="checkbox"
+                      checked={editAutoAlias}
+                      onChange={(e) => setEditAutoAlias(e.target.checked)}
+                      className="rounded border-slate-700 text-sky-500 focus:ring-0"
+                    />
+                    Tự động đổi gợi nhớ tên phụ trên Zalo
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer text-slate-300 text-[11px]">
+                    <input
+                      type="checkbox"
+                      checked={editAutoFriend}
+                      onChange={(e) => setEditAutoFriend(e.target.checked)}
+                      className="rounded border-slate-700 text-sky-500 focus:ring-0"
+                    />
+                    Tự động gửi lời mời kết bạn kèm theo
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer text-slate-300 text-[11px]">
+                    <input
+                      type="checkbox"
+                      checked={editAiRewrite}
+                      onChange={(e) => setEditAiRewrite(e.target.checked)}
+                      className="rounded border-slate-700 text-sky-500 focus:ring-0"
+                    />
+                    Kích hoạt AI viết lại tin nhắn (Chống spam fingerprint)
+                  </label>
+                </div>
+              </div>
+
+              {/* Bổ sung thêm SĐT hoặc Nhóm vào chiến dịch */}
+              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3.5 space-y-3">
+                <div className="text-slate-200 font-semibold flex items-center gap-1.5">
+                  <Plus className="h-4 w-4 text-sky-400" />
+                  Bổ Sung Thêm Số Điện Thoại Vào Chiến Dịch (Tùy chọn)
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Các số đã tồn tại trong chiến dịch sẽ tự động được lọc bỏ, chỉ chèn thêm các số mới.
+                </p>
+
+                <div>
+                  <label className="text-[11px] text-slate-400 block mb-1">
+                    Nhập/Dán thêm SĐT mới (Hỗ trợ 11-&gt;10 số, bóc tách nhiều số):
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={editAdditionalPhones}
+                    onChange={(e) => setEditAdditionalPhones(e.target.value)}
+                    placeholder="Dán thêm các số điện thoại mới tại đây..."
+                    className="w-full rounded-xl border border-slate-700 bg-slate-900 p-2 text-xs text-white focus:border-sky-500 focus:outline-none"
+                  />
+                </div>
+
+                {groups.length > 0 && (
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">
+                      Hoặc chọn thêm từ Nhóm Khách Hàng:
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {groups.map((grp) => (
+                        <label
+                          key={grp.id}
+                          className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs cursor-pointer transition-colors ${
+                            editSelectedGroupIds.includes(grp.id)
+                              ? "border-sky-500 bg-sky-500/20 text-sky-200"
+                              : "border-slate-800 bg-slate-900 text-slate-400 hover:text-white"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={editSelectedGroupIds.includes(grp.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) setEditSelectedGroupIds([...editSelectedGroupIds, grp.id]);
+                              else setEditSelectedGroupIds(editSelectedGroupIds.filter((id) => id !== grp.id));
+                            }}
+                            className="sr-only"
+                          />
+                          <span>{grp.name}</span>
+                          <span className="text-[10px] opacity-75">({grp.member_count || 0})</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex justify-end gap-2 border-t border-slate-800 p-4">
+              <button
+                type="button"
+                onClick={() => setShowEditModal(false)}
+                className="rounded-xl border border-slate-700 bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-700"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEdit}
+                disabled={savingEdit}
+                className="flex items-center gap-1.5 rounded-xl bg-sky-600 px-4 py-2 text-xs font-bold text-white hover:bg-sky-500 transition-colors shadow-lg shadow-sky-950/50 disabled:opacity-50"
+              >
+                <FileEdit className="h-3.5 w-3.5" />
+                {savingEdit ? "Đang lưu thay đổi..." : "Lưu Thay Đổi"}
               </button>
             </div>
           </div>

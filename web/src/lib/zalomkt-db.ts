@@ -393,6 +393,175 @@ export function controlMktCampaign(
   return res.changes > 0;
 }
 
+export interface UpdateMktCampaignParams {
+  title?: string;
+  rawContent?: string;
+  images?: string[];
+  config?: Partial<ZaloMktCampaignConfig>;
+  scheduledAt?: number | null;
+  status?: ZaloMktCampaign["status"];
+  rawPhones?: string;
+  groupIds?: string[];
+  groupFilterMode?: "all" | "uncontacted" | "valid_only";
+}
+
+/** Chỉnh sửa thông tin chiến dịch, cấu hình và nạp thêm số mới nếu có */
+export function updateMktCampaign(
+  id: string,
+  params: UpdateMktCampaignParams,
+  botId = "bot-1",
+): { success: boolean; campaign?: ZaloMktCampaign; newLeadsAdded?: number } {
+  const db = getDb(botId);
+  const existing = getMktCampaign(id, botId);
+  if (!existing) return { success: false };
+
+  const now = Date.now();
+  const updatedTitle = typeof params.title === "string" ? params.title.trim() : existing.title;
+  const updatedRawContent = typeof params.rawContent === "string" ? params.rawContent.trim() : existing.raw_content;
+  let existingImages: string[] = [];
+  try {
+    existingImages = JSON.parse(existing.images_json || "[]");
+  } catch {}
+
+  let existingConfig: ZaloMktCampaignConfig = {};
+  try {
+    existingConfig = JSON.parse(existing.config_json || "{}");
+  } catch {}
+
+  const updatedImages = params.images !== undefined ? params.images : existingImages;
+  const updatedConfig: ZaloMktCampaignConfig = { ...existingConfig, ...(params.config || {}) };
+  let updatedScheduledAt = params.scheduledAt !== undefined ? params.scheduledAt : (existing.scheduled_at ?? null);
+  let updatedStatus = params.status || existing.status;
+
+  if (params.scheduledAt !== undefined) {
+    if (params.scheduledAt && params.scheduledAt > now) {
+      if (existing.status === "draft" || existing.status === "paused" || existing.status === "scheduled") {
+        updatedStatus = "scheduled";
+      }
+    } else if (params.scheduledAt === null && existing.status === "scheduled") {
+      updatedStatus = "draft";
+    }
+  }
+
+  let newLeadsAdded = 0;
+  const transaction = db.transaction(() => {
+    // 1. Nếu có nạp thêm SĐT hoặc Nhóm mới
+    const seenPhones = new Set<string>();
+    const currentLeadPhones = db.prepare(`SELECT phone FROM zalomkt_campaign_leads WHERE campaign_id = ?`).all(id) as { phone: string }[];
+    for (const cp of currentLeadPhones) {
+      seenPhones.add(cp.phone);
+    }
+
+    const newParsedLeads: { phone: string; customName: string }[] = [];
+    if (params.rawPhones) {
+      const extracted = extractPhonesWithNamesFromText(params.rawPhones);
+      for (const item of extracted) {
+        if (!seenPhones.has(item.phone)) {
+          seenPhones.add(item.phone);
+          newParsedLeads.push(item);
+        }
+      }
+    }
+
+    if (params.groupIds && params.groupIds.length > 0) {
+      const groupPhones = getPhonesByGroupIds(params.groupIds, params.groupFilterMode || "all", botId);
+      for (const p of groupPhones) {
+        const cleanPhone = normalizePhoneNumber(p);
+        if (cleanPhone && isValidVietnamesePhone(cleanPhone) && !seenPhones.has(cleanPhone)) {
+          seenPhones.add(cleanPhone);
+          newParsedLeads.push({ phone: cleanPhone, customName: "" });
+        }
+      }
+    }
+
+    if (newParsedLeads.length > 0) {
+      const insertLeadStmt = db.prepare(`
+        INSERT INTO zalomkt_campaign_leads (
+          campaign_id, phone, custom_name, zalo_uid, display_name, gender, avatar,
+          status, skip_reason, personalized_text, alias_updated, friend_requested,
+          error_message, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const getContactStmt = db.prepare(`SELECT * FROM zalomkt_contacts WHERE phone = ?`);
+
+      for (const lead of newParsedLeads) {
+        const contact = getContactStmt.get(lead.phone) as any;
+        let leadStatus: ZaloMktLead["status"] = "pending";
+        let skipReason: string | null = null;
+        const uid = contact?.zalo_uid || null;
+        const dName = contact?.display_name || contact?.zalo_name || "";
+        const gen = contact?.gender ?? -1;
+        const avt = contact?.avatar || "";
+
+        if (contact) {
+          if (contact.is_blacklisted) {
+            leadStatus = "skipped";
+            skipReason = "Nằm trong danh sách đen (Blacklist)";
+          } else if (contact.status_code === "no_zalo") {
+            leadStatus = "skipped";
+            skipReason = "SĐT chưa đăng ký tài khoản Zalo";
+          } else if (contact.status_code === "blocked_stranger") {
+            leadStatus = "skipped";
+            skipReason = "Tài khoản chặn tin nhắn từ người lạ";
+          }
+        }
+
+        insertLeadStmt.run(
+          id,
+          lead.phone,
+          lead.customName || "",
+          uid,
+          dName,
+          gen,
+          avt,
+          leadStatus,
+          skipReason,
+          "",
+          0,
+          0,
+          null,
+          now,
+        );
+        newLeadsAdded++;
+      }
+    }
+
+    // 2. Cập nhật bảng zalomkt_campaigns
+    const totalLeadsRow = db.prepare(`SELECT COUNT(*) as total, SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) as skipped FROM zalomkt_campaign_leads WHERE campaign_id = ?`).get(id) as any;
+    const totalLeads = totalLeadsRow?.total ?? existing.total_leads;
+    const skippedCount = totalLeadsRow?.skipped ?? existing.skipped_count;
+
+    db.prepare(`
+      UPDATE zalomkt_campaigns
+      SET title = ?,
+          raw_content = ?,
+          images_json = ?,
+          status = ?,
+          config_json = ?,
+          scheduled_at = ?,
+          total_leads = ?,
+          skipped_count = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(
+      updatedTitle,
+      updatedRawContent,
+      JSON.stringify(updatedImages),
+      updatedStatus,
+      JSON.stringify(updatedConfig),
+      updatedScheduledAt,
+      totalLeads,
+      skippedCount,
+      now,
+      id,
+    );
+  });
+
+  transaction();
+  const updatedCampaign = getMktCampaign(id, botId);
+  return { success: true, campaign: updatedCampaign || undefined, newLeadsAdded };
+}
+
 /** Xóa chiến dịch */
 export function deleteMktCampaign(id: string, botId = "bot-1"): boolean {
   const db = getDb(botId);
@@ -527,6 +696,70 @@ export function importMktContacts(
 
   transaction();
   return { imported, updated };
+}
+
+export interface DeleteMktContactsParams {
+  phones?: string[];
+  deleteAll?: boolean;
+  filter?: {
+    search?: string;
+    status?: string;
+    groupId?: string;
+  };
+}
+
+/** Xóa số điện thoại trong Kho Data Toàn Cục (hỗ trợ xóa lẻ, xóa nhiều theo danh sách hoặc xóa sạch theo bộ lọc) */
+export function deleteMktContacts(
+  params: DeleteMktContactsParams,
+  botId = "bot-1",
+): { success: boolean; deletedCount: number } {
+  const db = getDb(botId);
+  let deletedCount = 0;
+
+  const transaction = db.transaction(() => {
+    if (params.deleteAll) {
+      let where = "WHERE 1=1";
+      const queryParams: any[] = [];
+
+      if (params.filter?.search?.trim()) {
+        const s = `%${params.filter.search.trim()}%`;
+        where += " AND (phone LIKE ? OR display_name LIKE ? OR zalo_name LIKE ?)";
+        queryParams.push(s, s, s);
+      }
+
+      if (params.filter?.status && params.filter.status !== "all") {
+        where += " AND status_code = ?";
+        queryParams.push(params.filter.status);
+      }
+
+      if (params.filter?.groupId && params.filter.groupId !== "all") {
+        where += " AND phone IN (SELECT phone FROM zalomkt_contact_group_members WHERE group_id = ?)";
+        queryParams.push(params.filter.groupId);
+      }
+
+      // Xóa trong zalomkt_contact_group_members
+      db.prepare(`DELETE FROM zalomkt_contact_group_members WHERE phone IN (SELECT phone FROM zalomkt_contacts ${where})`).run(...queryParams);
+
+      // Xóa trong zalomkt_contacts
+      const res = db.prepare(`DELETE FROM zalomkt_contacts ${where}`).run(...queryParams);
+      deletedCount = res.changes;
+    } else if (params.phones && params.phones.length > 0) {
+      const deleteGroupMembersStmt = db.prepare(`DELETE FROM zalomkt_contact_group_members WHERE phone = ?`);
+      const deleteContactStmt = db.prepare(`DELETE FROM zalomkt_contacts WHERE phone = ?`);
+
+      for (const phone of params.phones) {
+        if (!phone) continue;
+        deleteGroupMembersStmt.run(phone);
+        const res = deleteContactStmt.run(phone);
+        if (res.changes > 0) {
+          deletedCount += res.changes;
+        }
+      }
+    }
+  });
+
+  transaction();
+  return { success: true, deletedCount };
 }
 
 /** Thống kê tổng quan Kho Data Marketing */
