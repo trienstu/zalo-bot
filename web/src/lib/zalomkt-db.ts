@@ -519,7 +519,7 @@ export function updateMktCampaign(
           "",
           0,
           0,
-          null,
+          "",
           now,
         );
         newLeadsAdded++;
