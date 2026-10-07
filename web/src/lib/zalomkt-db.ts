@@ -487,7 +487,7 @@ export function updateMktCampaign(
       for (const lead of newParsedLeads) {
         const contact = getContactStmt.get(lead.phone) as any;
         let leadStatus: ZaloMktLead["status"] = "pending";
-        let skipReason: string | null = null;
+        let skipReason = "";
         const uid = contact?.zalo_uid || null;
         const dName = contact?.display_name || contact?.zalo_name || "";
         const gen = contact?.gender ?? -1;

@@ -3138,6 +3138,53 @@ export function ZaloMktManager({ botId = "bot-1" }: { botId?: string }) {
                         </label>
                       ))}
                     </div>
+
+                    {/* Bộ lọc phân loại số trong nhóm khi chỉnh sửa */}
+                    {editSelectedGroupIds.length > 0 && (
+                      <div className="mt-2.5 pt-2.5 border-t border-slate-800">
+                        <label className="text-[11px] font-semibold text-slate-300 block mb-1.5">
+                          Phân loại dữ liệu SĐT nạp từ các nhóm đã chọn:
+                        </label>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditGroupFilterMode("all")}
+                            className={`p-2 rounded-lg border text-left text-xs transition-all ${
+                              editGroupFilterMode === "all"
+                                ? "border-sky-500 bg-sky-500/20 text-sky-200"
+                                : "border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700"
+                            }`}
+                          >
+                            <div className="font-semibold text-sky-400">Toàn bộ nhóm</div>
+                            <div className="text-[10px] text-slate-400">Nạp tất cả số có trong nhóm</div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditGroupFilterMode("uncontacted")}
+                            className={`p-2 rounded-lg border text-left text-xs transition-all ${
+                              editGroupFilterMode === "uncontacted"
+                                ? "border-emerald-500 bg-emerald-500/20 text-emerald-200"
+                                : "border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700"
+                            }`}
+                          >
+                            <div className="font-semibold text-emerald-400">Chưa từng gửi tin</div>
+                            <div className="text-[10px] text-slate-400">Chỉ số chưa chạy chiến dịch nào</div>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditGroupFilterMode("valid_only")}
+                            className={`p-2 rounded-lg border text-left text-xs transition-all ${
+                              editGroupFilterMode === "valid_only"
+                                ? "border-purple-500 bg-purple-500/20 text-purple-200"
+                                : "border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700"
+                            }`}
+                          >
+                            <div className="font-semibold text-purple-400">Chỉ số có Zalo</div>
+                            <div className="text-[10px] text-slate-400">Đã xác minh Valid trước đó</div>
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
