@@ -15,9 +15,7 @@ import {
   type ToolIntent,
 } from "./hybrid-routing.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
-import { checkIsFileOrVoiceGeneration, isImageRequest } from "./tools/file-generator.js";
 import { isPresentationVideoRequest } from "./workers/presentation-video-processor.js";
-import { isMotionVideoRequest } from "./workers/motion-video-processor.js";
 
 export type PlannerTaskType =
   | "image_generation"
@@ -487,68 +485,6 @@ export async function planSearchQueries(params: {
     }, question, quoteText);
   }
 
-  // 2. Nhận diện câu lệnh tạo video nghệ thuật bằng mô hình Muse Video AI (Image-to-Video hoặc Text-to-Video)
-  const hasMuseKeyword = /\b(?:muse|muse2api|muse\.ai)\b/iu.test(trimmed);
-  const isExplicitMuseVideo = hasMuseKeyword && /\b(?:video|clip|mp4|thước\s*phim)\b/iu.test(trimmed);
-  if (isExplicitMuseVideo) {
-    return applyExecutionSignals({
-      needsSearch: false,
-      intent: "knowledge",
-      queries: [],
-      summaryIntent: "Người dùng yêu cầu tạo video nghệ thuật bằng mô hình Muse Video AI",
-      taskType: "muse_video",
-      responseMode: "action",
-      toolIntent: "create",
-    }, question, quoteText);
-  }
-
-  // 2.5. Phủ định nếu là câu hỏi tra cứu công cụ / repo / thư viện / phần mềm
-  const isResourceOrToolInquiry =
-    /(?:có\s+(?:repo|mã\s*nguồn|thư\s*viện|tool|công\s*cụ|app|ứng\s*dụng|phần\s*mềm|web|site|kênh|hệ\s*thống|cách|phương\s*pháp|ai)\s+(?:nào|gì)|hướng\s*dẫn\s+cách|làm\s*sao\s+để|xin\s+(?:repo|tool|link)|chia\s*sẻ\s+(?:repo|tool|phần\s*mềm))/iu.test(
-      trimmed,
-    );
-
-  // 3. Nhận diện câu lệnh xác nhận / giục thực thi tác vụ thuần túy (ví dụ: "ok làm đi", "làm luôn đi em", "triển khai luôn")
-  if (!isResourceOrToolInquiry && isAffirmativeTaskExecution(trimmed)) {
-    const isImgFollowUp = isImageRequest(question, quoteText);
-    return applyExecutionSignals({
-      needsSearch: false,
-      intent: "knowledge",
-      queries: [],
-      summaryIntent: isImgFollowUp ? "Người dùng đồng ý / giục vẽ ảnh đã chốt" : "Người dùng đồng ý / giục thực thi tác vụ tạo nội dung đã chốt",
-      taskType: "file_generation",
-      responseMode: "action",
-      toolIntent: "create",
-    }, question, quoteText);
-  }
-
-  // 3. Fast-Path cho CÂU LỆNH TẠO MEDIA TRỰC TIẾP TỪ QUESTION (TUYỆT ĐỐI KHÔNG BẮT QUOTE CỦA NGƯỜI KHÁC)
-  // Chỉ kích hoạt khi chính câu hỏi của người dùng ra lệnh tạo rõ ràng, không phải câu hỏi thăm dò/tra cứu
-  const isDirectMotion = !isResourceOrToolInquiry && isMotionVideoRequest(question);
-  const isDirectVideo = !isResourceOrToolInquiry && isPresentationVideoRequest(question);
-  const isDirectImg = !isResourceOrToolInquiry && isImageRequest(question);
-  const isDirectFileOrMedia = !isResourceOrToolInquiry && checkIsFileOrVoiceGeneration(question);
-  if (isDirectMotion || isDirectVideo || isDirectImg || isDirectFileOrMedia) {
-    return applyExecutionSignals({
-      needsSearch: false,
-      intent: "knowledge",
-      queries: [],
-      summaryIntent: isDirectMotion
-        ? "Người dùng yêu cầu dựng video đồ họa chuyển động Remotion"
-        : isDirectVideo
-          ? "Người dùng yêu cầu dựng video thuyết trình slide"
-          : isDirectImg
-            ? "Người dùng yêu cầu tạo / vẽ / chỉnh sửa hình ảnh"
-            : "Người dùng yêu cầu tạo file / âm thanh",
-      taskType: isDirectMotion
-        ? "motion_video"
-        : isDirectVideo
-          ? "presentation_video"
-          : "file_generation",
-      responseMode: "action",
-      toolIntent: "create",
-    }, question, quoteText);
-  }
 
   const executionPlannerContract =
     `4. Phân loại tác vụ hành động (taskType) & Đề xuất thực thi chuẩn mực (ANTI-OVERTHINKING):\n` +

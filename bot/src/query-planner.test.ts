@@ -316,21 +316,13 @@ test("câu hỏi chất vấn/phản biện meta (sao em nhầm vậy, bot nói 
   }
 });
 
-test("câu lệnh tạo ảnh, vẽ tranh, tạo file hoặc video được kích hoạt fast-path lập tức mà không cần gọi LLM planner", async () => {
+test("các slash command video được kích hoạt fast-path lập tức", async () => {
   const { planSearchQueries } = await import("./query-planner.js");
   const mediaCases = [
-    { q: "tạo ảnh hotgirl xinh đẹp tập trong phòng gym, mồ hôi nhễ nhại", expectedTask: "file_generation" },
-    { q: "vẽ cho anh bức tranh phong cảnh hoàng hôn trên biển Đà Nẵng", expectedTask: "file_generation" },
-    { q: "soạn file powerpoint 5 slide chiến lược kinh doanh 2026", expectedTask: "file_generation" },
-    { q: "dựng video thuyết trình 5 slide giới thiệu dự án Palm River", expectedTask: "presentation_video" },
-    { q: "làm video slide thuyết trình về báo cáo dự án", expectedTask: "presentation_video" },
-    { q: "đọc diễn cảm bài thơ này cho anh nghe", expectedTask: "file_generation" },
     { q: "/tiktok 3 đột phá của AI Agent", expectedTask: "motion_video" },
     { q: "/shorts tóm tắt tin tức công nghệ", expectedTask: "motion_video" },
     { q: "/video so sánh đối đầu iPhone và Samsung", expectedTask: "motion_video" },
     { q: "/remotion hiệu ứng karaoke pop scale", expectedTask: "motion_video" },
-    { q: "tạo video bằng muse về hoàng hôn trên bãi biển", expectedTask: "muse_video" },
-    { q: "làm video muse phong cảnh anime tuyệt đẹp", expectedTask: "muse_video" },
   ];
 
   for (const item of mediaCases) {
@@ -402,4 +394,10 @@ test("câu hỏi tra cứu, tìm kiếm hoặc đọc hiểu kèm quote tài li�
   assert.equal(checkIsFileOrVoiceGeneration("tóm tắt nội dung giúp anh nhé", "gửi file pdf báo cáo"), false);
   assert.equal(checkIsFileOrVoiceGeneration("cho mình hỏi tác giả là ai vậy bot", "file pdf start with why"), false);
   assert.equal(checkIsFileOrVoiceGeneration("giải thích ý nghĩa câu này với nha", "file word hop_dong.docx"), false);
+
+  // Câu hỏi tra cứu công cụ/phần mềm/AI (tránh sự cố Bác Nguyễn Huy Hoàng)
+  assert.equal(checkIsFileOrVoiceGeneration("@Sen Chúa các phần mềm, AI hỗ trợ chỉnh ảnh"), false);
+  assert.equal(checkIsFileOrVoiceGeneration("những công cụ hỗ trợ edit video tốt nhất"), false);
+  assert.equal(checkIsFileOrVoiceGeneration("danh sách tool bóc tách âm thanh"), false);
+  assert.equal(checkIsFileOrVoiceGeneration("hướng dẫn dịch chuyển biểu đồ trên mt5 bằng chuột"), false);
 });

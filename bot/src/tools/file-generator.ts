@@ -200,9 +200,9 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
     return false;
   }
 
-  // 1.5. Chặn câu hỏi tra cứu công cụ / repo / thư viện / phần mềm / hướng dẫn cách làm
+  // 1.5. Chặn câu hỏi tra cứu công cụ / repo / thư viện / phần mềm / mô hình / hướng dẫn cách làm
   const isResourceOrToolInquiry =
-    /(?:có\s+(?:repo|mã\s*nguồn|thư\s*viện|tool|công\s*cụ|app|ứng\s*dụng|phần\s*mềm|web|site|kênh|hệ\s*thống|cách|phương\s*pháp|ai)\s+(?:nào|gì)|hướng\s*dẫn\s+cách|làm\s*sao\s+để|xin\s+(?:repo|tool|link)|chia\s*sẻ\s+(?:repo|tool|phần\s*mềm))/iu.test(
+    /(?:(?:có|các|những|danh\s*sách|top|gợi\s*ý|chia\s*sẻ|tổng\s*hợp)\s+.*?(?:repo|mã\s*nguồn|thư\s*viện|tool|công\s*cụ|app|ứng\s*dụng|phần\s*mềm|web|site|kênh|hệ\s*thống|mô\s*hình|model|ai)\b|hướng\s*dẫn\s+cách|làm\s*sao\s+để|xin\s+(?:repo|tool|link)|chia\s*sẻ\s+(?:repo|tool|phần\s*mềm))/iu.test(
       qLower,
     );
   if (isResourceOrToolInquiry) {
@@ -310,7 +310,8 @@ export function checkIsFileOrVoiceGeneration(question: string, quoteText = ""): 
     /(?:vẽ|tạo|xuất|lập|thiết\s*kế|làm|soạn|sinh|render)(?:\s+lại)?\s*(?:cho\s*.*?\s*)?(?:biểu\s*đồ|đồ\s*thị|chart|plot|sơ\s*đồ|lưu\s*đồ|flowchart|mindmap|infographic|poster|ảnh|hình|tranh|bảng\s+(?:thi\s*đấu|đấu|xếp\s*hạng|điểm|so\s*sánh|thống\s*kê)|lịch\s+(?:thi\s*đấu|trình))/iu.test(qLower) ||
     /(?:biểu\s*đồ|đồ\s*họa|poster|infographic|hình\s*ảnh|bức\s*ảnh|tấm\s*ảnh).*?(?:làm\s*lại|sửa\s*lại|vẽ\s*lại|cẩn\s*thận|đẹp\s*hơn|chuyên\s*nghiệp)/iu.test(qLower) ||
     /^[/!](?:taoanh|veanh|draw|plot|chart|suaanh|chinhanh|chinhsuaanh|editanh|editimage|modifyimage|imagine|image)\b/iu.test(qLower) ||
-    /(?:sửa|chỉnh\s*sửa|chỉnh|edit|thay|đổi|xoá|xóa|làm\s*nét|biến\s*đổi|phục\s*chế)\s+(?:ảnh|hình|bức\s*ảnh|tấm\s*ảnh|phông|nền|background|tóc|áo|quần|váy|kính|màu|người)/iu.test(qLower) ||
+    (!/(?:phần\s*mềm|công\s*cụ|tool|app|ứng\s*dụng|mô\s*hình|ai|giải\s*pháp|cách|hướng\s*dẫn)\s+.*?(?:chỉnh|sửa|edit)/iu.test(qLower) &&
+     /(?:sửa|chỉnh\s*sửa|chỉnh|edit|thay|đổi|xoá|xóa|làm\s*nét|biến\s*đổi|phục\s*chế)\s+(?:ảnh|hình|bức\s*ảnh|tấm\s*ảnh|phông|nền|background|tóc|áo|quần|váy|kính|màu|người)/iu.test(qLower)) ||
     /(?:dựa\s+(?:vào|theo)|theo)\s+(?:prompt|câu\s*lệnh|ý\s*tưởng|mô\s*tả)\b/iu.test(qLower) ||
     /(?:chạy|viết|run|execute)\s*(?:code|mã|script)\s*(?:python|py)/iu.test(qLower);
 

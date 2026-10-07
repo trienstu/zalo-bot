@@ -2104,7 +2104,7 @@ QUY TẮC BẮT BUỘC:
         hasQuoteMediaLink ||
         /(?:tải|download|lấy|xin|tách)\s+(?:video|clip|mp4|nhạc|audio|mp3|bài\s*hát)/i.test(combinedQuoteInput) ||
         /(?:đọc link|tải trang|cào web|check link|bài viết|bình luận|comment)\s+https?:/i.test(question);
-      const needsAgentLoop = (checkIsFileOrVoiceGeneration(question, options.quote.text) || isQuotePlanAction || isQuoteExternalAction) && !isPureGreeting;
+      const needsAgentLoop = ((quotePlan ? isQuotePlanAction : checkIsFileOrVoiceGeneration(question, options.quote.text)) || isQuoteExternalAction) && !isPureGreeting;
       if (needsAgentLoop) {
         const dynamicTimeout = (options.quote.text?.length || 0) > 10_000 || (options.directDocContent?.length || 0) > 10_000 ? 150_000 : undefined;
         answer = await callGeminiAgentLoop(quoteSystemPrompt, quoteUserPrompt, {
@@ -3128,7 +3128,7 @@ QUY TẮC BẮT BUỘC:
       queryPlan?.responseMode === "action" ||
       queryPlan?.toolIntent === "create" ||
       queryPlan?.toolIntent === "execute";
-    const isFileOrVoiceReq = checkIsFileOrVoiceGeneration(question, options?.quote?.text) || isPlanAction;
+    const isFileOrVoiceReq = queryPlan ? isPlanAction : (checkIsFileOrVoiceGeneration(question, options?.quote?.text) || isPlanAction);
     const combinedContent = `${question} ${options?.quote?.text || ""}`;
     let matchedYtUrl = extractFirstYouTubeUrl(combinedContent);
     const isAskingAboutVideoOrMedia = /(?:tóm\s*tắt|tom\s*tat|nội\s*dung|noi\s*dung|nói\s*gì|noi\s*gi|review|phân\s*tích|clip|video|bài\s*giảng|bài\s*học|ý\s*chính|phụ\s*đề|transcript)/iu.test(question);

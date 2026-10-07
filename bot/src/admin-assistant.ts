@@ -3118,7 +3118,15 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       /(?:tải|download|lấy|xin|tách)\s+(?:video|clip|mp4|nhạc|audio|mp3|bài\s*hát)/i.test(combinedInput) ||
       (!isSearchDisabled && /(?:đọc link|tải trang|cào web|check link|bài viết|bình luận|comment)\s+https?:/i.test(rawText));
 
-    const needsAgentLoop = checkIsFileOrVoiceGeneration(rawText, event.quote?.text) || isExternalLinkOrScrapeAction;
+    const isPlanAction =
+      queryPlan?.taskType === "file_generation" ||
+      queryPlan?.taskType === "voice_generation" ||
+      queryPlan?.taskType === "music_generation" ||
+      queryPlan?.taskType === "python_diagram" ||
+      queryPlan?.responseMode === "action" ||
+      queryPlan?.toolIntent === "create" ||
+      queryPlan?.toolIntent === "execute";
+    const needsAgentLoop = (queryPlan ? isPlanAction : checkIsFileOrVoiceGeneration(rawText, event.quote?.text)) || isExternalLinkOrScrapeAction;
 
     // Nếu tìm thấy link YouTube từ lịch sử trò chuyện, chèn thêm vào effectiveUserPrompt để Agent Loop gọi tool xử lý
     if (matchedYtUrl && !effectiveUserPrompt.includes(matchedYtUrl)) {
