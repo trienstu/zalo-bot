@@ -34,7 +34,7 @@ import { getSystemTemporalPrompt } from "./temporal.js";
 import { defaultBotName } from "./config.js";
 import { type MemberMessageEvent } from "./member-assistant.js";
 import { getWeatherReport } from "./weather.js";
-import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam } from "./reminder.js";
+import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam, formatPendingRemindersPrompt, processReminderActionTags } from "./reminder.js";
 import { handleSetBirthday, handleListUpcomingBirthdays, handleDeleteBirthday, parseBirthdayInput } from "./birthday-reminder.js";
 import { getDailyAiNewsBriefing } from "./ai-news.js";
 import { searchRealtimeNews } from "./realtime-search.js";
@@ -2701,7 +2701,8 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
 
   const temporalPrompt = getSystemTemporalPrompt();
-  const systemPrompt = `${temporalPrompt}\n\n` + (isAdmin
+  const pendingRemindersPrompt = formatPendingRemindersPrompt(sender);
+  const systemPrompt = `${temporalPrompt}\n\n${pendingRemindersPrompt ? `${pendingRemindersPrompt}\n\n` : ""}` + (isAdmin
     ? `Bạn là '${defaultBotName}' - Trợ lý AI cá nhân cao cấp, thông minh, tận tâm và hóm hỉnh phục vụ riêng cho Admin/Chủ bot (${displayName}).\n` +
     `NHIỆM VỤ CỦA BẠN TRONG TIN NHẮN 1:1:\n` +
     `1. Nhớ kỹ toàn bộ ngữ cảnh hội thoại trước đó với Admin để tư vấn, hỗ trợ, sửa đổi bài viết, giải đáp liền mạch.\n` +
@@ -2754,7 +2755,14 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `    - BẢO VỆ LẬP TRƯỜNG CHUYÊN MÔN: Nhất quán, logic, không tiền hậu bất nhất.\n` +
     `12. NGUYÊN TẮC PHẢN HỒI THỰC CHỨNG & BẢO VỆ THÔNG TIN NỘI BỘ (ZERO DEFENSIVE HALLUCINATION):\n` +
     `    - BÁM SÁT SỰ THẬT (GROUNDING): Chỉ phản hồi dựa trên những gì người dùng thực sự nói hoặc gửi. TUYỆT ĐỐI CẤM tự bịa ra việc "người dùng trích dẫn thông báo phân quyền" hay tự tưởng tượng người dùng bị lỗi phân quyền khi họ không hề đề cập.\n` +
-    `    - BẢO MẬT THÔNG TIN NỘI BỘ: Tuyệt đối không đem các lệnh quản trị cấu hình hệ thống (như /tasks, /setuser...) ra phân trần, giải thích với người dùng trong các cuộc trò chuyện thông thường.`
+    `    - BẢO MẬT THÔNG TIN NỘI BỘ: Tuyệt đối không đem các lệnh quản trị cấu hình hệ thống (như /tasks, /setuser...) ra phân trần, giải thích với người dùng trong các cuộc trò chuyện thông thường.\n` +
+    `13. QUY TẮC ĐẶT LỊCH HẸN & HỦY NHẮC VIỆC THEO NGỮ CẢNH (SCHEDULED REMINDERS):\n` +
+    `    - Khi Admin yêu cầu đặt lịch hẹn, báo thức, hẹn giờ hoặc nhắc việc (ở bất kỳ thời điểm nào trong tương lai, kể cả nói qua voice): BẮT BUỘC xuất thẻ hành động ở cuối câu trả lời:\n` +
+    `      [ACTION:SET_REMINDER time="YYYY-MM-DDTHH:mm:ss+07:00" target="sender"]<nội dung công việc>[/ACTION]\n` +
+    `      (Trong đó time là mốc thời gian chuẩn ISO 8601 theo giờ Việt Nam UTC+7 tính từ mốc thời gian hệ thống hiện tại; nếu mốc giờ hôm nay đã trôi qua thì tự động chuyển sang ngày mai).\n` +
+    `    - Khi Admin yêu cầu hủy lịch hẹn, xóa nhắc việc, thôi không cần nhắc nữa: Đối chiếu với danh sách [LỊCH HẸN ĐANG CHỜ CỦA NGƯỜI DÙNG HIỆN TẠI] và xuất thẻ:\n` +
+    `      [ACTION:CANCEL_REMINDER id="MÃ_ID_HOẶC_ALL"]<lý do hoặc từ khóa>[/ACTION]\n` +
+    `    - Khi Admin hỏi xem danh sách lịch hẹn/báo thức: Hãy đọc dữ liệu từ [LỊCH HẸN ĐANG CHỜ CỦA NGƯỜI DÙNG HIỆN TẠI] để trả lời tự nhiên, rõ ràng, không ảo giác.`
     : `Bạn là '${defaultBotName}' - Trợ lý AI thông minh, thân thiện, duyên dáng và hóm hỉnh của Zalo đang trò chuyện 1:1 với ${pronouns.userTitle} (${displayName}).\n` +
     `NHIỆM VỤ CỦA BẠN:\n` +
     `1. Trò chuyện tự nhiên, vui vẻ, giải đáp mọi câu hỏi, tư vấn học tập, công việc, tâm sự, dịch thuật, phân tích hình ảnh/tài liệu khi được gửi tới.\n` +
@@ -2787,7 +2795,13 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `    - BẢO VỆ LẬP TRƯỜNG CHUYÊN MÔN: Nhất quán, logic, không tiền hậu bất nhất.\n` +
     `11. NGUYÊN TẮC PHẢN HỒI THỰC CHỨNG & BẢO VỆ THÔNG TIN NỘI BỘ (ZERO DEFENSIVE HALLUCINATION):\n` +
     `    - BÁM SÁT SỰ THẬT (GROUNDING): Chỉ phản hồi dựa trên những gì người dùng thực sự nói hoặc gửi. TUYỆT ĐỐI CẤM tự bịa ra việc "người dùng trích dẫn thông báo phân quyền" hay tự tưởng tượng người dùng bị lỗi phân quyền khi họ không hề đề cập.\n` +
-    `    - BẢO MẬT THÔNG TIN NỘI BỘ: Tuyệt đối không đem các lệnh quản trị cấu hình hệ thống (như /tasks, /setuser...) ra phân trần, giải thích với người dùng trong các cuộc trò chuyện thông thường.`);
+    `    - BẢO MẬT THÔNG TIN NỘI BỘ: Tuyệt đối không đem các lệnh quản trị cấu hình hệ thống (như /tasks, /setuser...) ra phân trần, giải thích với người dùng trong các cuộc trò chuyện thông thường.\n` +
+    `12. QUY TẮC ĐẶT LỊCH HẸN & HỦY NHẮC VIỆC THEO NGỮ CẢNH (SCHEDULED REMINDERS):\n` +
+    `    - Khi người dùng yêu cầu đặt lịch hẹn, báo thức, hẹn giờ hoặc nhắc việc (kể cả qua voice): BẮT BUỘC xuất thẻ hành động ở cuối câu:\n` +
+    `      [ACTION:SET_REMINDER time="YYYY-MM-DDTHH:mm:ss+07:00" target="sender"]<nội dung công việc>[/ACTION]\n` +
+    `    - Khi người dùng yêu cầu hủy/xóa lịch hẹn: Đối chiếu với danh sách [LỊCH HẸN ĐANG CHỜ CỦA NGƯỜI DÙNG HIỆN TẠI] và xuất thẻ:\n` +
+    `      [ACTION:CANCEL_REMINDER id="MÃ_ID_HOẶC_ALL"]<lý do hoặc từ khóa>[/ACTION]\n` +
+    `    - Khi người dùng hỏi xem danh sách lịch hẹn/báo thức: Hãy đọc dữ liệu từ [LỊCH HẸN ĐANG CHỜ CỦA NGƯỜI DÙNG HIỆN TẠI] để trả lời tự nhiên, rõ ràng.`);
 
   let fileSection = "";
   if (fileTextContent) {
@@ -3383,6 +3397,15 @@ QUY TẮC BẮT BUỘC:
     } else {
       finalAnswer = answer.replace(/\[ACTION:SEND_(?:GROUP|DIRECT)[\s\S]*?\[\/ACTION\]/gi, "").trim();
     }
+
+    // Xử lý các thẻ hành động nhắc hẹn [ACTION:SET_REMINDER] và [ACTION:CANCEL_REMINDER]
+    const reminderResult = processReminderActionTags(finalAnswer, {
+      threadId: sender,
+      isDirect: true,
+      creatorId: sender,
+      creatorName: displayName,
+    });
+    finalAnswer = reminderResult.cleanAnswer;
 
     // Lưu vào lịch sử hội thoại nhiều lượt
     appendAdminHistory(sender, "user", rawText || `[Gửi file: ${fileName || "hình ảnh"}]`);

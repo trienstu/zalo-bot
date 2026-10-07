@@ -67,7 +67,7 @@ import {
 } from "./audio-utils.js";
 import { isJxlBuffer, transcodeImageWithFfmpeg } from "./image-utils.js";
 import { normalizeZaloMediaUrl } from "./message-extract.js";
-import { handleSetReminder } from "./reminder.js";
+import { handleSetReminder, handleListReminders, cancelReminderByContext, parseFlexibleReminderTime } from "./reminder.js";
 import { handleSetBirthday, handleListUpcomingBirthdays } from "./birthday-reminder.js";
 
 /**
@@ -1562,11 +1562,30 @@ const AGENT_TOOLS_DECLARATION = {
       parameters: {
         type: "OBJECT",
         properties: {
-          time: { type: "STRING", description: "Thời gian nhắc hẹn (ví dụ: '15 phút nữa', '09:00 15/10', '8h sáng mai', '17:30 hôm nay', 'ngày 15/10 lúc 9h sáng')" },
+          time: { type: "STRING", description: "Thời gian nhắc hẹn (ví dụ: '15 phút nữa', '09:00 15/10', '8h sáng mai', '17:30 hôm nay', 'ngày 15/10 lúc 9h sáng', hoặc định dạng ISO '2026-10-07T09:00:00+07:00')" },
           content: { type: "STRING", description: "Nội dung công việc cần nhắc (ví dụ: 'Họp với đối tác', 'Uống nước', 'Gửi báo giá')" },
           target: { type: "STRING", enum: ["sender", "all"], description: "'sender' (mặc định) nếu nhắc riêng người yêu cầu, 'all' nếu nhắc cả nhóm" },
         },
         required: ["time", "content"],
+      },
+    },
+    {
+      name: "cancel_reminder",
+      description: "Hủy một hoặc nhiều lịch hẹn, báo thức đang chờ của người dùng.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          reminderId: { type: "STRING", description: "Mã số ID của lịch hẹn cần hủy hoặc 'all' nếu hủy tất cả" },
+          keyword: { type: "STRING", description: "Từ khóa nội dung hoặc thời gian của lịch hẹn cần hủy nếu không biết ID" },
+        },
+      },
+    },
+    {
+      name: "list_reminders",
+      description: "Xem danh sách các lịch hẹn, báo thức đang chờ của người dùng hiện tại.",
+      parameters: {
+        type: "OBJECT",
+        properties: {},
       },
     },
     {
@@ -2023,13 +2042,28 @@ export async function executeAgentTool(name: string, args: Record<string, any>, 
     case "set_reminder": {
       const time = String(args?.time || "").trim();
       const content = String(args?.content || "").trim();
-      const target = args?.target === "all" ? "cho cả nhóm" : "";
-      const fullArgs = `${target} ${time} ${content}`.trim();
+      const target = args?.target === "all" ? "all" : "sender";
       const threadId = context?.threadId || "";
       const isDirect = Boolean(context?.isDirect ?? true);
       const sender = context?.sender || "user";
       const displayName = context?.displayName || "Bạn";
-      const res = handleSetReminder(threadId, isDirect, sender, displayName, fullArgs);
+      const remindAt = parseFlexibleReminderTime(time);
+      const res = handleSetReminder(threadId, isDirect, sender, displayName, content || time, {
+        remindAt: remindAt || undefined,
+        targetType: target,
+        content: content || "Có việc cần làm",
+      });
+      return { success: true, message: res };
+    }
+    case "cancel_reminder": {
+      const sender = context?.sender || "user";
+      const idOrKw = String(args?.reminderId || args?.keyword || "all").trim();
+      const res = cancelReminderByContext(sender, idOrKw);
+      return { success: res.success, message: res.message };
+    }
+    case "list_reminders": {
+      const sender = context?.sender || "user";
+      const res = handleListReminders(sender);
       return { success: true, message: res };
     }
     case "manage_birthday": {

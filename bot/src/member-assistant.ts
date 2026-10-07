@@ -33,7 +33,7 @@ import {
 } from "./gemini.js";
 import { getWeatherReport } from "./weather.js";
 import { getDailyAiNewsBriefing } from "./ai-news.js";
-import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam } from "./reminder.js";
+import { handleSetReminder, handleListReminders, handleCancelReminder, parseNaturalTimeVietnam, formatPendingRemindersPrompt, processReminderActionTags } from "./reminder.js";
 import { handleSetBirthday, handleListUpcomingBirthdays } from "./birthday-reminder.js";
 import { searchRealtimeNews } from "./realtime-search.js";
 import { refreshDynamicKnowledgeIfExpired, fetchGoogleContent, parseGoogleUrl } from "./google-sync.js";
@@ -1655,6 +1655,13 @@ async function handleHistoryQA(
         { fallbackSourceContent: fileTextContent || options?.quote?.text },
       );
       answer = sanitizeHallucinatedFileLinks(answer, fileGenerated);
+      const reminderFastResult = processReminderActionTags(answer, {
+        threadId,
+        isDirect: false,
+        creatorId: options?.sender || "",
+        creatorName: displayName,
+      });
+      answer = reminderFastResult.cleanAnswer;
 
       // 🛡️ PHÒNG THỦ CHIỀU SÂU: Nếu người dùng yêu cầu Voice/Đọc thơ mà chưa có file voice nào được gửi
       if (checkIsVoiceRequest(question, options?.quote?.text) && !voiceGenerated && options?.api) {
@@ -2217,6 +2224,13 @@ QUY TẮC BẮT BUỘC:
         { fallbackSourceContent: options?.directDocContent || options?.quote?.text },
       );
       answer = sanitizeHallucinatedFileLinks(answer, fileGenerated);
+      const reminderQuoteResult = processReminderActionTags(answer, {
+        threadId,
+        isDirect: false,
+        creatorId: options?.sender || "",
+        creatorName: displayName,
+      });
+      answer = reminderQuoteResult.cleanAnswer;
 
       // 🛡️ PHÒNG THỦ CHIỀU SÂU: Nếu người dùng yêu cầu Voice/Đọc thơ mà chưa có file voice nào được gửi
       if (checkIsVoiceRequest(question, options?.quote?.text) && !voiceGenerated && options?.api) {
@@ -3030,8 +3044,10 @@ QUY TẮC BẮT BUỘC:
     `4. KẾT BÀI GỢI MỞ HOẶC LỜI CHÚC LỊCH THIỆP:\n` +
     `   - Có thể để lại 1 câu hỏi gợi mở ngắn gọn hoặc câu chúc tự nhiên, tinh tế (nếu phù hợp).\n`;
 
+  const pendingRemindersPrompt = formatPendingRemindersPrompt(options?.sender || "");
   const systemPrompt =
     `${getSystemTemporalPrompt()}\n\n` +
+    (pendingRemindersPrompt ? `${pendingRemindersPrompt}\n\n` : "") +
     `BẠN ĐANG TƯƠNG TÁC TRỰC TIẾP TRONG NHÓM: "${currentGroupName}" (ID: ${threadId}).\n` +
     `${personaIntro}\n${customPromptSection}\n` +
     (isSystemArchitectureQuery(`${question} ${options?.quote?.text || ""}`)
@@ -3098,6 +3114,13 @@ QUY TẮC BẮT BUỘC:
     `- KHI HỎI VỀ QUY TRÌNH, HƯỚNG DẪN HOẶC KINH NGHIỆM ĐÃ CHIA SẺ TRONG NHÓM: Trích dẫn và diễn giải chi tiết từng bước (Bước 1, Bước 2, Bước 3...), các công cụ (tool) và lưu ý thực chiến từ lịch sử chat. Không chỉ đưa mỗi link tài liệu.\n` +
     buildDynamicSystemPromptModules({ question, quoteText: options?.quote?.text, botName, isSuperAdmin }) +
     `- TỐI ƯU TỐC ĐỘ PHẢN HỒI: Nếu trong dữ liệu thời gian thực hoặc context đã có đủ thông tin để trả lời, PHẢI TẬP TRUNG TRẢ LỜI NGAY, không gọi thêm công cụ tìm kiếm lặp lại để tránh làm chậm phản hồi.\n` +
+    `- QUY TẮC ĐẶT LỊCH HẸN & HỦY NHẮC VIỆC THEO NGỮ CẢNH (SCHEDULED REMINDERS):\n` +
+    `  + Khi người dùng yêu cầu đặt lịch hẹn, báo thức, hẹn giờ hoặc nhắc việc (kể cả nói qua voice): BẮT BUỘC xuất thẻ hành động ở cuối câu:\n` +
+    `    [ACTION:SET_REMINDER time="YYYY-MM-DDTHH:mm:ss+07:00" target="sender" hoặc "all"]<nội dung công việc>[/ACTION]\n` +
+    `    (Trong đó time là mốc thời gian chuẩn ISO 8601 theo giờ Việt Nam UTC+7 tính từ mốc thời gian hệ thống hiện tại; target="all" nếu yêu cầu nhắc cả nhóm, hoặc "sender" nếu nhắc riêng cá nhân; nếu mốc giờ hôm nay đã trôi qua thì tự động chuyển sang ngày mai).\n` +
+    `  + Khi người dùng yêu cầu hủy/xóa lịch hẹn: Đối chiếu với danh sách [LỊCH HẸN ĐANG CHỜ CỦA NGƯỜI DÙNG HIỆN TẠI] và xuất thẻ:\n` +
+    `    [ACTION:CANCEL_REMINDER id="MÃ_ID_HOẶC_ALL"]<lý do hoặc từ khóa>[/ACTION]\n` +
+    `  + Khi người dùng hỏi xem danh sách lịch hẹn/báo thức: Hãy đọc dữ liệu từ [LỊCH HẸN ĐANG CHỜ CỦA NGƯỜI DÙNG HIỆN TẠI] để trả lời tự nhiên, rõ ràng.\n` +
     searchInstruction +
     directAnswerInstruction;
 
@@ -3341,6 +3364,13 @@ QUY TẮC BẮT BUỘC:
       { fallbackSourceContent: fileTextContent || options?.quote?.text },
     );
     answer = sanitizeHallucinatedFileLinks(answer, fileGenerated);
+    const reminderMainResult = processReminderActionTags(answer, {
+      threadId,
+      isDirect: false,
+      creatorId: options?.sender || "",
+      creatorName: displayName,
+    });
+    answer = reminderMainResult.cleanAnswer;
 
     // 🛡️ PHÒNG THỦ CHIỀU SÂU: Nếu người dùng yêu cầu Voice/Đọc thơ/Podcast mà chưa có file voice nào được gửi
     if (checkIsVoiceRequest(question, options?.quote?.text) && !voiceGenerated && options?.api) {

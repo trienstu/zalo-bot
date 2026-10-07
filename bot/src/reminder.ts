@@ -334,6 +334,44 @@ export function formatReminderTime(ts: number): string {
 }
 
 /**
+ * Phân tích thời gian linh hoạt (chấp nhận ISO 8601, timestamp epoch ms hoặc chuỗi tự nhiên)
+ */
+export function parseFlexibleReminderTime(timeStr: string): number | null {
+  const raw = String(timeStr || "").trim();
+  if (!raw) return null;
+
+  // 1. Timestamp số (10 hoặc 13 chữ số)
+  if (/^\d{10,13}$/.test(raw)) {
+    const ts = parseInt(raw, 10);
+    return ts > 1e11 ? ts : ts * 1000;
+  }
+
+  // 2. Định dạng ngày giờ ISO hoặc YYYY-MM-DD HH:mm(:ss)
+  const isoMatch = raw.match(/^\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}(?::\d{2})?(?:[+-]\d{2}:?\d{2}|Z)?$/i);
+  if (isoMatch) {
+    let normalized = raw.replace(" ", "T");
+    if (!/[+-]\d{2}:?\d{2}|Z$/i.test(normalized)) {
+      normalized += "+07:00";
+    }
+    const parsed = Date.parse(normalized);
+    if (!isNaN(parsed)) {
+      // Nếu giờ đã qua trong ngày (trong vòng 24h), tự động chuyển sang ngày mai
+      let finalTs = parsed;
+      if (finalTs <= Date.now() - 2 * 60 * 1000 && Date.now() - finalTs < 24 * 3600 * 1000) {
+        finalTs += 24 * 3600 * 1000;
+      }
+      return finalTs;
+    }
+  }
+
+  // 3. Fallback sang parseNaturalTimeVietnam
+  const natural = parseNaturalTimeVietnam(raw);
+  if (natural) return natural.remindAt;
+
+  return null;
+}
+
+/**
  * Xử lý lệnh đặt lịch / báo thức từ tin nhắn
  */
 export function handleSetReminder(
@@ -342,9 +380,32 @@ export function handleSetReminder(
   creatorId: string,
   creatorName: string,
   inputArgs: string,
+  options?: {
+    remindAt?: number;
+    targetType?: "sender" | "all";
+    content?: string;
+  },
 ): string {
-  const parsed = parseNaturalTimeVietnam(inputArgs);
-  if (!parsed) {
+  let remindAt = options?.remindAt;
+  let content = options?.content;
+  let targetType = options?.targetType || "sender";
+
+  if (!remindAt) {
+    const parsed = parseNaturalTimeVietnam(inputArgs);
+    if (parsed) {
+      remindAt = parsed.remindAt;
+      content = content || parsed.content;
+      targetType = options?.targetType || parsed.targetType;
+    } else {
+      const flexTime = parseFlexibleReminderTime(inputArgs);
+      if (flexTime) {
+        remindAt = flexTime;
+        content = content || "Có việc cần làm";
+      }
+    }
+  }
+
+  if (!remindAt) {
     return [
       `⚠️ Em chưa nhận diện được thời gian hẹn của bác!`,
       `💡 Bác có thể đặt lịch bằng các mẫu dễ hiểu sau:`,
@@ -356,26 +417,27 @@ export function handleSetReminder(
     ].join("\n");
   }
 
+  const finalContent = (content || "Có việc cần làm").trim();
   const id = createScheduledReminder({
     threadId,
     isDirect,
     creatorId,
     creatorName,
-    targetType: parsed.targetType,
-    remindAt: parsed.remindAt,
-    content: parsed.content,
+    targetType,
+    remindAt,
+    content: finalContent,
   });
 
   if (!id) {
     return `⚠️ Có lỗi khi lưu lịch hẹn vào cơ sở dữ liệu. Bác thử lại sau nhé!`;
   }
 
-  const timeDesc = formatReminderTime(parsed.remindAt);
-  const targetDesc = parsed.targetType === "all" ? "cho cả nhóm" : isDirect ? "cho bác" : `cho bác @${creatorName}`;
+  const timeDesc = formatReminderTime(remindAt);
+  const targetDesc = targetType === "all" ? "cho cả nhóm" : isDirect ? "cho bác" : `cho bác @${creatorName}`;
 
   return [
     `⏰ ĐÃ LƯU LỊCH HẸN THÀNH CÔNG! [Mã: #${id}] 🔔`,
-    `📌 Nội dung: "${parsed.content}"`,
+    `📌 Nội dung: "${finalContent}"`,
     `⏳ Thời gian: Nhắc ${targetDesc} ${timeDesc}.`,
     `💡 Gõ /dsnhac để xem tất cả lịch hẹn hoặc /huynhac ${id} để hủy.`,
   ].join("\n");
@@ -406,18 +468,207 @@ export function handleListReminders(creatorId: string): string {
 }
 
 /**
- * Hủy một lịch hẹn
+ * Trích xuất danh sách lịch hẹn đang chờ để nhúng vào Prompt cho AI nắm rõ ngữ cảnh realtime
  */
-export function handleCancelReminder(creatorId: string, idStr: string): string {
-  const id = parseInt(idStr.replace("#", "").trim(), 10);
-  if (isNaN(id) || id <= 0) {
-    return `⚠️ Vui lòng nhập đúng mã lịch hẹn cần hủy (Ví dụ: /huynhac 1). Bác gõ /dsnhac để xem mã số nhé!`;
+export function formatPendingRemindersPrompt(creatorId: string): string {
+  if (!creatorId) return "";
+  const list = getUserScheduledReminders(creatorId, 8);
+  if (list.length === 0) return "";
+
+  const lines = list.map((r) => {
+    const timeStr = formatReminderTime(r.remindAt);
+    const targetStr = r.targetType === "all" ? "cả nhóm" : "cá nhân";
+    return `  • ID #${r.id}: lúc ${timeStr} - "${r.content}" (mục tiêu: ${targetStr})`;
+  });
+
+  return (
+    `\n=== [LỊCH HẸN ĐANG CHỜ CỦA NGƯỜI DÙNG HIỆN TẠI (DATABASE REALTIME)] ===\n` +
+    lines.join("\n") +
+    `\n(GHI CHÚ HỆ THỐNG: Nếu người dùng hỏi về lịch hẹn/nhắc việc, hãy đọc từ danh sách trên để trả lời. Nếu người dùng yêu cầu hủy/xóa lịch hẹn, hãy dùng đúng mã ID tương ứng để xuất thẻ ACTION:CANCEL_REMINDER).\n`
+  );
+}
+
+/**
+ * Hủy lịch hẹn theo ngữ cảnh (ID, từ khóa nội dung, hoặc thời gian)
+ */
+export function cancelReminderByContext(
+  creatorId: string,
+  identifierOrKeyword: string,
+): { success: boolean; message: string; count: number; cancelledIds: number[] } {
+  const raw = String(identifierOrKeyword || "").trim();
+  if (!raw) {
+    return { success: false, message: "⚠️ Bác chưa chỉ định lịch hẹn cần hủy.", count: 0, cancelledIds: [] };
   }
 
-  const ok = cancelScheduledReminder(id, creatorId);
-  if (ok) {
-    return `✅ Đã hủy thành công lịch hẹn mã #${id}!`;
-  } else {
-    return `⚠️ Không tìm thấy lịch hẹn mã #${id} của bác hoặc lịch hẹn này đã được thực hiện trước đó.`;
+  // 1. Hủy tất cả
+  if (/^(?:all|tất cả|tat ca|toàn bộ|toan bo|hết|het)$/i.test(raw)) {
+    const list = getUserScheduledReminders(creatorId, 50);
+    if (list.length === 0) {
+      return { success: false, message: "⏰ Bác không có lịch hẹn nào đang chờ để hủy.", count: 0, cancelledIds: [] };
+    }
+    const cancelledIds: number[] = [];
+    for (const item of list) {
+      if (cancelScheduledReminder(item.id, creatorId)) {
+        cancelledIds.push(item.id);
+      }
+    }
+    return {
+      success: cancelledIds.length > 0,
+      message: `✅ Đã hủy toàn bộ ${cancelledIds.length} lịch hẹn đang chờ của bác!`,
+      count: cancelledIds.length,
+      cancelledIds,
+    };
   }
+
+  // 2. Hủy theo ID cụ thể (#12 hoặc 12 hoặc danh sách 12, 13)
+  const numbersOnly = raw.match(/\b\d+\b/g);
+  if (numbersOnly && numbersOnly.length > 0 && /^[#\s\d,]+$/.test(raw)) {
+    const cancelledIds: number[] = [];
+    for (const numStr of numbersOnly) {
+      const id = parseInt(numStr, 10);
+      if (cancelScheduledReminder(id, creatorId)) {
+        cancelledIds.push(id);
+      }
+    }
+    if (cancelledIds.length > 0) {
+      return {
+        success: true,
+        message: `✅ Đã hủy thành công lịch hẹn mã #${cancelledIds.join(", #")}!`,
+        count: cancelledIds.length,
+        cancelledIds,
+      };
+    }
+    return { success: false, message: `⚠️ Không tìm thấy lịch hẹn mã #${raw} đang chờ của bác.`, count: 0, cancelledIds: [] };
+  }
+
+  // 3. Hủy theo từ khóa nội dung hoặc mốc thời gian
+  const pending = getUserScheduledReminders(creatorId, 20);
+  if (pending.length === 0) {
+    return { success: false, message: "⏰ Bác không có lịch hẹn nào đang chờ để hủy.", count: 0, cancelledIds: [] };
+  }
+
+  const kw = raw.toLowerCase()
+    .replace(/^(?:hủy|huy|xóa|xoa|bỏ|bo|thôi|thoi)\s+(?:lịch\s*hẹn|nhắc\s*nhở|báo\s*thức|cái|việc|hẹn)?\s*/gi, "")
+    .replace(/(?:đi|nhe|nhé|nha|ạ|a)$/gi, "")
+    .trim();
+
+  const matched = pending.filter((item) => {
+    const cLower = item.content.toLowerCase();
+    const timeDesc = formatReminderTime(item.remindAt).toLowerCase();
+    return kw && (cLower.includes(kw) || timeDesc.includes(kw));
+  });
+
+  if (matched.length > 0) {
+    const cancelledIds: number[] = [];
+    for (const item of matched) {
+      if (cancelScheduledReminder(item.id, creatorId)) {
+        cancelledIds.push(item.id);
+      }
+    }
+    const detailList = matched.map((m) => `"#${m.id}: ${m.content}"`).join(", ");
+    return {
+      success: true,
+      message: `✅ Đã hủy ${cancelledIds.length} lịch hẹn (${detailList}) của bác thành công!`,
+      count: cancelledIds.length,
+      cancelledIds,
+    };
+  }
+
+  return {
+    success: false,
+    message: `⚠️ Không tìm thấy lịch hẹn nào khớp với nội dung "${raw}" để hủy. Bác gõ /dsnhac để kiểm tra danh sách nhé!`,
+    count: 0,
+    cancelledIds: [],
+  };
+}
+
+/**
+ * Hủy một lịch hẹn (cú pháp dòng lệnh truyền thống)
+ */
+export function handleCancelReminder(creatorId: string, idStr: string): string {
+  const res = cancelReminderByContext(creatorId, idStr);
+  return res.message;
+}
+
+/**
+ * Bóc tách và thực thi thẻ [ACTION:SET_REMINDER ...] và [ACTION:CANCEL_REMINDER ...]
+ * Tự động đồng bộ vào SQLite và dọn sạch thẻ khỏi câu trả lời của AI
+ */
+export function processReminderActionTags(
+  answer: string,
+  context: {
+    threadId: string;
+    isDirect: boolean;
+    creatorId: string;
+    creatorName: string;
+  },
+): {
+  cleanAnswer: string;
+  executedActions: Array<{
+    type: "set" | "cancel";
+    id?: number;
+    remindAt?: number;
+    message?: string;
+  }>;
+} {
+  let cleanAnswer = answer;
+  const executedActions: Array<{
+    type: "set" | "cancel";
+    id?: number;
+    remindAt?: number;
+    message?: string;
+  }> = [];
+
+  // 1. Quét [ACTION:SET_REMINDER ...]
+  const setRegex = /\[ACTION:SET_REMINDER(?:\s+time=["']([^"']+)["'])?(?:\s+target=["']([^"']+)["'])?\]([\s\S]*?)\[\/ACTION\]/gi;
+  let setMatch: RegExpExecArray | null;
+  while ((setMatch = setRegex.exec(answer)) !== null) {
+    const timeAttr = setMatch[1]?.trim() || "";
+    const targetAttr = setMatch[2]?.toLowerCase() === "all" ? "all" : "sender";
+    const content = setMatch[3]?.trim() || "Có việc cần làm";
+
+    const remindAt = parseFlexibleReminderTime(timeAttr) || parseFlexibleReminderTime(content);
+    if (remindAt) {
+      const id = createScheduledReminder({
+        threadId: context.threadId,
+        isDirect: context.isDirect,
+        creatorId: context.creatorId,
+        creatorName: context.creatorName,
+        targetType: targetAttr,
+        remindAt,
+        content,
+      });
+      if (id) {
+        executedActions.push({
+          type: "set",
+          id,
+          remindAt,
+          message: `⏰ Đã lưu lịch hẹn #${id}: "${content}" ${formatReminderTime(remindAt)}`,
+        });
+      }
+    }
+  }
+  cleanAnswer = cleanAnswer.replace(setRegex, "").trim();
+
+  // 2. Quét [ACTION:CANCEL_REMINDER ...]
+  const cancelRegex = /\[ACTION:CANCEL_REMINDER(?:\s+id=["']([^"']+)["'])?(?:\s+keyword=["']([^"']+)["'])?\]([\s\S]*?)\[\/ACTION\]/gi;
+  let cancelMatch: RegExpExecArray | null;
+  while ((cancelMatch = cancelRegex.exec(answer)) !== null) {
+    const idAttr = cancelMatch[1]?.trim() || "";
+    const kwAttr = cancelMatch[2]?.trim() || cancelMatch[3]?.trim() || "";
+    const targetQuery = idAttr || kwAttr;
+
+    if (targetQuery) {
+      const res = cancelReminderByContext(context.creatorId, targetQuery);
+      if (res.success) {
+        executedActions.push({
+          type: "cancel",
+          message: res.message,
+        });
+      }
+    }
+  }
+  cleanAnswer = cleanAnswer.replace(cancelRegex, "").trim();
+
+  return { cleanAnswer, executedActions };
 }

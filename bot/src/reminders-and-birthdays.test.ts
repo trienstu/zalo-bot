@@ -1,16 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseNaturalTimeVietnam, formatReminderTime } from "./reminder.js";
+import {
+  parseNaturalTimeVietnam,
+  parseFlexibleReminderTime,
+  cancelReminderByContext,
+  formatPendingRemindersPrompt,
+  processReminderActionTags,
+} from "./reminder.js";
 import {
   parseBirthdayInput,
-  handleSetBirthday,
-  handleListUpcomingBirthdays,
-  handleDeleteBirthday,
 } from "./birthday-reminder.js";
 import {
   upsertMemberBirthday,
   getTodayMemberBirthdays,
-  getAllMemberBirthdays,
   deleteMemberBirthday,
 } from "./db/index.js";
 import { handleGroupMentions } from "./host-assistant.js";
@@ -104,7 +106,6 @@ test("3. CRUD Member Birthday hoạt động chuẩn xác trong cơ sở dữ li
 });
 
 test("4. Bot tự tag Admin không kích hoạt theo dõi cảnh báo tag 1:1", () => {
-  let savedAlert = false;
   const mockApi = {
     getOwnId: () => "bot_account_id",
   };
@@ -120,4 +121,68 @@ test("4. Bot tự tag Admin không kích hoạt theo dõi cảnh báo tag 1:1", 
 
   // Kiểm tra không có lỗi crash và không ghi nhận tự nhắc
   assert.ok(true);
+});
+
+test("5. parseFlexibleReminderTime xử lý mượt mà ISO 8601, timestamp và ngôn ngữ tự nhiên", () => {
+  // 5a. ISO 8601 chuẩn
+  const isoTime = "2026-10-15T09:00:00+07:00";
+  const ts1 = parseFlexibleReminderTime(isoTime);
+  assert.ok(ts1, "Phải parse được ISO 8601");
+  const d1 = new Date(ts1);
+  assert.equal(d1.toISOString(), new Date(Date.parse(isoTime)).toISOString());
+
+  // 5b. Timestamp số
+  const nowTs = Date.now() + 3600000;
+  const ts2 = parseFlexibleReminderTime(String(nowTs));
+  assert.equal(ts2, nowTs);
+
+  // 5c. Fallback ngôn ngữ tự nhiên
+  const ts3 = parseFlexibleReminderTime("15 phút nữa");
+  assert.ok(ts3, "Phải parse được 15 phút nữa");
+  assert.ok(ts3 > Date.now());
+});
+
+test("6. Contextual Reminder: Đặt lịch, Xem danh sách và Hủy lịch theo ngữ cảnh SQLite", () => {
+  const testCreator = "test_user_remind_999";
+  const testThread = "group_test_999";
+
+  // 6a. Tạo 2 lịch hẹn bằng processReminderActionTags
+  const sampleLLMAnswer =
+    `Dạ Sếp, em đã ghi nhận lịch hẹn!\n` +
+    `[ACTION:SET_REMINDER time="2026-10-15T09:00:00+07:00" target="sender"]Check Zalo anh Giao và nâng cấp[/ACTION]\n` +
+    `[ACTION:SET_REMINDER time="2026-10-15T14:30:00+07:00" target="all"]Họp chiến lược bán hàng[/ACTION]`;
+
+  const processed = processReminderActionTags(sampleLLMAnswer, {
+    threadId: testThread,
+    isDirect: false,
+    creatorId: testCreator,
+    creatorName: "Sếp Triển",
+  });
+
+  assert.equal(processed.executedActions.length, 2, "Phải thực thi 2 lịch hẹn");
+  assert.ok(!processed.cleanAnswer.includes("[ACTION:SET_REMINDER"), "Phải dọn sạch thẻ khỏi câu trả lời");
+
+  // 6b. Kiểm tra formatPendingRemindersPrompt
+  const promptSummary = formatPendingRemindersPrompt(testCreator);
+  assert.ok(promptSummary.includes("Check Zalo anh Giao"));
+  assert.ok(promptSummary.includes("Họp chiến lược bán hàng"));
+
+  // 6c. Hủy 1 lịch hẹn theo từ khóa ngữ cảnh ("zalo")
+  const cancelRes = cancelReminderByContext(testCreator, "check zalo");
+  assert.equal(cancelRes.success, true);
+  assert.equal(cancelRes.count, 1);
+
+  // 6d. Kiểm tra lại prompt sau khi hủy 1 cái
+  const promptSummaryAfter = formatPendingRemindersPrompt(testCreator);
+  assert.ok(!promptSummaryAfter.includes("Check Zalo anh Giao"), "Lịch hẹn Check Zalo phải biến mất");
+  assert.ok(promptSummaryAfter.includes("Họp chiến lược bán hàng"), "Lịch hẹn Họp chiến lược vẫn còn");
+
+  // 6e. Hủy tất cả lịch hẹn còn lại bằng "all"
+  const cancelAllRes = cancelReminderByContext(testCreator, "all");
+  assert.equal(cancelAllRes.success, true);
+  assert.equal(cancelAllRes.count, 1);
+
+  // 6f. Kiểm tra danh sách trống
+  const promptEmpty = formatPendingRemindersPrompt(testCreator);
+  assert.equal(promptEmpty, "", "Danh sách phải trống rỗng sau khi hủy hết");
 });
