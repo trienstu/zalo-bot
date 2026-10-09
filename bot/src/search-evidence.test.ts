@@ -516,7 +516,14 @@ test("finalizeGroundedAnswer KHÔNG gắn nguồn thời sự vào bài hướng
   assert.ok(!res.includes("*(Nguồn:"));
   assert.ok(!res.includes("CafeBiz"));
   assert.equal(res, answer);
+});test("finalizeGroundedAnswer KHÔNG gắn nguồn vào câu chào hỏi, tiếp nhận hoặc câu trả lời ngắn dưới 180 ký tự", () => {
+  const shortAnswer = "Dạ vâng anh, tối anh gửi nhé ạ! Em sẵn sàng hỗ trợ anh kiểm tra đề thi bất cứ lúc nào.";
+  const context = "[Nguồn: reddit.com | Tiêu đề: Vật lí 12 Chuyên Bắc Ninh]";
+  const res = finalizeGroundedAnswer(shortAnswer, context, false, {
+    question: "Ok em. Tối nay mình gửi nhé",
+    intent: "chat",
+  });
+  assert.ok(!res.includes("*(Nguồn:"));
+  assert.ok(!res.includes("reddit.com"));
+  assert.equal(res, shortAnswer);
 });
-
-
-

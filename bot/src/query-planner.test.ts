@@ -401,3 +401,32 @@ test("câu hỏi tra cứu, tìm kiếm hoặc đọc hiểu kèm quote tài li�
   assert.equal(checkIsFileOrVoiceGeneration("danh sách tool bóc tách âm thanh"), false);
   assert.equal(checkIsFileOrVoiceGeneration("hướng dẫn dịch chuyển biểu đồ trên mt5 bằng chuột"), false);
 });
+
+test("isConversationalMessage và planSearchQueries nhận diện chính xác câu xã giao / thông báo cá nhân", async () => {
+  const { isConversationalMessage, planSearchQueries } = await import("./query-planner.js");
+
+  // Các câu đàm thoại, tiếp nhận, thông báo cá nhân
+  assert.equal(isConversationalMessage("Ok em. Tối nay mình gửi nhé"), true);
+  assert.equal(isConversationalMessage("ok em"), true);
+  assert.equal(isConversationalMessage("chào em"), true);
+  assert.equal(isConversationalMessage("cảm ơn bạn nhé"), true);
+  assert.equal(isConversationalMessage("dạ vâng em"), true);
+  assert.equal(isConversationalMessage("để mai mình gửi sau nhé"), true);
+  assert.equal(isConversationalMessage("chút nữa mình gửi nhé"), true);
+  assert.equal(isConversationalMessage("tối nay anh gửi nha"), true);
+
+  // Các câu hỏi dữ liệu thời gian thực / biến động KHÔNG được là conversational
+  assert.equal(isConversationalMessage("Tối nay mấy giờ đá bóng?"), false);
+  assert.equal(isConversationalMessage("Hôm nay giá vàng bao nhiêu?"), false);
+  assert.equal(isConversationalMessage("Ai là huấn luyện viên trưởng tuyển Anh?"), false);
+
+  // Fast-path của planSearchQueries: không search và intent là chat kể cả khi có recentContext cũ
+  const res = await planSearchQueries({
+    question: "Ok em. Tối nay mình gửi nhé",
+    recentContext: "Đề thi khảo sát chất lượng môn Vật lí 12 trường THPT Chuyên Bắc Ninh lần 1 năm học 2024-2025",
+  });
+  assert.equal(res.needsSearch, false);
+  assert.equal(res.intent, "chat");
+  assert.deepEqual(res.queries, []);
+});
+

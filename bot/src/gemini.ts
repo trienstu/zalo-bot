@@ -1232,7 +1232,7 @@ export async function callGemini(
       }
 
       // 🌐 NẾU CÓ KẾT QUẢ GOOGLE SEARCH GROUNDING:
-      if (candidate?.groundingMetadata?.groundingChunks && candidate.groundingMetadata.groundingChunks.length > 0) {
+      if (isSearchEnabled && candidate?.groundingMetadata?.groundingChunks && candidate.groundingMetadata.groundingChunks.length > 0) {
         incrementGroundingUsage(1);
         const sources = [
           ...new Set(
@@ -1242,7 +1242,8 @@ export async function callGemini(
           ),
         ];
         const alreadyHasCitation = /(?:nguồn(?:\s+kiểm\s+chứng)?|source)\s*:/i.test(content) || /\*\(nguồn/i.test(content);
-        if (sources.length > 0 && !alreadyHasCitation) {
+        // Chỉ dẫn nguồn khi câu trả lời thực sự cung cấp thông tin tra cứu (không phải câu chào hỏi xã giao ngắn)
+        if (sources.length > 0 && !alreadyHasCitation && content.length >= 180) {
           content += `\n\n*(Nguồn: ${sources.join(", ")})*`;
         }
         if (candidate.groundingMetadata.webSearchQueries?.length) {
@@ -1922,13 +1923,13 @@ const AGENT_TOOLS_DECLARATION = {
     },
     {
       name: "python_interpreter",
-      description: "Thực thi mã nguồn Python trực tiếp trên máy chủ để tính toán, phân tích số liệu, hoặc VẼ BIỂU ĐỒ SỐ LIỆU & THIẾT KẾ INFOGRAPHIC/POSTER/CARD ĐỒ HỌA CHUYÊN NGHIỆP (bằng PIL/Pillow hoặc matplotlib). BẮT BUỘC DÙNG khi người dùng yêu cầu vẽ biểu đồ, đồ thị, tạo infographic, poster lịch thi đấu, bảng xếp hạng, timeline, roadmap, thẻ danh ngôn hoặc khi người dùng yêu cầu làm lại/sửa lại ảnh/biểu đồ trước đó.",
+      description: "Thực thi mã nguồn Python trực tiếp trên máy chủ để tính toán, phân tích số liệu, VẼ SƠ ĐỒ MẠCH ĐIỆN VẬT LÍ SGK (bằng thư viện schemdraw), hoặc VẼ BIỂU ĐỒ SỐ LIỆU & THIẾT KẾ INFOGRAPHIC/POSTER/CARD ĐỒ HỌA CHUYÊN NGHIỆP (bằng PIL/Pillow hoặc matplotlib). BẮT BUỘC DÙNG khi người dùng yêu cầu vẽ mạch điện, biểu đồ, đồ thị, tạo infographic, poster lịch thi đấu, bảng xếp hạng, timeline, roadmap, thẻ danh ngôn hoặc khi người dùng yêu cầu làm lại/sửa lại ảnh/biểu đồ trước đó.",
       parameters: {
         type: "OBJECT",
         properties: {
           code: {
             type: "STRING",
-            description: "Đoạn mã Python hoàn chỉnh để thực thi.\n1. NẾU LÀ INFOGRAPHIC, POSTER LỊCH THI ĐẤU, BẢNG XẾP HẠNG, ROADMAP, CARD THÔNG BÁO: BẮT BUỘC dùng PIL (Image, ImageDraw, ImageFont) thiết kế Card Layout chuyên nghiệp khổ dọc (W=720, H=1100-1400):\n  - Nền tối cao cấp: Thể thao dùng đỏ rượu/burgundy (#42030D); Công nghệ/Doanh nghiệp dùng Navy (#0B132B) hoặc Slate (#0F172A); Tài chính dùng Midnight đen ngọc.\n  - Tiêu đề chính vàng kim (#FFD700/#FBBF24, 28-32px bold) căn giữa; phụ đề trắng.\n  - Đặt từng mục vào thẻ bo góc (draw.rounded_rectangle, radius=12-16) có viền mảnh, kèm badge pill trạng thái ở góc phải ([CHÍNH THỨC], [GIAO HỮU], [LỘ TRÌNH]...).\n  - Mỗi dòng sự kiện có ô con bo góc, hiển thị ngày giờ vàng rực, tiêu đề trắng đậm, địa điểm căn phải.\n  - Chân trang có slogan và nguồn rõ ràng. Dùng get_font(size, bold) chuẩn tiếng Việt.\n2. NẾU LÀ BIỂU ĐỒ SỐ LIỆU ĐỊNH LƯỢNG (doanh thu, %, thống kê): Dùng matplotlib (plt.style.use('dark_background'), plt.savefig('chart.png', dpi=150, bbox_inches='tight')). TUYỆT ĐỐI KHÔNG dùng biểu đồ cột cho lịch thi đấu!",
+            description: "Đoạn mã Python hoàn chỉnh để thực thi.\n1. NẾU LÀ SƠ ĐỒ MẠCH ĐIỆN VẬT LÍ (RLC nối tiếp/song song, nguồn xoay chiều, một chiều, cuộn cảm, tụ điện, vôn kế, ampe kế...): BẮT BUỘC dùng thư viện 'schemdraw' (import schemdraw; import schemdraw.elements as elm; with schemdraw.Drawing(file='circuit.png') as d: ...) để chuẩn đẹp như SGK Vật lí thay vì vẽ thủ công bằng matplotlib!\n2. NẾU LÀ INFOGRAPHIC, POSTER LỊCH THI ĐẤU, BẢNG XẾP HẠNG, ROADMAP, CARD THÔNG BÁO: BẮT BUỘC dùng PIL (Image, ImageDraw, ImageFont) thiết kế Card Layout chuyên nghiệp khổ dọc (W=720, H=1100-1400):\n  - Nền tối cao cấp: Thể thao dùng đỏ rượu/burgundy (#42030D); Công nghệ/Doanh nghiệp dùng Navy (#0B132B) hoặc Slate (#0F172A); Tài chính dùng Midnight đen ngọc.\n  - Tiêu đề chính vàng kim (#FFD700/#FBBF24, 28-32px bold) căn giữa; phụ đề trắng.\n  - Đặt từng mục vào thẻ bo góc (draw.rounded_rectangle, radius=12-16) có viền mảnh, kèm badge pill trạng thái ở góc phải ([CHÍNH THỨC], [GIAO HỮU], [LỘ TRÌNH]...).\n  - Mỗi dòng sự kiện có ô con bo góc, hiển thị ngày giờ vàng rực, tiêu đề trắng đậm, địa điểm căn phải.\n  - Chân trang có slogan và nguồn rõ ràng. Dùng get_font(size, bold) chuẩn tiếng Việt.\n3. NẾU LÀ BIỂU ĐỒ SỐ LIỆU ĐỊNH LƯỢNG (doanh thu, %, thống kê): Dùng matplotlib (plt.style.use('dark_background'), plt.savefig('chart.png', dpi=150, bbox_inches='tight')). TUYỆT ĐỐI KHÔNG dùng biểu đồ cột cho lịch thi đấu!",
           },
         },
         required: ["code"],

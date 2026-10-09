@@ -160,21 +160,87 @@ type PlannerSignals = {
 };
 
 /**
+ * Nhận diện câu chào hỏi, cảm ơn, tiếp nhận, hoặc thông báo cá nhân của người dùng (ngôi thứ nhất).
+ * Các câu này mang tính chất đàm thoại chat thuần túy, tuyệt đối KHÔNG kích hoạt tìm kiếm tra cứu.
+ */
+export function isConversationalMessage(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.length > 70) return false;
+
+  // Nếu có dấu chấm hỏi hoặc từ nghi vấn rõ rệt, đây là câu hỏi, không phải thông báo xã giao
+  const hasQuestionSignal =
+    /[?？]/.test(trimmed) ||
+    /\b(?:bao nhiêu|mấy giờ|khi nào|ở đâu|ai là|ai làm|ai thắng|thế nào|sao lại|vì sao|tại sao|có đúng không|phải không|được không|chưa|hả|hở)\b/iu.test(trimmed);
+  if (hasQuestionSignal) return false;
+
+  const normalized = normalizePlannerText(trimmed).replace(/[\s,.:;!?-]+/g, " ").trim();
+  const words = normalized.split(" ");
+  if (words.length === 0) return false;
+
+  // 1. Chào hỏi, cảm ơn, tiếp nhận
+  const greetingOrAckStarters = new Set([
+    "chao", "hi", "hello", "alo", "helo", "e",
+    "cam on", "thanks", "thank",
+    "vang", "da", "da vang", "ok", "oke", "okie", "okiee", "okay",
+    "uh", "u", "uhm", "um", "roi", "nhat tri", "duoc", "duoc roi", "da duoc",
+  ]);
+
+  const conversationParticles = new Set([
+    "em", "anh", "chi", "ban", "b", "bac", "sep", "moi nguoi", "ca nha", "bot",
+    "kevin", "sen chua", "moc mien", "nhe", "nha", "nghen", "a", "oi", "di", "roi", "day", "do",
+    "da", "vang", "ok", "uh",
+  ]);
+
+  const firstWord = words[0];
+  if (!firstWord) return false;
+
+  // Kiểm tra xem cụm bắt đầu có phải greeting/ack không (ưu tiên cụm 2 từ trước, ví dụ 'da vang')
+  let isGreeting = false;
+  let startOffset = 1;
+  if (words.length >= 2 && words[1] && greetingOrAckStarters.has(`${firstWord} ${words[1]}`)) {
+    isGreeting = true;
+    startOffset = 2;
+  } else if (greetingOrAckStarters.has(firstWord)) {
+    isGreeting = true;
+    startOffset = 1;
+  }
+
+  if (isGreeting) {
+    // Nếu tất cả các từ còn lại đều là đại từ xưng hô hoặc trợ từ đàm thoại
+    const remainingWords = words.slice(startOffset);
+    if (remainingWords.length === 0) return true;
+    const allParticles = remainingWords.every((w) => conversationParticles.has(w));
+    if (allParticles) return true;
+  }
+
+  // 2. Thông báo hành động cá nhân của người dùng (ngôi thứ nhất sẽ gửi/làm sau)
+  const isPersonalStatement =
+    /\b(?:minh|toi|anh|chi|em|to)\s+(?:gui|lam|xem|check|nhan|alo|goi|on|nghi|doc)\b/iu.test(normalized) ||
+    /\b(?:de|hen)\s+(?:toi|mai|chieu|sang|lat|chut|sau)\s+(?:minh|toi|anh|chi|em|to)?\s*(?:gui|lam|xem|check)?\b/iu.test(normalized) ||
+    /^(?:ok|oke|okie|da|vang)?\s*\b(?:toi nay|chieu nay|sang mai|toi mai|mai|lat nua|chut nua|ti nua)\s+(?:minh|toi|anh|chi|em|to)?\s*(?:gui|lam|xem|check|nhan)\b/iu.test(normalized);
+
+  if (isPersonalStatement) return true;
+
+  return false;
+}
+
+/**
  * Guardrail deterministic độc lập với LLM. Không trả lời câu hỏi thay LLM;
  * chỉ xác định mức độ cần dữ liệu mới và mức rủi ro để planner không thể
  * vô tình hạ một câu hỏi biến động/rủi ro cao thành tri thức nền.
  */
 function detectPlannerSignals(question: string, quoteText = ""): PlannerSignals {
+  const isPersonal = isConversationalMessage(question);
   const text = normalizePlannerText(`${question} ${quoteText}`);
   const scienceLaw = /\b(?:dinh luat|quy luat|luat bao toan|luat hap dan|luat newton|luat ohm)\b/i.test(text);
   const isConceptOrMechanism = /\b(?:la gi|nghia la gi|khai niem|dinh nghia|giai thich|nguyen ly|co che|hoat dong nhu the nao|cach hoat dong|tai sao|vi sao|y nghia)\b/i.test(text);
-  const hasExplicitTimeAnchor = /\b(?:hien nay|hien tai|hom nay|toi nay|chieu nay|sang nay|dem nay|trua nay|ngay mai|ngay kia|hom qua|luc nay|bay gio|moi nhat|co gi moi|tin moi|nghien cuu moi|vua qua|sap toi|nam nay|thang nay|tuan nay|cap nhat|dang dien ra|con hieu luc|phien ban moi|vua ra mat|sap ra mat|may gio|luc may gio|khi nao|bao gio|gio nao)\b/i.test(text);
-  const explicitlyCurrent = (!isConceptOrMechanism || hasExplicitTimeAnchor) && (
+  const hasExplicitTimeAnchor = !isPersonal && /\b(?:hien nay|hien tai|hom nay|toi nay|chieu nay|sang nay|dem nay|trua nay|ngay mai|ngay kia|hom qua|luc nay|bay gio|moi nhat|co gi moi|tin moi|nghien cuu moi|vua qua|sap toi|nam nay|thang nay|tuan nay|cap nhat|dang dien ra|con hieu luc|phien ban moi|vua ra mat|sap ra mat|may gio|luc may gio|khi nao|bao gio|gio nao)\b/i.test(text);
+  const explicitlyCurrent = !isPersonal && (!isConceptOrMechanism || hasExplicitTimeAnchor) && (
     hasExplicitTimeAnchor ||
     /\b(?:bang gia|bao gia|gia ban|gia mua|gia thi truong|lich thi dau|ket qua|ti so|bang xep hang|du bao|thoi tiet)\b/i.test(text) ||
     /^gia\s+/i.test(text)
   );
-  const inherentlyVolatile = !isConceptOrMechanism && /\b(?:lanh dao|chu tich|bi thu|tong bi thu|thu tuong|bo truong|giam doc|ceo|hlv|chuc vu|nhan su|gia vang|gia xang|gia dau|ty gia|lai suat|chung khoan|co phieu|vn-index|crypto|bitcoin|thoi tiet|bao so|bao ap thap|con bao|lu lut|ngap lut|dong dat|lich thi dau|ket qua tran|ti so|bang xep hang|vo dich|chuyen nhuong|phap luat|luat|nghi dinh|thong tu|thue|muc phat|thu tuc|quy hoach|sap nhap|dia gioi|dan so|gdp|du an|bat dong san|mo ban|tien do|phap ly|chu dau tu|chuyen bay|xo so|dich benh|canh bao an ninh|lo hong bao mat|tuyen sinh|diem chuan|hoc phi|lich thi|visa|thi thuc|giay phep|lich mo cua|gio mo cua|thong so ky thuat|ngay phat hanh|tran dau|doi tuyen|da bong|da banh|bong da|giai dau|kenh chieu|phat song|truc tiep|xem o dau|da voi ai|da luc|da gio|thi dau)\b/i.test(text) && !scienceLaw;
+  const inherentlyVolatile = !isPersonal && !isConceptOrMechanism && /\b(?:lanh dao|chu tich|bi thu|tong bi thu|thu tuong|bo truong|giam doc|ceo|hlv|chuc vu|nhan su|gia vang|gia xang|gia dau|ty gia|lai suat|chung khoan|co phieu|vn-index|crypto|bitcoin|thoi tiet|bao so|bao ap thap|con bao|lu lut|ngap lut|dong dat|lich thi dau|ket qua tran|ti so|bang xep hang|vo dich|chuyen nhuong|phap luat|luat|nghi dinh|thong tu|thue|muc phat|thu tuc|quy hoach|sap nhap|dia gioi|dan so|gdp|du an|bat dong san|mo ban|tien do|phap ly|chu dau tu|chuyen bay|xo so|dich benh|canh bao an ninh|lo hong bao mat|tuyen sinh|diem chuan|hoc phi|lich thi|visa|thi thuc|giay phep|lich mo cua|gio mo cua|thong so ky thuat|ngay phat hanh|tran dau|doi tuyen|da bong|da banh|bong da|giai dau|kenh chieu|phat song|truc tiep|xem o dau|da voi ai|da luc|da gio|thi dau)\b/i.test(text) && !scienceLaw;
   const stableTask = /\b(?:dich|viet lai|tom tat van ban|soan|sang tac|dat ten|giai phuong trinh|tinh toan|chung minh|viet code|sua code|regex|thuat toan|giai thich khai niem|la gi|hoat dong nhu the nao|cach hoat dong)\b/i.test(text) &&
     !explicitlyCurrent && !inherentlyVolatile;
   return {
@@ -435,14 +501,14 @@ export async function planSearchQueries(params: {
 }): Promise<QueryPlanResult> {
   const { question, quoteText, recentContext, displayName } = params;
 
-  // Nếu câu chào đơn thuần (không có trích dẫn quote, không có động từ hành động), bỏ qua planner để tiết kiệm tài nguyên
+  // Nếu câu chào hỏi, cảm ơn, tiếp nhận hoặc thông báo cá nhân (ngôi thứ nhất), bỏ qua planner để tiết kiệm tài nguyên
   const trimmed = question.trim();
-  const hasActionKeyword = /(?:tạo|làm|vẽ|xuất|soạn|viết|triển|gửi|lưu|chạy|sinh|đọc|thu\s*âm|ghi\s*âm|hát|phối|dựng|quay)/iu.test(trimmed);
-  if (!quoteText && !hasActionKeyword && /^(?:chào|hi|hello|alo|ê|cảm ơn|thanks|vâng|dạ)$/iu.test(trimmed)) {
+  if (!quoteText && isConversationalMessage(trimmed)) {
     return applyExecutionSignals({
       needsSearch: false,
       intent: "chat",
       queries: [],
+      summaryIntent: "Người dùng trò chuyện xã giao / thông báo cá nhân",
     }, question, quoteText);
   }
 
@@ -535,7 +601,8 @@ export async function planSearchQueries(params: {
     `      - Câu hỏi so sánh/tư vấn kỹ thuật kiểu "cái nào tốt hơn", "nên dùng/chọn cái nào": có thể needsSearch: true để lấy tài liệu bổ trợ nhưng intent phải là "knowledge", không được biến thiếu RSS thành từ chối trả lời. Ngoại lệ: y tế, pháp lý, tài chính/đầu tư hoặc câu hỏi giá/phiên bản hiện tại vẫn là fact_check.\n` +
     `      - Lịch sử cổ - trung đại đã cố định (các cuộc chiến lịch sử, triều đại phong kiến, năm diễn ra sự kiện lịch sử cố định hàng chục/trăm năm trước).\n` +
     `      - Văn hóa, nghệ thuật, triết học, giải thích khái niệm trừu tượng, sáng tác, dịch thuật, soạn email.\n` +
-    `      - Chào hỏi xã giao, khen ngợi, đùa vui thông thường.\n` +
+    `      - Chào hỏi xã giao, khen ngợi, đùa vui, cảm ơn, tiếp nhận thông thường (ví dụ: "ok em", "chào bạn", "cảm ơn nhé", "vâng ạ").\n` +
+    `      - Lời hứa, thông báo cá nhân của người dùng về việc họ sẽ làm hoặc gửi gì (ví dụ: "tối nay mình gửi nhé", "để mai xem lại", "chút nữa mình gửi", "anh gửi sau nhé"): Tuyệt đối KHÔNG coi là câu tra cứu hay yêu cầu tìm tài liệu, needsSearch: false, intent: "chat".\n` +
     `      - Phản biện, chất vấn, góp ý câu trả lời trước đó (ví dụ: "sao em nhầm vậy", "sao nói sai thế", "nhầm rồi", "sao em biết"): dùng ngữ cảnh lịch sử chat để đối thoại, nhận lỗi hoặc giải thích, TUYỆT ĐỐI KHÔNG search báo chí.\n` +
     `      => KHÔNG tìm kiếm bên ngoài, dùng 100% bộ não tri thức có sẵn: needsSearch: false, intent: "knowledge" hoặc "chat", queries: []\n\n` +
     `   B) 8 MẢNG DỮ LIỆU THỰC TẾ BIẾN ĐỘNG (BẮT BUỘC needsSearch: true - KỂ CẢ KHI CÂU HỎI KHÔNG CÓ TỪ 'CHECK' HAY 'HIỆN NAY'):\n` +

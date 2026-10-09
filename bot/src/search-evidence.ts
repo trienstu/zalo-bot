@@ -619,6 +619,11 @@ export function finalizeGroundedAnswer(
       return answer;
     }
 
+    // 2b. Không tự ý gắn nguồn nếu câu trả lời ngắn (< 180 ký tự) dạng đàm thoại chat / tiếp nhận
+    if (answer.trim().length < 180) {
+      return answer;
+    }
+
     // 3. Không tự ý gắn nguồn nếu câu trả lời nói về trạng thái bot, tiến trình vẽ ảnh, chào hỏi, đùa vui
     const isBotSelfStatusOrChat =
       /(?:tiến trình|render|đang vẽ|đang tạo ảnh|đang xử lý|đẩy lại bức ảnh|bức ảnh|chờ em|đợi em|em đây|sẵn sàng hỗ trợ|chào sếp|chào bác|dạ anh|dạ chị|cơn mưa thất tình|hệ thống đang)/i.test(answer);

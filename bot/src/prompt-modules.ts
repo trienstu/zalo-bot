@@ -45,6 +45,7 @@ export function getPromptModuleMediaGen(): string {
 export function getPromptModulePythonChart(): string {
   return `\n- KỸ NĂNG VẼ BIỂU ĐỒ, HÌNH ẢNH, SƠ ĐỒ & ĐỒ HỌA BẰNG PYTHON (python_interpreter):
   + Khi người dùng yêu cầu vẽ biểu đồ, đồ thị, sơ đồ, poster lịch thi đấu, bảng xếp hạng hoặc yêu cầu làm lại/sửa lại ảnh/biểu đồ: BẮT BUỘC sử dụng công cụ 'python_interpreter'. TUYỆT ĐỐI CẤM in code Python ra chat!
+  + VỚI SƠ ĐỒ MẠCH ĐIỆN VẬT LÍ (mạch R-L-C nối tiếp/song song, nguồn xoay chiều u = U₀cos(ωt), nguồn 1 chiều, cuộn cảm, tụ điện, biến trở, vôn kế, ampe kế...): BẮT BUỘC sử dụng thư viện chuyên dụng 'schemdraw' (import schemdraw; import schemdraw.elements as elm; with schemdraw.Drawing(file='circuit.png') as d: ...) để sơ đồ đạt chuẩn in ấn SGK Vật lí (cuộn cảm hình xoắn lò xo elm.Inductor(), tụ điện 2 bản song song elm.Capacitor(), nguồn xoay chiều elm.SourceSin(), điện trở elm.Resistor(), dây dẫn elm.Line()). TUYỆT ĐỐI KHÔNG dùng matplotlib vẽ thủ công các đường thẳng đứt đoạn!
   + Với lịch thi đấu/bảng sự kiện/roadmap: Dùng PIL vẽ Infographic Poster Card Layout nền tối (burgundy/navy), thẻ bo góc, badge nổi bật ([CHÍNH THỨC], [GIAO HỮU]), tiêu đề vàng kim #FFD700. Với số liệu: Dùng matplotlib dark theme.\n`;
 }
 

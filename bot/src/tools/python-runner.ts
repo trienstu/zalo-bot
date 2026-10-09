@@ -201,6 +201,11 @@ export async function runPythonCode(code: string, timeoutMs = 25000): Promise<Py
     preparedCode += `\ntry:\n    for _v in ['img', 'image', 'poster', 'card', 'figure']:\n        if _v in locals() and hasattr(locals()[_v], 'save'):\n            locals()[_v].save(r'${defaultChartPath}')\n            break\nexcept Exception:\n    pass\n`;
   }
 
+  // Tự động lưu file ảnh Schemdraw nếu code tạo Drawing mà quên gọi .save() hoặc không truyền file=
+  if (preparedCode.includes("schemdraw") && !/(?:\.save\(|file\s*=)/i.test(preparedCode)) {
+    preparedCode += `\ntry:\n    for _d in ['d', 'drawing', 'dwg', 'schem']:\n        if _d in locals() and hasattr(locals()[_d], 'save'):\n            locals()[_d].save(r'${defaultChartPath}')\n            break\nexcept Exception:\n    pass\n`;
+  }
+
   const finalScript = preambles.join("\n") + "\n\n" + preparedCode;
   fs.writeFileSync(scriptPath, finalScript, "utf8");
 

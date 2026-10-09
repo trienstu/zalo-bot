@@ -234,7 +234,7 @@ export async function callVertexGemini(
       ];
 
       const alreadyHasCitation = /(?:nguồn(?:\s+kiểm\s+chứng)?|source)\s*:/i.test(content) || /\*\(nguồn/i.test(content);
-      if (sources.length > 0 && !alreadyHasCitation) {
+      if (sources.length > 0 && !alreadyHasCitation && content.length >= 180) {
         content += `\n\n*(Nguồn: ${sources.join(", ")})*`;
       }
     }

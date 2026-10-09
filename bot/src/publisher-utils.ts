@@ -22,6 +22,7 @@ export function extractPublisherName(title?: string, uri?: string): string {
     return "";
   }
   const domainMap: Record<string, string> = {
+    // Báo chí chính thống & Tin tức
     "vnexpress.net": "VnExpress",
     "cafef.vn": "CafeF",
     "cafebiz.vn": "CafeBiz",
@@ -37,6 +38,7 @@ export function extractPublisherName(title?: string, uri?: string): string {
     "tienphong.vn": "Tiền Phong",
     "plo.vn": "Pháp Luật TP.HCM",
     "baochinhphu.vn": "Báo Chính Phủ",
+    "chinhphu.vn": "Cổng TTĐT Chính Phủ",
     "nhandan.vn": "Báo Nhân Dân",
     "tinnhanhchungkhoan.vn": "Đầu Tư Chứng Khoán",
     "baodautu.vn": "Báo Đầu Tư",
@@ -64,49 +66,130 @@ export function extractPublisherName(title?: string, uri?: string): string {
     "marketwatch.com": "MarketWatch",
     "finance.yahoo.com": "Yahoo Finance",
     "wikipedia.org": "Wikipedia",
+
+    // Giáo dục & Học thuật & Khảo thí
+    "moet.gov.vn": "Bộ GD&ĐT",
+    "hanoi.edu.vn": "Sở GD&ĐT Hà Nội",
+    "hcm.edu.vn": "Sở GD&ĐT TP.HCM",
+    "vietjack.com": "VietJack",
+    "loigiaihay.com": "Lời Giải Hay",
+    "vnteach.com": "VnTeach",
+    "hoc247.net": "Học 247",
+    "tuyensinh247.com": "Tuyển Sinh 247",
+    "onluyen.vn": "Ôn Luyện",
+    "azota.vn": "Azota",
+    "substudy.vn": "SubStudy",
+
+    // Pháp luật & Cơ quan Nhà nước
+    "thuvienphapluat.vn": "Thư viện Pháp luật",
+    "luatvietnam.vn": "Luật Việt Nam",
+    "moh.gov.vn": "Bộ Y Tế",
+    "molisa.gov.vn": "Bộ LĐ-TB&XH",
+    "mof.gov.vn": "Bộ Tài Chính",
+    "sbv.gov.vn": "Ngân hàng Nhà nước",
+    "gdt.gov.vn": "Tổng cục Thuế",
+    "nchmf.gov.vn": "TTKTTV Quốc Gia",
+
+    // Công nghệ & Mã nguồn mở
+    "github.com": "GitHub",
+    "gitlab.com": "GitLab",
+    "arxiv.org": "arXiv",
+    "nature.com": "Nature",
+    "sciencedirect.com": "ScienceDirect",
+    "who.int": "WHO",
+    "cdc.gov": "CDC",
   };
 
-  const rawTitle = (title || "").trim().toLowerCase();
-
-  // 1. Kiểm tra nếu title chính là tên miền (Google Search Grounding thường trả title = "bongda.com.vn", "goal.com", v.v.)
-  for (const [d, name] of Object.entries(domainMap)) {
-    if (rawTitle === d || rawTitle.includes(d)) {
-      return name;
+  /** Làm sạch ký tự HTML entity và dấu ngoặc đơn thừa */
+  const sanitizeName = (raw: string): string => {
+    let s = raw.trim();
+    s = s.replaceAll("&amp;", "&")
+      .replaceAll("&quot;", '"')
+      .replaceAll("&#39;", "'")
+      .replaceAll("&lt;", "<")
+      .replaceAll("&gt;", ">");
+    // Khử dấu ngoặc đóng dư thừa ở cuối nếu không có dấu ngoặc mở
+    if (s.endsWith(")") && !s.includes("(")) {
+      s = s.slice(0, -1).trim();
     }
-  }
+    return s;
+  };
 
-  // 2. Nếu URI không phải là link redirect nội bộ của Vertex AI thì kiểm tra domain từ URI
-  if (uri && !uri.includes("vertexaisearch.cloud.google.com")) {
+  // 1. Phân tích URI (Kể cả URI redirect của Vertex AI Search / Google Search)
+  if (uri) {
     try {
-      const hostname = new URL(uri).hostname.toLowerCase().replace(/^www\./, "");
-      if (isJunkOrBettingDomain(hostname)) return "";
-      for (const [d, name] of Object.entries(domainMap)) {
-        if (hostname === d || hostname.endsWith("." + d)) {
-          return name;
+      const parsed = new URL(uri);
+      let targetHost = parsed.hostname.toLowerCase().replace(/^www\./, "");
+
+      // Nếu là link redirect của Vertex hoặc Google, cố gắng bóc tách URL đích thực từ query parameter
+      if (targetHost.includes("vertexaisearch") || targetHost.includes("google.")) {
+        const destParam = parsed.searchParams.get("url") ||
+          parsed.searchParams.get("q") ||
+          parsed.searchParams.get("dest") ||
+          parsed.searchParams.get("target");
+        if (destParam && (destParam.startsWith("http://") || destParam.startsWith("https://"))) {
+          try {
+            targetHost = new URL(destParam).hostname.toLowerCase().replace(/^www\./, "");
+          } catch {}
+        }
+      }
+
+      if (!isJunkOrBettingDomain(targetHost) && !targetHost.includes("vertexaisearch") && !targetHost.includes("google.")) {
+        for (const [d, name] of Object.entries(domainMap)) {
+          if (targetHost === d || targetHost.endsWith("." + d)) {
+            return sanitizeName(name);
+          }
+        }
+        // Nếu là domain cấp 1 hợp lệ của cơ quan/tổ chức (.gov.vn, .edu.vn, .org, v.v.)
+        if (targetHost.endsWith(".gov.vn")) {
+          return sanitizeName(targetHost.replace(".gov.vn", "").toUpperCase() + " (Gov)");
+        }
+        if (targetHost.endsWith(".edu.vn")) {
+          return sanitizeName(targetHost.replace(".edu.vn", "") + ".edu.vn");
         }
       }
     } catch {}
   }
 
-  // 3. Nếu title có cấu trúc "Tiêu đề bài viết - Tên Báo"
-  if (title) {
-    const parts = title.split(/\s*[-–—|]\s*/);
-    if (parts.length > 1) {
-      const lastPart = parts[parts.length - 1]?.trim() || "";
-      if (lastPart.length > 1 && lastPart.length < 30 && !isJunkOrBettingDomain(lastPart)) {
-        return lastPart.replace(/^báo\s+/i, "");
+  // 2. Kiểm tra nếu title chính là tên miền hoặc chứa tên tòa soạn đã xác thực
+  const rawTitle = (title || "").trim();
+  if (rawTitle) {
+    const lowerTitle = rawTitle.toLowerCase();
+    for (const [d, name] of Object.entries(domainMap)) {
+      if (lowerTitle === d || lowerTitle.endsWith(" - " + d) || lowerTitle.endsWith(" | " + d)) {
+        return sanitizeName(name);
+      }
+      if (lowerTitle.endsWith(" - " + name.toLowerCase()) || lowerTitle.endsWith(" | " + name.toLowerCase())) {
+        return sanitizeName(name);
       }
     }
-    // Nếu title là một domain bất kỳ (e.g. somesite.com)
-    if (/^[a-z0-9-]+\.[a-z]{2,}(?:\.[a-z]{2,})?$/i.test(title.trim())) {
-      const host = title.trim().replace(/^www\./i, "");
-      if (isJunkOrBettingDomain(host)) return "";
-      const base = host.split(".")[0];
-      return base ? base.charAt(0).toUpperCase() + base.slice(1) : host;
+
+    // Nếu title kết thúc bằng " - Tên Tòa Soạn" hoặc " | Tên Tòa Soạn"
+    const parts = rawTitle.split(/\s*[-–—|]\s*/);
+    if (parts.length > 1) {
+      const lastPart = parts[parts.length - 1]?.trim() || "";
+      const lowerLast = lastPart.toLowerCase().replace(/^báo\s+/i, "");
+      for (const name of Object.values(domainMap)) {
+        if (lowerLast === name.toLowerCase()) {
+          return sanitizeName(name);
+        }
+      }
     }
-    if (isJunkOrBettingDomain(title)) return "";
-    return title.length > 25 ? title.slice(0, 25) + "..." : title;
+
+    // Nếu title chính là một domain sạch hợp lệ có đuôi tên miền
+    if (/^[a-z0-9-]+\.(?:vn|com|org|edu|gov|net)(?:\.[a-z]{2,})?$/i.test(rawTitle)) {
+      const host = rawTitle.replace(/^www\./i, "").toLowerCase();
+      if (!isJunkOrBettingDomain(host)) {
+        for (const [d, name] of Object.entries(domainMap)) {
+          if (host === d || host.endsWith("." + d)) {
+            return sanitizeName(name);
+          }
+        }
+        return sanitizeName(host);
+      }
+    }
   }
 
+  // Tuyệt đối không cắt chuỗi thô thiển title.slice(0, 25) để tránh tạo nguồn rác ("có đáp án...", "Đại lý", "2026...")
   return "";
 }

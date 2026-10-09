@@ -39,7 +39,7 @@ import { searchRealtimeNews } from "./realtime-search.js";
 import { refreshDynamicKnowledgeIfExpired, fetchGoogleContent, parseGoogleUrl } from "./google-sync.js";
 import { getSystemTemporalPrompt } from "./temporal.js";
 import { getSystemArchitectureProfile, isSystemArchitectureQuery } from "./system-architecture.js";
-import { planSearchQueries, type QueryPlanResult } from "./query-planner.js";
+import { planSearchQueries, isConversationalMessage, type QueryPlanResult } from "./query-planner.js";
 import { buildDynamicSystemPromptModules } from "./prompt-modules.js";
 import fs from "node:fs";
 import { config, defaultBotName } from "./config.js";
@@ -1896,7 +1896,7 @@ QUY TẮC BẮT BUỘC:
       `     + Với dữ liệu đóng nội bộ (file đính kèm, link Google Doc/Sheet, hợp đồng, chính sách, tài liệu): 100% số liệu phải lấy từ văn bản, zero-hallucination. Không tự bịa số liệu hay phương án. Thiếu thì báo thẳng.\n` +
       `     + Với thực thể/thị trường mở (xe cộ, đồ công nghệ, điện thoại, tài chính, dự án, pháp luật, người nổi tiếng): Phân cụm thực thể chuẩn xác, không đánh đồng hay nhầm lẫn chéo giữa các thương hiệu/hãng. Tận dụng dữ liệu báo chí/tìm kiếm để giải đáp toàn diện, không từ chối trả lời.\n` +
       `   - [NGUYÊN TẮC 2 - ZALO RICH TEXT & MARKDOWN]: Thoải mái dùng Markdown (**in đậm** cho tiêu đề/từ khóa/số liệu, [do]đỏ[/do], [xanh]xanh[/xanh], [cam]cam[/cam], gạch đầu dòng '-' hoặc '•') vì hệ thống tự động render màu sắc và kiểu chữ native trên Zalo. Tiêu đề mục dùng chuẩn **In đậm chữ thường** (viết hoa chữ cái đầu, ví dụ: '**1. Nội dung cốt lõi:**', tuyệt đối không viết hoa toàn bộ cả dòng). Tiết chế icon (tối đa 1-2 icon ở tiêu đề, cấm spam icon ở từng đầu gạch dòng). Bảng biểu dùng Khối thẻ (Card Layout).\n` +
-      `   - [NGUYÊN TẮC 3 - TRẢ LỜI TRỰC TIẾP, DẪN NGUỒN CHUẨN XÁC & GỢI MỞ]: Đi thẳng vào đáp án/kết quả trọng tâm mà người dùng hỏi ngay từ dòng đầu tiên. TUYỆT ĐỐI CẤM mở bài bằng các câu cảm thán rườm rà, đùa cợt hoặc xưng hô làm loãng nội dung ở mọi chủ đề. Với câu hỏi sử dụng dữ liệu thời gian thực (tin tức, sự kiện, văn bản pháp luật, đơn vị hành chính, giá cả, khoa học), BẮT BUỘC kết thúc bằng 1 dòng nguồn uy tín trong dấu ngoặc đơn in nghiêng: *(Nguồn: [Tên cơ quan ban hành / Tổ chức / Nguồn tin uy tín], [thời điểm nếu có]).* Sau khi trả lời xong, có thể để lại 1 câu hỏi gợi mở ngắn gọn hoặc lời chúc tinh tế.\n` +
+      `   - [NGUYÊN TẮC 3 - TRẢ LỜI TRỰC TIẾP, DẪN NGUỒN CHUẨN XÁC & GỢI MỞ]: Đi thẳng vào đáp án/kết quả trọng tâm mà người dùng hỏi ngay từ dòng đầu tiên. TUYỆT ĐỐI CẤM mở bài bằng các câu cảm thán rườm rà, đùa cợt hoặc xưng hô làm loãng nội dung ở mọi chủ đề. Chỉ khi câu trả lời thực sự dựa trên dữ liệu tìm kiếm/tra cứu thời gian thực (tin tức báo chí, tra cứu pháp luật, số liệu cập nhật), mới kết thúc bằng 1 dòng nguồn uy tín trong dấu ngoặc đơn in nghiêng: *(Nguồn: [Tên cơ quan ban hành / Tổ chức / Nguồn tin uy tín], [thời điểm nếu có]).* TUYỆT ĐỐI CẤM bịa nguồn hoặc gắn nguồn vào câu chào hỏi, đàm thoại chat, giải bài tập hay kiến thức lý thuyết chung. Sau khi trả lời xong, có thể để lại 1 câu hỏi gợi mở ngắn gọn hoặc lời chúc tinh tế.\n` +
       (isSuperAdmin
         ? `   - [NGUYÊN TẮC 4 - XƯNG HÔ ĐẶC QUYỀN VỚI SẾP (SUPER ADMIN)]:\n` +
           `     + Người hỏi (${displayName}) chính là SUPER ADMIN / CHỦ NHÂN CỦA BẠN.\n` +
@@ -2877,12 +2877,19 @@ QUY TẮC BẮT BUỘC:
             .join("\n")
           : undefined;
 
-      const plan = await planSearchQueries({
-        question,
-        quoteText: options?.quote?.text,
-        recentContext: recentCtx,
-        displayName,
-      });
+      const isConversational = !options?.quote?.text && isConversationalMessage(question);
+      let plan: QueryPlanResult;
+      if (isConversational) {
+        console.log(`[member-assistant] 💬 Fast-path: Đàm thoại xã giao / tiếp nhận cá nhân ("${question.slice(0, 40)}"), ngắt ngữ cảnh cũ & bỏ qua tra cứu.`);
+        plan = { needsSearch: false, queries: [], intent: "chat" };
+      } else {
+        plan = await planSearchQueries({
+          question,
+          quoteText: options?.quote?.text,
+          recentContext: recentCtx,
+          displayName,
+        });
+      }
       queryPlan = plan;
 
       if (options?.api && plan.taskType === "motion_video" && isMotionVideoRequest(question, options?.quote?.text)) {

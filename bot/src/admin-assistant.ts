@@ -38,7 +38,7 @@ import { handleSetReminder, handleListReminders, handleCancelReminder, parseNatu
 import { handleSetBirthday, handleListUpcomingBirthdays, handleDeleteBirthday, parseBirthdayInput } from "./birthday-reminder.js";
 import { getDailyAiNewsBriefing } from "./ai-news.js";
 import { searchRealtimeNews } from "./realtime-search.js";
-import { planSearchQueries } from "./query-planner.js";
+import { planSearchQueries, isConversationalMessage } from "./query-planner.js";
 import { finalizeGroundedAnswer, isStrictVerificationQuestion } from "./search-evidence.js";
 import { isRealEstateProjectProfileQuery } from "./real-estate-profile.js";
 import { canUseGrounding, formatGroundingQuotaReport, resetGroundingQuota } from "./grounding-quota.js";
@@ -2841,8 +2841,12 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
   try {
     let plan: QueryPlanResult;
+    const isConversational = !event.quote?.text && isConversationalMessage(rawText);
     if (isPureQuoteComprehension) {
       console.log(`[admin-assistant] ⚡ Fast-path: Đọc hiểu/tóm tắt trích dẫn thuần túy, bỏ qua Planner tra cứu.`);
+      plan = { needsSearch: false, queries: [], intent: "chat" };
+    } else if (isConversational) {
+      console.log(`[admin-assistant] 💬 Fast-path: Đàm thoại xã giao / tiếp nhận cá nhân ("${rawText.slice(0, 40)}"), ngắt ngữ cảnh cũ & bỏ qua tra cứu.`);
       plan = { needsSearch: false, queries: [], intent: "chat" };
     } else {
       plan = await planSearchQueries({
