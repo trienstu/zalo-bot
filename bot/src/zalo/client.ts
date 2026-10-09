@@ -7,6 +7,7 @@ import qrcodeTerminal from "qrcode-terminal";
 import { config } from "../config.js";
 import { setBotState, upsertBotFriend, pruneStaleBotFriends } from "../db/index.js";
 import { LOGIN_STATE_KEY } from "../health-state.js";
+import { cleanLatexMathToUnicode } from "../utils/latex-cleaner.js";
 
 /**
  * Wrapper quanh zca-js. MỌI lời gọi Zalo đi qua đây — phần còn lại của code KHÔNG
@@ -1043,7 +1044,7 @@ async function sendSingleGroupChunk(
  */
 export function cleanZaloText(text: string): string {
   if (!text) return "";
-  let res = text;
+  let res = cleanLatexMathToUnicode(text);
 
   // 1. Markdown links [text](url) -> text (url)
   res = res.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, "$1 ($2)");

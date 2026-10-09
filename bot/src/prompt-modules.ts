@@ -27,6 +27,9 @@ export function getPromptModuleDocGen(): string {
       + TUYỆT ĐỐI CẤM TỰ BỊA ĐẶT LINK TẢI FILE: CẤM TỰ GÕ BẤT KỲ ĐƯỜNG LINK TẢI NÀO (như link https://fg40.dlfl.vn/..., zdn.vn, zalo.me...). Link tải file chỉ do hệ thống máy chủ đính kèm tự động khi thực sự xuất file thành công qua tool!
       + TUYỆT ĐỐI CẤM NÓI DỐI ĐÃ GỬI FILE: CẤM in vào tin nhắn chat rằng "em đã xuất xong file", "đã gửi file", "anh/chị bấm vào link tải" khi CHƯA THỰC SỰ GỌI CÔNG CỤ XUẤT FILE!
       + TUYỆT ĐỐI CẤM TỰ Ý BỊA ĐẶT HOẶC GÁN GHÉP LINK DRIVE / TÀI LIỆU CÁ NHÂN: Khi dẫn link Google Drive, Docs, Dropbox hoặc kho lưu trữ chia sẻ, BẮT BUỘC phải trích xuất chính xác từ dữ liệu ngữ cảnh thực tế được cung cấp. CẤM tự bịa ra link Drive hoặc tự ý gán nhãn sai lệch chủ đề cho link nếu ngữ cảnh không ghi rõ!
+      + [QUY TẮC SOẠN ĐỀ THI & TRỘN ĐỀ THEO CHUẨN MỚI BỘ GD&ĐT]:
+        * Khi người dùng yêu cầu soạn đề thi / bài kiểm tra THPT (Vật lí, Toán, Hóa, Sinh...): BẮT BUỘC áp dụng Cấu trúc định dạng đề thi 3 phần chuẩn GDPT 2018 (Phần I: Trắc nghiệm 4 lựa chọn A-B-C-D; Phần II: Trắc nghiệm Đúng/Sai lũy tiến 4 ý a-b-c-d; Phần III: Trả lời ngắn điền đáp số định lượng). Khi gọi 'generate_file' với fileType='docx', hệ thống tự động căn chỉnh bảng 2 cột đáp án A-B-C-D chuẩn đẹp để in ấn trực tiếp!
+        * Khi người dùng yêu cầu 'trộn đề', 'trộn 4 mã đề', 'hoán vị mã đề' từ đề thi có sẵn: BẮT BUỘC PHẢI GỌI CÔNG CỤ 'shuffle_exam' để tự động hoán vị câu hỏi/phương án, sinh 4 mã đề (101, 102, 103, 104) kèm Bảng ma trận đáp án đối chiếu và xuất file Word (.docx) gửi cho người dùng!
       + TUYỆT ĐỐI CẤM bịa đặt các câu như 'hạn mức 2 tác vụ/giờ', 'đạt ngưỡng hệ thống', 'chỉ chủ nhân mới có quyền', 'lát nữa em mới thu âm', 'uống trà đợi em'. Khi người dùng yêu cầu, PHẢI THỰC HIỆN NGAY LẬP TỨC!\n`;
 }
 

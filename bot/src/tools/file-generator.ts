@@ -18,6 +18,7 @@ import ExcelJS from "exceljs";
 import PptxGenJS from "pptxgenjs";
 import { checkIsMusicRequest } from "./music-generator.js";
 import { getPPTMasterConfig, renderPPTMasterPresentation } from "./pptmaster-bridge.js";
+import { cleanLatexMathToUnicode } from "../utils/latex-cleaner.js";
 
 const GENERATED_FILES_DIR = path.resolve(process.cwd(), "data", "generated-files");
 
@@ -1536,9 +1537,10 @@ export interface WordBlock {
  */
 export function parseMarkdownRuns(text: string, baseFont = "Times New Roman", baseSize = 26): TextRun[] {
   if (!text) return [];
+  const clean = cleanLatexMathToUnicode(text);
   const runs: TextRun[] = [];
   const tokenRegex = /(\*\*.*?\*\*|\*.*?\*)/g;
-  const parts = text.split(tokenRegex);
+  const parts = clean.split(tokenRegex);
   for (const part of parts) {
     if (!part) continue;
     if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
@@ -1549,7 +1551,7 @@ export function parseMarkdownRuns(text: string, baseFont = "Times New Roman", ba
       runs.push(new TextRun({ text: part, font: baseFont, size: baseSize }));
     }
   }
-  return runs.length > 0 ? runs : [new TextRun({ text, font: baseFont, size: baseSize })];
+  return runs.length > 0 ? runs : [new TextRun({ text: clean, font: baseFont, size: baseSize })];
 }
 
 /**
@@ -1656,6 +1658,124 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
       });
       i++;
       continue;
+    }
+
+    // 3.5. Kiểm tra Câu hỏi Trắc nghiệm hoặc Câu hỏi Đúng/Sai trong đề thi
+    const isQuestionHeading = /^(?:#{1,3}\s*)?(?:\*\*)?(?:Câu|Bài)\s+\d+[\.:]/i.test(line);
+    if (isQuestionHeading) {
+      // Trường hợp A: Phương án A, B, C, D nằm ngay trong cùng 1 dòng (viết liền dính chùm)
+      const inlineOptMatch = line.match(
+        /^(.*?)(?:[\s,;]+|^)(A[\.:]\s*[\s\S]+?)(?:[\s,;]+)(B[\.:]\s*[\s\S]+?)(?:[\s,;]+)(C[\.:]\s*[\s\S]+?)(?:[\s,;]+)(D[\.:]\s*[\s\S]+)$/i
+      );
+      if (inlineOptMatch) {
+        const qText = inlineOptMatch[1]!.replace(/^#{1,3}\s*/, "").trim();
+        const optA = inlineOptMatch[2]!.trim();
+        const optB = inlineOptMatch[3]!.trim();
+        const optC = inlineOptMatch[4]!.trim();
+        const optD = inlineOptMatch[5]!.trim();
+
+        blocks.push({
+          type: "paragraph",
+          text: qText,
+          align: "left",
+        });
+
+        const maxLen = Math.max(optA.length, optB.length, optC.length, optD.length);
+        if (maxLen <= 45) {
+          blocks.push({
+            type: "two_columns",
+            leftCol: [optA, optC],
+            rightCol: [optB, optD],
+            align: "left",
+          });
+        } else {
+          blocks.push({ type: "paragraph", text: `   ${optA}`, align: "left" });
+          blocks.push({ type: "paragraph", text: `   ${optB}`, align: "left" });
+          blocks.push({ type: "paragraph", text: `   ${optC}`, align: "left" });
+          blocks.push({ type: "paragraph", text: `   ${optD}`, align: "left" });
+        }
+        i++;
+        continue;
+      }
+
+      // Trường hợp B: Phương án Đúng/Sai a), b), c), d) nằm ngay trong cùng 1 dòng
+      const inlineTfMatch = line.match(
+        /^(.*?)(?:[\s,;]+|^)(a\)\s*[\s\S]+?)(?:[\s,;]+)(b\)\s*[\s\S]+?)(?:[\s,;]+)(c\)\s*[\s\S]+?)(?:[\s,;]+)(d\)\s*[\s\S]+)$/i
+      );
+      if (inlineTfMatch) {
+        const qText = inlineTfMatch[1]!.replace(/^#{1,3}\s*/, "").trim();
+        blocks.push({
+          type: "paragraph",
+          text: qText,
+          align: "left",
+        });
+        blocks.push({ type: "paragraph", text: `   ${inlineTfMatch[2]!.trim()}`, align: "left" });
+        blocks.push({ type: "paragraph", text: `   ${inlineTfMatch[3]!.trim()}`, align: "left" });
+        blocks.push({ type: "paragraph", text: `   ${inlineTfMatch[4]!.trim()}`, align: "left" });
+        blocks.push({ type: "paragraph", text: `   ${inlineTfMatch[5]!.trim()}`, align: "left" });
+        i++;
+        continue;
+      }
+
+      // Trường hợp C: Các phương án A, B, C, D nằm ở các dòng tiếp theo
+      if (
+        i + 4 < lines.length &&
+        /^A[\.:]\s*/i.test(lines[i + 1]!.trim()) &&
+        /^B[\.:]\s*/i.test(lines[i + 2]!.trim()) &&
+        /^C[\.:]\s*/i.test(lines[i + 3]!.trim()) &&
+        /^D[\.:]\s*/i.test(lines[i + 4]!.trim())
+      ) {
+        const qText = line.replace(/^#{1,3}\s*/, "").trim();
+        const optA = lines[i + 1]!.trim();
+        const optB = lines[i + 2]!.trim();
+        const optC = lines[i + 3]!.trim();
+        const optD = lines[i + 4]!.trim();
+
+        blocks.push({
+          type: "paragraph",
+          text: qText,
+          align: "left",
+        });
+
+        const maxLen = Math.max(optA.length, optB.length, optC.length, optD.length);
+        if (maxLen <= 45) {
+          blocks.push({
+            type: "two_columns",
+            leftCol: [optA, optC],
+            rightCol: [optB, optD],
+            align: "left",
+          });
+        } else {
+          blocks.push({ type: "paragraph", text: `   ${optA}`, align: "left" });
+          blocks.push({ type: "paragraph", text: `   ${optB}`, align: "left" });
+          blocks.push({ type: "paragraph", text: `   ${optC}`, align: "left" });
+          blocks.push({ type: "paragraph", text: `   ${optD}`, align: "left" });
+        }
+        i += 5;
+        continue;
+      }
+
+      // Trường hợp D: Các ý Đúng/Sai a), b), c), d) nằm ở các dòng tiếp theo
+      if (
+        i + 4 < lines.length &&
+        /^a\)\s*/i.test(lines[i + 1]!.trim()) &&
+        /^b\)\s*/i.test(lines[i + 2]!.trim()) &&
+        /^c\)\s*/i.test(lines[i + 3]!.trim()) &&
+        /^d\)\s*/i.test(lines[i + 4]!.trim())
+      ) {
+        const qText = line.replace(/^#{1,3}\s*/, "").trim();
+        blocks.push({
+          type: "paragraph",
+          text: qText,
+          align: "left",
+        });
+        blocks.push({ type: "paragraph", text: `   ${lines[i + 1]!.trim()}`, align: "left" });
+        blocks.push({ type: "paragraph", text: `   ${lines[i + 2]!.trim()}`, align: "left" });
+        blocks.push({ type: "paragraph", text: `   ${lines[i + 3]!.trim()}`, align: "left" });
+        blocks.push({ type: "paragraph", text: `   ${lines[i + 4]!.trim()}`, align: "left" });
+        i += 5;
+        continue;
+      }
     }
 
     // 4. Danh sách gạch đầu dòng (- / * / •) hoặc số (1. / 2.)
@@ -1831,36 +1951,25 @@ export async function generateWordDoc(
       // Định dạng blocks mới nâng cao (hỗ trợ hai cột Nghị định 30, bảng biểu)
       for (const block of (sections as WordBlock[])) {
         if (block.type === "two_columns") {
-          // Bảng 2 cột không viền cho thể thức hành chính (Quốc hiệu/Tiêu ngữ hoặc Nơi nhận/Người ký)
+          // Bảng 2 cột không viền cho thể thức hành chính hoặc phương án trắc nghiệm
+          const isLeftCol = block.align === "left" || (block.leftCol || []).some((t) => /^[A-D][\.:]|^[a-d]\)/i.test(t.trim()));
+          const colAlign = isLeftCol ? AlignmentType.LEFT : AlignmentType.CENTER;
+          const colSize = isLeftCol ? 26 : 24;
+
           const leftParas = (block.leftCol || []).map(
             (t) =>
               new Paragraph({
-                children: [
-                  new TextRun({
-                    text: t,
-                    bold: t.toUpperCase() === t && t.length > 3,
-                    font: "Times New Roman",
-                    size: 24,
-                  }),
-                ],
-                alignment: AlignmentType.CENTER,
-                spacing: { after: 60 },
+                children: parseMarkdownRuns(t, "Times New Roman", colSize),
+                alignment: colAlign,
+                spacing: { after: isLeftCol ? 40 : 60 },
               }),
           );
           const rightParas = (block.rightCol || []).map(
             (t) =>
               new Paragraph({
-                children: [
-                  new TextRun({
-                    text: t,
-                    bold: t.toUpperCase() === t && t.length > 3,
-                    italics: t.includes("ngày") && t.includes("tháng"),
-                    font: "Times New Roman",
-                    size: 24,
-                  }),
-                ],
-                alignment: AlignmentType.CENTER,
-                spacing: { after: 60 },
+                children: parseMarkdownRuns(t, "Times New Roman", colSize),
+                alignment: colAlign,
+                spacing: { after: isLeftCol ? 40 : 60 },
               }),
           );
 
@@ -1887,7 +1996,7 @@ export async function generateWordDoc(
             ],
           });
           docChildren.push(twoColTable);
-          docChildren.push(new Paragraph({ spacing: { after: 200 } }));
+          docChildren.push(new Paragraph({ spacing: { after: isLeftCol ? 80 : 200 } }));
         } else if (block.type === "heading") {
           const hLevel =
             block.level === 2
@@ -1907,15 +2016,7 @@ export async function generateWordDoc(
         } else if (block.type === "paragraph") {
           docChildren.push(
             new Paragraph({
-              children: [
-                new TextRun({
-                  text: block.text || "",
-                  font: "Times New Roman",
-                  size: 26, // 13pt
-                  bold: block.bold,
-                  italics: block.italic,
-                }),
-              ],
+              children: parseMarkdownRuns(block.text || "", "Times New Roman", 26),
               alignment:
                 block.align === "center"
                   ? AlignmentType.CENTER

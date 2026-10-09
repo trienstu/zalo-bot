@@ -34,6 +34,7 @@ import {
 } from "./tools/file-generator.js";
 import { renderPresentationVideoFromSlides } from "./workers/presentation-video-processor.js";
 import { renderDecree30Document } from "./tools/pptmaster-bridge.js";
+import { parseExamText, exportShuffledExamToDocx } from "./tools/exam-shuffler.js";
 import {
   synthesizeSpeech,
   synthesizeDialogue,
@@ -1824,6 +1825,32 @@ const AGENT_TOOLS_DECLARATION = {
       },
     },
     {
+      name: "shuffle_exam",
+      description: "Trộn một đề thi trắc nghiệm (gồm Phần I: 4 lựa chọn, Phần II: Đúng/Sai, Phần III: Trả lời ngắn) thành nhiều mã đề (mặc định 4 mã: 101, 102, 103, 104) kèm Bảng ma trận đáp án đối chiếu cho giáo viên và tự động xuất thành file Word (.docx) chuẩn in ấn.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          examContent: {
+            type: "STRING",
+            description: "Toàn văn đề thi gốc kèm các câu hỏi, phương án và đáp án (nếu có)",
+          },
+          title: {
+            type: "STRING",
+            description: "Tiêu đề đề thi, ví dụ: 'ĐỀ KIỂM TRA ĐỊNH KỲ VẬT LÍ 12'",
+          },
+          fileName: {
+            type: "STRING",
+            description: "Tên file Word cần xuất, ví dụ: 'de_kiem_tra_tron_4_ma'",
+          },
+          numVariants: {
+            type: "INTEGER",
+            description: "Số lượng mã đề cần trộn (mặc định 4 mã: 101, 102, 103, 104)",
+          },
+        },
+        required: ["examContent"],
+      },
+    },
+    {
       name: "create_voice",
       description: "Chuyển văn bản thành giọng nói AI (Text-to-Speech) hoặc tạo Podcast đối đáp 2 người (đối thoại Nam - Nữ) và gửi file âm thanh (.m4a Voice Bubble) trực tiếp vào Zalo.",
       parameters: {
@@ -2295,6 +2322,16 @@ export async function executeAgentTool(name: string, args: Record<string, any>, 
         return result;
       }
     }
+    case "shuffle_exam": {
+      const examContent = String(args?.examContent || "").trim();
+      const title = String(args?.title || "ĐỀ KIỂM TRA ĐỊNH KỲ").trim();
+      const fileName = String(args?.fileName || "de_thi_tron_4_ma").trim();
+      const numVariants = Math.min(Math.max(Number(args?.numVariants || 4), 2), 8);
+      const codes = Array.from({ length: numVariants }, (_, idx) => String(101 + idx));
+      const parsed = parseExamText(examContent, title);
+      const result = await exportShuffledExamToDocx(parsed, codes, fileName);
+      return result;
+    }
     case "create_voice": {
       const text = String(args?.text || "").trim();
       const voice = args?.voice ? String(args.voice) : undefined;
@@ -2644,6 +2681,7 @@ async function call9RouterAgentLoop(
 
       if (
         (fnName === "generate_file" ||
+          fnName === "shuffle_exam" ||
           fnName === "create_voice" ||
           fnName === "generate_image" ||
           fnName === "generate_video" ||
@@ -2912,7 +2950,7 @@ export async function callGeminiAgentLoop(
           }
           options?.onToolCall?.(fc.name, fc.args || {});
           const result = await executeAgentTool(fc.name, fc.args || {}, options?.context);
-          if ((fc.name === "generate_file" || fc.name === "create_voice" || fc.name === "generate_image" || fc.name === "generate_video" || fc.name === "generate_music" || (fc.name === "download_media_video" && result?.filePath) || (fc.name === "facebook_post_lookup" && result?.filePath)) && result?.success && options?.onFileGenerated) {
+          if ((fc.name === "generate_file" || fc.name === "shuffle_exam" || fc.name === "create_voice" || fc.name === "generate_image" || fc.name === "generate_video" || fc.name === "generate_music" || (fc.name === "download_media_video" && result?.filePath) || (fc.name === "facebook_post_lookup" && result?.filePath)) && result?.success && options?.onFileGenerated) {
             try {
               await options.onFileGenerated({
                 ...result,

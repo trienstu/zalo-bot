@@ -58,3 +58,15 @@ test("cleanZaloText: Thu gọn spam nhiều emoji liên tiếp", () => {
   assert.ok(!output.includes("✨✨✨"), "Không được để 3 emoji liên tiếp");
   assert.ok(output.includes("🔥"), "Phải giữ lại 1 emoji đại diện");
 });
+
+test("cleanZaloText: Tự động chuyển đổi công thức Toán/Lý LaTeX sang Unicode sạch", () => {
+  const input = "Độ lớn lực từ $F = \\frac{I \\cdot B \\cdot L}{\\sin\\alpha}$, gia tốc $a = 1\\text{ m/s}^2$ và $\\vec{B}$.";
+  const output = cleanZaloText(input);
+  assert.ok(!output.includes("\\frac"), "Không còn \\frac");
+  assert.ok(!output.includes("\\alpha"), "Không còn \\alpha");
+  assert.ok(!output.includes("$"), "Không còn $");
+  assert.ok(output.includes("α"), "Có ký tự α");
+  assert.ok(output.includes("1 m/s²"), "Có 1 m/s²");
+  assert.ok(output.includes("vectơ B"), "Có vectơ B");
+});
+
