@@ -2180,14 +2180,14 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
 
     if (!fullExtractedText) {
       if (downloadError === "FILE_TOO_LARGE") {
-        const mb = fileSizeBytes ? (fileSizeBytes / 1024 / 1024).toFixed(1) : "hơn 50";
+        const mb = fileSizeBytes ? (fileSizeBytes / 1024 / 1024).toFixed(1) : "hơn 100";
         await sendDirectText(
           api,
           sender,
           `⚠️ Dạ Sếp ơi, file "${fileName || topicName}" có dung lượng quá lớn (${mb} MB)!\n\n` +
-          `👉 Do file vượt quá 50MB (gần 1GB) nên máy chủ không thể tải và nạp trực tiếp được.\n` +
+          `👉 Do file vượt quá hạn mức 100MB nên máy chủ không thể tải và nạp trực tiếp được.\n` +
           `👉 Sếp giúp em:\n` +
-          `1. Xuất file PDF ở mức Standard / Nén dung lượng (khuyên dùng dưới 30MB - 50MB).\n` +
+          `1. Xuất file PDF ở mức Standard / Nén dung lượng (khuyên dùng dưới 50MB - 100MB).\n` +
           `2. Hoặc gửi file Word / Bảng giá Excel / dán đoạn văn bản nội dung dự án bên dưới lệnh: /hoc ${topicName || "Tên dự án"} để em ghi nhớ vĩnh viễn nhé! ☘️`,
         );
       } else if (targetUrl) {
@@ -2648,14 +2648,14 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
           return;
         }
         if (fileRes?.error === "FILE_TOO_LARGE") {
-          const mb = fileRes.fileSizeBytes ? (fileRes.fileSizeBytes / 1024 / 1024).toFixed(1) : "hơn 50";
+          const mb = fileRes.fileSizeBytes ? (fileRes.fileSizeBytes / 1024 / 1024).toFixed(1) : "hơn 100";
           await sendDirectText(
             api,
             sender,
             `⚠️ Dạ ${userGreeting} ơi, file "${fileName || "tài liệu"}" có dung lượng quá lớn (${mb} MB)!\n\n` +
-            `👉 Do file vượt quá 50MB nên máy chủ không thể tải và giải mã trực tiếp trong vài giây được.\n` +
+            `👉 Do file vượt quá hạn mức 100MB nên máy chủ không thể tải và giải mã trực tiếp trong vài giây được.\n` +
             `👉 ${userGreeting} giúp em:\n` +
-            `1. Xuất lại file ở mức Standard / Nén dung lượng (khuyên dùng dưới 30MB - 50MB).\n` +
+            `1. Xuất lại file ở mức Standard / Nén dung lượng (khuyên dùng dưới 50MB - 100MB).\n` +
             `2. Hoặc gửi file Word (.docx) / Excel (.xlsx) / dán trực tiếp văn bản vào đây, em sẽ nạp và ghi nhớ ngay lập tức ạ! ☘️`,
           );
           return;

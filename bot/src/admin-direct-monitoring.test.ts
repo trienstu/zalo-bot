@@ -307,18 +307,18 @@ test("findDirectUserByNameOrId tìm thấy thành viên tiếng Việt có dấu
   // 1. Tìm bằng tên chính xác có dấu
   const foundExact = findDirectUserByNameOrId("Thức Ăn Chăn Nuôi");
   assert.ok(foundExact.length > 0);
-  assert.equal(foundExact[0].userId, testUid);
-  assert.equal(foundExact[0].displayName, "Thức Ăn Chăn Nuôi");
+  assert.equal(foundExact[0]!.userId, testUid);
+  assert.equal(foundExact[0]!.displayName, "Thức Ăn Chăn Nuôi");
 
   // 2. Tìm bằng chữ thường có dấu (chữ ă thường so với Ă hoa trong SQLite)
   const foundLower = findDirectUserByNameOrId("thức ăn chăn nuôi");
   assert.ok(foundLower.length > 0);
-  assert.equal(foundLower[0].userId, testUid);
+  assert.equal(foundLower[0]!.userId, testUid);
 
   // 3. Tìm không dấu
   const foundNoAccent = findDirectUserByNameOrId("thuc an chan nuoi");
   assert.ok(foundNoAccent.length > 0);
-  assert.equal(foundNoAccent[0].userId, testUid);
+  assert.equal(foundNoAccent[0]!.userId, testUid);
 
   // Dọn dẹp
   db.prepare("DELETE FROM group_members WHERE zalo_user_id = ?").run(testUid);

@@ -239,7 +239,7 @@ test("calculateNextSlotSchedule tính toán ca chạy tiếp theo chuẩn xác",
 });
 
 test("deleteMktContacts xóa số điện thoại đơn lẻ, nhiều số và xóa theo bộ lọc chuẩn xác", async () => {
-  const { upsertMktContact, getMktContact, deleteMktContacts, createContactGroup, addPhonesToGroup } = await import("../db/zalomkt-db.js");
+  const { upsertMktContact, getMktContact, deleteMktContacts } = await import("../db/zalomkt-db.js");
 
   // Chuẩn bị dữ liệu test
   const p1 = "0977111222";

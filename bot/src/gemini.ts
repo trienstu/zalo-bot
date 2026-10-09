@@ -536,7 +536,7 @@ export async function downloadFileContent(
 
     if (fs.existsSync(targetUrl)) {
       const stats = fs.statSync(targetUrl);
-      if (stats.size > 50 * 1024 * 1024) {
+      if (stats.size > 100 * 1024 * 1024) {
         return { error: "FILE_TOO_LARGE", fileSizeBytes: stats.size };
       }
       buffer = fs.readFileSync(targetUrl);
@@ -545,7 +545,7 @@ export async function downloadFileContent(
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
           const res = await fetch(targetUrl, {
-            signal: AbortSignal.timeout(60_000), // 60s timeout cho file tài liệu nặng (20MB-50MB)
+            signal: AbortSignal.timeout(60_000), // 60s timeout cho file tài liệu nặng (20MB-100MB)
             headers: {
               "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
               "Referer": "https://chat.zalo.me/",
@@ -563,8 +563,8 @@ export async function downloadFileContent(
 
           const contentLengthStr = res.headers.get("content-length");
           const contentLength = contentLengthStr ? parseInt(contentLengthStr, 10) : 0;
-          if (contentLength > 50 * 1024 * 1024) {
-            console.warn(`[gemini] File quá lớn: ${(contentLength / 1024 / 1024).toFixed(1)}MB > 50MB`);
+          if (contentLength > 100 * 1024 * 1024) {
+            console.warn(`[gemini] File quá lớn: ${(contentLength / 1024 / 1024).toFixed(1)}MB > 100MB`);
             return {
               error: "FILE_TOO_LARGE",
               fileSizeBytes: contentLength,
@@ -573,8 +573,8 @@ export async function downloadFileContent(
 
           const arrayBuffer = await res.arrayBuffer();
           buffer = Buffer.from(arrayBuffer);
-          if (buffer.length > 50 * 1024 * 1024) {
-            console.warn(`[gemini] File tải về vượt quá 50MB (${(buffer.length / 1024 / 1024).toFixed(1)}MB)`);
+          if (buffer.length > 100 * 1024 * 1024) {
+            console.warn(`[gemini] File tải về vượt quá 100MB (${(buffer.length / 1024 / 1024).toFixed(1)}MB)`);
             return {
               error: "FILE_TOO_LARGE",
               fileSizeBytes: buffer.length,
@@ -705,7 +705,9 @@ export async function downloadFileContent(
         const { execFile } = await import("child_process");
         const { promisify } = await import("util");
         const execFileAsync = promisify(execFile);
-        const { stdout } = await execFileAsync("unzip", ["-p", tempDocxPath, "word/document.xml"]);
+        const { stdout } = await execFileAsync("unzip", ["-p", tempDocxPath, "word/document.xml"], {
+          maxBuffer: 50 * 1024 * 1024,
+        });
         try { fs.unlinkSync(tempDocxPath); } catch {}
 
         if (stdout) {

@@ -1530,20 +1530,65 @@ export interface WordBlock {
   tableRows?: Array<Array<string | number>>;
   leftCol?: string[];
   rightCol?: string[];
+  leftAlign?: "left" | "center" | "right";
+  rightAlign?: "left" | "center" | "right";
+  borderless?: boolean;
 }
 
 /**
- * Chuyển đổi văn bản chứa Markdown (**in đậm**, *in nghiêng*) thành mảng TextRun chuẩn của Word.
+ * Chuyển đổi văn bản chứa Markdown (**in đậm**, *in nghiêng*) và LaTeX Math ($...$, $$...$$) thành mảng TextRun chuẩn của Word.
+ * - Mặc định hỗ trợ MathType và Word Equation: Giữ nguyên vẹn 100% cú pháp TeX trong $...$ và $$...$$ với font "Cambria Math"
+ *   để người dùng mở Word bấm Alt + \ (Toggle TeX) là convert tức thì sang MathType tương tác được.
+ * - Tùy chọn unicode: Chỉ băm sang Unicode khi được chỉ định riêng biệt.
  */
-export function parseMarkdownRuns(text: string, baseFont = "Times New Roman", baseSize = 26): TextRun[] {
+export function parseMarkdownRuns(
+  text: string,
+  baseFont = "Times New Roman",
+  baseSize = 26,
+  options?: { mathMode?: "mathtype" | "unicode" },
+): TextRun[] {
   if (!text) return [];
-  const clean = cleanLatexMathToUnicode(text);
+
+  // 1. Chế độ Unicode thuần (chỉ khi yêu cầu riêng biệt)
+  if (options?.mathMode === "unicode") {
+    const clean = cleanLatexMathToUnicode(text);
+    const runs: TextRun[] = [];
+    const tokenRegex = /(\*\*.*?\*\*|\*.*?\*)/g;
+    const parts = clean.split(tokenRegex);
+    for (const part of parts) {
+      if (!part) continue;
+      if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
+        runs.push(new TextRun({ text: part.slice(2, -2), font: baseFont, size: baseSize, bold: true }));
+      } else if (part.startsWith("*") && part.endsWith("*") && part.length >= 2) {
+        runs.push(new TextRun({ text: part.slice(1, -1), font: baseFont, size: baseSize, italics: true }));
+      } else {
+        runs.push(new TextRun({ text: part, font: baseFont, size: baseSize }));
+      }
+    }
+    return runs.length > 0 ? runs : [new TextRun({ text: clean, font: baseFont, size: baseSize })];
+  }
+
+  // 2. Chế độ Mặc định: Giữ nguyên vẹn LaTeX cho MathType / Word Equation
   const runs: TextRun[] = [];
-  const tokenRegex = /(\*\*.*?\*\*|\*.*?\*)/g;
-  const parts = clean.split(tokenRegex);
+  // Tokenize tách block math ($$...$$), inline math ($...$), bold (**...**), italic (*...*)
+  const tokenRegex = /(\$\$[\s\S]+?\$\$|\$(?:\\\$|[^\$\n])+?\$|\*\*.*?\*\*|\*.*?\*)/g;
+  const parts = text.split(tokenRegex);
+
   for (const part of parts) {
     if (!part) continue;
-    if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
+
+    if (part.startsWith("$$") && part.endsWith("$$") && part.length >= 4) {
+      // Block Math LaTeX: Giữ nguyên $$...$$
+      runs.push(new TextRun({ text: part, font: "Cambria Math", size: baseSize }));
+    } else if (
+      part.startsWith("$") &&
+      part.endsWith("$") &&
+      part.length >= 2 &&
+      !/^\$\d+(?:,\d+)*(?:\.\d+)?\$$/.test(part)
+    ) {
+      // Inline Math LaTeX: Giữ nguyên $...$
+      runs.push(new TextRun({ text: part, font: "Cambria Math", size: baseSize }));
+    } else if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
       runs.push(new TextRun({ text: part.slice(2, -2), font: baseFont, size: baseSize, bold: true }));
     } else if (part.startsWith("*") && part.endsWith("*") && part.length >= 2) {
       runs.push(new TextRun({ text: part.slice(1, -1), font: baseFont, size: baseSize, italics: true }));
@@ -1551,7 +1596,8 @@ export function parseMarkdownRuns(text: string, baseFont = "Times New Roman", ba
       runs.push(new TextRun({ text: part, font: baseFont, size: baseSize }));
     }
   }
-  return runs.length > 0 ? runs : [new TextRun({ text: clean, font: baseFont, size: baseSize })];
+
+  return runs.length > 0 ? runs : [new TextRun({ text, font: baseFont, size: baseSize })];
 }
 
 /**
@@ -1561,6 +1607,103 @@ export function parseMarkdownRuns(text: string, baseFont = "Times New Roman", ba
  * - Danh sách gạch đầu dòng (- / * / •) thành WordBlock kiểu 'bullets'
  * - Văn bản thông thường thành WordBlock kiểu 'paragraph'
  */
+/**
+ * Nhận diện và chuẩn hóa phần đầu thể thức văn bản hành chính Việt Nam (Nghị định 30/2020/NĐ-CP):
+ * - Bảng 2 cột ẩn viền:
+ *   + Cột trái: Tên cơ quan ban hành (in hoa, đứng), Số hiệu văn bản
+ *   + Cột phải: Quốc hiệu (in hoa đậm), Tiêu ngữ (đậm), Địa danh - ngày tháng năm (nghiêng)
+ */
+function tryExtractAdminHeader(lines: string[]): { headerBlock: WordBlock; nextIndex: number } | null {
+  const checkLimit = Math.min(lines.length, 15);
+  let nationIdx = -1;
+  let mottoIdx = -1;
+  let dateIdx = -1;
+  let mergedIdx = -1;
+
+  for (let idx = 0; idx < checkLimit; idx++) {
+    const l = lines[idx]!.replace(/^[#*]+\s*|\s*[*#]+$/g, "").trim();
+    if (/CỘNG\s*HÒA\s*XÃ\s*HỘI\s*CHỦ\s*NGHĨA\s*VIỆT\s*NAM/i.test(l)) {
+      nationIdx = idx;
+    }
+    if (/Độc\s*lập\s*[-–—]\s*Tự\s*do\s*[-–—]\s*Hạnh\s*phúc/i.test(l)) {
+      mottoIdx = idx;
+    }
+    if (/(?:ngày\s+\d+\s+tháng\s+\d+\s+năm\s+\d+|\d{1,2}\/\d{1,2}\/\d{4})/i.test(l)) {
+      dateIdx = idx;
+    }
+    if (/CỘNG\s*HÒA/i.test(l) && /(?:Số:\s*|Số\s*\d+)/i.test(l)) {
+      mergedIdx = idx;
+    }
+  }
+
+  if (nationIdx === -1 && mottoIdx === -1 && mergedIdx === -1) {
+    return null;
+  }
+
+  const leftLines: string[] = [];
+  const rightLines: string[] = [];
+  let maxIdx = 0;
+
+  if (mergedIdx !== -1) {
+    // Trường hợp dòng dính chùm: "Số: 317/2026/NĐ-CP * CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM Độc lập - Tự do - Hạnh phúc Hà Nội, ngày 11 tháng 8 năm 2026*"
+    for (let idx = 0; idx < mergedIdx; idx++) {
+      const l = lines[idx]!.replace(/^[#*]+\s*|\s*[*#]+$/g, "").trim();
+      if (l) leftLines.push(l);
+    }
+    const mergedLine = lines[mergedIdx]!;
+    const match = mergedLine.match(/^(.*?)(?:[*•]|\s{2,})?(CỘNG\s*HÒA[\s\S]*)$/i);
+    const leftText = (match?.[1] || "").replace(/^[#*]+\s*|\s*[*#]+$/g, "").trim();
+    const rightText = (match?.[2] || "").replace(/^[#*]+\s*|\s*[*#]+$/g, "").trim();
+
+    if (leftText) leftLines.push(leftText);
+    rightLines.push("**CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM**");
+    rightLines.push("**Độc lập - Tự do - Hạnh phúc**");
+
+    const foundDate =
+      rightText.match(/([a-zA-ZÀ-ỹ\s]+,\s*ngày\s+\d+\s+tháng\s+\d+\s+năm\s+\d+)/i) ||
+      rightText.match(/(ngày\s+\d+\s+tháng\s+\d+\s+năm\s+\d+)/i);
+    if (foundDate) {
+      rightLines.push(`*${foundDate[0].trim()}*`);
+    }
+    maxIdx = mergedIdx;
+  } else {
+    // Các dòng tách rời bình thường
+    const upperLimit = Math.max(nationIdx, mottoIdx, dateIdx);
+    maxIdx = upperLimit;
+    for (let idx = 0; idx <= upperLimit; idx++) {
+      const l = lines[idx]!.replace(/^[#*]+\s*|\s*[*#]+$/g, "").trim();
+      if (!l) continue;
+      if (idx === nationIdx) {
+        rightLines.push("**CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM**");
+      } else if (idx === mottoIdx) {
+        rightLines.push("**Độc lập - Tự do - Hạnh phúc**");
+      } else if (idx === dateIdx) {
+        rightLines.push(`*${l}*`);
+      } else if (/^(?:Số:\s*|Số\s*\d+|CHÍNH PHỦ|BỘ\s+|SỞ\s+|TRƯỜNG\s+|ỦY BAN|UBND|PHÒNG\s+)/i.test(l)) {
+        leftLines.push(l);
+      } else if (leftLines.length < 3) {
+        leftLines.push(l);
+      }
+    }
+  }
+
+  if (leftLines.length === 0 || rightLines.length === 0) {
+    return null;
+  }
+
+  return {
+    headerBlock: {
+      type: "two_columns",
+      leftCol: leftLines,
+      rightCol: rightLines,
+      leftAlign: "center",
+      rightAlign: "center",
+      borderless: true,
+    },
+    nextIndex: maxIdx + 1,
+  };
+}
+
 export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string): WordBlock[] {
   if (!content || !content.trim()) {
     return [
@@ -1572,8 +1715,15 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
   const lines = content.replace(/\r\n/g, "\n").split("\n");
   const blocks: WordBlock[] = [];
 
-  // Nếu có defaultTitle mà trong dòng đầu của content chưa có heading 1
-  if (defaultTitle && defaultTitle.trim()) {
+  // Kiểm tra trước thể thức văn bản hành chính Việt Nam (Nghị định 30)
+  const adminHeader = tryExtractAdminHeader(lines);
+  let startIndex = 0;
+
+  if (adminHeader) {
+    blocks.push(adminHeader.headerBlock);
+    startIndex = adminHeader.nextIndex;
+  } else if (defaultTitle && defaultTitle.trim()) {
+    // Nếu có defaultTitle mà trong dòng đầu của content chưa có heading 1
     const trimmedFirstLine = lines.find((l) => l.trim().length > 0) || "";
     if (!trimmedFirstLine.startsWith("# ")) {
       blocks.push({
@@ -1585,7 +1735,7 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
     }
   }
 
-  let i = 0;
+  let i = startIndex;
   while (i < lines.length) {
     const rawLine = lines[i]!;
     const line = rawLine.trim();
@@ -1623,10 +1773,10 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
 
         const headers = parseRowCells(tableLines[0]!);
         const isSeparatorRow = /^\|?(?:\s*:?-+:?\s*\|?)+$/.test(tableLines[1]!) || tableLines[1]!.includes("---");
-        const startIndex = isSeparatorRow ? 2 : 1;
+        const sepIndex = isSeparatorRow ? 2 : 1;
 
         const dataRows: string[][] = [];
-        for (let r = startIndex; r < tableLines.length; r++) {
+        for (let r = sepIndex; r < tableLines.length; r++) {
           const cells = parseRowCells(tableLines[r]!);
           while (cells.length < headers.length) {
             cells.push("");
@@ -1634,10 +1784,20 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
           dataRows.push(cells);
         }
 
+        // Tự động nhận diện bảng trắc nghiệm hoặc bảng ma trận đáp án không viền
+        const isChoiceTable =
+          headers.some((h) => /^[A-D][\.:]|^[a-d]\)/i.test(h)) ||
+          dataRows.some((row) => row.some((c) => /^[A-D][\.:]|^[a-d]\)/i.test(String(c))));
+        const isAnswerKeyTable = headers.some((h) => /(?:câu|đáp án|mã đề|part|key)/i.test(h));
+        const hasBorderlessHint = /(?:khong_khung|borderless|b[oỏ]\s*khung|kh[oô]ng\s*vi[eề]n)/i.test(
+          content + " " + (defaultTitle || ""),
+        );
+
         blocks.push({
           type: "table",
           tableHeaders: headers,
           tableRows: dataRows,
+          borderless: isChoiceTable || (isAnswerKeyTable && hasBorderlessHint) || hasBorderlessHint,
         });
         continue;
       } else {
@@ -1646,29 +1806,41 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
       }
     }
 
-    // 3. Tiêu đề Markdown (#, ##, ###)
-    if (/^#{1,3}\s+/.test(line)) {
-      const level = line.startsWith("### ") ? 3 : line.startsWith("## ") ? 2 : 1;
-      const text = line.replace(/^#{1,3}\s+/, "").trim();
-      blocks.push({
-        type: "heading",
-        level,
-        text,
-        align: level === 1 && blocks.length <= 1 ? "center" : "left",
-      });
+    // 3. Tiêu đề Markdown (#, ##, ###, ####, #####)
+    if (/^#{1,6}\s+/.test(line)) {
+      const hashMatch = line.match(/^#+/);
+      const hashCount = hashMatch ? hashMatch[0].length : 1;
+      const cleanText = line.replace(/^#+\s*/, "").replace(/\*\*/g, "").trim();
+
+      // Nếu là cấp 4 trở lên hoặc dạng "Điều 1...", "Khoản 1...": chuyển thành paragraph in đậm sạch sẽ
+      if (hashCount >= 4 || /^Điều\s+\d+/i.test(cleanText)) {
+        blocks.push({
+          type: "paragraph",
+          text: `**${cleanText}**`,
+          align: "left",
+        });
+      } else {
+        const level = hashCount === 3 ? 3 : hashCount === 2 ? 2 : 1;
+        blocks.push({
+          type: "heading",
+          level,
+          text: cleanText,
+          align: level === 1 && blocks.length <= 1 ? "center" : "left",
+        });
+      }
       i++;
       continue;
     }
 
     // 3.5. Kiểm tra Câu hỏi Trắc nghiệm hoặc Câu hỏi Đúng/Sai trong đề thi
-    const isQuestionHeading = /^(?:#{1,3}\s*)?(?:\*\*)?(?:Câu|Bài)\s+\d+[\.:]/i.test(line);
+    const isQuestionHeading = /^(?:#{1,6}\s*)?(?:\*\*)?(?:Câu|Bài)\s+\d+[\.:]/i.test(line);
     if (isQuestionHeading) {
       // Trường hợp A: Phương án A, B, C, D nằm ngay trong cùng 1 dòng (viết liền dính chùm)
       const inlineOptMatch = line.match(
-        /^(.*?)(?:[\s,;]+|^)(A[\.:]\s*[\s\S]+?)(?:[\s,;]+)(B[\.:]\s*[\s\S]+?)(?:[\s,;]+)(C[\.:]\s*[\s\S]+?)(?:[\s,;]+)(D[\.:]\s*[\s\S]+)$/i
+        /^(.*?)(?:[\s,;]+|^)(A[\.:]\s*[\s\S]+?)(?:[\s,;]+)(B[\.:]\s*[\s\S]+?)(?:[\s,;]+)(C[\.:]\s*[\s\S]+?)(?:[\s,;]+)(D[\.:]\s*[\s\S]+)$/i,
       );
       if (inlineOptMatch) {
-        const qText = inlineOptMatch[1]!.replace(/^#{1,3}\s*/, "").trim();
+        const qText = inlineOptMatch[1]!.replace(/^#{1,6}\s*/, "").trim();
         const optA = inlineOptMatch[2]!.trim();
         const optB = inlineOptMatch[3]!.trim();
         const optC = inlineOptMatch[4]!.trim();
@@ -1687,6 +1859,7 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
             leftCol: [optA, optC],
             rightCol: [optB, optD],
             align: "left",
+            borderless: true,
           });
         } else {
           blocks.push({ type: "paragraph", text: `   ${optA}`, align: "left" });
@@ -1700,10 +1873,10 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
 
       // Trường hợp B: Phương án Đúng/Sai a), b), c), d) nằm ngay trong cùng 1 dòng
       const inlineTfMatch = line.match(
-        /^(.*?)(?:[\s,;]+|^)(a\)\s*[\s\S]+?)(?:[\s,;]+)(b\)\s*[\s\S]+?)(?:[\s,;]+)(c\)\s*[\s\S]+?)(?:[\s,;]+)(d\)\s*[\s\S]+)$/i
+        /^(.*?)(?:[\s,;]+|^)(a\)\s*[\s\S]+?)(?:[\s,;]+)(b\)\s*[\s\S]+?)(?:[\s,;]+)(c\)\s*[\s\S]+?)(?:[\s,;]+)(d\)\s*[\s\S]+)$/i,
       );
       if (inlineTfMatch) {
-        const qText = inlineTfMatch[1]!.replace(/^#{1,3}\s*/, "").trim();
+        const qText = inlineTfMatch[1]!.replace(/^#{1,6}\s*/, "").trim();
         blocks.push({
           type: "paragraph",
           text: qText,
@@ -1725,7 +1898,7 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
         /^C[\.:]\s*/i.test(lines[i + 3]!.trim()) &&
         /^D[\.:]\s*/i.test(lines[i + 4]!.trim())
       ) {
-        const qText = line.replace(/^#{1,3}\s*/, "").trim();
+        const qText = line.replace(/^#{1,6}\s*/, "").trim();
         const optA = lines[i + 1]!.trim();
         const optB = lines[i + 2]!.trim();
         const optC = lines[i + 3]!.trim();
@@ -1744,6 +1917,7 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
             leftCol: [optA, optC],
             rightCol: [optB, optD],
             align: "left",
+            borderless: true,
           });
         } else {
           blocks.push({ type: "paragraph", text: `   ${optA}`, align: "left" });
@@ -1763,7 +1937,7 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
         /^c\)\s*/i.test(lines[i + 3]!.trim()) &&
         /^d\)\s*/i.test(lines[i + 4]!.trim())
       ) {
-        const qText = line.replace(/^#{1,3}\s*/, "").trim();
+        const qText = line.replace(/^#{1,6}\s*/, "").trim();
         blocks.push({
           type: "paragraph",
           text: qText,
@@ -1809,8 +1983,59 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
       continue;
     }
 
+    // 5.5. Nhận diện phần Footer hành chính (Nơi nhận & Chữ ký / Ban hành)
+    if (/^(?:\*\*|\*|#+)?\s*Nơi nhận\s*:/i.test(line)) {
+      const leftRecipientLines: string[] = ["**Nơi nhận:**"];
+      const rightSignatureLines: string[] = [];
+      let collectingRecipients = true;
+
+      while (i + 1 < lines.length) {
+        const nextRaw = lines[i + 1]!.trim();
+        if (!nextRaw) {
+          i++;
+          continue;
+        }
+        if (/^===+\s*TRANG/i.test(nextRaw) || /^---+$/.test(nextRaw)) {
+          break;
+        }
+
+        const isSignatureKeyword =
+          /^(?:HIỆU\s*TRƯỞNG|THỦ\s*TƯỚNG|BỘ\s*TRƯỞNG|GIÁM\s*ĐỐC|CHỦ\s*TỊCH|TRƯỞNG\s*KHOA|KT\.\s*|TL\.\s*|TM\.\s*|\(Đã\s*ký\))/i.test(
+            nextRaw.replace(/[*#]/g, "").trim(),
+          );
+        if (isSignatureKeyword) {
+          collectingRecipients = false;
+        }
+
+        if (collectingRecipients) {
+          leftRecipientLines.push(nextRaw.replace(/^[-*•]\s*/, "- "));
+        } else {
+          rightSignatureLines.push(nextRaw);
+        }
+        i++;
+      }
+
+      if (rightSignatureLines.length > 0) {
+        blocks.push({
+          type: "two_columns",
+          leftCol: leftRecipientLines,
+          rightCol: rightSignatureLines,
+          leftAlign: "left",
+          rightAlign: "center",
+          borderless: true,
+        });
+      } else {
+        for (const r of leftRecipientLines) {
+          blocks.push({ type: "paragraph", text: r, align: "left" });
+        }
+      }
+      i++;
+      continue;
+    }
+
     // 6. Đoạn văn bản thông thường (Paragraph)
-    const paraLines: string[] = [line];
+    const cleanCurrentLine = line.replace(/^#+\s*/, "");
+    const paraLines: string[] = [cleanCurrentLine];
     i++;
     while (i < lines.length) {
       const nextLine = lines[i]!.trim();
@@ -1818,14 +2043,15 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
       const isNextTable = (nextLine.startsWith("|") && nextLine.endsWith("|")) || ((nextLine.match(/\|/g) || []).length >= 2);
       if (
         isNextTable ||
-        /^#{1,3}\s+/.test(nextLine) ||
+        /^#{1,6}\s+/.test(nextLine) ||
         /^(?:[-*•]\s+|\d+[\.)]\s+)/.test(nextLine) ||
         /^===+\s*TRANG\s*\d+\s*===+/i.test(nextLine) ||
-        /^---+$/.test(nextLine)
+        /^---+$/.test(nextLine) ||
+        /^(?:\*\*|\*|#+)?\s*Nơi nhận\s*:/i.test(nextLine)
       ) {
         break;
       }
-      paraLines.push(nextLine);
+      paraLines.push(nextLine.replace(/^#+\s*/, ""));
       i++;
     }
 
@@ -1953,14 +2179,30 @@ export async function generateWordDoc(
         if (block.type === "two_columns") {
           // Bảng 2 cột không viền cho thể thức hành chính hoặc phương án trắc nghiệm
           const isLeftCol = block.align === "left" || (block.leftCol || []).some((t) => /^[A-D][\.:]|^[a-d]\)/i.test(t.trim()));
-          const colAlign = isLeftCol ? AlignmentType.LEFT : AlignmentType.CENTER;
+          const defaultAlign = isLeftCol ? AlignmentType.LEFT : AlignmentType.CENTER;
+          const leftAlign =
+            block.leftAlign === "left"
+              ? AlignmentType.LEFT
+              : block.leftAlign === "center"
+                ? AlignmentType.CENTER
+                : block.leftAlign === "right"
+                  ? AlignmentType.RIGHT
+                  : defaultAlign;
+          const rightAlign =
+            block.rightAlign === "left"
+              ? AlignmentType.LEFT
+              : block.rightAlign === "center"
+                ? AlignmentType.CENTER
+                : block.rightAlign === "right"
+                  ? AlignmentType.RIGHT
+                  : defaultAlign;
           const colSize = isLeftCol ? 26 : 24;
 
           const leftParas = (block.leftCol || []).map(
             (t) =>
               new Paragraph({
                 children: parseMarkdownRuns(t, "Times New Roman", colSize),
-                alignment: colAlign,
+                alignment: leftAlign,
                 spacing: { after: isLeftCol ? 40 : 60 },
               }),
           );
@@ -1968,7 +2210,7 @@ export async function generateWordDoc(
             (t) =>
               new Paragraph({
                 children: parseMarkdownRuns(t, "Times New Roman", colSize),
-                alignment: colAlign,
+                alignment: rightAlign,
                 spacing: { after: isLeftCol ? 40 : 60 },
               }),
           );
@@ -2039,8 +2281,11 @@ export async function generateWordDoc(
             );
           }
         } else if (block.type === "table" && block.tableHeaders && block.tableRows) {
-          const thinBorder = { style: BorderStyle.SINGLE, size: 1, color: "888888" };
-          const cellBorders = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder };
+          const isBorderless = Boolean(block.borderless);
+          const borderConfig = isBorderless
+            ? { style: BorderStyle.NONE, size: 0, color: "auto" }
+            : { style: BorderStyle.SINGLE, size: 1, color: "888888" };
+          const cellBorders = { top: borderConfig, bottom: borderConfig, left: borderConfig, right: borderConfig };
           const colCount = Math.max(block.tableHeaders.length, ...block.tableRows.map((r) => r.length), 1);
           const colWidthPct = Math.floor(100 / colCount);
 
@@ -2056,7 +2301,7 @@ export async function generateWordDoc(
                       alignment: AlignmentType.CENTER,
                     }),
                   ],
-                  shading: { fill: "D9E1F2" },
+                  shading: isBorderless ? undefined : { fill: "D9E1F2" },
                   borders: cellBorders,
                 }),
             ),

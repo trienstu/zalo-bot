@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { cleanLatexMathToUnicode, convertMathExpressionToUnicode } from "./latex-cleaner.js";
+import { cleanLatexMathToUnicode } from "./latex-cleaner.js";
 
 test("cleanLatexMathToUnicode: Xử lý công thức từ trường của cô Pham Thi Hoai Thu", () => {
   const input = "Độ lớn lực từ: $F = \\frac{I \\cdot B \\cdot L}{\\sin\\alpha}$, với cảm ứng từ $\\vec{B}$. Chiều dài $0,2\\text{ m}$.";

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { parseMarkdownToWordBlocks, generateWordDoc } from "./file-generator.js";
+import { parseMarkdownToWordBlocks, generateWordDoc, parseMarkdownRuns } from "./file-generator.js";
 
 test("parseMarkdownToWordBlocks: Nhận diện câu hỏi trắc nghiệm viết dính chùm trên 1 dòng và tách thành 2 cột", () => {
   const content = `**Câu 1.** Nguyên nhân làm cho dao động tắt dần trong không khí là do A. trọng lực. B. lực cản môi trường. C. dây treo nhẹ. D. chu kỳ nhỏ.`;
@@ -73,4 +73,73 @@ D. $\\omega = 40\\text{ rad/s}$.`;
 
   // Xóa file test sau khi chạy
   fs.unlinkSync(result.filePath);
+});
+
+test("parseMarkdownRuns: Giữ nguyên vẹn TeX cho MathType và Word Equation với font Cambria Math", () => {
+  const runs = parseMarkdownRuns("Một vật dao động điều hòa với phương trình $x = 4\\cos(10\\pi t + \\pi/3)$ và độ cứng $k = 100\\text{ N/m}$.");
+
+  const mathRuns = runs.filter((r: any) => r.root?.[1]?.[0]?.root?.[0] === "Cambria Math" || JSON.stringify(r).includes("Cambria Math"));
+  assert.ok(mathRuns.length >= 2, "Phải có ít nhất 2 run mang font Cambria Math");
+
+  const textJson = JSON.stringify(runs);
+  assert.ok(textJson.includes("$x = 4\\\\cos(10\\\\pi t + \\\\pi/3)$"));
+  assert.ok(textJson.includes("$k = 100\\\\text{ N/m}$"));
+});
+
+test("parseMarkdownToWordBlocks: Chuẩn hóa thể thức hành chính Nghị định 30 (Header 2 cột không viền, khử #### Điều, Footer)", () => {
+  const text = `BỘ GIÁO DỤC VÀ ĐÀO TẠO
+Số: 317/QĐ-BGDĐT
+CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM
+Độc lập - Tự do - Hạnh phúc
+Hà Nội, ngày 11 tháng 8 năm 2026
+
+# QUYẾT ĐỊNH
+Về việc phê duyệt kế hoạch tổ chức kỳ thi
+
+#### Điều 1. Ban hành kế hoạch
+Ban hành kèm theo Quyết định này Kế hoạch tổ chức kỳ thi học sinh giỏi quốc gia.
+
+#### Điều 2. Trách nhiệm thi hành
+Các ông Chánh Văn phòng, Cục trưởng Cục Quản lý chất lượng chịu trách nhiệm thi hành.
+
+**Nơi nhận:**
+- Như Điều 2;
+- Bộ trưởng (để b/c);
+- Lưu: VT, QLCL.
+BỘ TRƯỞNG
+(Đã ký)
+Nguyễn Kim Sơn`;
+
+  const blocks = parseMarkdownToWordBlocks(text);
+
+  // 1. Khối đầu tiên là Header 2 cột không viền
+  assert.equal(blocks[0]?.type, "two_columns");
+  assert.equal(blocks[0]?.borderless, true);
+  assert.ok(blocks[0]?.leftCol?.some((l) => l.includes("BỘ GIÁO DỤC")));
+  assert.ok(blocks[0]?.rightCol?.some((l) => l.includes("CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM")));
+  assert.ok(blocks[0]?.rightCol?.some((l) => l.includes("Độc lập - Tự do - Hạnh phúc")));
+
+  // 2. Khử sạch #### Điều 1, Điều 2 thành paragraph in đậm sạch sẽ
+  const dieu1Block = blocks.find((b) => b.type === "paragraph" && b.text?.includes("Điều 1."));
+  assert.ok(dieu1Block, "Phải có khối Điều 1");
+  assert.ok(!dieu1Block.text?.includes("####"), "Tuyệt đối không được chứa ký tự rác ####");
+  assert.ok(dieu1Block.text?.startsWith("**Điều 1."), "Điều 1 phải được in đậm sạch sẽ");
+
+  // 3. Khối Footer là 2 cột không viền (Nơi nhận bên trái, Chữ ký bên phải)
+  const footerBlock = blocks.find((b) => b.type === "two_columns" && b.leftCol?.some((l) => l.includes("Nơi nhận")));
+  assert.ok(footerBlock, "Phải có khối Footer 2 cột");
+  assert.equal(footerBlock.borderless, true);
+  assert.ok(footerBlock.rightCol?.some((r) => r.includes("BỘ TRƯỞNG")));
+});
+
+test("parseMarkdownToWordBlocks: Tự động gắn cờ borderless cho bảng trắc nghiệm hoặc ma trận đáp án", () => {
+  const tableContent = `| Câu | A | B | C | D |
+|---|---|---|---|---|
+| 1 | Đúng | Sai | Đúng | Sai |
+| 2 | A | B | C | D |`;
+
+  const blocks = parseMarkdownToWordBlocks(tableContent, "Bảng Đáp Án borderless");
+  const tableBlock = blocks.find((b) => b.type === "table");
+  assert.ok(tableBlock, "Phải có khối table");
+  assert.equal(tableBlock.borderless, true, "Bảng trắc nghiệm / đáp án phải có cờ borderless: true");
 });
