@@ -1227,6 +1227,19 @@ export async function sendDirectText(api: ZaloApi, userId: string, text: string)
   console.log(`[sendDirectText] ✅ Đã gửi 1:1 thành công ${chunks.length} phần đến [${targetId}]`);
 }
 
+function withCallTimeout<T>(promise: Promise<T>, timeoutMs: number, operationName: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`Timeout quá ${timeoutMs}ms khi thực hiện ${operationName}`));
+    }, timeoutMs);
+    if (typeof timer.unref === "function") timer.unref();
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 /**
  * Gửi file đính kèm (Word .docx, Excel .xlsx, PDF, Markdown .md, TXT) vào Group Zalo.
  */
@@ -1246,16 +1259,30 @@ export async function sendGroupFile(
     attachments: [attachment],
   };
 
-  console.log(`[sendGroupFile] 📎 Đang gửi file [${path.basename(filePath)}] vào nhóm [${threadIdStr}]...`);
+  const fileName = path.basename(filePath);
+  console.log(`[sendGroupFile] 📎 Đang gửi file [${fileName}] vào nhóm [${threadIdStr}]...`);
+  const FILE_TIMEOUT_MS = 45_000;
   try {
-    await api.sendMessage(payload, threadIdStr, ThreadType.Group);
+    await withCallTimeout(
+      api.sendMessage(payload, threadIdStr, ThreadType.Group),
+      FILE_TIMEOUT_MS,
+      `sendGroupFile Group [${fileName}]`,
+    );
     return;
   } catch (e1) {
     try {
-      await api.sendMessage(payload, threadIdStr, 1);
+      await withCallTimeout(
+        api.sendMessage(payload, threadIdStr, 1),
+        FILE_TIMEOUT_MS,
+        `sendGroupFile fallback type 1 [${fileName}]`,
+      );
       return;
     } catch (e2) {
-      await api.sendMessage(payload, threadIdStr);
+      await withCallTimeout(
+        api.sendMessage(payload, threadIdStr),
+        FILE_TIMEOUT_MS,
+        `sendGroupFile fallback default [${fileName}]`,
+      );
     }
   }
 }
@@ -1279,16 +1306,30 @@ export async function sendDirectFile(
     attachments: [attachment],
   };
 
-  console.log(`[sendDirectFile] 📎 Đang gửi file 1:1 [${path.basename(filePath)}] đến [${targetId}]...`);
+  const fileName = path.basename(filePath);
+  console.log(`[sendDirectFile] 📎 Đang gửi file 1:1 [${fileName}] đến [${targetId}]...`);
+  const FILE_TIMEOUT_MS = 45_000;
   try {
-    await api.sendMessage(payload, targetId, ThreadType.User);
+    await withCallTimeout(
+      api.sendMessage(payload, targetId, ThreadType.User),
+      FILE_TIMEOUT_MS,
+      `sendDirectFile User [${fileName}]`,
+    );
     return;
   } catch (e1) {
     try {
-      await api.sendMessage(payload, targetId, 0);
+      await withCallTimeout(
+        api.sendMessage(payload, targetId, 0),
+        FILE_TIMEOUT_MS,
+        `sendDirectFile fallback type 0 [${fileName}]`,
+      );
       return;
     } catch (e2) {
-      await api.sendMessage(payload, targetId);
+      await withCallTimeout(
+        api.sendMessage(payload, targetId),
+        FILE_TIMEOUT_MS,
+        `sendDirectFile fallback default [${fileName}]`,
+      );
     }
   }
 }

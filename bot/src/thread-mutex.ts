@@ -37,7 +37,21 @@ export class ThreadMutexManager {
     try {
       // Đợi lượt xử lý tuần tự
       await prevPromise;
-      return await task();
+      // Chạy task với timeout bảo vệ 120s, tránh treo vĩnh viễn mutex nếu socket mạng/upload bị đơ
+      const timeoutLimitMs = 120_000;
+      let timer: NodeJS.Timeout | undefined;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`[thread-mutex] Tác vụ "${_taskName}" trong thread ${cleanId} bị timeout sau ${timeoutLimitMs}ms`));
+        }, timeoutLimitMs);
+        if (typeof timer.unref === "function") timer.unref();
+      });
+
+      try {
+        return await Promise.race([task(), timeoutPromise]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
     } finally {
       state.inFlightCount = Math.max(0, state.inFlightCount - 1);
       state.lastActiveAt = Date.now();
