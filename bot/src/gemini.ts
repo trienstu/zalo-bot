@@ -1738,7 +1738,7 @@ const AGENT_TOOLS_DECLARATION = {
           },
           content: {
             type: "STRING",
-            description: "Toàn bộ nội dung văn bản chi tiết đầy đủ (dành cho file docx, html, md, txt, code, hoặc nội dung markdown để tự động phân tích thành slides thuyết trình nếu không truyền mảng slides)",
+            description: "Toàn bộ nội dung văn bản chi tiết đầy đủ (dành cho file docx, html, md, txt, code, hoặc nội dung markdown để tự động phân tích thành slides thuyết trình nếu không truyền mảng slides). LƯU Ý KHI SOẠN THẢO TOÁN/KHOA HỌC: Mọi công thức, biểu thức, số mũ, phân số, đại lượng có chỉ số BẮT BUỘC viết dạng LaTeX bọc trong dấu $ ... $ (ví dụ: $m_1 = 200\\text{ g}$, $3,34 \\cdot 10^5$, $F_A$, $\\Rightarrow$) để hệ thống tự động render sang Word Equation bản xứ.",
           },
           slides: {
             type: "ARRAY",
@@ -1957,6 +1957,11 @@ const AGENT_TOOLS_DECLARATION = {
           imageUrl: {
             type: "STRING",
             description: "URL hoặc đường dẫn ảnh gốc nếu người dùng yêu cầu chỉnh sửa/biến thể trên một ảnh đã có trong nhóm hoặc ảnh đính kèm",
+          },
+          imageUrls: {
+            type: "ARRAY",
+            items: { type: "STRING" },
+            description: "Danh sách nhiều URL ảnh tham chiếu khi cần kết hợp, ghép đôi hoặc giữ nguyên nhiều nhân vật cùng lúc",
           },
           isEdit: {
             type: "BOOLEAN",
@@ -2376,8 +2381,13 @@ export async function executeAgentTool(name: string, args: Record<string, any>, 
       const isEdit = Boolean(args?.isEdit);
       const imageUrl = args?.imageUrl ? String(args.imageUrl).trim() : undefined;
 
+      const rawImageUrls = Array.isArray(args?.imageUrls) ? (args.imageUrls as string[]).filter(Boolean) : [];
+      if (imageUrl && !rawImageUrls.includes(imageUrl)) {
+        rawImageUrls.unshift(imageUrl);
+      }
+
       let inputImageDataUrl: string | null = null;
-      if (imageUrl) {
+      if (imageUrl && rawImageUrls.length <= 1) {
         if (fs.existsSync(imageUrl)) {
           inputImageDataUrl = prepareImageDataUrl(imageUrl);
         } else {
@@ -2397,6 +2407,7 @@ export async function executeAgentTool(name: string, args: Record<string, any>, 
         const imgRes = await generateCodexImage(prompt, {
           aspectRatio,
           image: inputImageDataUrl,
+          imageUrls: rawImageUrls.length > 0 ? rawImageUrls : undefined,
           isEdit,
           model: requestedModel,
         });

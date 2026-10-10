@@ -1964,6 +1964,58 @@ export function convertTexToDocxMath(rawTex: string): DocxMath | null {
 }
 
 /**
+ * Tự động nhận diện và bọc các biểu thức toán/lý/hóa trần trụi (khi người dùng hoặc AI quên bọc dấu $)
+ * thành chuẩn LaTeX có dấu $ bọc ngoài để parseMarkdownRuns tự động chuyển đổi sang Native Word Equation.
+ */
+export function autoEnrichMathDelimiters(text: string): string {
+  if (!text) return "";
+
+  // Bỏ qua nếu là dòng tiêu đề Markdown (# ..., ## ...)
+  if (/^#{1,6}\s+/.test(text.trim())) return text;
+
+  // Tách văn bản thành các đoạn đã bọc $ và các đoạn văn bản thường
+  const parts = text.split(/(\$\$[\s\S]+?\$\$|\$(?:\\\$|[^\$\n])+?\$)/g);
+
+  return parts
+    .map((part, idx) => {
+      // Các phần lẻ idx % 2 === 1 là đã bọc trong $ -> giữ nguyên 100%
+      if (idx % 2 === 1) return part;
+
+      let s = part;
+
+      // 1. Mũi tên suy luận: =>, <=>, ->
+      s = s.replace(/(?<=\s|^)=>(?=\s|$)/g, "$\\Rightarrow$");
+      s = s.replace(/(?<=\s|^)<=>\s*(?=\s|$)/g, "$\\Leftrightarrow$");
+
+      // 2. Lũy thừa khoa học & số mũ mười: 3,34.10^5, 3.10^8, 10^5, 10^{-3}
+      s = s.replace(/(?<![\$\w\d])(\d+(?:[,\.]\d+)?)\s*[\.x×·\*]\s*10\^([+-]?\d+)(?![\$\w\d])/g, (_, n, p) => `$${n} \\cdot 10^{${p}}$`);
+      s = s.replace(/(?<![\$\w\d])10\^([+-]?\d+)(?![\$\w\d])/g, (_, p) => `$10^{${p}}$`);
+
+      // 3. Đại lượng có chỉ số gạch dưới: F_A, F_Amax, P_đá, V_chìm, D_n, Q_thu, Q_toa...
+      s = s.replace(/(?<![\$\w\\])\b([a-zA-Z\u0370-\u03FF])_([a-zA-Z0-9\p{L}]+)(?![\$\w])/gu, (_, base, sub) => {
+        if (/[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(sub) || sub.length > 2) {
+          return `$${base}_{\\text{${sub}}}$`;
+        }
+        return `$${base}_{${sub}}$`;
+      });
+
+      // 4. Biến có số dính liền khi đứng cạnh phép tính hoặc dấu bằng/đơn vị: m1 = 200, t1 = 20, V0 = 200
+      s = s.replace(/(?<![\$\w\\])\b([mtvpVTDSshH])(\d)(?=\s*[=<>+\-≈~]|,\s*[mtvpVTDSshH]\d)/g, (_, base, num) => `$${base}_{${num}}$`);
+
+      // 5. Ký hiệu TeX trần trụi chưa bọc $: \lambda, \Delta, \mu, \Omega, \alpha, \beta, \rho, \frac...
+      s = s.replace(/(?<![\$\w])\\(lambda|Delta|mu|Omega|alpha|beta|gamma|rho|pi|sigma|tau|theta|phi|omega|vec|frac|sqrt)\b([^$\n]*?)(?=[,;.!?\s]|$)/g, (_, cmd, rest) => {
+        if (rest.startsWith("{") || rest.includes("=") || rest.includes("+") || rest.includes("-")) {
+          return `$\\${cmd}${rest}$`;
+        }
+        return `$\\${cmd}$${rest}`;
+      });
+
+      return s;
+    })
+    .join("");
+}
+
+/**
  * Chuyển đổi văn bản chứa Markdown (**in đậm**, *in nghiêng*) và LaTeX Math ($...$, $$...$$) thành mảng TextRun hoặc DocxMath chuẩn của Word.
  * - Mặc định hỗ trợ Word Equation (<m:oMath>) bản địa của Microsoft Word: Mở file hiển thị ngay lập tức, sửa trực tiếp được bằng bàn phím.
  * - Tùy chọn mathtype: Giữ nguyên chuỗi TeX thô với font Cambria Math.
@@ -1977,9 +2029,11 @@ export function parseMarkdownRuns(
 ): (TextRun | DocxMath)[] {
   if (!text) return [];
 
+  const effectiveText = options?.mathMode === "unicode" ? text : autoEnrichMathDelimiters(text);
+
   // 1. Chế độ Unicode thuần (chỉ khi yêu cầu riêng biệt)
   if (options?.mathMode === "unicode") {
-    const clean = cleanLatexMathToUnicode(text);
+    const clean = cleanLatexMathToUnicode(effectiveText);
     const runs: (TextRun | DocxMath)[] = [];
     const tokenRegex = /(\*\*.*?\*\*|\*.*?\*)/g;
     const parts = clean.split(tokenRegex);
@@ -1999,7 +2053,7 @@ export function parseMarkdownRuns(
   // 2. Chế độ Mặc định (OMML Word Equation bản địa) hoặc Chế độ MathType thuần
   const runs: (TextRun | DocxMath)[] = [];
   const tokenRegex = /(\$\$[\s\S]+?\$\$|\$(?:\\\$|[^\$\n])+?\$|\*\*.*?\*\*|\*.*?\*)/g;
-  const parts = text.split(tokenRegex);
+  const parts = effectiveText.split(tokenRegex);
 
   for (const part of parts) {
     if (!part) continue;

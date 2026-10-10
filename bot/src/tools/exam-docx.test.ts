@@ -302,8 +302,20 @@ test("parseMarkdownRuns: Khử sạch \\mug (microgram) và bóc tách nhóm ngo
   assert.ok(!groupJson.includes('root\":[\"{\"]'), "Không được có m:t chứa dấu mở ngoặc nhọn {");
   assert.ok(!groupJson.includes('root\":[\"}\"]'), "Không được có m:t chứa dấu đóng ngoặc nhọn }");
 });
+test("parseMarkdownRuns: Tự động phát hiện và bọc công thức toán/lý/hóa thô (autoEnrichMathDelimiters) thành Word Equation", () => {
+  // Văn bản thô chưa có dấu $ (đúng như trong file cô Hoa phản ánh)
+  const rawText = "Người ta rót m1 = 200 g nước ở t1 = 20°C vào nhiệt lượng kế. Cho λ = 3,34.10^5 J/kg. Lực F_Amax = Dn.V = 402 gf. Khối lượng P_đá và thể tích V_chìm. Ta có M'/9 = 136 => M' = 1224.";
+  const runs = parseMarkdownRuns(rawText);
+  const runsJson = JSON.stringify(runs);
 
+  // Phải tạo ra các đối tượng DocxMath (OMML) thay vì chỉ là TextRun thuần
+  const hasDocxMath = runs.some((r: any) => r.constructor.name === "Math" || (r as any).root !== undefined);
+  assert.ok(hasDocxMath, "Văn bản thô chứa công thức toán phải được tự động chuyển thành DocxMath (OMML)");
 
-
-
+  // Kiểm tra các thành phần đã được parse chuẩn
+  assert.ok(runsJson.includes("3,34"), "Phải chứa số 3,34");
+  assert.ok(runsJson.includes("10"), "Phải chứa cơ số 10");
+  assert.ok(runsJson.includes("F"), "Phải chứa ký hiệu F");
+  assert.ok(runsJson.includes("Rightarrow") || runsJson.includes("⇒"), "Phải chuyển đổi dấu => thành mũi tên suy ra");
+});
 

@@ -395,6 +395,7 @@ const MAX_HISTORY_TURNS = 12;
 const lastAnalyzedDocuments = new Map<string, { name: string; text: string; timestamp: number }>();
 const lastUploadedZipFiles = new Map<string, { name: string; filePath: string; timestamp: number }>();
 const lastDirectMedia = new Map<string, { mediaPart: GeminiMediaPart; imageBuffer?: Buffer; url?: string; fileName?: string; timestamp: number }>();
+const lastDirectMediaHistory = new Map<string, Array<{ mediaPart: GeminiMediaPart; imageBuffer?: Buffer; url?: string; fileName?: string; timestamp: number }>>();
 
 function getAdminHistory(userId: string) {
   if (!adminChatSessions.has(userId)) {
@@ -2563,13 +2564,22 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     const fileRes = await downloadFileContent(targetUrl, fileName);
     if (fileRes?.mediaPart && fileRes.mediaPart.data && fileRes.mediaPart.data.length > 50) {
       mediaPart = fileRes.mediaPart;
-      lastDirectMedia.set(sender, {
+      const mediaItem = {
         mediaPart: fileRes.mediaPart,
         imageBuffer: fileRes.imageBuffer,
         url: targetUrl,
         fileName: fileName || "Ảnh đính kèm",
         timestamp: Date.now(),
-      });
+      };
+      lastDirectMedia.set(sender, mediaItem);
+      const mediaHistory = (lastDirectMediaHistory.get(sender) || []).filter(
+        (it) => Date.now() - it.timestamp < 30 * 60 * 1000,
+      );
+      if (!mediaHistory.some((it) => it.url === targetUrl)) {
+        mediaHistory.push(mediaItem);
+        if (mediaHistory.length > 5) mediaHistory.shift();
+        lastDirectMediaHistory.set(sender, mediaHistory);
+      }
 
       // 🎙️ TỰ ĐỘNG BÓC BĂNG FILE ÂM THANH (STT): Đọc transcript vào fileTextContent để sẵn sàng xuất Word hoặc in chữ
       if (fileRes.mediaPart.mimeType?.startsWith("audio/") && fileRes.audioBuffer) {
@@ -3038,9 +3048,20 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
     `      + Nếu EVIDENCE_STATUS là INSUFFICIENT hoặc thông tin chỉ là đồn đoán: nói rõ chưa đủ xác nhận, tuyệt đối không đoán hoặc tự bịa mốc thời gian.\n` +
     `      + Tuyệt đối không tạo tên nguồn, ngày hoặc URL không có trong dữ liệu bằng chứng.\n`;
 
-  const directImageRefHint = targetUrl
-    ? `\n[ẢNH THAM CHIẾU / ĐÍNH KÈM HIỆN TẠI]: "${targetUrl}". Khi người dùng yêu cầu chỉnh sửa, thay đổi chi tiết hoặc biến thể từ ảnh này, hãy gọi 'generate_image' với imageUrl="${targetUrl}" và isEdit=true.\n`
-    : "";
+  const activeRecentMedias = (lastDirectMediaHistory.get(sender) || []).filter(
+    (it) => Date.now() - it.timestamp < 30 * 60 * 1000,
+  );
+  const recentImageUrls = Array.from(new Set(activeRecentMedias.map((m) => m.url).filter(Boolean) as string[]));
+  if (targetUrl && !recentImageUrls.includes(targetUrl)) {
+    recentImageUrls.push(targetUrl);
+  }
+
+  const directImageRefHint = recentImageUrls.length > 1
+    ? `\n[DANH SÁCH ${recentImageUrls.length} ẢNH THAM CHIẾU GẦN ĐÂY CỦA NGƯỜI DÙNG]: ${JSON.stringify(recentImageUrls)}.\n` +
+      `Khi người dùng yêu cầu vẽ, ghép đôi, kết hợp hoặc tạo ảnh chứa hai hay nhiều nhân vật từ các ảnh đã gửi (ví dụ: ảnh KOL nam + ảnh KOL nữ): BẮT BUỘC gọi tool 'generate_image' với imageUrls=${JSON.stringify(recentImageUrls)} và isEdit=true.\n`
+    : targetUrl
+      ? `\n[ẢNH THAM CHIẾU / ĐÍNH KÈM HIỆN TẠI]: "${targetUrl}". Khi người dùng yêu cầu chỉnh sửa, thay đổi chi tiết hoặc biến thể từ ảnh này, hãy gọi 'generate_image' với imageUrl="${targetUrl}" và isEdit=true.\n`
+      : "";
 
   const defaultImagePrompt =
     `[NGƯỜI DÙNG GỬI HÌNH ẢNH / TÀI LIỆU]: Hãy quan sát kỹ toàn bộ bức ảnh này.\n` +
