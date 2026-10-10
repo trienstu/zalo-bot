@@ -236,4 +236,25 @@ test("parseMarkdownRuns: Xử lý chuẩn xác lũy thừa kèm đơn vị ngh�
   assert.ok(primeJson.includes("ích"), "Phải nhận diện ích làm script token");
 });
 
+test("parseMarkdownRuns & parseMarkdownToWordBlocks: Khử triệt để backslash trong ký hiệu Hy Lạp kèm chỉ số (\\Delta \\Phi_1) và không nhận nhầm dấu trị tuyệt đối (|A|) thành bảng", () => {
+  // 1. Ký hiệu Hy Lạp kèm chỉ số: \Phi_1 -> Φ_1, \Delta \Phi_1 -> Δ Φ_1 không còn sót ký tự \
+  const fluxText = "Suất điện động $e_c = N \\frac{|\\Delta \\Phi_1|}{\\Delta t}$.";
+  const fluxRuns = parseMarkdownRuns(fluxText);
+  const fluxJson = JSON.stringify(fluxRuns);
+  assert.ok(!fluxJson.includes("\\Phi"), "Không được sót \\Phi thô");
+  assert.ok(!fluxJson.includes("\\Delta"), "Không được sót \\Delta thô");
+  assert.ok(!fluxJson.includes("\\"), "Không được sót dấu gạch chéo ngược \\");
+  assert.ok(fluxJson.includes("Φ"), "Phải chuyển đổi thành ký tự Φ");
+  assert.ok(fluxJson.includes("Δ"), "Phải chuyển đổi thành ký tự Δ");
+
+  // 2. Đoạn văn chứa nhiều dấu trị tuyệt đối (|A|, |Q|) không được nhận nhầm thành bảng Markdown
+  const absText = `*Giải chi tiết:* Khi $Q > 0$ và $A < 0$, $\\Delta U = Q - |A|$.
+- Nếu $|Q| > |A| \\Rightarrow \\Delta U > 0$ (nội năng tăng).
+- Nếu $|Q| < |A| \\Rightarrow \\Delta U < 0$ (nội năng giảm).`;
+  const blocks = parseMarkdownToWordBlocks(absText);
+  const hasTable = blocks.some((b) => b.type === "table");
+  assert.equal(hasTable, false, "Tuyệt đối không được nhận nhầm đoạn văn chứa dấu trị tuyệt đối thành bảng");
+});
+
+
 

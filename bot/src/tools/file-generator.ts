@@ -1573,69 +1573,69 @@ export function cleanTexSymbols(tex: string): string {
     .replace(/(?:\\?\^?\\circ\s*([CFK])\b|\\?\^?\\circ\s*\\text\{([CFK])\}|\\?\^?\\circ([CFK]))/gi, (_, p1, p2, p3) => "°" + (p1 || p2 || p3).toUpperCase())
     .replace(/(?:\\?\^?\\circ\b|\\deg\b|\\circ\b)/g, "°")
     // 2. Chữ cái Hy Lạp viết HOA
-    .replace(/\\Phi\b|\\Phi(?=[A-Za-z])/g, "Φ")
-    .replace(/\\Psi\b|\\Psi(?=[A-Za-z])/g, "Ψ")
-    .replace(/\\Theta\b|\\Theta(?=[A-Za-z])/g, "Θ")
-    .replace(/\\Omega\b|\\Omega(?=[A-Za-z])/g, "Ω")
-    .replace(/\\Delta\b|\\Delta(?=[A-Za-z])/g, "Δ")
-    .replace(/\\Lambda\b|\\Lambda(?=[A-Za-z])/g, "Λ")
-    .replace(/\\Sigma\b|\\Sigma(?=[A-Za-z])/g, "Σ")
-    .replace(/\\Gamma\b|\\Gamma(?=[A-Za-z])/g, "Γ")
-    .replace(/\\Pi\b|\\Pi(?=[A-Za-z])/g, "Π")
+    .replace(/\\Phi(?![a-zA-Z])/g, "Φ")
+    .replace(/\\Psi(?![a-zA-Z])/g, "Ψ")
+    .replace(/\\Theta(?![a-zA-Z])/g, "Θ")
+    .replace(/\\Omega(?![a-zA-Z])/g, "Ω")
+    .replace(/\\Delta(?![a-zA-Z])/g, "Δ")
+    .replace(/\\Lambda(?![a-zA-Z])/g, "Λ")
+    .replace(/\\Sigma(?![a-zA-Z])/g, "Σ")
+    .replace(/\\Gamma(?![a-zA-Z])/g, "Γ")
+    .replace(/\\Pi(?![a-zA-Z])/g, "Π")
     // 3. Chữ cái Hy Lạp viết THƯỜNG
-    .replace(/\\(?:varphi|phi)\b/g, "φ")
-    .replace(/\\(?:vartheta|theta)\b/g, "θ")
-    .replace(/\\(?:varepsilon|epsilon)\b/g, "ε")
-    .replace(/\\pi\b|\\pi(?=[A-Za-z])/g, "π")
-    .replace(/\\omega\b|\\omega(?=[A-Za-z])/g, "ω")
-    .replace(/\\alpha\b|\\alpha(?=[A-Za-z])/g, "α")
-    .replace(/\\beta\b|\\beta(?=[A-Za-z])/g, "β")
-    .replace(/\\gamma\b|\\gamma(?=[A-Za-z])/g, "γ")
-    .replace(/\\lambda\b|\\lambda(?=[A-Za-z])/g, "λ")
-    .replace(/\\delta\b|\\delta(?=[A-Za-z])/g, "δ")
-    .replace(/\\mu\b|\\mu(?=[A-Za-z])/g, "μ")
-    .replace(/\\nu\b|\\nu(?=[A-Za-z])/g, "ν")
-    .replace(/\\rho\b|\\rho(?=[A-Za-z])/g, "ρ")
-    .replace(/\\tau\b|\\tau(?=[A-Za-z])/g, "τ")
-    .replace(/\\psi\b|\\psi(?=[A-Za-z])/g, "ψ")
-    .replace(/\\sigma\b|\\sigma(?=[A-Za-z])/g, "σ")
-    .replace(/\\eta\b|\\eta(?=[A-Za-z])/g, "η")
-    .replace(/\\chi\b|\\chi(?=[A-Za-z])/g, "χ")
-    .replace(/\\zeta\b|\\zeta(?=[A-Za-z])/g, "ζ")
-    .replace(/\\xi\b|\\xi(?=[A-Za-z])/g, "ξ")
+    .replace(/\\(?:varphi|phi)(?![a-zA-Z])/g, "φ")
+    .replace(/\\(?:vartheta|theta)(?![a-zA-Z])/g, "θ")
+    .replace(/\\(?:varepsilon|epsilon)(?![a-zA-Z])/g, "ε")
+    .replace(/\\pi(?![a-zA-Z])/g, "π")
+    .replace(/\\omega(?![a-zA-Z])/g, "ω")
+    .replace(/\\alpha(?![a-zA-Z])/g, "α")
+    .replace(/\\beta(?![a-zA-Z])/g, "β")
+    .replace(/\\gamma(?![a-zA-Z])/g, "γ")
+    .replace(/\\lambda(?![a-zA-Z])/g, "λ")
+    .replace(/\\delta(?![a-zA-Z])/g, "δ")
+    .replace(/\\mu(?![a-zA-Z])/g, "μ")
+    .replace(/\\nu(?![a-zA-Z])/g, "ν")
+    .replace(/\\rho(?![a-zA-Z])/g, "ρ")
+    .replace(/\\tau(?![a-zA-Z])/g, "τ")
+    .replace(/\\psi(?![a-zA-Z])/g, "ψ")
+    .replace(/\\sigma(?![a-zA-Z])/g, "σ")
+    .replace(/\\eta(?![a-zA-Z])/g, "η")
+    .replace(/\\chi(?![a-zA-Z])/g, "χ")
+    .replace(/\\zeta(?![a-zA-Z])/g, "ζ")
+    .replace(/\\xi(?![a-zA-Z])/g, "ξ")
     // 4. Mũi tên & Toán tử logic
-    .replace(/\\(?:iff|Leftrightarrow)\b/g, "⇔")
-    .replace(/\\(?:implies|Rightarrow)\b/g, "⇒")
-    .replace(/\\Leftarrow\b/g, "⇐")
-    .replace(/\\(?:to|rightarrow)\b/g, "→")
-    .replace(/\\(?:gets|leftarrow)\b/g, "←")
-    .replace(/\\leftrightarrow\b/g, "↔")
+    .replace(/\\(?:iff|Leftrightarrow)(?![a-zA-Z])/g, "⇔")
+    .replace(/\\(?:implies|Rightarrow)(?![a-zA-Z])/g, "⇒")
+    .replace(/\\Leftarrow(?![a-zA-Z])/g, "⇐")
+    .replace(/\\(?:to|rightarrow)(?![a-zA-Z])/g, "→")
+    .replace(/\\(?:gets|leftarrow)(?![a-zA-Z])/g, "←")
+    .replace(/\\leftrightarrow(?![a-zA-Z])/g, "↔")
     // 5. Quan hệ toán học & phép tính
-    .replace(/\\approx\b/g, "≈")
-    .replace(/\\sim\b/g, "∼")
-    .replace(/\\equiv\b/g, "≡")
-    .replace(/\\pm\b/g, "±")
-    .replace(/\\mp\b/g, "∓")
-    .replace(/\\(?:le|leq)\b/g, "≤")
-    .replace(/\\(?:ge|geq)\b/g, "≥")
-    .replace(/\\(?:ne|neq)\b/g, "≠")
-    .replace(/\\cdot\b|\\cdot(?=[A-Za-z0-9\p{L}])/gu, "·")
-    .replace(/\\times\b/g, "×")
-    .replace(/\\div\b/g, "÷")
-    .replace(/\\infty\b/g, "∞")
-    .replace(/\\in\b/g, "∈")
-    .replace(/\\notin\b/g, "∉")
-    .replace(/\\subset\b/g, "⊂")
-    .replace(/\\forall\b/g, "∀")
-    .replace(/\\exists\b/g, "∃")
-    .replace(/\\angle\b/g, "∠")
-    .replace(/\\parallel\b/g, "∥")
-    .replace(/\\perp\b/g, "⊥")
-    .replace(/\\triangle\b/g, "Δ")
-    .replace(/\\propto\b/g, "∝")
-    .replace(/\\(?:displaystyle|limits|nolimits|rm|bf|it|cal)\b/g, "")
+    .replace(/\\approx(?![a-zA-Z])/g, "≈")
+    .replace(/\\sim(?![a-zA-Z])/g, "∼")
+    .replace(/\\equiv(?![a-zA-Z])/g, "≡")
+    .replace(/\\pm(?![a-zA-Z])/g, "±")
+    .replace(/\\mp(?![a-zA-Z])/g, "∓")
+    .replace(/\\(?:le|leq)(?![a-zA-Z])/g, "≤")
+    .replace(/\\(?:ge|geq)(?![a-zA-Z])/g, "≥")
+    .replace(/\\(?:ne|neq)(?![a-zA-Z])/g, "≠")
+    .replace(/\\cdot(?![a-zA-Z])/gu, "·")
+    .replace(/\\times(?![a-zA-Z])/g, "×")
+    .replace(/\\div(?![a-zA-Z])/g, "÷")
+    .replace(/\\infty(?![a-zA-Z])/g, "∞")
+    .replace(/\\in(?![a-zA-Z])/g, "∈")
+    .replace(/\\notin(?![a-zA-Z])/g, "∉")
+    .replace(/\\subset(?![a-zA-Z])/g, "⊂")
+    .replace(/\\forall(?![a-zA-Z])/g, "∀")
+    .replace(/\\exists(?![a-zA-Z])/g, "∃")
+    .replace(/\\angle(?![a-zA-Z])/g, "∠")
+    .replace(/\\parallel(?![a-zA-Z])/g, "∥")
+    .replace(/\\perp(?![a-zA-Z])/g, "⊥")
+    .replace(/\\triangle(?![a-zA-Z])/g, "Δ")
+    .replace(/\\propto(?![a-zA-Z])/g, "∝")
+    .replace(/\\(?:displaystyle|limits|nolimits|rm|bf|it|cal)(?![a-zA-Z])/g, "")
     // 6. Hàm số toán học chuẩn
-    .replace(/\\(?:cos|sin|tan|cot|ln|log|exp|lim|max|min)\b/g, (m) => m.slice(1))
+    .replace(/\\(?:cos|sin|tan|cot|ln|log|exp|lim|max|min)(?![a-zA-Z])/g, (m) => m.slice(1))
     // 7. Dấu ngoặc mở rộng & khoảng trắng
     .replace(/\\(?:enspace|thinspace|quad|qquad|hspace\{[^{}]+\}|[,;!~])/g, " ")
     .replace(/\\\s+/g, " ")
@@ -1650,8 +1650,10 @@ export function cleanTexSymbols(tex: string): string {
     .replace(/\\right\|/g, "|")
     .replace(/\\left\./g, "")
     .replace(/\\right\./g, "")
-    .replace(/\\left\\langle|\\langle\b/g, "⟨")
-    .replace(/\\right\\rangle|\\rangle\b/g, "⟩");
+    .replace(/\\left\\langle|\\langle(?![a-zA-Z])/g, "⟨")
+    .replace(/\\right\\rangle|\\rangle(?![a-zA-Z])/g, "⟩")
+    // 8. Khử triệt để mọi dấu gạch chéo ngược đơn lẻ còn sót lại
+    .replace(/\\(?![a-zA-Z])/g, "")
 }
 
 /**
@@ -2188,9 +2190,15 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
       continue;
     }
 
-    // 2. Kiểm tra Bảng Markdown (bắt đầu bằng '|' hoặc chứa ít nhất 2 dấu '|')
-    const isTableRow = (line.startsWith("|") && line.endsWith("|")) || (line.match(/\|/g) || []).length >= 2;
-    if (isTableRow) {
+    // 2. Kiểm tra Bảng Markdown (BẮT BUỘC có dòng phân cách nét đứt --- ở dòng kế tiếp)
+    // Tránh nhận nhầm công thức toán chứa dấu giá trị tuyệt đối |A|, |Q| hay bra-ket thành bảng
+    const isPotentialTableRow = (line.startsWith("|") && line.endsWith("|")) || (line.match(/\|/g) || []).length >= 2;
+    const nextLineRaw = i + 1 < lines.length ? lines[i + 1]!.trim() : "";
+    const isNextSeparatorRow =
+      nextLineRaw.length > 0 &&
+      (/^\|?(?:\s*:?-{2,}:?\s*\|?)+$/.test(nextLineRaw) || (nextLineRaw.includes("---") && nextLineRaw.includes("|")));
+
+    if (isPotentialTableRow && isNextSeparatorRow) {
       const tableLines: string[] = [];
       while (
         i < lines.length &&
@@ -2241,9 +2249,6 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
           tableRows: dataRows,
           borderless: isChoiceTable || (isAnswerKeyTable && hasBorderlessHint) || hasBorderlessHint,
         });
-        continue;
-      } else {
-        blocks.push({ type: "paragraph", text: tableLines[0]! });
         continue;
       }
     }
@@ -2759,7 +2764,7 @@ export async function generateWordDoc(
                   width: { size: colWidthPct, type: WidthType.PERCENTAGE },
                   children: [
                     new Paragraph({
-                      children: [new TextRun({ text: h.replace(/\*\*/g, ""), bold: true, font: "Times New Roman", size: 22 })],
+                      children: parseMarkdownRuns(`**${h.replace(/\*\*/g, "")}**`, "Times New Roman", 22),
                       alignment: AlignmentType.CENTER,
                     }),
                   ],
