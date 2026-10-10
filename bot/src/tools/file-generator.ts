@@ -1564,6 +1564,9 @@ export function cleanTexSymbols(tex: string): string {
     .replace(/\\tilde\{([^{}]+)\}/g, "$1")
     .replace(/\\dot\{([^{}]+)\}/g, "$1")
     .replace(/\\ddot\{([^{}]+)\}/g, "$1")
+    .replace(/\{,\}/g, ",")
+    .replace(/\{;\}/g, ";")
+    .replace(/\{\s*\}\s*([\^_])/g, "$1")
     .replace(/\{\}/g, "")
     .replace(/\\%/g, "%")
     // 1.5. Độ C, Độ F, Độ K và ký hiệu độ: bắt triệt để trước mọi thứ
