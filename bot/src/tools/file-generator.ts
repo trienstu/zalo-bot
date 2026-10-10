@@ -1715,9 +1715,9 @@ export function extractBaseTokenBefore(
     return null;
   }
 
-  // 2. Ký tự đơn hoặc chuỗi chữ/số/ký hiệu
+  // 2. Ký tự đơn hoặc chuỗi chữ/số/ký hiệu (kèm dấu ' cho biến như Q', v', x' và dấu độ °)
   let i = pos - 1;
-  while (i >= 0 && /[a-zA-Z0-9\p{L}\p{N}°]/u.test(s[i]!)) {
+  while (i >= 0 && /[a-zA-Z0-9\p{L}\p{N}°']/u.test(s[i]!)) {
     i--;
   }
   const start = i + 1;
@@ -1786,57 +1786,60 @@ export function parseTexToMathChildren(rawTex: string): any[] {
       }
     }
 
-    // 3. Đồng vị phóng xạ hạt nhân: ví dụ ^4_2He hoặc ^{4}_{2}He hoặc _2^4He
+    // 3. Số mũ (^), chỉ số dưới (_), hoặc đồng vị hạt nhân tiền tố (^A_Z X, ^A X)
     if (s[i] === "^" || s[i] === "_") {
-      const nuclearMatch = s
-        .slice(i)
-        .match(/^(?:\^(?:\{([^{}]+)\}|([0-9]+))_(?:\{([^{}]+)\}|([0-9]+))|_(?:\{([^{}]+)\}|([0-9]+))\^(?:\{([^{}]+)\}|([0-9]+)))\s*(?:\\text\{([^{}]+)\}|([a-zA-Z\p{L}]+))/u);
-      if (nuclearMatch) {
-        const superVal = nuclearMatch[1] || nuclearMatch[2] || nuclearMatch[7] || nuclearMatch[8] || "";
-        const subVal = nuclearMatch[3] || nuclearMatch[4] || nuclearMatch[5] || nuclearMatch[6] || "";
-        const elemVal = nuclearMatch[9] || nuclearMatch[10] || "";
-        if (elemVal) {
-          flushText();
-          children.push(
-            new MathPreSubSuperScript({
-              children: [new MathRun(elemVal)],
-              superScript: [new MathRun(superVal)],
-              subScript: [new MathRun(subVal)],
-            }),
-          );
-          i += nuclearMatch[0].length;
-          continue;
-        }
-      }
+      const isSuper = s[i] === "^";
+      const baseInfo = extractBaseTokenBefore(textBuffer, textBuffer.length);
 
-      // Hạt nhân chỉ có số khối đứng trước: ví dụ ^{4}He hoặc ^4He
-      if (s[i] === "^") {
-        const nuclearSingleMatch = s
+      // 3.1. Hạt nhân tiền tố (MathPreSubSuperScript): CHỈ xét khi phía trước KHÔNG có base token
+      // Ví dụ: ^{4}_{2}He, ^{235}_{92}U, ^4He, ^1_0n (đứng đầu chuỗi hoặc sau dấu +, =, ->)
+      if (!baseInfo) {
+        const nuclearMatch = s
           .slice(i)
-          .match(/^\^(?:\{([0-9]+)\}|([0-9]+))\s*(?:\\text\{([a-zA-Z\p{L}]+)\}|([a-zA-Z\p{L}]+))/u);
-        if (nuclearSingleMatch) {
-          const superVal = nuclearSingleMatch[1] || nuclearSingleMatch[2] || "";
-          const elemVal = nuclearSingleMatch[3] || nuclearSingleMatch[4] || "";
+          .match(/^(?:\^(?:\{([^{}]+)\}|([0-9]+))_(?:\{([^{}]+)\}|([0-9]+))|_(?:\{([^{}]+)\}|([0-9]+))\^(?:\{([^{}]+)\}|([0-9]+)))\s*(?:\\text\{([A-Z][a-z]{0,2}|[a-zA-Z])\}|([A-Z][a-z]{0,2}|[a-z]))(?![a-zA-Z])/u);
+        if (nuclearMatch) {
+          const superVal = nuclearMatch[1] || nuclearMatch[2] || nuclearMatch[7] || nuclearMatch[8] || "";
+          const subVal = nuclearMatch[3] || nuclearMatch[4] || nuclearMatch[5] || nuclearMatch[6] || "";
+          const elemVal = nuclearMatch[9] || nuclearMatch[10] || "";
           if (elemVal) {
             flushText();
             children.push(
               new MathPreSubSuperScript({
                 children: [new MathRun(elemVal)],
                 superScript: [new MathRun(superVal)],
-                subScript: [],
+                subScript: [new MathRun(subVal)],
               }),
             );
-            i += nuclearSingleMatch[0].length;
+            i += nuclearMatch[0].length;
             continue;
           }
         }
-      }
-    }
 
-    // 4. Số mũ (^) và chỉ số dưới (_)
-    if (s[i] === "^" || s[i] === "_") {
-      const isSuper = s[i] === "^";
-      const baseInfo = extractBaseTokenBefore(textBuffer, textBuffer.length);
+        // Hạt nhân chỉ có số khối đứng trước: ví dụ ^{4}He hoặc ^4He
+        if (isSuper) {
+          const nuclearSingleMatch = s
+            .slice(i)
+            .match(/^\^(?:\{([0-9]+)\}|([0-9]+))\s*(?:\\text\{([A-Z][a-z]{0,2}|[a-zA-Z])\}|([A-Z][a-z]{0,2}))(?![a-zA-Z])/u);
+          if (nuclearSingleMatch) {
+            const superVal = nuclearSingleMatch[1] || nuclearSingleMatch[2] || "";
+            const elemVal = nuclearSingleMatch[3] || nuclearSingleMatch[4] || "";
+            if (elemVal) {
+              flushText();
+              children.push(
+                new MathPreSubSuperScript({
+                  children: [new MathRun(elemVal)],
+                  superScript: [new MathRun(superVal)],
+                  subScript: [],
+                }),
+              );
+              i += nuclearSingleMatch[0].length;
+              continue;
+            }
+          }
+        }
+      }
+
+      // 3.2. Số mũ (^) và chỉ số dưới (_) thông thường khi có base token
       if (baseInfo) {
         const cursor = i + 1;
         let scriptContent = "";

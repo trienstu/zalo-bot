@@ -217,4 +217,23 @@ a) Độ lớn cảm ứng từ...`;
   assert.ok(!blockJson.includes("(B hướng lên)"), "Không được để rác sơ đồ ASCII lọt vào văn bản Word");
 });
 
+test("parseMarkdownRuns: Xử lý chuẩn xác lũy thừa kèm đơn vị nghịch đảo ($10^{23}\\text{ mol}^{-1}$) và biến có dấu phẩy trên ($Q'_{ích}$)", () => {
+  // 1. $10^{23}\text{ mol}^{-1}$: Không bị nhận nhầm thành hạt nhân mol-23, không sót raw ^{-1}
+  const molText = "Hằng số Avogadro $N_A \\approx 6,022 \\cdot 10^{23}\\text{ mol}^{-1}$.";
+  const molRuns = parseMarkdownRuns(molText);
+  const molJson = JSON.stringify(molRuns);
+  assert.ok(!molJson.includes("^{-1}"), "Không được để sót chuỗi thô ^{-1}");
+  assert.ok(!molJson.includes("^{23}"), "Không được để sót chuỗi thô ^{23}");
+  assert.ok(molJson.includes("10"), "Phải có cơ số 10");
+  assert.ok(molJson.includes("mol"), "Phải có đơn vị mol");
+
+  // 2. $Q'_{ích}$: Biến mang dấu phẩy trên (prime ') làm base cho chỉ số dưới
+  const primeText = "Nhiệt lượng có ích $Q'_{ích} = A - Q_{tỏa}$.";
+  const primeRuns = parseMarkdownRuns(primeText);
+  const primeJson = JSON.stringify(primeRuns);
+  assert.ok(!primeJson.includes("'_{ích}"), "Không được để sót chuỗi thô '_{ích}");
+  assert.ok(primeJson.includes("Q'"), "Phải nhận diện Q' làm base token");
+  assert.ok(primeJson.includes("ích"), "Phải nhận diện ích làm script token");
+});
+
 
