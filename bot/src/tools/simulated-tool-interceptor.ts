@@ -83,19 +83,19 @@ export function extractMarkdownTable(text: string): { headers: string[]; rows: s
 export function extractSimulatedGenerateFile(text: string): ExtractedToolCall | null {
   if (!text) return null;
 
-  // 1. Kiểm tra cú pháp hàm trước: [generate_file(...) ] hoặc generate_file(...)
+  // 1. Kiểm tra cú pháp hàm trước: [generate_file(...) ] hoặc generate_file(...) hoặc [ACTION:GENERATE_FILE(...)]
   // Nhận diện kết thúc hàm an toàn qua dấu nháy kết thúc tham số content theo sau bởi ')' và có thể ']'
-  const funcMatch = text.match(/\[?\bgenerate_file\s*\(([\s\S]*?(?:'''|"""|['"]))\s*\)\s*\]?/i) ||
-                    text.match(/\[?\bgenerate_file\s*\(([\s\S]*?)\)\s*\]?/i);
+  const funcMatch = text.match(/\[?\b(?:ACTION:)?generate_file\s*\(([\s\S]*?(?:'''|"""|['"]))\s*\)\s*\]?/i) ||
+                    text.match(/\[?\b(?:ACTION:)?generate_file\s*\(([\s\S]*?)\)\s*\]?/i);
 
-  // 2. Tag cú pháp XML / BBCode: [generate_file ... /] hoặc [generate_file ...]
+  // 2. Tag cú pháp XML / BBCode: [generate_file ... /] hoặc [generate_file ...] hoặc [ACTION:GENERATE_FILE ...]
   const tagMatch = funcMatch ? null : (
-    text.match(/\[\s*generate_file\b([\s\S]*?)\/\s*\]/i) ||
-    text.match(/<\s*generate_file\b([\s\S]*?)\/\s*>/i) ||
-    text.match(/\[\s*generate_file\b([\s\S]*?(?:'''|"""|['"]))\s*\]/i) ||
-    text.match(/<\s*generate_file\b([\s\S]*?(?:'''|"""|['"]))\s*>/i) ||
-    text.match(/\[\s*generate_file\b([\s\S]*?)\]/i) ||
-    text.match(/<\s*generate_file\b([\s\S]*?)>/i)
+    text.match(/\[\s*(?:ACTION:)?generate_file\b([\s\S]*?)\/\s*\]/i) ||
+    text.match(/<\s*(?:ACTION:)?generate_file\b([\s\S]*?)\/\s*>/i) ||
+    text.match(/\[\s*(?:ACTION:)?generate_file\b([\s\S]*?(?:'''|"""|['"]))\s*\]/i) ||
+    text.match(/<\s*(?:ACTION:)?generate_file\b([\s\S]*?(?:'''|"""|['"]))\s*>/i) ||
+    text.match(/\[\s*(?:ACTION:)?generate_file\b([\s\S]*?)\]/i) ||
+    text.match(/<\s*(?:ACTION:)?generate_file\b([\s\S]*?)>/i)
   );
 
   const match = funcMatch || tagMatch;
@@ -177,8 +177,8 @@ export function extractSimulatedGenerateFile(text: string): ExtractedToolCall | 
   const inner = match[1] || "";
   const args: Record<string, string> = {};
 
-  // Trích xuất fileType
-  const fileTypeMatch = inner.match(/fileType\s*=\s*['"]([a-zA-Z0-9]+)['"]/i);
+  // Trích xuất fileType (chấp nhận cả fileType và type)
+  const fileTypeMatch = inner.match(/(?:fileType|type)\s*=\s*['"]([a-zA-Z0-9]+)['"]/i);
   if (fileTypeMatch && fileTypeMatch[1]) {
     args.fileType = fileTypeMatch[1];
   }

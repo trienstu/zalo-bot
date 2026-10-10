@@ -3144,7 +3144,10 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
       queryPlan?.responseMode === "action" ||
       queryPlan?.toolIntent === "create" ||
       queryPlan?.toolIntent === "execute";
-    const needsAgentLoop = (queryPlan ? isPlanAction : checkIsFileOrVoiceGeneration(rawText, event.quote?.text)) || isExternalLinkOrScrapeAction;
+    const needsAgentLoop =
+      isPlanAction ||
+      checkIsFileOrVoiceGeneration(rawText, event.quote?.text) ||
+      isExternalLinkOrScrapeAction;
 
     // Nếu tìm thấy link YouTube từ lịch sử trò chuyện, chèn thêm vào effectiveUserPrompt để Agent Loop gọi tool xử lý
     if (matchedYtUrl && !effectiveUserPrompt.includes(matchedYtUrl)) {
@@ -3189,6 +3192,8 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
             const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
             const isMedia = Boolean(file.isMediaDownload);
             const isVoice = !isMedia && /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+            const isDocx = /\.(docx|doc)$/i.test(file.filePath);
+            const mathTypeTip = isDocx ? "\n\n💡 Mẹo MathType: Thầy/Cô mở file trong Word rồi bấm Alt + \\ (Windows) hoặc Option + \\ (Mac) để chuyển toàn bộ công thức sang MathType chuẩn in ấn nhé!" : "";
             if (isVoice) {
               voiceGenerated = true;
             } else {
@@ -3206,7 +3211,7 @@ export async function handleAdminDirectInteraction(api: any, event: MemberMessag
                       ? `🎵 ${defaultBotName} đã tải xong tệp âm thanh [${file.fileName}] cho ${userGreeting}!`
                       : isVoice
                         ? `🎙️ ${defaultBotName} gửi voice cho ${userGreeting} nghe đây ạ!`
-                        : `📄 ${defaultBotName} đã tạo file [${file.fileName}] thành công cho ${userGreeting}!`
+                        : `📄 ${defaultBotName} đã tạo file [${file.fileName}] thành công cho ${userGreeting}!${mathTypeTip}`
             );
             if (isVoice) {
               await sendDirectVoice(api, sender, file.filePath, caption);

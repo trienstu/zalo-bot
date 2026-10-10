@@ -1599,6 +1599,8 @@ async function handleHistoryQA(
                 const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
                 const isMedia = Boolean(file.isMediaDownload);
                 const isVoice = !isMedia && /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+                const isDocx = /\.(docx|doc)$/i.test(file.filePath);
+                const mathTypeTip = isDocx ? "\n\n💡 Mẹo MathType: Thầy/Cô mở file trong Word rồi bấm Alt + \\ (Windows) hoặc Option + \\ (Mac) để chuyển toàn bộ công thức sang MathType chuẩn in ấn nhé!" : "";
                 if (isVoice) {
                   voiceGenerated = true;
                 } else {
@@ -1613,7 +1615,7 @@ async function handleHistoryQA(
                         ? `🎵 ${botName} đã tải xong tệp âm thanh [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
                         : isVoice
                           ? `🎙️ ${botName} gửi voice cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`} nghe nhé!`
-                          : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!`
+                          : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${isSuperAdmin ? "Sếp" : `bác @${displayName}`}!${mathTypeTip}`
                 );
                 if (isVoice) {
                   await sendGroupVoice(
@@ -2117,7 +2119,7 @@ QUY TẮC BẮT BUỘC:
         hasQuoteMediaLink ||
         /(?:tải|download|lấy|xin|tách)\s+(?:video|clip|mp4|nhạc|audio|mp3|bài\s*hát)/i.test(combinedQuoteInput) ||
         /(?:đọc link|tải trang|cào web|check link|bài viết|bình luận|comment)\s+https?:/i.test(question);
-      const needsAgentLoop = ((quotePlan ? isQuotePlanAction : checkIsFileOrVoiceGeneration(question, options.quote.text)) || isQuoteExternalAction) && !isPureGreeting;
+      const needsAgentLoop = (isQuotePlanAction || checkIsFileOrVoiceGeneration(question, options.quote.text) || isQuoteExternalAction) && !isPureGreeting;
       if (needsAgentLoop) {
         const dynamicTimeout = (options.quote.text?.length || 0) > 10_000 || (options.directDocContent?.length || 0) > 10_000 ? 150_000 : undefined;
         answer = await callGeminiAgentLoop(quoteSystemPrompt, quoteUserPrompt, {
@@ -2134,6 +2136,8 @@ QUY TẮC BẮT BUỘC:
                 const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
                 const isMedia = Boolean(file.isMediaDownload);
                 const isVoice = !isMedia && /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+                const isDocx = /\.(docx|doc)$/i.test(file.filePath);
+                const mathTypeTip = isDocx ? "\n\n💡 Mẹo MathType: Thầy/Cô mở file trong Word rồi bấm Alt + \\ (Windows) hoặc Option + \\ (Mac) để chuyển toàn bộ công thức sang MathType chuẩn in ấn nhé!" : "";
                 if (isVoice) {
                   voiceGenerated = true;
                 } else {
@@ -2151,7 +2155,7 @@ QUY TẮC BẮT BUỘC:
                           ? `🎵 ${botName} đã tải xong tệp âm thanh [${file.fileName}] cho ${userGreeting}!`
                           : isVoice
                             ? `🎙️ ${botName} gửi voice cho ${userGreeting} nghe nhé!`
-                            : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${userGreeting}!`
+                            : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${userGreeting}!${mathTypeTip}`
                 );
                 if (isVoice) {
                   await sendGroupVoice(
@@ -3268,6 +3272,8 @@ QUY TẮC BẮT BUỘC:
               const isImg = /\.(png|jpg|jpeg|webp)$/i.test(file.filePath);
               const isMedia = Boolean(file.isMediaDownload);
               const isVoice = !isMedia && /\.(m4a|mp3|wav|aac)$/i.test(file.filePath);
+              const isDocx = /\.(docx|doc)$/i.test(file.filePath);
+              const mathTypeTip = isDocx ? "\n\n💡 Mẹo MathType: Thầy/Cô mở file trong Word rồi bấm Alt + \\ (Windows) hoặc Option + \\ (Mac) để chuyển toàn bộ công thức sang MathType chuẩn in ấn nhé!" : "";
               if (isVoice) {
                 voiceGenerated = true;
               } else {
@@ -3287,7 +3293,7 @@ QUY TẮC BẮT BUỘC:
                           ? `🎙️ ${botName} gửi voice cho ${userGreeting} nghe nhé!`
                           : /\.(md|markdown)$/i.test(file.filePath)
                             ? `📄 ${botName} đã xuất xong file Markdown [${file.fileName}] cho ${userGreeting}!`
-                            : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${userGreeting}!`
+                            : `📄 ${botName} đã tạo xong file [${file.fileName}] cho ${userGreeting}!${mathTypeTip}`
               );
               if (isVoice) {
                 await sendGroupVoice(options.api, threadId, file.filePath, caption);
