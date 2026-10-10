@@ -181,3 +181,40 @@ test("parseMarkdownRuns: Xử lý chuẩn xác ngoặc lồng nhau, ký hiệu H
   assert.ok(nucJson.includes("m:sPre") || nucJson.includes("He"), "Phải nhận diện cấu trúc hạt nhân");
 });
 
+test("parseMarkdownRuns & parseMarkdownToWordBlocks: Khử sạch độ C (^\\circC), khoảng trắng (\\ ), \\textbf và bỏ qua khối ASCII code block", () => {
+  // 1. Độ C và bảo toàn số cơ số
+  const tempText = "Nhiệt độ nóng chảy hoàn toàn ở $0^\\circ C$, từ $-10^\\circ C$ lên $30,5^\\circ C$ và $^\\circC$.";
+  const runs = parseMarkdownRuns(tempText);
+  const jsonStr = JSON.stringify(runs);
+  assert.ok(!jsonStr.includes("circ"), "Tuyệt đối không được sót chữ circ thô");
+  assert.ok(jsonStr.includes("0°C") || jsonStr.includes("0"), "Phải bảo toàn số 0 trong 0°C");
+  assert.ok(jsonStr.includes("-10°C") || jsonStr.includes("-10"), "Phải bảo toàn số -10 trong -10°C");
+
+  // 2. Khoảng trắng LaTeX control space (\ ) và đơn vị điện trở \Omega
+  const ohmText = "Điện trở $r = 0,5\\ \\Omega$ và $R = 1,5\\ \\Omega$. Khối lượng $1\\text{ g}\\ $";
+  const ohmRuns = parseMarkdownRuns(ohmText);
+  const ohmJson = JSON.stringify(ohmRuns);
+  assert.ok(!ohmJson.includes("\\ "), "Tuyệt đối không được sót dấu gạch chéo ngược khoảng trắng \\ ");
+  assert.ok(ohmJson.includes("Ω"), "Phải hiển thị ký hiệu Ω");
+
+  // 3. \textbf trong công thức giải thích
+  const boldText = "$F = 0,05\\text{ N} \\to \\textbf{Chọn A.}$";
+  const boldRuns = parseMarkdownRuns(boldText);
+  const boldJson = JSON.stringify(boldRuns);
+  assert.ok(!boldJson.includes("textbf"), "Tuyệt đối không được sót lệnh textbf");
+  assert.ok(boldJson.includes("Chọn A."), "Phải hiển thị nội dung text Chọn A.");
+
+  // 4. Bỏ qua khối code block ASCII
+  const asciiText = `Câu 3. Một thanh ray dẫn điện.
+\`\`\`
+[R] /   \\
+\\   / (B hướng lên)
+\`\`\`
+a) Độ lớn cảm ứng từ...`;
+  const blocks = parseMarkdownToWordBlocks(asciiText);
+  const blockJson = JSON.stringify(blocks);
+  assert.ok(!blockJson.includes("```"), "Không được chứa dấu ba nháy ngược code block");
+  assert.ok(!blockJson.includes("(B hướng lên)"), "Không được để rác sơ đồ ASCII lọt vào văn bản Word");
+});
+
+

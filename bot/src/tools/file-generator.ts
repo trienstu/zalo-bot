@@ -1550,6 +1550,7 @@ export function cleanTexSymbols(tex: string): string {
   return tex
     // 1. Nhóm Text / Định dạng font / Ký hiệu mũ
     .replace(/\\text\{([^{}]+)\}/g, "$1")
+    .replace(/\\textbf\{([^{}]+)\}/g, "$1")
     .replace(/\\mathrm\{([^{}]+)\}/g, "$1")
     .replace(/\\mathbf\{([^{}]+)\}/g, "$1")
     .replace(/\\mathit\{([^{}]+)\}/g, "$1")
@@ -1560,6 +1561,9 @@ export function cleanTexSymbols(tex: string): string {
     .replace(/\\tilde\{([^{}]+)\}/g, "$1")
     .replace(/\\dot\{([^{}]+)\}/g, "$1")
     .replace(/\\ddot\{([^{}]+)\}/g, "$1")
+    // 1.5. Độ C và ký hiệu độ: bắt triệt để trước mọi thứ
+    .replace(/(?:\\?\^?\\circ\s*C\b|\\?\^?\\circ\s*\\text\{C\}|\\?\^?\\circC)/g, "°C")
+    .replace(/(?:\\?\^?\\circ\b|\\deg\b|\\circ\b)/g, "°")
     // 2. Chữ cái Hy Lạp viết HOA
     .replace(/\\Phi\b/g, "Φ")
     .replace(/\\Psi\b/g, "Ψ")
@@ -1611,8 +1615,6 @@ export function cleanTexSymbols(tex: string): string {
     .replace(/\\times\b/g, "×")
     .replace(/\\div\b/g, "÷")
     .replace(/\\infty\b/g, "∞")
-    .replace(/\^\\circ\b|\\circ\b/g, "°")
-    .replace(/\\deg\b/g, "°")
     .replace(/\\in\b/g, "∈")
     .replace(/\\notin\b/g, "∉")
     .replace(/\\subset\b/g, "⊂")
@@ -1621,6 +1623,8 @@ export function cleanTexSymbols(tex: string): string {
     // 6. Hàm số toán học chuẩn
     .replace(/\\(?:cos|sin|tan|cot|ln|log|exp|lim|max|min)\b/g, (m) => m.slice(1))
     // 7. Dấu ngoặc mở rộng & khoảng trắng
+    .replace(/\\\s+/g, " ")
+    .replace(/\\~/g, " ")
     .replace(/\\(?:,|;|!|quad|qquad)/g, " ")
     .replace(/\\left\(/g, "(")
     .replace(/\\right\)/g, ")")
@@ -1797,9 +1801,6 @@ export function parseTexToMathChildren(rawTex: string): any[] {
       const isSuper = s[i] === "^";
       const baseInfo = extractBaseTokenBefore(textBuffer, textBuffer.length);
       if (baseInfo) {
-        textBuffer = textBuffer.slice(0, baseInfo.startIndex);
-        flushText();
-
         const cursor = i + 1;
         let scriptContent = "";
         let nextIndex = cursor;
@@ -1816,6 +1817,9 @@ export function parseTexToMathChildren(rawTex: string): any[] {
         }
 
         if (scriptContent !== "") {
+          textBuffer = textBuffer.slice(0, baseInfo.startIndex);
+          flushText();
+
           const baseChildren = baseInfo.isGroup
             ? parseTexToMathChildren(baseInfo.baseStr)
             : [new MathRun(baseInfo.baseStr)];
@@ -2431,6 +2435,16 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
       continue;
     }
 
+    // 5.9. Khối code block markdown (``` ... ```) hoặc sơ đồ ASCII
+    if (line.startsWith("```")) {
+      i++;
+      while (i < lines.length && !lines[i]!.trim().startsWith("```")) {
+        i++;
+      }
+      if (i < lines.length) i++;
+      continue;
+    }
+
     // 6. Đoạn văn bản thông thường (Paragraph)
     const cleanCurrentLine = line.replace(/^#+\s*/, "");
     const paraLines: string[] = [cleanCurrentLine];
@@ -2441,6 +2455,7 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
       const isNextTable = (nextLine.startsWith("|") && nextLine.endsWith("|")) || ((nextLine.match(/\|/g) || []).length >= 2);
       if (
         isNextTable ||
+        nextLine.startsWith("```") ||
         /^#{1,6}\s+/.test(nextLine) ||
         /^(?:[-*•]\s+|\d+[\.)]\s+)/.test(nextLine) ||
         /^===+\s*TRANG\s*\d+\s*===+/i.test(nextLine) ||
