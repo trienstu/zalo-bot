@@ -1607,7 +1607,7 @@ export function cleanTexSymbols(tex: string): string {
     .replace(/\\(?:le|leq)\b/g, "≤")
     .replace(/\\(?:ge|geq)\b/g, "≥")
     .replace(/\\(?:ne|neq)\b/g, "≠")
-    .replace(/\\cdot\b/g, "·")
+    .replace(/\\cdot\b|\\cdot(?=[A-Za-z0-9\p{L}])/gu, "·")
     .replace(/\\times\b/g, "×")
     .replace(/\\div\b/g, "÷")
     .replace(/\\infty\b/g, "∞")
@@ -1961,11 +1961,37 @@ export function parseMarkdownRuns(
         }
       }
     } else if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
-      runs.push(new TextRun({ text: part.slice(2, -2), font: baseFont, size: baseSize, bold: true }));
+      const inner = part.slice(2, -2);
+      if (inner.includes("$")) {
+        const subRuns = parseMarkdownRuns(inner, baseFont, baseSize, options);
+        for (const sub of subRuns) {
+          if (sub instanceof TextRun) {
+            runs.push(new TextRun({ text: (sub as any).text || "", font: baseFont, size: baseSize, bold: true }));
+          } else {
+            runs.push(sub);
+          }
+        }
+      } else {
+        runs.push(new TextRun({ text: inner, font: baseFont, size: baseSize, bold: true }));
+      }
     } else if (part.startsWith("*") && part.endsWith("*") && part.length >= 2) {
-      runs.push(new TextRun({ text: part.slice(1, -1), font: baseFont, size: baseSize, italics: true }));
+      const inner = part.slice(1, -1);
+      if (inner.includes("$")) {
+        const subRuns = parseMarkdownRuns(inner, baseFont, baseSize, options);
+        for (const sub of subRuns) {
+          if (sub instanceof TextRun) {
+            runs.push(new TextRun({ text: (sub as any).text || "", font: baseFont, size: baseSize, italics: true }));
+          } else {
+            runs.push(sub);
+          }
+        }
+      } else {
+        runs.push(new TextRun({ text: inner, font: baseFont, size: baseSize, italics: true }));
+      }
     } else {
-      runs.push(new TextRun({ text: part, font: baseFont, size: baseSize }));
+      // Làm sạch ký hiệu LaTeX bị sót ngoài khối math (ví dụ \cdot, \Delta, ...)
+      const cleanPlain = cleanTexSymbols(part);
+      runs.push(new TextRun({ text: cleanPlain, font: baseFont, size: baseSize }));
     }
   }
 
