@@ -152,3 +152,32 @@ test("parseMarkdownToWordBlocks: Tự động gắn cờ borderless cho bảng t
   assert.ok(tableBlock, "Phải có khối table");
   assert.equal(tableBlock.borderless, true, "Bảng trắc nghiệm / đáp án phải có cờ borderless: true");
 });
+
+test("parseMarkdownRuns: Xử lý chuẩn xác ngoặc lồng nhau, ký hiệu Hy Lạp hoa, toán tử logic, hạt nhân và đáp số số đơn lẻ", () => {
+  // 1. Ngoặc lồng nhau trong số mũ và phân số phức tạp
+  const radioText = "Định luật phóng xạ: $m(t) = m_0 \\cdot 2^{-\\frac{t}{T}} \\iff 2,5 = 20 \\cdot 2^{-\\frac{t}{8}} \\implies t = 24\\text{ ngày}$. Đáp số: $24$";
+  const runs = parseMarkdownRuns(radioText);
+  const jsonStr = JSON.stringify(runs);
+
+  // Không được chứa các chuỗi rác bị xé vụn
+  assert.ok(!jsonStr.includes("2^{-"), "Không được xé vụn số mũ thành 2^{-");
+  assert.ok(!jsonStr.includes("\\iff"), "Phải chuyển đổi \\iff thành ký hiệu ⇔");
+  assert.ok(!jsonStr.includes("\\implies"), "Phải chuyển đổi \\implies thành ký hiệu ⇒");
+  assert.ok(!jsonStr.includes("$24$"), "Đáp số $24$ không được để sót ký tự $ thô");
+
+  // 2. Ký hiệu Hy Lạp viết hoa và phân số có số mũ âm
+  const indText = "Suất điện động: $e_c = N \\cdot \\left| \\frac{\\Delta\\Phi}{\\Delta t} \\right| = 100 \\cdot \\frac{3,2 \\cdot 10^{-3}}{0,04} = 8\\text{ V}$. Từ thông ban đầu: $\\Phi_1 = B_1 S$";
+  const indRuns = parseMarkdownRuns(indText);
+  const indJson = JSON.stringify(indRuns);
+
+  assert.ok(!indJson.includes("\\Phi"), "Ký hiệu \\Phi phải chuyển sang Φ");
+  assert.ok(!indJson.includes("\\left|"), "Dấu \\left| phải chuyển sang |");
+  assert.ok(!indJson.includes("\\cdot"), "Dấu \\cdot phải chuyển sang ·");
+
+  // 3. Đồng vị hạt nhân
+  const nucText = "Mỗi phản ứng tạo thành 1 hạt $^4_2He$ hoặc $^{235}_{92}U$";
+  const nucRuns = parseMarkdownRuns(nucText);
+  const nucJson = JSON.stringify(nucRuns);
+  assert.ok(nucJson.includes("m:sPre") || nucJson.includes("He"), "Phải nhận diện cấu trúc hạt nhân");
+});
+

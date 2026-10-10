@@ -19,6 +19,8 @@ import {
   MathRadical,
   MathSuperScript,
   MathSubScript,
+  MathSubSuperScript,
+  MathPreSubSuperScript,
 } from "docx";
 import ExcelJS from "exceljs";
 import PptxGenJS from "pptxgenjs";
@@ -1544,118 +1546,342 @@ export interface WordBlock {
 /**
  * Làm sạch ký hiệu LaTeX và chuyển các lệnh thông dụng sang ký tự Unicode tương ứng
  */
-function cleanTexSymbols(tex: string): string {
+export function cleanTexSymbols(tex: string): string {
   return tex
+    // 1. Nhóm Text / Định dạng font / Ký hiệu mũ
     .replace(/\\text\{([^{}]+)\}/g, "$1")
     .replace(/\\mathrm\{([^{}]+)\}/g, "$1")
     .replace(/\\mathbf\{([^{}]+)\}/g, "$1")
+    .replace(/\\mathit\{([^{}]+)\}/g, "$1")
+    .replace(/\\operatorname\{([^{}]+)\}/g, "$1")
+    .replace(/\\vec\{([^{}]+)\}/g, "$1")
+    .replace(/\\overline\{([^{}]+)\}/g, "$1")
+    .replace(/\\hat\{([^{}]+)\}/g, "$1")
+    .replace(/\\tilde\{([^{}]+)\}/g, "$1")
+    .replace(/\\dot\{([^{}]+)\}/g, "$1")
+    .replace(/\\ddot\{([^{}]+)\}/g, "$1")
+    // 2. Chữ cái Hy Lạp viết HOA
+    .replace(/\\Phi\b/g, "Φ")
+    .replace(/\\Psi\b/g, "Ψ")
+    .replace(/\\Theta\b/g, "Θ")
+    .replace(/\\Omega\b/g, "Ω")
+    .replace(/\\Delta\b/g, "Δ")
+    .replace(/\\Lambda\b/g, "Λ")
+    .replace(/\\Sigma\b/g, "Σ")
+    .replace(/\\Gamma\b/g, "Γ")
+    .replace(/\\Pi\b/g, "Π")
+    // 3. Chữ cái Hy Lạp viết THƯỜNG
+    .replace(/\\(?:varphi|phi)\b/g, "φ")
+    .replace(/\\(?:vartheta|theta)\b/g, "θ")
+    .replace(/\\(?:varepsilon|epsilon)\b/g, "ε")
     .replace(/\\pi\b/g, "π")
     .replace(/\\omega\b/g, "ω")
-    .replace(/\\Omega\b/g, "Ω")
-    .replace(/\\varphi\b/g, "φ")
-    .replace(/\\phi\b/g, "φ")
     .replace(/\\alpha\b/g, "α")
     .replace(/\\beta\b/g, "β")
     .replace(/\\gamma\b/g, "γ")
     .replace(/\\lambda\b/g, "λ")
-    .replace(/\\Delta\b/g, "Δ")
     .replace(/\\delta\b/g, "δ")
-    .replace(/\\theta\b/g, "θ")
     .replace(/\\mu\b/g, "μ")
+    .replace(/\\nu\b/g, "ν")
     .replace(/\\rho\b/g, "ρ")
     .replace(/\\tau\b/g, "τ")
+    .replace(/\\psi\b/g, "ψ")
+    .replace(/\\sigma\b/g, "σ")
+    .replace(/\\eta\b/g, "η")
+    .replace(/\\chi\b/g, "χ")
+    .replace(/\\zeta\b/g, "ζ")
+    .replace(/\\xi\b/g, "ξ")
+    // 4. Mũi tên & Toán tử logic
+    .replace(/\\(?:iff|Leftrightarrow)\b/g, "⇔")
+    .replace(/\\(?:implies|Rightarrow)\b/g, "⇒")
+    .replace(/\\Leftarrow\b/g, "⇐")
+    .replace(/\\(?:to|rightarrow)\b/g, "→")
+    .replace(/\\(?:gets|leftarrow)\b/g, "←")
+    .replace(/\\leftrightarrow\b/g, "↔")
+    // 5. Quan hệ toán học & phép tính
     .replace(/\\approx\b/g, "≈")
+    .replace(/\\sim\b/g, "∼")
+    .replace(/\\equiv\b/g, "≡")
     .replace(/\\pm\b/g, "±")
+    .replace(/\\mp\b/g, "∓")
     .replace(/\\(?:le|leq)\b/g, "≤")
     .replace(/\\(?:ge|geq)\b/g, "≥")
     .replace(/\\(?:ne|neq)\b/g, "≠")
     .replace(/\\cdot\b/g, "·")
     .replace(/\\times\b/g, "×")
+    .replace(/\\div\b/g, "÷")
     .replace(/\\infty\b/g, "∞")
-    .replace(/\^\\circ\b/g, "°")
-    .replace(/\\(?:cos|sin|tan|cot|ln|log|lim|max|min)\b/g, (m) => m.slice(1))
+    .replace(/\^\\circ\b|\\circ\b/g, "°")
+    .replace(/\\deg\b/g, "°")
+    .replace(/\\in\b/g, "∈")
+    .replace(/\\notin\b/g, "∉")
+    .replace(/\\subset\b/g, "⊂")
+    .replace(/\\forall\b/g, "∀")
+    .replace(/\\exists\b/g, "∃")
+    // 6. Hàm số toán học chuẩn
+    .replace(/\\(?:cos|sin|tan|cot|ln|log|exp|lim|max|min)\b/g, (m) => m.slice(1))
+    // 7. Dấu ngoặc mở rộng & khoảng trắng
     .replace(/\\(?:,|;|!|quad|qquad)/g, " ")
     .replace(/\\left\(/g, "(")
     .replace(/\\right\)/g, ")")
     .replace(/\\left\[/g, "[")
     .replace(/\\right\]/g, "]")
-    .replace(/\\left\\{/g, "{")
-    .replace(/\\right\\}/g, "}");
+    .replace(/\\left\\\{/g, "{")
+    .replace(/\\right\\\}/g, "}")
+    .replace(/\\left\|/g, "|")
+    .replace(/\\right\|/g, "|")
+    .replace(/\\left\./g, "")
+    .replace(/\\right\./g, "")
+    .replace(/\\left\\langle|\\langle\b/g, "⟨")
+    .replace(/\\right\\rangle|\\rangle\b/g, "⟩");
 }
 
 /**
- * Phân tích chuỗi TeX thành các phần tử toán bản địa OMML của docx (MathFraction, MathRadical, MathSuperScript...)
+ * Trích xuất khối ngoặc nhọn cân bằng bắt đầu tại startIndex (nơi s[startIndex] === '{')
  */
-function parseTexToMathChildren(rawTex: string): any[] {
-  const children: any[] = [];
+export function extractBalancedBraces(s: string, startIndex: number): { content: string; endIndex: number } | null {
+  if (s[startIndex] !== "{") return null;
+  let depth = 0;
+  for (let i = startIndex; i < s.length; i++) {
+    if (s[i] === "{" && (i === 0 || s[i - 1] !== "\\")) {
+      depth++;
+    } else if (s[i] === "}" && (i === 0 || s[i - 1] !== "\\")) {
+      depth--;
+      if (depth === 0) {
+        return {
+          content: s.slice(startIndex + 1, i),
+          endIndex: i, // Vị trí ký tự '}'
+        };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Trích xuất token cơ số (base token) nằm ngay trước vị trí pos trong chuỗi s
+ */
+export function extractBaseTokenBefore(
+  s: string,
+  pos: number,
+): { baseStr: string; startIndex: number; isGroup: boolean } | null {
+  if (pos <= 0) return null;
+  const lastChar = s[pos - 1];
+
+  // 1. Nhóm ngoặc đóng: ), ], }
+  if (lastChar === ")" || lastChar === "]" || lastChar === "}") {
+    const openChar = lastChar === ")" ? "(" : lastChar === "]" ? "[" : "{";
+    let depth = 0;
+    for (let i = pos - 1; i >= 0; i--) {
+      if (s[i] === lastChar && (i === 0 || s[i - 1] !== "\\")) depth++;
+      else if (s[i] === openChar && (i === 0 || s[i - 1] !== "\\")) {
+        depth--;
+        if (depth === 0) {
+          if (lastChar === "}") {
+            // Nhóm ngoặc nhọn cú pháp TeX: bóc bỏ cặp ngoặc ngoài
+            return {
+              baseStr: s.slice(i + 1, pos - 1),
+              startIndex: i,
+              isGroup: true,
+            };
+          }
+          // Ngoặc tròn hoặc vuông: giữ nguyên hiển thị
+          return {
+            baseStr: s.slice(i, pos),
+            startIndex: i,
+            isGroup: true,
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  // 2. Ký tự đơn hoặc chuỗi chữ/số/ký hiệu
+  let i = pos - 1;
+  while (i >= 0 && /[a-zA-Z0-9\p{L}\p{N}°]/u.test(s[i]!)) {
+    i--;
+  }
+  const start = i + 1;
+  if (start < pos) {
+    return { baseStr: s.slice(start, pos), startIndex: start, isGroup: false };
+  }
+  return null;
+}
+
+/**
+ * Phân tích chuỗi TeX thành các phần tử toán bản địa OMML của docx (MathFraction, MathRadical, MathSuperScript, MathSubScript...)
+ */
+export function parseTexToMathChildren(rawTex: string): any[] {
   const s = cleanTexSymbols(rawTex).trim();
   if (!s) return [];
 
-  const pattern =
-    /(\\frac\{[^{}]+\}\{[^{}]+\}|\\sqrt\{[^{}]+\}|([a-zA-Z0-9πωφαβγλΔδθμρτ_]+)\^\{([^{}]+)\}|([a-zA-Z0-9πωφαβγλΔδθμρτ_]+)\^([0-9a-zA-Z])|([a-zA-Z0-9πωφαβγλΔδθμρτ_]+)_\{([^{}]+)\}|([a-zA-Z0-9πωφαβγλΔδθμρτ_]+)_([0-9a-zA-Z]))/g;
+  const children: any[] = [];
+  let i = 0;
+  let textBuffer = "";
 
-  let lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = pattern.exec(s)) !== null) {
-    if (m.index > lastIndex) {
-      const textPart = s.slice(lastIndex, m.index);
-      if (textPart) children.push(new MathRun(textPart));
+  const flushText = () => {
+    if (textBuffer) {
+      children.push(new MathRun(textBuffer));
+      textBuffer = "";
     }
-    const matchStr = m[0];
-    if (matchStr.startsWith("\\frac")) {
-      const fracM = matchStr.match(/\\frac\{([^{}]+)\}\{([^{}]+)\}/);
-      if (fracM && fracM[1] && fracM[2]) {
-        children.push(
-          new MathFraction({
-            numerator: parseTexToMathChildren(fracM[1]),
-            denominator: parseTexToMathChildren(fracM[2]),
-          }),
-        );
+  };
+
+  while (i < s.length) {
+    // 1. Phân số \frac{numerator}{denominator}
+    if (s.startsWith("\\frac", i)) {
+      let cursor = i + 5;
+      while (cursor < s.length && /\s/.test(s[cursor]!)) cursor++;
+      const numMatch = extractBalancedBraces(s, cursor);
+      if (numMatch) {
+        cursor = numMatch.endIndex + 1;
+        while (cursor < s.length && /\s/.test(s[cursor]!)) cursor++;
+        const denMatch = extractBalancedBraces(s, cursor);
+        if (denMatch) {
+          flushText();
+          children.push(
+            new MathFraction({
+              numerator: parseTexToMathChildren(numMatch.content),
+              denominator: parseTexToMathChildren(denMatch.content),
+            }),
+          );
+          i = denMatch.endIndex + 1;
+          continue;
+        }
       }
-    } else if (matchStr.startsWith("\\sqrt")) {
-      const radM = matchStr.match(/\\sqrt\{([^{}]+)\}/);
-      if (radM && radM[1]) {
+    }
+
+    // 2. Căn thức \sqrt{content}
+    if (s.startsWith("\\sqrt", i)) {
+      let cursor = i + 5;
+      while (cursor < s.length && /\s/.test(s[cursor]!)) cursor++;
+      const radMatch = extractBalancedBraces(s, cursor);
+      if (radMatch) {
+        flushText();
         children.push(
           new MathRadical({
-            children: parseTexToMathChildren(radM[1]),
+            children: parseTexToMathChildren(radMatch.content),
           }),
         );
+        i = radMatch.endIndex + 1;
+        continue;
       }
-    } else if (m[2] && m[3]) {
-      children.push(
-        new MathSuperScript({
-          children: [new MathRun(m[2])],
-          superScript: parseTexToMathChildren(m[3]),
-        }),
-      );
-    } else if (m[4] && m[5]) {
-      children.push(
-        new MathSuperScript({
-          children: [new MathRun(m[4])],
-          superScript: [new MathRun(m[5])],
-        }),
-      );
-    } else if (m[6] && m[7]) {
-      children.push(
-        new MathSubScript({
-          children: [new MathRun(m[6])],
-          subScript: parseTexToMathChildren(m[7]),
-        }),
-      );
-    } else if (m[8] && m[9]) {
-      children.push(
-        new MathSubScript({
-          children: [new MathRun(m[8])],
-          subScript: [new MathRun(m[9])],
-        }),
-      );
     }
-    lastIndex = pattern.lastIndex;
+
+    // 3. Đồng vị phóng xạ hạt nhân: ví dụ ^4_2He hoặc ^{4}_{2}He hoặc _2^4He
+    if (s[i] === "^" || s[i] === "_") {
+      const nuclearMatch = s
+        .slice(i)
+        .match(/^(?:\^(?:\{([^{}]+)\}|([0-9]+))_(?:\{([^{}]+)\}|([0-9]+))|_(?:\{([^{}]+)\}|([0-9]+))\^(?:\{([^{}]+)\}|([0-9]+)))\s*(?:\\text\{([^{}]+)\}|([a-zA-Z\p{L}]+))/u);
+      if (nuclearMatch) {
+        const superVal = nuclearMatch[1] || nuclearMatch[2] || nuclearMatch[7] || nuclearMatch[8] || "";
+        const subVal = nuclearMatch[3] || nuclearMatch[4] || nuclearMatch[5] || nuclearMatch[6] || "";
+        const elemVal = nuclearMatch[9] || nuclearMatch[10] || "";
+        if (elemVal) {
+          flushText();
+          children.push(
+            new MathPreSubSuperScript({
+              children: [new MathRun(elemVal)],
+              superScript: [new MathRun(superVal)],
+              subScript: [new MathRun(subVal)],
+            }),
+          );
+          i += nuclearMatch[0].length;
+          continue;
+        }
+      }
+    }
+
+    // 4. Số mũ (^) và chỉ số dưới (_)
+    if (s[i] === "^" || s[i] === "_") {
+      const isSuper = s[i] === "^";
+      const baseInfo = extractBaseTokenBefore(textBuffer, textBuffer.length);
+      if (baseInfo) {
+        textBuffer = textBuffer.slice(0, baseInfo.startIndex);
+        flushText();
+
+        const cursor = i + 1;
+        let scriptContent = "";
+        let nextIndex = cursor;
+
+        if (s[cursor] === "{") {
+          const bMatch = extractBalancedBraces(s, cursor);
+          if (bMatch) {
+            scriptContent = bMatch.content;
+            nextIndex = bMatch.endIndex + 1;
+          }
+        } else if (cursor < s.length && /[0-9a-zA-Z\p{L}+-]/u.test(s[cursor]!)) {
+          scriptContent = s[cursor]!;
+          nextIndex = cursor + 1;
+        }
+
+        if (scriptContent !== "") {
+          const baseChildren = baseInfo.isGroup
+            ? parseTexToMathChildren(baseInfo.baseStr)
+            : [new MathRun(baseInfo.baseStr)];
+          const scriptChildren = parseTexToMathChildren(scriptContent);
+
+          // Kiểm tra xem có script kép tiếp theo không (ví dụ base^super_sub hoặc base_sub^super)
+          let secondCursor = nextIndex;
+          while (secondCursor < s.length && /\s/.test(s[secondCursor]!)) secondCursor++;
+          const hasDual =
+            (isSuper && s[secondCursor] === "_") || (!isSuper && s[secondCursor] === "^");
+
+          if (hasDual) {
+            let secondScriptContent = "";
+            let secondNextIndex = secondCursor + 1;
+            if (s[secondNextIndex] === "{") {
+              const b2Match = extractBalancedBraces(s, secondNextIndex);
+              if (b2Match) {
+                secondScriptContent = b2Match.content;
+                secondNextIndex = b2Match.endIndex + 1;
+              }
+            } else if (secondNextIndex < s.length && /[0-9a-zA-Z\p{L}+-]/u.test(s[secondNextIndex]!)) {
+              secondScriptContent = s[secondNextIndex]!;
+              secondNextIndex = secondNextIndex + 1;
+            }
+
+            if (secondScriptContent !== "") {
+              const secondChildren = parseTexToMathChildren(secondScriptContent);
+              children.push(
+                new MathSubSuperScript({
+                  children: baseChildren,
+                  superScript: isSuper ? scriptChildren : secondChildren,
+                  subScript: isSuper ? secondChildren : scriptChildren,
+                }),
+              );
+              i = secondNextIndex;
+              continue;
+            }
+          }
+
+          // Script đơn
+          if (isSuper) {
+            children.push(
+              new MathSuperScript({
+                children: baseChildren,
+                superScript: scriptChildren,
+              }),
+            );
+          } else {
+            children.push(
+              new MathSubScript({
+                children: baseChildren,
+                subScript: scriptChildren,
+              }),
+            );
+          }
+          i = nextIndex;
+          continue;
+        }
+      }
+    }
+
+    textBuffer += s[i];
+    i++;
   }
-  if (lastIndex < s.length) {
-    const textPart = s.slice(lastIndex);
-    if (textPart) children.push(new MathRun(textPart));
-  }
+
+  flushText();
   return children.length > 0 ? children : [new MathRun(s)];
 }
 
@@ -1719,8 +1945,7 @@ export function parseMarkdownRuns(
     const isMathInline =
       part.startsWith("$") &&
       part.endsWith("$") &&
-      part.length >= 2 &&
-      !/^\$\d+(?:,\d+)*(?:\.\d+)?\$$/.test(part);
+      part.length >= 2;
 
     if (isMathBlock || isMathInline) {
       if (options?.mathMode === "mathtype") {
@@ -1730,8 +1955,9 @@ export function parseMarkdownRuns(
         if (docxMath) {
           runs.push(docxMath);
         } else {
-          // Fallback nếu không parse được sang OMML
-          runs.push(new TextRun({ text: part, font: "Cambria Math", size: baseSize }));
+          // Fallback nếu không parse được sang OMML: loại bỏ ký tự $ bọc ngoài để không lộ cú pháp thô
+          const cleanText = part.replace(/^\$\$|\$\$$/g, "").replace(/^\$|\$$/g, "").trim();
+          runs.push(new TextRun({ text: cleanText || part, font: baseFont, size: baseSize }));
         }
       }
     } else if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
