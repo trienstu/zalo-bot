@@ -1593,7 +1593,7 @@ export function cleanTexSymbols(tex: string): string {
     .replace(/\\gamma(?![a-zA-Z])/g, "γ")
     .replace(/\\lambda(?![a-zA-Z])/g, "λ")
     .replace(/\\delta(?![a-zA-Z])/g, "δ")
-    .replace(/\\mu(?![a-zA-Z])/g, "μ")
+    .replace(/\\mu(?![a-z]{3,})/g, "μ")
     .replace(/\\nu(?![a-zA-Z])/g, "ν")
     .replace(/\\rho(?![a-zA-Z])/g, "ρ")
     .replace(/\\tau(?![a-zA-Z])/g, "τ")
@@ -1748,6 +1748,23 @@ export function parseTexToMathChildren(rawTex: string): any[] {
   };
 
   while (i < s.length) {
+    // 0. Khối nhóm ngoặc nhọn cú pháp TeX: { ... } (tự do không đi kèm lệnh)
+    if (s[i] === "{") {
+      const bMatch = extractBalancedBraces(s, i);
+      if (bMatch) {
+        flushText();
+        const innerChildren = parseTexToMathChildren(bMatch.content);
+        children.push(...innerChildren);
+        i = bMatch.endIndex + 1;
+        continue;
+      }
+    }
+    if (s[i] === "}") {
+      // Bỏ qua dấu đóng ngoặc nhọn mồ côi
+      i++;
+      continue;
+    }
+
     // 1. Phân số \frac{numerator}{denominator}
     if (s.startsWith("\\frac", i)) {
       let cursor = i + 5;

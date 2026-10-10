@@ -284,6 +284,26 @@ test("parseMarkdownRuns & parseMarkdownToWordBlocks: Khử sạch \\cdotK, hạt
   assert.ok(tb.tableRows?.[0]?.[2]?.includes("Faraday"), "Ô thứ 3 phải bảo toàn nguyên vẹn nội dung hướng dẫn giải");
 });
 
+test("parseMarkdownRuns: Khử sạch \\mug (microgram) và bóc tách nhóm ngoặc nhọn tự do ({^3_1\\text{H}})", () => {
+  // 1. \\mug -> μg
+  const muText = "Khối lượng $m = 2,62\\mug = 0,655\\mug$.";
+  const muRuns = parseMarkdownRuns(muText);
+  const muJson = JSON.stringify(muRuns);
+  assert.ok(!muJson.includes("\\mu"), "Không được sót \\mu thô");
+  assert.ok(!muJson.includes("\\"), "Không được sót dấu \\");
+  assert.ok(muJson.includes("μg"), "Phải chuyển đổi thành μg");
+
+  // 2. Nhóm ngoặc nhọn cú pháp bao quanh số hạng hạt nhân {^3_1\text{H}} -> MathPreSubSuperScript, không lọt dấu { hay }
+  const groupText = "Phản ứng $^2_1\\text{H} + {^3_1\\text{H}} \\to {^4_2\\text{He}} + {^1_0\\text{n}}$.";
+  const groupRuns = parseMarkdownRuns(groupText);
+  const groupJson = JSON.stringify(groupRuns);
+  assert.ok(!groupJson.includes('\"text\":\"{\"'), "Không được có text node dấu mở ngoặc nhọn {");
+  assert.ok(!groupJson.includes('\"text\":\"}\"'), "Không được có text node dấu đóng ngoặc nhọn }");
+  assert.ok(!groupJson.includes('root\":[\"{\"]'), "Không được có m:t chứa dấu mở ngoặc nhọn {");
+  assert.ok(!groupJson.includes('root\":[\"}\"]'), "Không được có m:t chứa dấu đóng ngoặc nhọn }");
+});
+
+
 
 
 
