@@ -13,6 +13,12 @@ import {
   WidthType,
   BorderStyle,
   convertInchesToTwip,
+  Math as DocxMath,
+  MathRun,
+  MathFraction,
+  MathRadical,
+  MathSuperScript,
+  MathSubScript,
 } from "docx";
 import ExcelJS from "exceljs";
 import PptxGenJS from "pptxgenjs";
@@ -1536,23 +1542,156 @@ export interface WordBlock {
 }
 
 /**
- * Chuyển đổi văn bản chứa Markdown (**in đậm**, *in nghiêng*) và LaTeX Math ($...$, $$...$$) thành mảng TextRun chuẩn của Word.
- * - Mặc định hỗ trợ MathType và Word Equation: Giữ nguyên vẹn 100% cú pháp TeX trong $...$ và $$...$$ với font "Cambria Math"
- *   để người dùng mở Word bấm Alt + \ (Toggle TeX) là convert tức thì sang MathType tương tác được.
+ * Làm sạch ký hiệu LaTeX và chuyển các lệnh thông dụng sang ký tự Unicode tương ứng
+ */
+function cleanTexSymbols(tex: string): string {
+  return tex
+    .replace(/\\text\{([^{}]+)\}/g, "$1")
+    .replace(/\\mathrm\{([^{}]+)\}/g, "$1")
+    .replace(/\\mathbf\{([^{}]+)\}/g, "$1")
+    .replace(/\\pi\b/g, "π")
+    .replace(/\\omega\b/g, "ω")
+    .replace(/\\Omega\b/g, "Ω")
+    .replace(/\\varphi\b/g, "φ")
+    .replace(/\\phi\b/g, "φ")
+    .replace(/\\alpha\b/g, "α")
+    .replace(/\\beta\b/g, "β")
+    .replace(/\\gamma\b/g, "γ")
+    .replace(/\\lambda\b/g, "λ")
+    .replace(/\\Delta\b/g, "Δ")
+    .replace(/\\delta\b/g, "δ")
+    .replace(/\\theta\b/g, "θ")
+    .replace(/\\mu\b/g, "μ")
+    .replace(/\\rho\b/g, "ρ")
+    .replace(/\\tau\b/g, "τ")
+    .replace(/\\approx\b/g, "≈")
+    .replace(/\\pm\b/g, "±")
+    .replace(/\\(?:le|leq)\b/g, "≤")
+    .replace(/\\(?:ge|geq)\b/g, "≥")
+    .replace(/\\(?:ne|neq)\b/g, "≠")
+    .replace(/\\cdot\b/g, "·")
+    .replace(/\\times\b/g, "×")
+    .replace(/\\infty\b/g, "∞")
+    .replace(/\^\\circ\b/g, "°")
+    .replace(/\\(?:cos|sin|tan|cot|ln|log|lim|max|min)\b/g, (m) => m.slice(1))
+    .replace(/\\(?:,|;|!|quad|qquad)/g, " ")
+    .replace(/\\left\(/g, "(")
+    .replace(/\\right\)/g, ")")
+    .replace(/\\left\[/g, "[")
+    .replace(/\\right\]/g, "]")
+    .replace(/\\left\\{/g, "{")
+    .replace(/\\right\\}/g, "}");
+}
+
+/**
+ * Phân tích chuỗi TeX thành các phần tử toán bản địa OMML của docx (MathFraction, MathRadical, MathSuperScript...)
+ */
+function parseTexToMathChildren(rawTex: string): any[] {
+  const children: any[] = [];
+  const s = cleanTexSymbols(rawTex).trim();
+  if (!s) return [];
+
+  const pattern =
+    /(\\frac\{[^{}]+\}\{[^{}]+\}|\\sqrt\{[^{}]+\}|([a-zA-Z0-9πωφαβγλΔδθμρτ_]+)\^\{([^{}]+)\}|([a-zA-Z0-9πωφαβγλΔδθμρτ_]+)\^([0-9a-zA-Z])|([a-zA-Z0-9πωφαβγλΔδθμρτ_]+)_\{([^{}]+)\}|([a-zA-Z0-9πωφαβγλΔδθμρτ_]+)_([0-9a-zA-Z]))/g;
+
+  let lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = pattern.exec(s)) !== null) {
+    if (m.index > lastIndex) {
+      const textPart = s.slice(lastIndex, m.index);
+      if (textPart) children.push(new MathRun(textPart));
+    }
+    const matchStr = m[0];
+    if (matchStr.startsWith("\\frac")) {
+      const fracM = matchStr.match(/\\frac\{([^{}]+)\}\{([^{}]+)\}/);
+      if (fracM && fracM[1] && fracM[2]) {
+        children.push(
+          new MathFraction({
+            numerator: parseTexToMathChildren(fracM[1]),
+            denominator: parseTexToMathChildren(fracM[2]),
+          }),
+        );
+      }
+    } else if (matchStr.startsWith("\\sqrt")) {
+      const radM = matchStr.match(/\\sqrt\{([^{}]+)\}/);
+      if (radM && radM[1]) {
+        children.push(
+          new MathRadical({
+            children: parseTexToMathChildren(radM[1]),
+          }),
+        );
+      }
+    } else if (m[2] && m[3]) {
+      children.push(
+        new MathSuperScript({
+          children: [new MathRun(m[2])],
+          superScript: parseTexToMathChildren(m[3]),
+        }),
+      );
+    } else if (m[4] && m[5]) {
+      children.push(
+        new MathSuperScript({
+          children: [new MathRun(m[4])],
+          superScript: [new MathRun(m[5])],
+        }),
+      );
+    } else if (m[6] && m[7]) {
+      children.push(
+        new MathSubScript({
+          children: [new MathRun(m[6])],
+          subScript: parseTexToMathChildren(m[7]),
+        }),
+      );
+    } else if (m[8] && m[9]) {
+      children.push(
+        new MathSubScript({
+          children: [new MathRun(m[8])],
+          subScript: [new MathRun(m[9])],
+        }),
+      );
+    }
+    lastIndex = pattern.lastIndex;
+  }
+  if (lastIndex < s.length) {
+    const textPart = s.slice(lastIndex);
+    if (textPart) children.push(new MathRun(textPart));
+  }
+  return children.length > 0 ? children : [new MathRun(s)];
+}
+
+/**
+ * Chuyển đổi mã TeX sang đối tượng DocxMath bản địa Word Equation (<m:oMath>)
+ */
+export function convertTexToDocxMath(rawTex: string): DocxMath | null {
+  try {
+    const clean = rawTex.replace(/^\$\$|\$\$$/g, "").replace(/^\$|\$$/g, "").trim();
+    if (!clean) return null;
+    const children = parseTexToMathChildren(clean);
+    if (!children || children.length === 0) return null;
+    return new DocxMath({ children });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Chuyển đổi văn bản chứa Markdown (**in đậm**, *in nghiêng*) và LaTeX Math ($...$, $$...$$) thành mảng TextRun hoặc DocxMath chuẩn của Word.
+ * - Mặc định hỗ trợ Word Equation (<m:oMath>) bản địa của Microsoft Word: Mở file hiển thị ngay lập tức, sửa trực tiếp được bằng bàn phím.
+ * - Tùy chọn mathtype: Giữ nguyên chuỗi TeX thô với font Cambria Math.
  * - Tùy chọn unicode: Chỉ băm sang Unicode khi được chỉ định riêng biệt.
  */
 export function parseMarkdownRuns(
   text: string,
   baseFont = "Times New Roman",
   baseSize = 26,
-  options?: { mathMode?: "mathtype" | "unicode" },
-): TextRun[] {
+  options?: { mathMode?: "omml" | "mathtype" | "unicode" },
+): (TextRun | DocxMath)[] {
   if (!text) return [];
 
   // 1. Chế độ Unicode thuần (chỉ khi yêu cầu riêng biệt)
   if (options?.mathMode === "unicode") {
     const clean = cleanLatexMathToUnicode(text);
-    const runs: TextRun[] = [];
+    const runs: (TextRun | DocxMath)[] = [];
     const tokenRegex = /(\*\*.*?\*\*|\*.*?\*)/g;
     const parts = clean.split(tokenRegex);
     for (const part of parts) {
@@ -1568,26 +1707,33 @@ export function parseMarkdownRuns(
     return runs.length > 0 ? runs : [new TextRun({ text: clean, font: baseFont, size: baseSize })];
   }
 
-  // 2. Chế độ Mặc định: Giữ nguyên vẹn LaTeX cho MathType / Word Equation
-  const runs: TextRun[] = [];
-  // Tokenize tách block math ($$...$$), inline math ($...$), bold (**...**), italic (*...*)
+  // 2. Chế độ Mặc định (OMML Word Equation bản địa) hoặc Chế độ MathType thuần
+  const runs: (TextRun | DocxMath)[] = [];
   const tokenRegex = /(\$\$[\s\S]+?\$\$|\$(?:\\\$|[^\$\n])+?\$|\*\*.*?\*\*|\*.*?\*)/g;
   const parts = text.split(tokenRegex);
 
   for (const part of parts) {
     if (!part) continue;
 
-    if (part.startsWith("$$") && part.endsWith("$$") && part.length >= 4) {
-      // Block Math LaTeX: Giữ nguyên $$...$$
-      runs.push(new TextRun({ text: part, font: "Cambria Math", size: baseSize }));
-    } else if (
+    const isMathBlock = part.startsWith("$$") && part.endsWith("$$") && part.length >= 4;
+    const isMathInline =
       part.startsWith("$") &&
       part.endsWith("$") &&
       part.length >= 2 &&
-      !/^\$\d+(?:,\d+)*(?:\.\d+)?\$$/.test(part)
-    ) {
-      // Inline Math LaTeX: Giữ nguyên $...$
-      runs.push(new TextRun({ text: part, font: "Cambria Math", size: baseSize }));
+      !/^\$\d+(?:,\d+)*(?:\.\d+)?\$$/.test(part);
+
+    if (isMathBlock || isMathInline) {
+      if (options?.mathMode === "mathtype") {
+        runs.push(new TextRun({ text: part, font: "Cambria Math", size: baseSize }));
+      } else {
+        const docxMath = convertTexToDocxMath(part);
+        if (docxMath) {
+          runs.push(docxMath);
+        } else {
+          // Fallback nếu không parse được sang OMML
+          runs.push(new TextRun({ text: part, font: "Cambria Math", size: baseSize }));
+        }
+      }
     } else if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
       runs.push(new TextRun({ text: part.slice(2, -2), font: baseFont, size: baseSize, bold: true }));
     } else if (part.startsWith("*") && part.endsWith("*") && part.length >= 2) {
@@ -2217,9 +2363,18 @@ export async function generateWordDoc(
 
           const noneBorder = { style: BorderStyle.NONE, size: 0, color: "auto" };
           const borders = { top: noneBorder, bottom: noneBorder, left: noneBorder, right: noneBorder };
+          const borderlessTableBorders = {
+            top: noneBorder,
+            bottom: noneBorder,
+            left: noneBorder,
+            right: noneBorder,
+            insideHorizontal: noneBorder,
+            insideVertical: noneBorder,
+          };
 
           const twoColTable = new Table({
             width: { size: 100, type: WidthType.PERCENTAGE },
+            borders: borderlessTableBorders,
             rows: [
               new TableRow({
                 children: [
@@ -2325,9 +2480,21 @@ export async function generateWordDoc(
               }),
           );
 
+          const noneBorder = { style: BorderStyle.NONE, size: 0, color: "auto" };
+          const borderlessTableBorders = {
+            top: noneBorder,
+            bottom: noneBorder,
+            left: noneBorder,
+            right: noneBorder,
+            insideHorizontal: noneBorder,
+            insideVertical: noneBorder,
+          };
+          const tableBorders = isBorderless ? borderlessTableBorders : undefined;
+
           docChildren.push(
             new Table({
               width: { size: 100, type: WidthType.PERCENTAGE },
+              borders: tableBorders,
               rows: [headerRow, ...dataRows],
             }),
           );

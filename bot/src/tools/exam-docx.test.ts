@@ -75,13 +75,22 @@ D. $\\omega = 40\\text{ rad/s}$.`;
   fs.unlinkSync(result.filePath);
 });
 
-test("parseMarkdownRuns: Giữ nguyên vẹn TeX cho MathType và Word Equation với font Cambria Math", () => {
-  const runs = parseMarkdownRuns("Một vật dao động điều hòa với phương trình $x = 4\\cos(10\\pi t + \\pi/3)$ và độ cứng $k = 100\\text{ N/m}$.");
+test("parseMarkdownRuns: Chuyển đổi công thức sang Word Equation bản địa (OMML) và hỗ trợ chế độ MathType", () => {
+  // 1. Mặc định: Chuyển đổi sang đối tượng DocxMath bản địa Word Equation (<m:oMath>)
+  const ommlRuns = parseMarkdownRuns("Một vật dao động điều hòa với phương trình $x = 4\\cos(10\\pi t + \\pi/3)$ và độ cứng $k = 100\\text{ N/m}$.");
+  const ommlJson = JSON.stringify(ommlRuns);
+  assert.ok(ommlJson.includes("m:oMath") || ommlRuns.some((r: any) => r.rootKey === "m:oMath" || r.constructor?.name === "Math"), "Phải có ít nhất 1 phần tử DocxMath");
 
-  const mathRuns = runs.filter((r: any) => r.root?.[1]?.[0]?.root?.[0] === "Cambria Math" || JSON.stringify(r).includes("Cambria Math"));
+  // 2. Chế độ MathType: Giữ nguyên TeX với font Cambria Math
+  const mathTypeRuns = parseMarkdownRuns(
+    "Một vật dao động điều hòa với phương trình $x = 4\\cos(10\\pi t + \\pi/3)$ và độ cứng $k = 100\\text{ N/m}$.",
+    "Times New Roman",
+    26,
+    { mathMode: "mathtype" },
+  );
+  const mathRuns = mathTypeRuns.filter((r: any) => r.root?.[1]?.[0]?.root?.[0] === "Cambria Math" || JSON.stringify(r).includes("Cambria Math"));
   assert.ok(mathRuns.length >= 2, "Phải có ít nhất 2 run mang font Cambria Math");
-
-  const textJson = JSON.stringify(runs);
+  const textJson = JSON.stringify(mathTypeRuns);
   assert.ok(textJson.includes("$x = 4\\\\cos(10\\\\pi t + \\\\pi/3)$"));
   assert.ok(textJson.includes("$k = 100\\\\text{ N/m}$"));
 });
