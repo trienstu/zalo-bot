@@ -1619,7 +1619,7 @@ export function cleanTexSymbols(tex: string): string {
     .replace(/\\(?:le|leq)(?![a-zA-Z])/g, "≤")
     .replace(/\\(?:ge|geq)(?![a-zA-Z])/g, "≥")
     .replace(/\\(?:ne|neq)(?![a-zA-Z])/g, "≠")
-    .replace(/\\cdot(?![a-zA-Z])/gu, "·")
+    .replace(/\\cdot/g, "·")
     .replace(/\\times(?![a-zA-Z])/g, "×")
     .replace(/\\div(?![a-zA-Z])/g, "÷")
     .replace(/\\infty(?![a-zA-Z])/g, "∞")
@@ -1798,7 +1798,7 @@ export function parseTexToMathChildren(rawTex: string): any[] {
       if (!baseInfo) {
         const nuclearMatch = s
           .slice(i)
-          .match(/^(?:\^(?:\{([^{}]+)\}|([0-9]+))_(?:\{([^{}]+)\}|([0-9]+))|_(?:\{([^{}]+)\}|([0-9]+))\^(?:\{([^{}]+)\}|([0-9]+)))\s*(?:\\text\{([A-Z][a-z]{0,2}|[a-zA-Z])\}|([A-Z][a-z]{0,2}|[a-z]))(?![a-zA-Z])/u);
+          .match(/^(?:\^(?:\{([^{}]+)\}|([0-9a-zA-Z]+))_(?:\{([^{}]+)\}|([0-9a-zA-Z]+))|_(?:\{([^{}]+)\}|([0-9a-zA-Z]+))\^(?:\{([^{}]+)\}|([0-9a-zA-Z]+)))\s*(?:\\text\{([A-Z][a-z]{0,2}|[a-zA-Z])\}|([A-Z][a-z]{0,2}|[a-z]))(?![a-zA-Z])/u);
         if (nuclearMatch) {
           const superVal = nuclearMatch[1] || nuclearMatch[2] || nuclearMatch[7] || nuclearMatch[8] || "";
           const subVal = nuclearMatch[3] || nuclearMatch[4] || nuclearMatch[5] || nuclearMatch[6] || "";
@@ -1817,11 +1817,11 @@ export function parseTexToMathChildren(rawTex: string): any[] {
           }
         }
 
-        // Hạt nhân chỉ có số khối đứng trước: ví dụ ^{4}He hoặc ^4He
+        // Hạt nhân chỉ có số khối đứng trước: ví dụ ^{4}He hoặc ^4He hoặc ^AX
         if (isSuper) {
           const nuclearSingleMatch = s
             .slice(i)
-            .match(/^\^(?:\{([0-9]+)\}|([0-9]+))\s*(?:\\text\{([A-Z][a-z]{0,2}|[a-zA-Z])\}|([A-Z][a-z]{0,2}))(?![a-zA-Z])/u);
+            .match(/^\^(?:\{([^{}]+)\}|([0-9a-zA-Z]+))\s*(?:\\text\{([A-Z][a-z]{0,2}|[a-zA-Z])\}|([A-Z][a-z]{0,2}))(?![a-zA-Z])/u);
           if (nuclearSingleMatch) {
             const superVal = nuclearSingleMatch[1] || nuclearSingleMatch[2] || "";
             const elemVal = nuclearSingleMatch[3] || nuclearSingleMatch[4] || "";
@@ -2211,14 +2211,44 @@ export function parseMarkdownToWordBlocks(content: string, defaultTitle?: string
 
       if (tableLines.length >= 2) {
         const parseRowCells = (rowStr: string): string[] => {
-          let parts = rowStr.split("|").map((c) => c.trim());
-          if (rowStr.startsWith("|") && parts.length > 0) {
-            parts.shift();
+          const cells: string[] = [];
+          let current = "";
+          let inMath = false;
+          let inEscape = false;
+
+          for (let k = 0; k < rowStr.length; k++) {
+            const ch = rowStr[k]!;
+            if (inEscape) {
+              current += ch;
+              inEscape = false;
+              continue;
+            }
+            if (ch === "\\") {
+              current += ch;
+              inEscape = true;
+              continue;
+            }
+            if (ch === "$") {
+              inMath = !inMath;
+              current += ch;
+              continue;
+            }
+            if (ch === "|" && !inMath) {
+              cells.push(current.trim());
+              current = "";
+              continue;
+            }
+            current += ch;
           }
-          if (rowStr.endsWith("|") && parts.length > 0) {
-            parts.pop();
+          cells.push(current.trim());
+
+          if (rowStr.trim().startsWith("|") && cells.length > 0) {
+            cells.shift();
           }
-          return parts;
+          if (rowStr.trim().endsWith("|") && cells.length > 0) {
+            cells.pop();
+          }
+          return cells;
         };
 
         const headers = parseRowCells(tableLines[0]!);

@@ -256,5 +256,34 @@ test("parseMarkdownRuns & parseMarkdownToWordBlocks: Khử triệt để backsla
   assert.equal(hasTable, false, "Tuyệt đối không được nhận nhầm đoạn văn chứa dấu trị tuyệt đối thành bảng");
 });
 
+test("parseMarkdownRuns & parseMarkdownToWordBlocks: Khử sạch \\cdotK, hạt nhân ^A_Z X và bảo toàn ô bảng chứa công thức có dấu |", () => {
+  // 1. \\cdotK trong đơn vị nhiệt dung riêng: J/(kg\\cdotK) -> J/(kg·K)
+  const cdotText = "Nhiệt dung riêng $c = 4186\\text{ J/(kg\\cdotK)}$.";
+  const cdotRuns = parseMarkdownRuns(cdotText);
+  const cdotJson = JSON.stringify(cdotRuns);
+  assert.ok(!cdotJson.includes("\\cdot"), "Không được sót \\cdot thô");
+  assert.ok(!cdotJson.includes("\\"), "Không được sót dấu \\");
+  assert.ok(cdotJson.includes("·"), "Phải có dấu chấm nhân ·");
+
+  // 2. Hạt nhân ^A_Z X có chữ cái làm số khối và số hiệu nguyên tử
+  const nucSymText = "Ký hiệu hạt nhân tổng quát $^A_Z X$ hay $^{A}_{Z}\\text{X}$.";
+  const nucSymRuns = parseMarkdownRuns(nucSymText);
+  const nucSymJson = JSON.stringify(nucSymRuns);
+  assert.ok(!nucSymJson.includes('\"text\":\"^\"'), "Không được có text node caret ^ đơn lẻ");
+  assert.ok(nucSymJson.includes("m:sPre"), "Phải được đóng gói thành MathPreSubSuperScript");
+
+  // 3. Ô bảng Markdown chứa công thức có dấu gạch đứng | không bị xé nhỏ cột
+  const tableWithMath = `| Câu | Đáp án | Hướng dẫn giải |
+| --- | --- | --- |
+| 12 | C | Theo định luật Faraday: $|e_c| = \\left| \\frac{\\Delta\\Phi}{\\Delta t}\\right|$, tỉ lệ thuận. |`;
+  const tableBlocks = parseMarkdownToWordBlocks(tableWithMath);
+  const tb = tableBlocks.find((b) => b.type === "table");
+  assert.ok(tb, "Phải nhận diện được bảng");
+  assert.equal(tb.tableHeaders?.length, 3, "Bảng phải có đúng 3 cột");
+  assert.equal(tb.tableRows?.[0]?.length, 3, "Dòng dữ liệu phải có đúng 3 ô, không bị xé lẻ bởi dấu | trong công thức");
+  assert.ok(tb.tableRows?.[0]?.[2]?.includes("Faraday"), "Ô thứ 3 phải bảo toàn nguyên vẹn nội dung hướng dẫn giải");
+});
+
+
 
 
