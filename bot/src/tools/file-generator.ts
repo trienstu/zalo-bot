@@ -1566,40 +1566,40 @@ export function cleanTexSymbols(tex: string): string {
     .replace(/\\ddot\{([^{}]+)\}/g, "$1")
     .replace(/\{\}/g, "")
     .replace(/\\%/g, "%")
-    // 1.5. Độ C và ký hiệu độ: bắt triệt để trước mọi thứ
-    .replace(/(?:\\?\^?\\circ\s*C\b|\\?\^?\\circ\s*\\text\{C\}|\\?\^?\\circC)/g, "°C")
+    // 1.5. Độ C, Độ F, Độ K và ký hiệu độ: bắt triệt để trước mọi thứ
+    .replace(/(?:\\?\^?\\circ\s*([CFK])\b|\\?\^?\\circ\s*\\text\{([CFK])\}|\\?\^?\\circ([CFK]))/gi, (_, p1, p2, p3) => "°" + (p1 || p2 || p3).toUpperCase())
     .replace(/(?:\\?\^?\\circ\b|\\deg\b|\\circ\b)/g, "°")
     // 2. Chữ cái Hy Lạp viết HOA
-    .replace(/\\Phi\b/g, "Φ")
-    .replace(/\\Psi\b/g, "Ψ")
-    .replace(/\\Theta\b/g, "Θ")
-    .replace(/\\Omega\b/g, "Ω")
-    .replace(/\\Delta\b/g, "Δ")
-    .replace(/\\Lambda\b/g, "Λ")
-    .replace(/\\Sigma\b/g, "Σ")
-    .replace(/\\Gamma\b/g, "Γ")
-    .replace(/\\Pi\b/g, "Π")
+    .replace(/\\Phi\b|\\Phi(?=[A-Za-z])/g, "Φ")
+    .replace(/\\Psi\b|\\Psi(?=[A-Za-z])/g, "Ψ")
+    .replace(/\\Theta\b|\\Theta(?=[A-Za-z])/g, "Θ")
+    .replace(/\\Omega\b|\\Omega(?=[A-Za-z])/g, "Ω")
+    .replace(/\\Delta\b|\\Delta(?=[A-Za-z])/g, "Δ")
+    .replace(/\\Lambda\b|\\Lambda(?=[A-Za-z])/g, "Λ")
+    .replace(/\\Sigma\b|\\Sigma(?=[A-Za-z])/g, "Σ")
+    .replace(/\\Gamma\b|\\Gamma(?=[A-Za-z])/g, "Γ")
+    .replace(/\\Pi\b|\\Pi(?=[A-Za-z])/g, "Π")
     // 3. Chữ cái Hy Lạp viết THƯỜNG
     .replace(/\\(?:varphi|phi)\b/g, "φ")
     .replace(/\\(?:vartheta|theta)\b/g, "θ")
     .replace(/\\(?:varepsilon|epsilon)\b/g, "ε")
-    .replace(/\\pi\b/g, "π")
-    .replace(/\\omega\b/g, "ω")
-    .replace(/\\alpha\b/g, "α")
-    .replace(/\\beta\b/g, "β")
-    .replace(/\\gamma\b/g, "γ")
-    .replace(/\\lambda\b/g, "λ")
-    .replace(/\\delta\b/g, "δ")
-    .replace(/\\mu\b/g, "μ")
-    .replace(/\\nu\b/g, "ν")
-    .replace(/\\rho\b/g, "ρ")
-    .replace(/\\tau\b/g, "τ")
-    .replace(/\\psi\b/g, "ψ")
-    .replace(/\\sigma\b/g, "σ")
-    .replace(/\\eta\b/g, "η")
-    .replace(/\\chi\b/g, "χ")
-    .replace(/\\zeta\b/g, "ζ")
-    .replace(/\\xi\b/g, "ξ")
+    .replace(/\\pi\b|\\pi(?=[A-Za-z])/g, "π")
+    .replace(/\\omega\b|\\omega(?=[A-Za-z])/g, "ω")
+    .replace(/\\alpha\b|\\alpha(?=[A-Za-z])/g, "α")
+    .replace(/\\beta\b|\\beta(?=[A-Za-z])/g, "β")
+    .replace(/\\gamma\b|\\gamma(?=[A-Za-z])/g, "γ")
+    .replace(/\\lambda\b|\\lambda(?=[A-Za-z])/g, "λ")
+    .replace(/\\delta\b|\\delta(?=[A-Za-z])/g, "δ")
+    .replace(/\\mu\b|\\mu(?=[A-Za-z])/g, "μ")
+    .replace(/\\nu\b|\\nu(?=[A-Za-z])/g, "ν")
+    .replace(/\\rho\b|\\rho(?=[A-Za-z])/g, "ρ")
+    .replace(/\\tau\b|\\tau(?=[A-Za-z])/g, "τ")
+    .replace(/\\psi\b|\\psi(?=[A-Za-z])/g, "ψ")
+    .replace(/\\sigma\b|\\sigma(?=[A-Za-z])/g, "σ")
+    .replace(/\\eta\b|\\eta(?=[A-Za-z])/g, "η")
+    .replace(/\\chi\b|\\chi(?=[A-Za-z])/g, "χ")
+    .replace(/\\zeta\b|\\zeta(?=[A-Za-z])/g, "ζ")
+    .replace(/\\xi\b|\\xi(?=[A-Za-z])/g, "ξ")
     // 4. Mũi tên & Toán tử logic
     .replace(/\\(?:iff|Leftrightarrow)\b/g, "⇔")
     .replace(/\\(?:implies|Rightarrow)\b/g, "⇒")
@@ -1634,9 +1634,9 @@ export function cleanTexSymbols(tex: string): string {
     // 6. Hàm số toán học chuẩn
     .replace(/\\(?:cos|sin|tan|cot|ln|log|exp|lim|max|min)\b/g, (m) => m.slice(1))
     // 7. Dấu ngoặc mở rộng & khoảng trắng
+    .replace(/\\(?:enspace|thinspace|quad|qquad|hspace\{[^{}]+\}|[,;!~])/g, " ")
     .replace(/\\\s+/g, " ")
-    .replace(/\\~/g, " ")
-    .replace(/\\(?:,|;|!|quad|qquad)/g, " ")
+    .replace(/\\+(?=\s*($|[,;.:)]))/g, "")
     .replace(/\\left\(/g, "(")
     .replace(/\\right\)/g, ")")
     .replace(/\\left\[/g, "[")
@@ -1803,6 +1803,29 @@ export function parseTexToMathChildren(rawTex: string): any[] {
           );
           i += nuclearMatch[0].length;
           continue;
+        }
+      }
+
+      // Hạt nhân chỉ có số khối đứng trước: ví dụ ^{4}He hoặc ^4He
+      if (s[i] === "^") {
+        const nuclearSingleMatch = s
+          .slice(i)
+          .match(/^\^(?:\{([0-9]+)\}|([0-9]+))\s*(?:\\text\{([a-zA-Z\p{L}]+)\}|([a-zA-Z\p{L}]+))/u);
+        if (nuclearSingleMatch) {
+          const superVal = nuclearSingleMatch[1] || nuclearSingleMatch[2] || "";
+          const elemVal = nuclearSingleMatch[3] || nuclearSingleMatch[4] || "";
+          if (elemVal) {
+            flushText();
+            children.push(
+              new MathPreSubSuperScript({
+                children: [new MathRun(elemVal)],
+                superScript: [new MathRun(superVal)],
+                subScript: [],
+              }),
+            );
+            i += nuclearSingleMatch[0].length;
+            continue;
+          }
         }
       }
     }
